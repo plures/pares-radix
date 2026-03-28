@@ -14,8 +14,8 @@
 	let navItems = $derived(getAllNavItems());
 
 	// ── Responsive breakpoints ───────────────────────────────────────────────
-	// Default to desktop width for SSR; hydrates to actual width on the client.
-	let windowWidth = $state(browser ? window.innerWidth : 1280);
+	// Default to desktop width for SSR and initial client render; hydrates to actual width on the client.
+	let windowWidth = $state(1280);
 
 	$effect(() => {
 		if (!browser) return;
