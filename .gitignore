@@ -2,6 +2,3 @@ node_modules/
 dist/
 build/
 .svelte-kit/
-target/
-*.log
-.DS_Store

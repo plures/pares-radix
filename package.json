@@ -1,33 +1,15 @@
 {
   "name": "@plures/pares-radix",
-  "version": "0.1.1",
+  "version": "0.1.0",
   "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "build": "tsc",
-    "lint": "eslint src/",
-    "check": "tsc --noEmit",
-    "test": "echo \"No tests yet\" && exit 0"
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "keywords": [
-    "praxis",
-    "plugin",
-    "inference",
-    "platform"
-  ],
+  "keywords": ["praxis", "plugin", "inference", "platform"],
   "author": "Plures",
   "license": "MIT",
   "repository": {
@@ -35,12 +17,12 @@
     "url": "https://github.com/plures/pares-radix.git"
   },
   "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "svelte": "^5.0.0",
+    "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
-    "eslint": "^9.0.0",
-    "@eslint/js": "^9.0.0",
-    "typescript-eslint": "^8.0.0"
-  },
-  "peerDependencies": {
-    "svelte": "^5.0.0"
+    "vite": "^6.0.0"
   }
 }

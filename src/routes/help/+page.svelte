@@ -1,0 +1,174 @@
+<script lang="ts">
+	import { getAllHelpSections } from '$lib/platform/plugin-loader.js';
+	import type { HelpSection } from '$lib/types/plugin.js';
+
+	let sections = $derived(getAllHelpSections());
+	let searchQuery = $state('');
+
+	let filtered = $derived(
+		searchQuery
+			? sections.filter((s: HelpSection) =>
+					s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+					(typeof s.content === 'string' && s.content.toLowerCase().includes(searchQuery.toLowerCase()))
+				)
+			: sections
+	);
+
+	const shortcuts = [
+		{ key: '⌘ + K', desc: 'Quick search' },
+		{ key: '⌘ + /', desc: 'Toggle sidebar' },
+		{ key: '⌘ + ,', desc: 'Settings' },
+		{ key: '?', desc: 'This help page' },
+	];
+</script>
+
+<svelte:head>
+	<title>Radix — Help</title>
+</svelte:head>
+
+<h1>Help</h1>
+
+<div class="search-bar">
+	<input
+		type="text"
+		placeholder="Search help..."
+		bind:value={searchQuery}
+	/>
+</div>
+
+{#if filtered.length > 0}
+	<div class="sections">
+		{#each filtered as section}
+			<div class="section">
+				<h2><span class="section-icon">{section.icon}</span> {section.title}</h2>
+				{#if typeof section.content === 'string'}
+					<div class="section-content">{section.content}</div>
+				{:else}
+					{#await section.content() then mod}
+						<mod.default />
+					{:catch}
+						<p class="error">Failed to load section</p>
+					{/await}
+				{/if}
+			</div>
+		{/each}
+	</div>
+{:else}
+	<p class="no-results">No help sections match your search.</p>
+{/if}
+
+<div class="shortcuts-section">
+	<h2>⌨️ Keyboard Shortcuts</h2>
+	<div class="shortcuts-grid">
+		{#each shortcuts as shortcut}
+			<div class="shortcut">
+				<kbd>{shortcut.key}</kbd>
+				<span>{shortcut.desc}</span>
+			</div>
+		{/each}
+	</div>
+</div>
+
+<style>
+	h1 {
+		margin: 0 0 16px;
+	}
+
+	.search-bar {
+		margin-bottom: 24px;
+	}
+
+	.search-bar input {
+		width: 100%;
+		max-width: 400px;
+		padding: 10px 14px;
+		border: 1px solid var(--color-border);
+		border-radius: 8px;
+		background: var(--color-surface);
+		color: var(--color-text);
+		font-size: 0.9rem;
+	}
+
+	.search-bar input::placeholder {
+		color: var(--color-text-muted);
+	}
+
+	.sections {
+		display: flex;
+		flex-direction: column;
+		gap: 20px;
+	}
+
+	.section {
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 8px;
+		padding: 20px;
+	}
+
+	.section h2 {
+		margin: 0 0 12px;
+		font-size: 1.05rem;
+	}
+
+	.section-icon {
+		margin-right: 4px;
+	}
+
+	.section-content {
+		color: var(--color-text-muted);
+		font-size: 0.9rem;
+		line-height: 1.6;
+		white-space: pre-wrap;
+	}
+
+	.no-results {
+		color: var(--color-text-muted);
+		text-align: center;
+		padding: 32px;
+	}
+
+	.error {
+		color: var(--color-danger);
+	}
+
+	.shortcuts-section {
+		margin-top: 32px;
+		background: var(--color-surface);
+		border: 1px solid var(--color-border);
+		border-radius: 8px;
+		padding: 20px;
+	}
+
+	.shortcuts-section h2 {
+		margin: 0 0 16px;
+		font-size: 1.05rem;
+	}
+
+	.shortcuts-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+		gap: 12px;
+	}
+
+	.shortcut {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	kbd {
+		background: var(--color-bg);
+		border: 1px solid var(--color-border);
+		border-radius: 4px;
+		padding: 2px 8px;
+		font-size: 0.8rem;
+		font-family: monospace;
+		white-space: nowrap;
+	}
+
+	.shortcut span {
+		font-size: 0.85rem;
+		color: var(--color-text-muted);
+	}
+</style>
