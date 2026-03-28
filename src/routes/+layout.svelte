@@ -2,6 +2,7 @@
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { getAllNavItems } from '$lib/platform/plugin-loader.js';
 	import { theme } from '$lib/stores/theme.js';
+	import { browser } from '$app/environment';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -10,20 +11,89 @@
 
 	let { children }: Props = $props();
 
-	let sidebarCollapsed = $state(false);
 	let navItems = $derived(getAllNavItems());
 
+	// ── Responsive breakpoints ───────────────────────────────────────────────
+	// Default to desktop width for SSR; hydrates to actual width on the client.
+	let windowWidth = $state(browser ? window.innerWidth : 1280);
+
+	$effect(() => {
+		if (!browser) return;
+		const onResize = () => { windowWidth = window.innerWidth; };
+		window.addEventListener('resize', onResize, { passive: true });
+		return () => window.removeEventListener('resize', onResize);
+	});
+
+	let isMobile = $derived(windowWidth < 768);
+	let isTablet = $derived(windowWidth >= 768 && windowWidth < 1024);
+
+	// ── Sidebar state ────────────────────────────────────────────────────────
+	// Desktop: user-controlled toggle between full (240 px) and icon (56 px).
+	let desktopCollapsed = $state(false);
+	// Mobile: whether the full-width overlay is visible.
+	let mobileOpen = $state(false);
+
+	// Collapsed prop passed to <Sidebar>:
+	//   mobile  → hidden when overlay closed, visible when open
+	//   tablet  → always icon mode (auto-collapsed)
+	//   desktop → follows user preference
+	let sidebarCollapsed = $derived(
+		isMobile ? !mobileOpen : (isTablet || desktopCollapsed)
+	);
+
 	function toggleSidebar() {
-		sidebarCollapsed = !sidebarCollapsed;
+		if (isMobile) {
+			mobileOpen = !mobileOpen;
+		} else if (!isTablet) {
+			// Tablet is always icon mode — nothing to toggle.
+			desktopCollapsed = !desktopCollapsed;
+		}
 	}
+
+	function closeMobileOverlay() {
+		mobileOpen = false;
+	}
+
+	// ── Keyboard shortcut: Ctrl+/ or ⌘+/ toggles sidebar ───────────────────
+	$effect(() => {
+		if (!browser) return;
+		function onKeyDown(e: KeyboardEvent) {
+			if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+				e.preventDefault();
+				toggleSidebar();
+			}
+		}
+		window.addEventListener('keydown', onKeyDown);
+		return () => window.removeEventListener('keydown', onKeyDown);
+	});
 </script>
 
 <div class="app" data-theme={theme.value}>
-	<Sidebar items={navItems} collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
+	{#if isMobile && mobileOpen}
+		<!-- Backdrop closes the mobile overlay when tapped outside the sidebar -->
+		<div
+			class="mobile-backdrop"
+			onclick={closeMobileOverlay}
+			aria-hidden="true"
+		></div>
+	{/if}
+
+	<Sidebar
+		items={navItems}
+		collapsed={sidebarCollapsed}
+		onToggle={toggleSidebar}
+	/>
 
 	<main class="content">
 		<header class="topbar">
-			<button class="mobile-menu" onclick={toggleSidebar} aria-label="Menu">☰</button>
+			<!-- Hamburger shown only on mobile; sidebar has its own toggle on desktop -->
+			<button
+				class="mobile-menu"
+				onclick={toggleSidebar}
+				aria-label="Open navigation menu"
+				aria-expanded={mobileOpen}
+				aria-controls="sidebar"
+			>☰</button>
 			<div class="topbar-actions">
 				<button class="theme-toggle" onclick={() => theme.toggle()} aria-label="Toggle theme">
 					{theme.value === 'dark' ? '☀️' : '🌙'}
@@ -77,6 +147,14 @@
 		min-height: 100vh;
 	}
 
+	/* Darkened overlay behind the mobile sidebar drawer */
+	.mobile-backdrop {
+		position: fixed;
+		inset: 0;
+		background: rgba(0, 0, 0, 0.5);
+		z-index: 99;
+	}
+
 	.content {
 		flex: 1;
 		display: flex;
@@ -94,6 +172,7 @@
 		height: 48px;
 	}
 
+	/* Hamburger shown only on mobile; desktop uses the sidebar's own toggle */
 	.mobile-menu {
 		display: none;
 		background: none;
@@ -123,7 +202,7 @@
 		overflow-y: auto;
 	}
 
-	@media (max-width: 768px) {
+	@media (max-width: 767px) {
 		.mobile-menu {
 			display: block;
 		}
