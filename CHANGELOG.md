@@ -1,3 +1,8 @@
+## [0.1.2] — 2026-03-28
+
+- docs: add comprehensive architecture documentation (a767b06)
+- docs: add transition plan and FinancialAdvisor migration guide (4b6489c)
+
 ## [0.1.1] — 2026-03-28
 
 - chore: add CI, Copilot automation, build tooling (7b4ff72)
