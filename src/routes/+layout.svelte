@@ -90,8 +90,9 @@
 			<button
 				class="mobile-menu"
 				onclick={toggleSidebar}
-				aria-label="Open navigation menu"
+				aria-label={mobileOpen ? 'Close navigation menu' : 'Open navigation menu'}
 				aria-expanded={mobileOpen}
+				aria-pressed={mobileOpen}
 				aria-controls="sidebar"
 			>☰</button>
 			<div class="topbar-actions">
