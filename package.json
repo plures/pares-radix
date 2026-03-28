@@ -1,7 +1,7 @@
 {
   "name": "@plures/pares-radix",
   "version": "0.1.0",
-  "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
+  "description": "Praxis base application \u2014 plugin-driven platform with inference engine, UX contracts, and LLM integration",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
   },
-  "keywords": ["praxis", "plugin", "inference", "platform"],
+  "keywords": [
+    "praxis",
+    "plugin",
+    "inference",
+    "platform"
+  ],
   "author": "Plures",
   "license": "MIT",
   "repository": {
@@ -23,6 +28,12 @@
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "^5.7.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "eslint-plugin-svelte": "^2.0.0",
+    "svelte-eslint-parser": "^0.43.0",
+    "@plures/eslint-plugin-design-dojo": "*"
+  },
+  "dependencies": {
+    "@plures/design-dojo": "*"
   }
 }

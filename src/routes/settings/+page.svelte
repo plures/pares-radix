@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Button } from '@plures/design-dojo';
 	import SettingsGroup from '$lib/components/SettingsGroup.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { getAllSettings } from '$lib/platform/plugin-loader.js';
@@ -8,7 +9,6 @@
 
 	let allSettings = $derived(getAllSettings());
 
-	// Group settings by plugin (extract plugin name from key namespace)
 	let grouped = $derived(() => {
 		const groups = new Map<string, typeof allSettings>();
 		for (const s of allSettings) {
@@ -77,7 +77,6 @@
 
 <h1>Settings</h1>
 
-<!-- Platform settings -->
 <SettingsGroup groupName="Platform" settings={[
 	{
 		key: 'radix.theme',
@@ -89,20 +88,18 @@
 	}
 ]} />
 
-<!-- Plugin settings -->
 {#each [...grouped().entries()] as [name, pluginSettings]}
 	<div class="group-spacer">
 		<SettingsGroup groupName={name} settings={pluginSettings} />
 	</div>
 {/each}
 
-<!-- Data management -->
 <div class="data-section">
 	<h2>Data Management</h2>
 	<div class="data-actions">
-		<button class="btn" onclick={exportData}>📦 Export All Data</button>
-		<button class="btn" onclick={importData}>📥 Import Data</button>
-		<button class="btn danger" onclick={() => showClearConfirm = true}>🗑️ Clear All Data</button>
+		<Button variant="secondary" onclick={exportData}>📦 Export All Data</Button>
+		<Button variant="secondary" onclick={importData}>📥 Import Data</Button>
+		<Button variant="secondary" onclick={() => showClearConfirm = true}>🗑️ Clear All Data</Button>
 	</div>
 </div>
 
@@ -116,19 +113,9 @@
 />
 
 <style>
-	h1 {
-		margin: 0 0 24px;
-	}
-
-	h2 {
-		font-size: 1.1rem;
-		margin: 0 0 12px;
-		color: var(--color-text);
-	}
-
-	.group-spacer {
-		margin-top: 16px;
-	}
+	h1 { margin: 0 0 24px; }
+	h2 { font-size: 1.1rem; margin: 0 0 12px; color: var(--color-text); }
+	.group-spacer { margin-top: 16px; }
 
 	.data-section {
 		margin-top: 32px;
@@ -138,28 +125,5 @@
 		border-radius: 8px;
 	}
 
-	.data-actions {
-		display: flex;
-		gap: 8px;
-		flex-wrap: wrap;
-	}
-
-	.btn {
-		padding: 8px 16px;
-		border-radius: 6px;
-		border: 1px solid var(--color-border);
-		background: var(--color-surface);
-		color: var(--color-text);
-		cursor: pointer;
-		font-size: 0.85rem;
-	}
-
-	.btn:hover {
-		background: var(--color-hover);
-	}
-
-	.btn.danger {
-		border-color: var(--color-danger);
-		color: var(--color-danger);
-	}
+	.data-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 </style>

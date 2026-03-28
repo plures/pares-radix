@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SearchInput } from '@plures/design-dojo';
 	import { getAllHelpSections } from '$lib/platform/plugin-loader.js';
 	import type { HelpSection } from '$lib/types/plugin.js';
 
@@ -29,8 +30,7 @@
 <h1>Help</h1>
 
 <div class="search-bar">
-	<input
-		type="text"
+	<SearchInput
 		placeholder="Search help..."
 		bind:value={searchQuery}
 	/>
