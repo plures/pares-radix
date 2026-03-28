@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Input, Select, Toggle } from '@plures/design-dojo';
 	import type { PluginSetting } from '$lib/types/plugin.js';
 	import { browser } from '$app/environment';
 
@@ -27,23 +28,21 @@
 
 	{#each settings as setting}
 		<div class="setting">
-			<label for={setting.key}>
+			<div class="setting-info">
 				<span class="setting-label">{setting.label}</span>
 				{#if setting.description}
 					<span class="setting-desc">{setting.description}</span>
 				{/if}
-			</label>
+			</div>
 
 			<div class="setting-control">
 				{#if setting.type === 'toggle'}
-					<input
-						id={setting.key}
-						type="checkbox"
+					<Toggle
 						checked={getValue(setting) as boolean}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).checked)}
 					/>
 				{:else if setting.type === 'select'}
-					<select
+					<Select
 						id={setting.key}
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLSelectElement).value)}
@@ -51,30 +50,23 @@
 						{#each setting.options ?? [] as opt}
 							<option value={opt.value}>{opt.label}</option>
 						{/each}
-					</select>
+					</Select>
 				{:else if setting.type === 'number'}
-					<input
+					<Input
 						id={setting.key}
 						type="number"
-						value={getValue(setting) as number}
+						value={String(getValue(setting))}
 						onchange={(e) => setValue(setting, Number((e.target as HTMLInputElement).value))}
 					/>
 				{:else if setting.type === 'password'}
-					<input
+					<Input
 						id={setting.key}
 						type="password"
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
 					/>
-				{:else if setting.type === 'color'}
-					<input
-						id={setting.key}
-						type="color"
-						value={getValue(setting) as string}
-						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
-					/>
 				{:else}
-					<input
+					<Input
 						id={setting.key}
 						type="text"
 						value={getValue(setting) as string}
@@ -110,9 +102,8 @@
 		gap: 16px;
 	}
 
-	.setting:last-child {
-		border-bottom: none;
-	}
+	.setting:last-child { border-bottom: none; }
+	.setting-info { flex: 1; }
 
 	.setting-label {
 		display: block;
@@ -127,22 +118,5 @@
 		margin-top: 2px;
 	}
 
-	.setting-control {
-		flex-shrink: 0;
-	}
-
-	select, input[type="text"], input[type="number"], input[type="password"] {
-		padding: 6px 10px;
-		border: 1px solid var(--color-border);
-		border-radius: 4px;
-		background: var(--color-bg);
-		color: var(--color-text);
-		font-size: 0.85rem;
-	}
-
-	input[type="checkbox"] {
-		width: 18px;
-		height: 18px;
-		accent-color: var(--color-accent);
-	}
+	.setting-control { flex-shrink: 0; }
 </style>
