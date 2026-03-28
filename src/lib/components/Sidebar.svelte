@@ -11,13 +11,13 @@
 	let { items, collapsed, onToggle }: Props = $props();
 </script>
 
-<aside class="sidebar" class:collapsed>
+<aside id="sidebar" class="sidebar" class:collapsed aria-label="Main navigation">
 	<div class="sidebar-header">
 		<a href="/" class="logo">
 			{#if !collapsed}<span class="logo-text">Radix</span>{/if}
 			<span class="logo-icon">⚡</span>
 		</a>
-		<button class="toggle-btn" onclick={onToggle} aria-label="Toggle sidebar">
+		<button class="toggle-btn" onclick={onToggle} aria-label="Toggle sidebar" aria-expanded={!collapsed} aria-controls="sidebar">
 			{collapsed ? '→' : '←'}
 		</button>
 	</div>
@@ -172,7 +172,7 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	@media (max-width: 768px) {
+	@media (max-width: 767px) {
 		.sidebar {
 			position: fixed;
 			z-index: 100;
@@ -183,6 +183,20 @@
 		.sidebar.collapsed {
 			width: 0;
 			border: none;
+			visibility: hidden;
+			pointer-events: none;
+		}
+
+		/* Sidebar toggle is irrelevant on mobile — hamburger controls it */
+		.toggle-btn {
+			display: none;
+		}
+	}
+
+	/* On tablet, sidebar auto-collapses to icon mode; no manual toggle needed */
+	@media (min-width: 768px) and (max-width: 1023px) {
+		.toggle-btn {
+			display: none;
 		}
 	}
 </style>
