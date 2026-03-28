@@ -183,6 +183,8 @@
 		.sidebar.collapsed {
 			width: 0;
 			border: none;
+			visibility: hidden;
+			pointer-events: none;
 		}
 
 		/* Sidebar toggle is irrelevant on mobile — hamburger controls it */
