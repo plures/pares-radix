@@ -26,7 +26,7 @@ jobs:
         id: lint
 
       - name: Type check
-        run: npx tsc --noEmit --skipLibCheck 2>&1
+        run: npx svelte-kit sync && npx tsc --noEmit --skipLibCheck 2>&1
         continue-on-error: true
         id: typecheck
 

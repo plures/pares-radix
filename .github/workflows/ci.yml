@@ -36,7 +36,13 @@ jobs:
         run: npm run lint --if-present
 
       - name: Type check
-        run: npx tsc --noEmit --skipLibCheck || echo "No tsconfig found, skipping"
+        run: |
+          if [ -f tsconfig.json ]; then
+            npx svelte-kit sync
+            npx tsc --noEmit --skipLibCheck
+          else
+            echo "Skipping type check: tsconfig.json not found."
+          fi
 
       - name: Test
         run: npm test --if-present
