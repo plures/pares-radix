@@ -1,3 +1,8 @@
+## [0.1.1] — 2026-03-28
+
+- chore: add CI, Copilot automation, build tooling (7b4ff72)
+- feat: initial pares-radix foundation (929cd1a)
+
 # Changelog
 
 All notable changes to this project will be documented in this file.

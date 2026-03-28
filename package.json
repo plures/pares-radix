@@ -1,6 +1,6 @@
 {
   "name": "@plures/pares-radix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
   "type": "module",
   "main": "dist/index.js",
@@ -22,7 +22,12 @@
     "README.md",
     "LICENSE"
   ],
-  "keywords": ["praxis", "plugin", "inference", "platform"],
+  "keywords": [
+    "praxis",
+    "plugin",
+    "inference",
+    "platform"
+  ],
   "author": "Plures",
   "license": "MIT",
   "repository": {
