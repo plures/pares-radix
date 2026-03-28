@@ -24,7 +24,7 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<div class="overlay" role="presentation" onclick={onCancel}>
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<div class="dialog" role="alertdialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+		<div class="dialog" role="alertdialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()}>
 			<h3>{title}</h3>
 			<p>{message}</p>
 			<div class="actions">
