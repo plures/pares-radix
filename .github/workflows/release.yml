@@ -1,0 +1,21 @@
+name: Release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Force version bump (patch/minor/major)'
+        type: choice
+        options: [patch, minor, major]
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+jobs:
+  release:
+    uses: plures/.github/.github/workflows/release-reusable.yml@main
+    with:
+      # Force patch release on every merge to main for this package.
+      bump: ${{ github.event_name == 'push' && 'patch' || github.event.inputs.bump || '' }}
+    secrets: inherit

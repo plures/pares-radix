@@ -6,8 +6,8 @@
  * prerequisites, and ensure plugins provide proper empty states.
  */
 
-import type { Expectation, DataRequirement } from '../types/plugin.js';
-import { getAllRoutes, getAllNavItems } from './plugin-loader.js';
+import type { Expectation, DataRequirement, NavItem } from '../types/plugin.js';
+import { getAllRoutes, getAllNavItems } from '../platform/plugin-loader.js';
 
 // ─── Built-in UX Expectations ───────────────────────────────────────────────
 
@@ -19,7 +19,7 @@ export const builtinUxExpectations: Expectation[] = [
     severity: 'error',
     validate: () => {
       const routes = getAllRoutes();
-      const navHrefs = new Set(getAllNavItems().map(n => n.href));
+      const navHrefs = new Set(getAllNavItems().map((n: NavItem) => n.href));
       // Every route must be in nav OR be a child of a route that is
       for (const route of routes) {
         const inNav = navHrefs.has(route.path);
@@ -59,7 +59,7 @@ export const builtinUxExpectations: Expectation[] = [
     description: 'All navigation items must point to registered routes',
     severity: 'warning',
     validate: () => {
-      const routePaths = new Set(getAllRoutes().map(r => r.path));
+      const routePaths = new Set(getAllRoutes().map((r: { path: string }) => r.path));
       // Add base routes that radix provides
       routePaths.add('/');
       routePaths.add('/settings');

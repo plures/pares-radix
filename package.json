@@ -1,0 +1,41 @@
+{
+  "name": "@plures/pares-radix",
+  "version": "0.1.0",
+  "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src/",
+    "check": "tsc --noEmit",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": ["praxis", "plugin", "inference", "platform"],
+  "author": "Plures",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/plures/pares-radix.git"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  }
+}
