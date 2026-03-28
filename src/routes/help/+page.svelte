@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { SearchInput } from '@plures/design-dojo';
 	import { getAllHelpSections } from '$lib/platform/plugin-loader.js';
 	import type { HelpSection } from '$lib/types/plugin.js';
 
@@ -30,9 +29,11 @@
 <h1>Help</h1>
 
 <div class="search-bar">
-	<SearchInput
+	<input
+		type="search"
 		placeholder="Search help..."
 		bind:value={searchQuery}
+		class="search-input"
 	/>
 </div>
 
@@ -78,7 +79,7 @@
 		margin-bottom: 24px;
 	}
 
-	.search-bar input {
+	.search-input {
 		width: 100%;
 		max-width: 400px;
 		padding: 10px 14px;
@@ -89,7 +90,7 @@
 		font-size: 0.9rem;
 	}
 
-	.search-bar input::placeholder {
+	.search-input::placeholder {
 		color: var(--color-text-muted);
 	}
 

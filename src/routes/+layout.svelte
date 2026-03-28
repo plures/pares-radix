@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Sidebar, StatusBar, StatusBarItem, StatusBarSpacer, Button } from '@plures/design-dojo';
 	import { page } from '$app/state';
 	import { getAllNavItems } from '$lib/platform/plugin-loader.js';
 	import { theme } from '$lib/stores/theme.js';
@@ -16,7 +15,7 @@
 </script>
 
 <div class="app" data-theme={theme.value}>
-	<Sidebar collapsed={sidebarCollapsed} ontoggle={(c) => sidebarCollapsed = c}>
+	<aside class="sidebar" class:collapsed={sidebarCollapsed}>
 		<nav class="sidebar-nav">
 			{#each navItems as item}
 				{@const active = page.url.pathname === item.href || (item.href !== '/' && page.url.pathname.startsWith(item.href + '/'))}
@@ -26,27 +25,27 @@
 				</a>
 			{/each}
 		</nav>
-	</Sidebar>
+	</aside>
 
 	<div class="content">
 		<header class="topbar">
-			<Button variant="ghost" onclick={() => sidebarCollapsed = !sidebarCollapsed} aria-label="Toggle sidebar">
+			<button class="btn-ghost" onclick={() => sidebarCollapsed = !sidebarCollapsed} aria-label="Toggle sidebar">
 				{sidebarCollapsed ? '☰' : '◀'}
-			</Button>
+			</button>
 			<div class="topbar-actions">
-				<Button variant="ghost" onclick={() => theme.toggle()} aria-label="Toggle theme">
+				<button class="btn-ghost" onclick={() => theme.toggle()} aria-label="Toggle theme">
 					{theme.value === 'dark' ? '☀️' : '🌙'}
-				</Button>
+				</button>
 			</div>
 		</header>
 		<main class="page">
 			{@render children()}
 		</main>
-		<StatusBar>
-			<StatusBarItem label="Theme" value={theme.value} />
-			<StatusBarSpacer />
-			<StatusBarItem label="Radix" value="v0.2.0" />
-		</StatusBar>
+		<footer class="status-bar">
+			<span class="status-item"><span class="status-key">Theme</span> <span class="status-val">{theme.value}</span></span>
+			<span class="status-spacer"></span>
+			<span class="status-item"><span class="status-key">Radix</span> <span class="status-val">v0.2.0</span></span>
+		</footer>
 	</div>
 </div>
 
@@ -122,4 +121,45 @@
 	.nav-link:hover { background: var(--color-hover); color: var(--color-text); }
 	.nav-link.active { background: var(--color-accent-bg); color: var(--color-accent); font-weight: 500; }
 	.nav-icon { font-size: 1.1rem; width: 20px; text-align: center; }
+
+	.sidebar {
+		width: 220px;
+		background: var(--color-surface);
+		border-right: 1px solid var(--color-border);
+		padding: 12px 8px;
+		transition: width 0.2s ease;
+		overflow: hidden;
+		flex-shrink: 0;
+	}
+
+	.sidebar.collapsed { width: 52px; }
+
+	.btn-ghost {
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 6px 8px;
+		border-radius: 6px;
+		color: var(--color-text);
+		font-size: 1rem;
+		line-height: 1;
+	}
+
+	.btn-ghost:hover { background: var(--color-hover); }
+
+	.status-bar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 12px;
+		border-top: 1px solid var(--color-border);
+		background: var(--color-surface);
+		font-size: 0.75rem;
+		color: var(--color-text-muted);
+		height: 28px;
+	}
+
+	.status-item { display: flex; gap: 4px; }
+	.status-key { opacity: 0.7; }
+	.status-spacer { flex: 1; }
 </style>
