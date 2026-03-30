@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Input, Select, Toggle } from '@plures/design-dojo';
 	import type { PluginSetting } from '$lib/types/plugin.js';
 	import { browser } from '$app/environment';
 
@@ -37,37 +36,43 @@
 
 			<div class="setting-control">
 				{#if setting.type === 'toggle'}
-					<Toggle
+					<input
+						type="checkbox"
+						class="toggle"
 						checked={getValue(setting) as boolean}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).checked)}
 					/>
 				{:else if setting.type === 'select'}
-					<Select
+					<select
 						id={setting.key}
+						class="select"
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLSelectElement).value)}
 					>
 						{#each setting.options ?? [] as opt}
 							<option value={opt.value}>{opt.label}</option>
 						{/each}
-					</Select>
+					</select>
 				{:else if setting.type === 'number'}
-					<Input
+					<input
 						id={setting.key}
+						class="input"
 						type="number"
 						value={String(getValue(setting))}
 						onchange={(e) => setValue(setting, Number((e.target as HTMLInputElement).value))}
 					/>
 				{:else if setting.type === 'password'}
-					<Input
+					<input
 						id={setting.key}
+						class="input"
 						type="password"
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
 					/>
 				{:else}
-					<Input
+					<input
 						id={setting.key}
+						class="input"
 						type="text"
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
@@ -119,4 +124,22 @@
 	}
 
 	.setting-control { flex-shrink: 0; }
+
+	.input, .select {
+		padding: 6px 10px;
+		border: 1px solid var(--color-border);
+		border-radius: 6px;
+		background: var(--color-bg);
+		color: var(--color-text);
+		font-size: 0.875rem;
+	}
+
+	.select { min-width: 120px; }
+
+	.toggle {
+		width: 1.1rem;
+		height: 1.1rem;
+		accent-color: var(--color-accent);
+		cursor: pointer;
+	}
 </style>

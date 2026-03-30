@@ -32,7 +32,5 @@
     "eslint-plugin-svelte": "^2.0.0",
     "svelte-eslint-parser": "^0.43.0"
   },
-  "dependencies": {
-    "@plures/design-dojo": "*"
-  }
+  "dependencies": {}
 }

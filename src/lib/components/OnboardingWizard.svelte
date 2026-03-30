@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Button } from '@plures/design-dojo';
 	import type { OnboardingStep } from '$lib/types/plugin.js';
 	import { onboarding } from '$lib/stores/onboarding.js';
 
@@ -49,9 +48,9 @@
 					{#if isCurrent && !done}
 						<div class="step-actions">
 							<a href={step.href} class="btn primary">{step.actionLabel}</a>
-							<Button variant="secondary" onclick={() => checkAndAdvance(step)}>
+							<button class="btn secondary" onclick={() => checkAndAdvance(step)}>
 								I've done this
-							</Button>
+							</button>
 						</div>
 					{/if}
 				</div>

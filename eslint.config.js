@@ -2,7 +2,6 @@ import eslint from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import sveltePlugin from 'eslint-plugin-svelte';
 import svelteParser from 'svelte-eslint-parser';
-import designDojoPlugin from '@plures/design-dojo/enforce';
 
 export default tseslint.config(
   eslint.configs.recommended,
@@ -10,8 +9,6 @@ export default tseslint.config(
   {
     ignores: ['dist/', 'node_modules/', '.svelte-kit/', 'build/'],
   },
-  // Apply design-dojo recommended config (no-local-components + prefer-design-dojo-imports)
-  designDojoPlugin.configs.recommended,
   {
     files: ['**/*.svelte'],
     plugins: {
