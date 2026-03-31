@@ -16,6 +16,8 @@ export {
   getPlugin,
   getPluginIds,
   isPluginActive,
+  exportAllPluginData,
+  importAllPluginData,
 } from './platform/plugin-loader.js';
 export {
   createInferenceEngine,
