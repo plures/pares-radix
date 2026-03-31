@@ -33,6 +33,7 @@
 		type="search"
 		class="search-input"
 		placeholder="Search help..."
+		aria-label="Search help"
 		bind:value={searchQuery}
 	/>
 </div>
