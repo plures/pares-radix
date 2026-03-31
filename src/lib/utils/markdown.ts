@@ -85,25 +85,44 @@ function escapeHtml(str: string): string {
 }
 
 function applyInline(line: string): string {
+	// First, extract inline code spans so that emphasis and links
+	// are not processed inside backticks.
+	const codeSpans: string[] = [];
+	line = line.replace(/`([^`]+)`/g, (_match, code) => {
+		const index = codeSpans.length;
+		codeSpans.push(code);
+		return `__CODE_SPAN_${index}__`;
+	});
+
 	// Bold + italic (***text***) — must come before bold/italic individually
 	line = line.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
 	// Bold (**text**)
 	line = line.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 	// Italic (*text*)
 	line = line.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-	// Inline code (`code`)
-	line = line.replace(/`([^`]+)`/g, '<code>$1</code>');
 	// Links ([label](url)) — only allow safe URL schemes
 	line = line.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, href) => {
 		const safe = isSafeUrl(href);
 		return safe ? `<a href="${href}" rel="noopener noreferrer">${label}</a>` : label;
+	});
+
+	// Restore inline code spans.
+	line = line.replace(/__CODE_SPAN_(\d+)__/g, (_match, indexStr) => {
+		const index = Number(indexStr);
+		const code = codeSpans[index] ?? '';
+		return `<code>${code}</code>`;
 	});
 	return line;
 }
 
 /** Allow only http, https, and root-relative or hash links. */
 function isSafeUrl(href: string): boolean {
-	if (href.startsWith('/') || href.startsWith('#')) return true;
+	if (href.startsWith('#')) return true;
+	if (href.startsWith('/')) {
+		// Allow single-slash root-relative paths ("/", "/foo"), but reject
+		// protocol-relative URLs like "//evil.example".
+		return href.length === 1 || href[1] !== '/';
+	}
 	try {
 		const url = new URL(href);
 		return url.protocol === 'http:' || url.protocol === 'https:';
