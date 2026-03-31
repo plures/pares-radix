@@ -126,6 +126,8 @@ export interface HelpSection {
   content: string | (() => Promise<{ default: typeof SvelteComponent }>);
   /** Sort priority */
   priority?: number;
+  /** Links to relevant plugin pages shown as "See also" */
+  links?: { label: string; href: string }[];
 }
 
 export interface OnboardingStep {
