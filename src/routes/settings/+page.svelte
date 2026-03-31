@@ -1,15 +1,17 @@
 <script lang="ts">
 	import SettingsGroup from '$lib/components/SettingsGroup.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { getAllSettings } from '$lib/platform/plugin-loader.js';
+	import { getAllSettings, exportAllPluginData, importAllPluginData } from '$lib/platform/plugin-loader.js';
+	import { settingsAPI, clearAllSettings, exportSettings, importSettings } from '$lib/stores/settings.js';
 	import { theme } from '$lib/stores/theme.js';
 	import { onboarding } from '$lib/stores/onboarding.js';
 	import { browser } from '$app/environment';
+	import type { PluginSetting } from '$lib/types/plugin.js';
 
 	let allSettings = $derived(getAllSettings());
 
-	let grouped = $derived(() => {
-		const groups = new Map<string, typeof allSettings>();
+	let grouped = $derived.by(() => {
+		const groups = new Map<string, PluginSetting[]>();
 		for (const s of allSettings) {
 			const ns = s.group ?? s.key.split('.')[0] ?? 'General';
 			if (!groups.has(ns)) groups.set(ns, []);
@@ -20,16 +22,58 @@
 
 	let showClearConfirm = $state(false);
 
-	function exportData() {
-		if (!browser) return;
-		const data: Record<string, string | null> = {};
-		for (let i = 0; i < localStorage.length; i++) {
-			const key = localStorage.key(i);
-			if (key?.startsWith('radix-')) {
-				data[key] = localStorage.getItem(key);
-			}
+	// Platform settings rendered inline in the Platform SettingsGroup
+	let platformSettings: PluginSetting[] = $derived([
+		{
+			key: 'radix.theme',
+			type: 'select',
+			label: 'Theme',
+			description: 'Application color scheme',
+			default: theme.value,
+			options: [
+				{ value: 'dark', label: 'Dark' },
+				{ value: 'light', label: 'Light' }
+			]
+		},
+		{
+			key: 'radix.llm.provider',
+			type: 'select',
+			label: 'LLM Provider',
+			description: 'Language model provider for inference',
+			default: '',
+			options: [
+				{ value: '', label: 'None' },
+				{ value: 'openai', label: 'OpenAI' },
+				{ value: 'anthropic', label: 'Anthropic' },
+				{ value: 'ollama', label: 'Ollama (local)' }
+			]
+		},
+		{
+			key: 'radix.llm.apiKey',
+			type: 'password',
+			label: 'LLM API Key',
+			description: 'API key for the selected provider',
+			default: ''
 		}
-		const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+	]);
+
+	// Keep the theme store in sync when the platform theme setting changes.
+	$effect(() => {
+		const unsubscribe = settingsAPI.subscribe('radix.theme', (value) => {
+			if (value === 'light' || value === 'dark') {
+				theme.value = value;
+			}
+		});
+		return unsubscribe;
+	});
+
+	async function exportData() {
+		if (!browser) return;
+		const pluginData = await exportAllPluginData();
+		const blob = new Blob(
+			[JSON.stringify({ settings: exportSettings(), plugins: pluginData }, null, 2)],
+			{ type: 'application/json' }
+		);
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
@@ -47,10 +91,12 @@
 			const file = input.files?.[0];
 			if (!file) return;
 			const text = await file.text();
-			const data = JSON.parse(text);
-			for (const [key, value] of Object.entries(data)) {
-				if (typeof value === 'string') localStorage.setItem(key, value);
-			}
+			const data = JSON.parse(text) as {
+				settings?: Record<string, unknown>;
+				plugins?: Record<string, unknown>;
+			};
+			if (data.settings) importSettings(data.settings);
+			if (data.plugins) await importAllPluginData(data.plugins);
 			window.location.reload();
 		};
 		input.click();
@@ -58,12 +104,7 @@
 
 	function clearAllData() {
 		if (!browser) return;
-		const keys: string[] = [];
-		for (let i = 0; i < localStorage.length; i++) {
-			const key = localStorage.key(i);
-			if (key?.startsWith('radix-')) keys.push(key);
-		}
-		keys.forEach(k => localStorage.removeItem(k));
+		clearAllSettings();
 		onboarding.reset();
 		showClearConfirm = false;
 		window.location.reload();
@@ -76,18 +117,10 @@
 
 <h1>Settings</h1>
 
-<SettingsGroup groupName="Platform" settings={[
-	{
-		key: 'radix.theme',
-		type: 'select',
-		label: 'Theme',
-		description: 'Application color scheme',
-		default: theme.value,
-		options: [{ value: 'dark', label: 'Dark' }, { value: 'light', label: 'Light' }]
-	}
-]} />
+<SettingsGroup groupName="Platform" settings={platformSettings} />
+<p class="api-key-note">⚠️ API keys are stored locally on this device. Do not use this on shared computers.</p>
 
-{#each [...grouped().entries()] as [name, pluginSettings]}
+{#each [...grouped.entries()] as [name, pluginSettings]}
 	<div class="group-spacer">
 		<SettingsGroup groupName={name} settings={pluginSettings} />
 	</div>
@@ -140,4 +173,11 @@
 
 	.btn:hover { background: var(--color-hover); }
 	.btn.secondary { background: var(--color-surface); }
+
+	.api-key-note {
+		margin: 6px 0 0;
+		font-size: 0.78rem;
+		color: var(--color-text-muted);
+	}
 </style>
+

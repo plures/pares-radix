@@ -200,6 +200,38 @@ export function isPluginActive(id: string): boolean {
   return plugins.get(id)?.active ?? false;
 }
 
+/**
+ * Collect export data from every active plugin.
+ * Returns a map of pluginId → exported data slice.
+ */
+export async function exportAllPluginData(): Promise<Record<string, unknown>> {
+  const result: Record<string, unknown> = {};
+  for (const [id, { plugin, active }] of plugins) {
+    if (!active) continue;
+    try {
+      result[id] = await plugin.onDataExport?.();
+    } catch (err) {
+      console.error(`[radix] Plugin "${id}" export failed:`, err);
+    }
+  }
+  return result;
+}
+
+/**
+ * Distribute imported data slices to the corresponding plugins.
+ * Each plugin receives only its own slice (keyed by plugin ID).
+ */
+export async function importAllPluginData(data: Record<string, unknown>): Promise<void> {
+  for (const [id, { plugin, active }] of plugins) {
+    if (!active || data[id] === undefined) continue;
+    try {
+      await plugin.onDataImport?.(data[id]);
+    } catch (err) {
+      console.error(`[radix] Plugin "${id}" import failed:`, err);
+    }
+  }
+}
+
 // ─── Dependency Resolution ──────────────────────────────────────────────────
 
 function topologicalSort(plugins: Map<string, LoadedPlugin>): string[] {

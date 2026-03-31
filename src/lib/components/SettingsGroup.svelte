@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PluginSetting } from '$lib/types/plugin.js';
-	import { browser } from '$app/environment';
+	import { settingsAPI } from '$lib/stores/settings.js';
 
 	interface Props {
 		groupName: string;
@@ -9,16 +9,26 @@
 
 	let { groupName, settings }: Props = $props();
 
+	// Reactive local values — initialised from settingsAPI and updated on change
+	// so that controls reflect persisted state without a page reload.
+	let values: Record<string, unknown> = $state({});
+
+	$effect(() => {
+		for (const s of settings) {
+			const stored = settingsAPI.get(s.key);
+			values[s.key] = stored !== undefined ? stored : s.default;
+		}
+	});
+
 	function getValue(setting: PluginSetting): unknown {
-		if (!browser) return setting.default;
-		const stored = localStorage.getItem(`radix-setting:${setting.key}`);
-		return stored !== null ? JSON.parse(stored) : setting.default;
+		if (setting.key in values) return values[setting.key];
+		const stored = settingsAPI.get(setting.key);
+		return stored !== undefined ? stored : setting.default;
 	}
 
-	function setValue(setting: PluginSetting, value: unknown) {
-		if (browser) {
-			localStorage.setItem(`radix-setting:${setting.key}`, JSON.stringify(value));
-		}
+	function setValue(setting: PluginSetting, value: unknown): void {
+		values[setting.key] = value;
+		settingsAPI.set(setting.key, value);
 	}
 </script>
 
@@ -67,6 +77,14 @@
 						id={setting.key}
 						class="input"
 						type="password"
+						value={getValue(setting) as string}
+						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
+					/>
+				{:else if setting.type === 'color'}
+					<input
+						id={setting.key}
+						class="color-input"
+						type="color"
 						value={getValue(setting) as string}
 						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
 					/>
@@ -142,6 +160,16 @@
 		width: 1.1rem;
 		height: 1.1rem;
 		accent-color: var(--color-accent);
+		cursor: pointer;
+	}
+
+	.color-input {
+		width: 2.5rem;
+		height: 2rem;
+		padding: 2px 3px;
+		border: 1px solid var(--color-border);
+		border-radius: 6px;
+		background: var(--color-bg);
 		cursor: pointer;
 	}
 </style>
