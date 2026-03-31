@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { Button } from '@plures/design-dojo';
 	import SettingsGroup from '$lib/components/SettingsGroup.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import { getAllSettings } from '$lib/platform/plugin-loader.js';
@@ -97,9 +96,9 @@
 <div class="data-section">
 	<h2>Data Management</h2>
 	<div class="data-actions">
-		<Button variant="secondary" onclick={exportData}>📦 Export All Data</Button>
-		<Button variant="secondary" onclick={importData}>📥 Import Data</Button>
-		<Button variant="secondary" onclick={() => showClearConfirm = true}>🗑️ Clear All Data</Button>
+		<button class="btn secondary" onclick={exportData}>📦 Export All Data</button>
+		<button class="btn secondary" onclick={importData}>📥 Import Data</button>
+		<button class="btn secondary" onclick={() => showClearConfirm = true}>🗑️ Clear All Data</button>
 	</div>
 </div>
 
@@ -126,4 +125,19 @@
 	}
 
 	.data-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+	.btn {
+		padding: 7px 14px;
+		border-radius: 6px;
+		font-size: 0.85rem;
+		cursor: pointer;
+		border: 1px solid var(--color-border);
+		background: var(--color-surface);
+		color: var(--color-text);
+		font-weight: 500;
+		transition: background 0.12s;
+	}
+
+	.btn:hover { background: var(--color-hover); }
+	.btn.secondary { background: var(--color-surface); }
 </style>
