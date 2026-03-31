@@ -28,7 +28,7 @@
 	{#each settings as setting}
 		<div class="setting">
 			<div class="setting-info">
-				<span class="setting-label">{setting.label}</span>
+				<label class="setting-label" for={setting.key}>{setting.label}</label>
 				{#if setting.description}
 					<span class="setting-desc">{setting.description}</span>
 				{/if}
@@ -37,6 +37,7 @@
 			<div class="setting-control">
 				{#if setting.type === 'toggle'}
 					<input
+						id={setting.key}
 						type="checkbox"
 						class="toggle"
 						checked={getValue(setting) as boolean}
@@ -114,6 +115,7 @@
 		display: block;
 		font-size: 0.9rem;
 		color: var(--color-text);
+		cursor: default;
 	}
 
 	.setting-desc {

@@ -23,6 +23,7 @@
 	}: Props = $props();
 
 	let dialogEl: HTMLDialogElement | undefined = $state();
+	let confirming = $state(false);
 
 	$effect(() => {
 		if (!dialogEl) return;
@@ -32,21 +33,31 @@
 			if (dialogEl.open) dialogEl.close();
 		}
 	});
+
+	function handleClose() {
+		open = false;
+		if (!confirming) onCancel();
+		confirming = false;
+	}
+
+	function handleConfirm() {
+		confirming = true;
+		open = false;
+		onConfirm();
+	}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 <dialog
 	bind:this={dialogEl}
 	class="confirm-dialog"
-	onclose={onCancel}
-	onclick={(e) => { if (e.target === dialogEl) onCancel(); }}
+	onclose={handleClose}
 >
 	<div class="dialog-inner">
 		<h2 class="dialog-title">{title}</h2>
 		<p class="confirm-message">{message}</p>
 		<div class="confirm-actions">
 			<button class="btn secondary" onclick={onCancel}>{cancelLabel}</button>
-			<button class="btn primary" onclick={onConfirm}>{confirmLabel}</button>
+			<button class="btn primary" onclick={handleConfirm}>{confirmLabel}</button>
 		</div>
 	</div>
 </dialog>
