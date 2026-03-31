@@ -115,7 +115,7 @@
 		display: block;
 		font-size: 0.9rem;
 		color: var(--color-text);
-		cursor: default;
+		cursor: pointer;
 	}
 
 	.setting-desc {

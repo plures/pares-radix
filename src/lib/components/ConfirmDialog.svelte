@@ -40,6 +40,10 @@
 		confirming = false;
 	}
 
+	function handleCancel() {
+		dialogEl?.close();
+	}
+
 	function handleConfirm() {
 		confirming = true;
 		open = false;
@@ -56,7 +60,7 @@
 		<h2 class="dialog-title">{title}</h2>
 		<p class="confirm-message">{message}</p>
 		<div class="confirm-actions">
-			<button class="btn secondary" onclick={onCancel}>{cancelLabel}</button>
+			<button class="btn secondary" onclick={handleCancel}>{cancelLabel}</button>
 			<button class="btn primary" onclick={handleConfirm}>{confirmLabel}</button>
 		</div>
 	</div>
