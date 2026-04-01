@@ -115,9 +115,11 @@ function applyInline(line: string): string {
 	return line;
 }
 
-/** Allow only http, https, and root-relative or hash links. */
-function isSafeUrl(href: string): boolean {
+/** Allow only http, https, root-relative, document-relative, and hash links. */
+export function isSafeUrl(href: string): boolean {
 	if (href.startsWith('#')) return true;
+	// Relative paths: ./foo, ../foo, foo/bar — but NOT protocol-relative //
+	if (href.startsWith('./') || href.startsWith('../')) return true;
 	if (href.startsWith('/')) {
 		// Allow single-slash root-relative paths ("/", "/foo"), but reject
 		// protocol-relative URLs like "//evil.example".

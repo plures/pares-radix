@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { getAllHelpSections } from '$lib/platform/plugin-loader.js';
-	import { renderMarkdown } from '$lib/utils/markdown.js';
+	import { renderMarkdown, isSafeUrl } from '$lib/utils/markdown.js';
 	import { browser } from '$app/environment';
 	import type { HelpSection } from '$lib/types/plugin.js';
 
@@ -71,7 +71,9 @@
 					<div class="section-links">
 						<span class="links-label">See also:</span>
 						{#each section.links as link}
-							<a href={link.href} class="section-link">{link.label}</a>
+							{#if isSafeUrl(link.href)}
+								<a href={link.href} class="section-link">{link.label}</a>
+							{/if}
 						{/each}
 					</div>
 				{/if}
