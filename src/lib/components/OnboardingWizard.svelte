@@ -8,15 +8,15 @@
 
 	let { steps }: Props = $props();
 
-	let currentIndex = $derived(
-		steps.findIndex(s => !onboarding.isComplete(s.title))
-	);
-
 	let progress = $derived(
 		steps.length > 0
 			? Math.round((steps.filter(s => onboarding.isComplete(s.title)).length / steps.length) * 100)
 			: 100
 	);
+
+	function isLocked(step: OnboardingStep): boolean {
+		return (step.after ?? []).some(dep => !onboarding.isComplete(dep));
+	}
 
 	async function checkAndAdvance(step: OnboardingStep) {
 		const complete = await step.isComplete();
@@ -37,15 +37,15 @@
 	</div>
 
 	<div class="steps">
-		{#each steps as step, i}
+		{#each steps as step}
 			{@const done = onboarding.isComplete(step.title)}
-			{@const isCurrent = i === currentIndex}
-			<div class="step" class:done class:current={isCurrent}>
-				<div class="step-icon">{done ? '✅' : step.icon}</div>
+			{@const locked = !done && isLocked(step)}
+			<div class="step" class:done class:locked>
+				<div class="step-icon">{done ? '✅' : locked ? '🔒' : step.icon}</div>
 				<div class="step-content">
 					<h3>{step.title}</h3>
 					<p>{step.description}</p>
-					{#if isCurrent && !done}
+					{#if !done && !locked}
 						<div class="step-actions">
 							<a href={step.href} class="btn primary">{step.actionLabel}</a>
 							<button class="btn secondary" onclick={() => checkAndAdvance(step)}>
@@ -112,17 +112,16 @@
 		border-radius: 8px;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
-		opacity: 0.6;
 		transition: all 0.2s ease;
-	}
-
-	.step.current {
-		opacity: 1;
-		border-color: var(--color-accent);
+		/* active steps (not done, not locked) are fully visible at opacity 1 */
 	}
 
 	.step.done {
-		opacity: 0.8;
+		opacity: 0.7;
+	}
+
+	.step.locked {
+		opacity: 0.4;
 	}
 
 	.step-icon {

@@ -140,19 +140,62 @@ export function getAllHelpSections(): HelpSection[] {
   return sections.sort((a, b) => (a.priority ?? 50) - (b.priority ?? 50));
 }
 
-/** All onboarding steps, dependency-ordered */
+/** All onboarding steps, dependency-ordered (topological sort by `after` chain) */
 export function getAllOnboardingSteps(): OnboardingStep[] {
   const steps: OnboardingStep[] = [];
   for (const [, { plugin, active }] of plugins) {
     if (!active) continue;
     steps.push(...(plugin.onboardingSteps ?? []));
   }
-  // Simple dependency ordering: steps with `after` go later
-  return steps.sort((a, b) => {
-    if (a.after?.length && !b.after?.length) return 1;
-    if (!a.after?.length && b.after?.length) return -1;
-    return 0;
-  });
+  return sortStepsByDependency(steps);
+}
+
+/**
+ * Topological sort of onboarding steps by their `after` dependency chain.
+ * Steps listed in `after` (by title) must appear before the dependent step.
+ * Detects and warns on cycles; unknown dependency titles are warned and skipped.
+ */
+function sortStepsByDependency(steps: OnboardingStep[]): OnboardingStep[] {
+  if (steps.length === 0) return steps;
+
+  const byTitle = new Map<string, OnboardingStep>();
+  for (const step of steps) {
+    if (byTitle.has(step.title)) {
+      console.warn(`[radix] Duplicate onboarding step title "${step.title}" — earlier entry overwritten.`);
+    }
+    byTitle.set(step.title, step);
+  }
+  const visited = new Set<string>();
+  const inStack = new Set<string>();
+  const sorted: OnboardingStep[] = [];
+
+  function visit(title: string): void {
+    if (visited.has(title)) return;
+    if (inStack.has(title)) {
+      console.warn(`[radix] Onboarding step cycle detected at: "${title}"`);
+      return;
+    }
+    inStack.add(title);
+    const step = byTitle.get(title);
+    if (step) {
+      for (const dep of step.after ?? []) {
+        if (byTitle.has(dep)) {
+          visit(dep);
+        } else {
+          console.warn(`[radix] Onboarding step "${title}" depends on unknown step "${dep}"`);
+        }
+      }
+    }
+    inStack.delete(title);
+    visited.add(title);
+    if (step) sorted.push(step);
+  }
+
+  for (const step of steps) {
+    visit(step.title);
+  }
+
+  return sorted;
 }
 
 /** All inference rules from all active plugins */
