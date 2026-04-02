@@ -14,8 +14,26 @@
 			: 100
 	);
 
+	// Titles of steps currently participating in this wizard, used to
+	// ignore dependencies that refer to unknown/inactive steps.
+	const stepTitles = $derived(new Set(steps.map((s) => s.title)));
+
 	function isLocked(step: OnboardingStep): boolean {
-		return (step.after ?? []).some(dep => !onboarding.isComplete(dep));
+		const deps = step.after ?? [];
+
+		if (deps.length === 0) {
+			return false;
+		}
+
+		// Only enforce locking on dependencies that correspond to known steps.
+		const knownDeps = deps.filter((dep) => stepTitles.has(dep));
+
+		if (knownDeps.length === 0) {
+			// All dependencies refer to unknown steps; do not lock on them.
+			return false;
+		}
+
+		return knownDeps.some((dep) => !onboarding.isComplete(dep));
 	}
 
 	async function checkAndAdvance(step: OnboardingStep) {

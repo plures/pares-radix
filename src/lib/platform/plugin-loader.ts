@@ -161,7 +161,10 @@ function sortStepsByDependency(steps: OnboardingStep[]): OnboardingStep[] {
   const byTitle = new Map<string, OnboardingStep>();
   for (const step of steps) {
     if (byTitle.has(step.title)) {
-      console.warn(`[radix] Duplicate onboarding step title "${step.title}" — earlier entry overwritten.`);
+      console.error(
+        `[radix] Duplicate onboarding step title "${step.title}" — later entry ignored; titles must be globally unique.`,
+      );
+      continue;
     }
     byTitle.set(step.title, step);
   }
