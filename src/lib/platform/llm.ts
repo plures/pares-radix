@@ -269,7 +269,10 @@ export function createLLMAPI(): LLMAPI {
           throw new Error(`[radix] Unknown LLM provider: "${provider}"`);
       }
 
-      if (result.tokensUsed) {
+      if (
+        typeof result.tokensUsed === 'number' &&
+        Number.isFinite(result.tokensUsed)
+      ) {
         tokensUsedThisSession += result.tokensUsed;
       }
 
