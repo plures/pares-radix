@@ -1,7 +1,13 @@
 <script lang="ts">
 	import SettingsGroup from '$lib/components/SettingsGroup.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
-	import { getAllSettings, exportAllPluginData, importAllPluginData } from '$lib/platform/plugin-loader.js';
+	import {
+		getAllSettings,
+		exportAllPluginData,
+		importAllPluginData,
+		getActivePluginManifests
+	} from '$lib/platform/plugin-loader.js';
+	import { createExport, validateImport } from '$lib/platform/data-transfer.js';
 	import { settingsAPI, clearAllSettings, exportSettings, importSettings } from '$lib/stores/settings.js';
 	import { theme } from '$lib/stores/theme.js';
 	import { onboarding } from '$lib/stores/onboarding.js';
@@ -21,6 +27,10 @@
 	});
 
 	let showClearConfirm = $state(false);
+	let exporting = $state(false);
+	let importing = $state(false);
+	let importProgress = $state({ done: 0, total: 0, current: '' });
+	let importError = $state<string | null>(null);
 
 	// Platform settings rendered inline in the Platform SettingsGroup
 	let platformSettings: PluginSetting[] = $derived([
@@ -90,36 +100,60 @@
 	});
 
 	async function exportData() {
-		if (!browser) return;
-		const pluginData = await exportAllPluginData();
-		const blob = new Blob(
-			[JSON.stringify({ settings: exportSettings(), plugins: pluginData }, null, 2)],
-			{ type: 'application/json' }
-		);
-		const url = URL.createObjectURL(blob);
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = 'radix-export.json';
-		a.click();
-		URL.revokeObjectURL(url);
+		if (!browser || exporting) return;
+		exporting = true;
+		try {
+			const pluginData = await exportAllPluginData();
+			const activePlugins = getActivePluginManifests();
+			const payload = createExport(exportSettings(), pluginData, activePlugins);
+			const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `radix-export-${new Date().toISOString().slice(0, 10)}.json`;
+			a.click();
+			URL.revokeObjectURL(url);
+		} finally {
+			exporting = false;
+		}
 	}
 
 	function importData() {
-		if (!browser) return;
+		if (!browser || importing) return;
+		importError = null;
 		const input = document.createElement('input');
 		input.type = 'file';
 		input.accept = '.json';
 		input.onchange = async () => {
 			const file = input.files?.[0];
 			if (!file) return;
-			const text = await file.text();
-			const data = JSON.parse(text) as {
-				settings?: Record<string, unknown>;
-				plugins?: Record<string, unknown>;
-			};
-			if (data.settings) importSettings(data.settings);
-			if (data.plugins) await importAllPluginData(data.plugins);
-			window.location.reload();
+			importing = true;
+			importProgress = { done: 0, total: 0, current: '' };
+			try {
+				const text = await file.text();
+				const raw: unknown = JSON.parse(text);
+
+				if (!validateImport(raw)) {
+					importError =
+						'Invalid or incompatible export file. Please use a file exported from this application.';
+					return;
+				}
+
+				if (raw.settings) importSettings(raw.settings);
+
+				if (raw.plugins) {
+					await importAllPluginData(raw.plugins, (done, total, pluginId) => {
+						importProgress = { done, total, current: pluginId };
+					});
+				}
+
+				window.location.reload();
+			} catch (err) {
+				console.error('[radix] Import failed:', err);
+				importError = 'Failed to read the file. Make sure it is a valid JSON export.';
+			} finally {
+				importing = false;
+			}
 		};
 		input.click();
 	}
@@ -151,10 +185,35 @@
 <div class="data-section">
 	<h2>Data Management</h2>
 	<div class="data-actions">
-		<button class="btn secondary" onclick={exportData}>📦 Export All Data</button>
-		<button class="btn secondary" onclick={importData}>📥 Import Data</button>
-		<button class="btn secondary" onclick={() => showClearConfirm = true}>🗑️ Clear All Data</button>
+		<button class="btn secondary" onclick={exportData} disabled={exporting || importing}>
+			{exporting ? '⏳ Exporting…' : '📦 Export All Data'}
+		</button>
+		<button class="btn secondary" onclick={importData} disabled={exporting || importing}>
+			{importing ? '⏳ Importing…' : '📥 Import Data'}
+		</button>
+		<button class="btn secondary" onclick={() => showClearConfirm = true} disabled={exporting || importing}>🗑️ Clear All Data</button>
 	</div>
+
+	{#if importing && importProgress.total > 0}
+		<div class="import-progress" role="status" aria-live="polite">
+			<div class="progress-bar-track">
+				<div
+					class="progress-bar-fill"
+					style="width: {Math.round((importProgress.done / importProgress.total) * 100)}%"
+				></div>
+			</div>
+			<p class="progress-label">
+				Importing plugin data… {importProgress.done}/{importProgress.total}
+				{#if importProgress.current}
+					<span class="progress-plugin">({importProgress.current})</span>
+				{/if}
+			</p>
+		</div>
+	{/if}
+
+	{#if importError}
+		<p class="import-error" role="alert">{importError}</p>
+	{/if}
 </div>
 
 <ConfirmDialog
@@ -195,6 +254,45 @@
 
 	.btn:hover { background: var(--color-hover); }
 	.btn.secondary { background: var(--color-surface); }
+	.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+	.import-progress {
+		margin-top: 12px;
+	}
+
+	.progress-bar-track {
+		height: 6px;
+		border-radius: 3px;
+		background: var(--color-border);
+		overflow: hidden;
+	}
+
+	.progress-bar-fill {
+		height: 100%;
+		border-radius: 3px;
+		background: var(--color-accent, #6366f1);
+		transition: width 0.2s ease;
+	}
+
+	.progress-label {
+		margin: 6px 0 0;
+		font-size: 0.78rem;
+		color: var(--color-text-muted);
+	}
+
+	.progress-plugin {
+		opacity: 0.75;
+	}
+
+	.import-error {
+		margin-top: 10px;
+		padding: 8px 12px;
+		border-radius: 6px;
+		background: color-mix(in srgb, var(--color-error, #ef4444) 12%, transparent);
+		border: 1px solid color-mix(in srgb, var(--color-error, #ef4444) 40%, transparent);
+		color: var(--color-error, #ef4444);
+		font-size: 0.82rem;
+	}
 
 	.api-key-note {
 		margin: 6px 0 0;
