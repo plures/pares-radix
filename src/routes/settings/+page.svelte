@@ -45,6 +45,7 @@
 				{ value: '', label: 'None' },
 				{ value: 'openai', label: 'OpenAI' },
 				{ value: 'anthropic', label: 'Anthropic' },
+				{ value: 'copilot', label: 'GitHub Copilot' },
 				{ value: 'ollama', label: 'Ollama (local)' }
 			]
 		},
@@ -52,8 +53,29 @@
 			key: 'radix.llm.apiKey',
 			type: 'password',
 			label: 'LLM API Key',
-			description: 'API key for the selected provider',
+			description: 'API key or token for the selected provider (not required for Ollama)',
 			default: ''
+		},
+		{
+			key: 'radix.llm.model',
+			type: 'text',
+			label: 'Model',
+			description: 'Model name to use (leave blank for provider default)',
+			default: ''
+		},
+		{
+			key: 'radix.llm.ollamaUrl',
+			type: 'text',
+			label: 'Ollama URL',
+			description: 'Base URL for the local Ollama server',
+			default: 'http://localhost:11434'
+		},
+		{
+			key: 'radix.llm.tokenBudget',
+			type: 'number',
+			label: 'Session Token Budget',
+			description: 'Maximum tokens to spend per session (0 = unlimited)',
+			default: 50000
 		}
 	]);
 

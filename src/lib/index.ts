@@ -24,6 +24,7 @@ export {
   needsUserConfirmation,
   isAutoConfirmed,
 } from './platform/inference-engine.js';
+export { createLLMAPI, resetTokenBudget, getTokensUsed } from './platform/llm.js';
 export {
   builtinUxExpectations,
   checkDataRequirements,
