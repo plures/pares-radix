@@ -18,6 +18,7 @@ export {
   isPluginActive,
   exportAllPluginData,
   importAllPluginData,
+  getActivePluginManifests,
 } from './platform/plugin-loader.js';
 export {
   createInferenceEngine,
@@ -30,3 +31,13 @@ export {
   checkDataRequirements,
   validateUxExpectations,
 } from './praxis/ux-contracts.js';
+export {
+  EXPORT_FORMAT_VERSION,
+  createExport,
+  validateImport,
+} from './platform/data-transfer.js';
+export type {
+  PluginManifestEntry,
+  RadixExportMeta,
+  RadixExport,
+} from './platform/data-transfer.js';

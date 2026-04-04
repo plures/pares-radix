@@ -266,16 +266,48 @@ export async function exportAllPluginData(): Promise<Record<string, unknown>> {
 /**
  * Distribute imported data slices to the corresponding plugins.
  * Each plugin receives only its own slice (keyed by plugin ID).
+ *
+ * @param data      Per-plugin data keyed by plugin ID.
+ * @param onProgress  Optional callback fired after each plugin is processed.
+ *                    Receives (done, total, pluginId).
  */
-export async function importAllPluginData(data: Record<string, unknown>): Promise<void> {
-  for (const [id, { plugin, active }] of plugins) {
-    if (!active || data[id] === undefined) continue;
+export async function importAllPluginData(
+  data: Record<string, unknown>,
+  onProgress?: (done: number, total: number, pluginId: string) => void,
+): Promise<void> {
+  const targets = [...plugins.entries()].filter(
+    ([id, { active }]) => active && data[id] !== undefined,
+  );
+  const total = targets.length;
+  let done = 0;
+
+  for (const [id, { plugin }] of targets) {
     try {
       await plugin.onDataImport?.(data[id]);
     } catch (err) {
       console.error(`[radix] Plugin "${id}" import failed:`, err);
     }
+    done++;
+    onProgress?.(done, total, id);
   }
+}
+
+/**
+ * Return a lightweight manifest entry for every currently active plugin.
+ * Used to embed provenance metadata in the export envelope.
+ */
+export function getActivePluginManifests(): Array<{
+  id: string;
+  name: string;
+  version: string;
+  icon: string;
+}> {
+  const manifests: Array<{ id: string; name: string; version: string; icon: string }> = [];
+  for (const [id, { plugin, active }] of plugins) {
+    if (!active) continue;
+    manifests.push({ id, name: plugin.name, version: plugin.version, icon: plugin.icon });
+  }
+  return manifests;
 }
 
 // ─── Dependency Resolution ──────────────────────────────────────────────────
