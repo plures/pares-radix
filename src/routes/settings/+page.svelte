@@ -1,6 +1,5 @@
 <script lang="ts">
-	import SettingsGroup from '$lib/components/SettingsGroup.svelte';
-	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { SettingsPanel, Dialog, Button } from '@plures/design-dojo';
 	import {
 		getAllSettings,
 		exportAllPluginData,
@@ -173,25 +172,25 @@
 
 <h1>Settings</h1>
 
-<SettingsGroup groupName="Platform" settings={platformSettings} />
+<SettingsPanel groupName="Platform" settings={platformSettings} getValue={(key) => settingsAPI.get(key)} setValue={(key, value) => settingsAPI.set(key, value)} />
 <p class="api-key-note">⚠️ API keys are stored locally on this device. Do not use this on shared computers.</p>
 
 {#each [...grouped.entries()] as [name, pluginSettings]}
 	<div class="group-spacer">
-		<SettingsGroup groupName={name} settings={pluginSettings} />
+		<SettingsPanel groupName={name} settings={pluginSettings} getValue={(key) => settingsAPI.get(key)} setValue={(key, value) => settingsAPI.set(key, value)} />
 	</div>
 {/each}
 
 <div class="data-section">
 	<h2>Data Management</h2>
 	<div class="data-actions">
-		<button class="btn secondary" onclick={exportData} disabled={exporting || importing}>
+		<Button variant="secondary" onclick={exportData} disabled={exporting || importing}>
 			{exporting ? '⏳ Exporting…' : '📦 Export All Data'}
-		</button>
-		<button class="btn secondary" onclick={importData} disabled={exporting || importing}>
+		</Button>
+		<Button variant="secondary" onclick={importData} disabled={exporting || importing}>
 			{importing ? '⏳ Importing…' : '📥 Import Data'}
-		</button>
-		<button class="btn secondary" onclick={() => showClearConfirm = true} disabled={exporting || importing}>🗑️ Clear All Data</button>
+		</Button>
+		<Button variant="secondary" onclick={() => showClearConfirm = true} disabled={exporting || importing}>🗑️ Clear All Data</Button>
 	</div>
 
 	{#if importing && importProgress.total > 0}
@@ -216,7 +215,7 @@
 	{/if}
 </div>
 
-<ConfirmDialog
+<Dialog
 	open={showClearConfirm}
 	title="Clear All Data"
 	message="This will permanently delete all settings, onboarding progress, and plugin data. This cannot be undone."
@@ -239,22 +238,6 @@
 	}
 
 	.data-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
-	.btn {
-		padding: 7px 14px;
-		border-radius: 6px;
-		font-size: 0.85rem;
-		cursor: pointer;
-		border: 1px solid var(--color-border);
-		background: var(--color-surface);
-		color: var(--color-text);
-		font-weight: 500;
-		transition: background 0.12s;
-	}
-
-	.btn:hover { background: var(--color-hover); }
-	.btn.secondary { background: var(--color-surface); }
-	.btn:disabled { opacity: 0.55; cursor: not-allowed; }
 
 	.import-progress {
 		margin-top: 12px;

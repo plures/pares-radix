@@ -1,0 +1,19 @@
+{
+  "name": "@plures/design-dojo",
+  "version": "0.1.0",
+  "description": "Design system UI primitives for Plures applications",
+  "type": "module",
+  "svelte": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "svelte": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0"
+  },
+  "license": "BSL-1.1"
+}

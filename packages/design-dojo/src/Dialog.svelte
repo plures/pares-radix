@@ -1,16 +1,8 @@
 <!--
-  ConfirmDialog — native <dialog> element, no external dependencies.
+  Dialog — confirmation dialog using native <dialog> element.
 -->
 <script lang="ts">
-	interface Props {
-		open: boolean;
-		title: string;
-		message: string;
-		confirmLabel?: string;
-		cancelLabel?: string;
-		onConfirm: () => void;
-		onCancel: () => void;
-	}
+	import type { DialogProps } from './types.js';
 
 	let {
 		open = $bindable(),
@@ -20,7 +12,7 @@
 		cancelLabel = 'Cancel',
 		onConfirm,
 		onCancel
-	}: Props = $props();
+	}: DialogProps = $props();
 
 	let dialogEl: HTMLDialogElement | undefined = $state();
 	let confirming = $state(false);

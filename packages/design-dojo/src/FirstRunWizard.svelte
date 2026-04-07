@@ -1,16 +1,11 @@
 <script lang="ts">
-	import type { OnboardingStep } from '$lib/types/plugin.js';
-	import { onboarding } from '$lib/stores/onboarding.js';
+	import type { FirstRunWizardProps, WizardStep } from './types.js';
 
-	interface Props {
-		steps: OnboardingStep[];
-	}
-
-	let { steps }: Props = $props();
+	let { steps, isComplete, markComplete }: FirstRunWizardProps = $props();
 
 	let progress = $derived(
 		steps.length > 0
-			? Math.round((steps.filter(s => onboarding.isComplete(s.title)).length / steps.length) * 100)
+			? Math.round((steps.filter(s => isComplete(s.title)).length / steps.length) * 100)
 			: 100
 	);
 
@@ -18,7 +13,7 @@
 	// ignore dependencies that refer to unknown/inactive steps.
 	const stepTitles = $derived(new Set(steps.map((s) => s.title)));
 
-	function isLocked(step: OnboardingStep): boolean {
+	function isLocked(step: WizardStep): boolean {
 		const deps = step.after ?? [];
 
 		if (deps.length === 0) {
@@ -33,13 +28,13 @@
 			return false;
 		}
 
-		return knownDeps.some((dep) => !onboarding.isComplete(dep));
+		return knownDeps.some((dep) => !isComplete(dep));
 	}
 
-	async function checkAndAdvance(step: OnboardingStep) {
+	async function checkAndAdvance(step: WizardStep) {
 		const complete = await step.isComplete();
 		if (complete) {
-			onboarding.markComplete(step.title);
+			markComplete(step.title);
 		}
 	}
 </script>
@@ -56,7 +51,7 @@
 
 	<div class="steps">
 		{#each steps as step}
-			{@const done = onboarding.isComplete(step.title)}
+			{@const done = isComplete(step.title)}
 			{@const locked = !done && isLocked(step)}
 			<div class="step" class:done class:locked>
 				<div class="step-icon">{done ? '✅' : locked ? '🔒' : step.icon}</div>

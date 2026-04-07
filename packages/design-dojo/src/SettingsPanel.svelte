@@ -1,34 +1,28 @@
 <script lang="ts">
-	import type { PluginSetting } from '$lib/types/plugin.js';
-	import { settingsAPI } from '$lib/stores/settings.js';
+	import type { SettingsPanelProps, SettingDefinition } from './types.js';
 
-	interface Props {
-		groupName: string;
-		settings: PluginSetting[];
-	}
+	let { groupName, settings, getValue, setValue }: SettingsPanelProps = $props();
 
-	let { groupName, settings }: Props = $props();
-
-	// Reactive local values — initialised from settingsAPI and updated on change
+	// Reactive local values — initialised from getValue and updated on change
 	// so that controls reflect persisted state without a page reload.
 	let values: Record<string, unknown> = $state({});
 
 	$effect(() => {
 		for (const s of settings) {
-			const stored = settingsAPI.get(s.key);
+			const stored = getValue(s.key);
 			values[s.key] = stored !== undefined ? stored : s.default;
 		}
 	});
 
-	function getValue(setting: PluginSetting): unknown {
+	function getVal(setting: SettingDefinition): unknown {
 		if (setting.key in values) return values[setting.key];
-		const stored = settingsAPI.get(setting.key);
+		const stored = getValue(setting.key);
 		return stored !== undefined ? stored : setting.default;
 	}
 
-	function setValue(setting: PluginSetting, value: unknown): void {
+	function setVal(setting: SettingDefinition, value: unknown): void {
 		values[setting.key] = value;
-		settingsAPI.set(setting.key, value);
+		setValue(setting.key, value);
 	}
 </script>
 
@@ -50,15 +44,15 @@
 						id={setting.key}
 						type="checkbox"
 						class="toggle"
-						checked={getValue(setting) as boolean}
-						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).checked)}
+						checked={getVal(setting) as boolean}
+						onchange={(e) => setVal(setting, (e.target as HTMLInputElement).checked)}
 					/>
 				{:else if setting.type === 'select'}
 					<select
 						id={setting.key}
 						class="select"
-						value={getValue(setting) as string}
-						onchange={(e) => setValue(setting, (e.target as HTMLSelectElement).value)}
+						value={getVal(setting) as string}
+						onchange={(e) => setVal(setting, (e.target as HTMLSelectElement).value)}
 					>
 						{#each setting.options ?? [] as opt}
 							<option value={opt.value}>{opt.label}</option>
@@ -69,32 +63,32 @@
 						id={setting.key}
 						class="input"
 						type="number"
-						value={String(getValue(setting))}
-						onchange={(e) => setValue(setting, Number((e.target as HTMLInputElement).value))}
+						value={String(getVal(setting))}
+						onchange={(e) => setVal(setting, Number((e.target as HTMLInputElement).value))}
 					/>
 				{:else if setting.type === 'password'}
 					<input
 						id={setting.key}
 						class="input"
 						type="password"
-						value={getValue(setting) as string}
-						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
+						value={getVal(setting) as string}
+						onchange={(e) => setVal(setting, (e.target as HTMLInputElement).value)}
 					/>
 				{:else if setting.type === 'color'}
 					<input
 						id={setting.key}
 						class="color-input"
 						type="color"
-						value={getValue(setting) as string}
-						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
+						value={getVal(setting) as string}
+						onchange={(e) => setVal(setting, (e.target as HTMLInputElement).value)}
 					/>
 				{:else}
 					<input
 						id={setting.key}
 						class="input"
 						type="text"
-						value={getValue(setting) as string}
-						onchange={(e) => setValue(setting, (e.target as HTMLInputElement).value)}
+						value={getVal(setting) as string}
+						onchange={(e) => setVal(setting, (e.target as HTMLInputElement).value)}
 					/>
 				{/if}
 			</div>

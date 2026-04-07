@@ -1,11 +1,7 @@
 <script lang="ts">
-	import type { DashboardWidget } from '$lib/types/plugin.js';
+	import type { DashboardGridProps } from './types.js';
 
-	interface Props {
-		widgets: DashboardWidget[];
-	}
-
-	let { widgets }: Props = $props();
+	let { widgets }: DashboardGridProps = $props();
 </script>
 
 <div class="dashboard-grid">
