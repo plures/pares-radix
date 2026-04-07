@@ -36,6 +36,6 @@
     "svelte-eslint-parser": "^0.43.0"
   },
   "dependencies": {
-    "@plures/design-dojo": "*"
+    "@plures/design-dojo": "workspace:*"
   }
 }
