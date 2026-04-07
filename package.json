@@ -21,6 +21,9 @@
     "type": "git",
     "url": "https://github.com/plures/pares-radix.git"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",
@@ -32,5 +35,7 @@
     "eslint-plugin-svelte": "^2.0.0",
     "svelte-eslint-parser": "^0.43.0"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@plures/design-dojo": "workspace:*"
+  }
 }

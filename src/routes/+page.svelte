@@ -1,6 +1,5 @@
 <script lang="ts">
-	import OnboardingWizard from '$lib/components/OnboardingWizard.svelte';
-	import DashboardGrid from '$lib/components/DashboardGrid.svelte';
+	import { FirstRunWizard, DashboardGrid } from '@plures/design-dojo';
 	import { getAllOnboardingSteps, getAllDashboardWidgets } from '$lib/platform/plugin-loader.js';
 	import { onboarding } from '$lib/stores/onboarding.js';
 
@@ -19,5 +18,5 @@
 	<h1>Dashboard</h1>
 	<DashboardGrid {widgets} />
 {:else}
-	<OnboardingWizard {steps} />
+	<FirstRunWizard {steps} isComplete={onboarding.isComplete} markComplete={onboarding.markComplete} />
 {/if}
