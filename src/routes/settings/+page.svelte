@@ -172,12 +172,12 @@
 
 <h1>Settings</h1>
 
-<SettingsPanel groupName="Platform" settings={platformSettings} getValue={(key) => settingsAPI.get(key)} setValue={(key, value) => settingsAPI.set(key, value)} />
+<SettingsPanel groupName="Platform" settings={platformSettings} getValue={settingsAPI.get} setValue={settingsAPI.set} />
 <p class="api-key-note">⚠️ API keys are stored locally on this device. Do not use this on shared computers.</p>
 
 {#each [...grouped.entries()] as [name, pluginSettings]}
 	<div class="group-spacer">
-		<SettingsPanel groupName={name} settings={pluginSettings} getValue={(key) => settingsAPI.get(key)} setValue={(key, value) => settingsAPI.set(key, value)} />
+		<SettingsPanel groupName={name} settings={pluginSettings} getValue={settingsAPI.get} setValue={settingsAPI.set} />
 	</div>
 {/each}
 
