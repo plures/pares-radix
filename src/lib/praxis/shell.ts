@@ -81,6 +81,18 @@ const shellFacts: PraxisFact[] = [
     description: 'Platform or plugin settings changed',
     persist: true,
   },
+  {
+    id: 'app.window',
+    description:
+      "Desktop window geometry (position, size, maximized). Persisted from window.state.changed and restored through the layout's Tauri event wiring.",
+    persist: true,
+  },
+  {
+    id: 'app.tray',
+    description:
+      'System tray state — derived from nav.visible and synced to the Tauri tray icon.',
+    persist: false,
+  },
 ];
 
 // ─── Events ──────────────────────────────────────────────────────────────────
@@ -101,6 +113,18 @@ const shellEvents: PraxisEvent[] = [
   {
     id: 'settings.changed',
     description: 'User modified settings',
+  },
+  {
+    id: 'window.state.changed',
+    description:
+      'Desktop window geometry changed (position, resize, maximize). Emitted by Tauri backend.',
+    schema: '{ x: number; y: number; width: number; height: number; maximized: boolean }',
+  },
+  {
+    id: 'tray.menu.requested',
+    description:
+      'Tray menu rebuild requested — triggered when nav.visible changes in Tauri context.',
+    schema: '{ items: TrayMenuItem[] }',
   },
 ];
 
@@ -438,6 +462,75 @@ const shellRules: PraxisRule[] = [
       return { fact: 'settings.updated', payload };
     },
   },
+
+  // ── Rule 5: Window State Persistence ────────────────────────────────────────
+  {
+    id: 'rule.window-state',
+    description:
+      'On window.state.changed, persist window geometry as the app.window fact via PluresDB adapter.',
+    trigger: 'window.state.changed',
+    emits: ['app.window'],
+    contract: defineContract({
+      examples: [
+        {
+          given: { x: 100, y: 200, width: 1200, height: 800, maximized: false },
+          expect: {
+            fact: 'app.window',
+            payload: { x: 100, y: 200, width: 1200, height: 800, maximized: false },
+          },
+          description: 'normal window geometry is persisted as app.window',
+        },
+        {
+          given: { x: 0, y: 0, width: 1920, height: 1080, maximized: true },
+          expect: {
+            fact: 'app.window',
+            payload: { x: 0, y: 0, width: 1920, height: 1080, maximized: true },
+          },
+          description: 'maximized window state is persisted',
+        },
+      ],
+      invariants: [
+        {
+          description: 'app.window must always be emitted on window.state.changed',
+          check: (output) => {
+            const o = output as { fact: string };
+            return o.fact === 'app.window';
+          },
+        },
+        {
+          description: 'app.window payload must include width, height, and maximized',
+          check: (output) => {
+            const o = output as { payload: Record<string, unknown> };
+            return (
+              typeof o.payload.width === 'number' &&
+              typeof o.payload.height === 'number' &&
+              typeof o.payload.maximized === 'boolean'
+            );
+          },
+        },
+      ],
+    }),
+    evaluate: async (event, ctx) => {
+      const ev = event as {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+        maximized: boolean;
+      };
+      const payload = {
+        x: ev.x,
+        y: ev.y,
+        width: ev.width,
+        height: ev.height,
+        maximized: ev.maximized,
+      };
+      ctx.emitFact('app.window', payload);
+      return { fact: 'app.window', payload };
+    },
+  },
+
+
 ];
 
 // ─── Constraints ─────────────────────────────────────────────────────────────
