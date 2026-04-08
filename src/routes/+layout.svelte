@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getAllNavItems } from '$lib/platform/plugin-loader.js';
-	import { theme } from '$lib/stores/theme.js';
+	import { Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
+	import type { CommandItem } from '@plures/design-dojo';
+	import { goto } from '$app/navigation';
+	import { query, initPraxisFacts, toggleTheme, getTheme } from '$lib/stores/praxis-svelte.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -10,43 +12,91 @@
 
 	let { children }: Props = $props();
 
+	// Initialise praxis facts once on mount
+	$effect(() => {
+		initPraxisFacts();
+	});
+
+	// Reactive bindings via praxis query()
+	let themeValue = $derived(
+		(query<{ value: 'light' | 'dark' }>('theme.applied')?.value) ?? getTheme()
+	);
+	let navItems = $derived(
+		(query<{ items: { href: string; label: string; icon?: string; badge?: number }[] }>('nav.visible')?.items) ?? []
+	);
+
 	let sidebarCollapsed = $state(false);
-	let navItems = $derived(getAllNavItems());
+	let paletteOpen = $state(false);
+
+	// Built-in platform commands for the command palette
+	let commands: CommandItem[] = $derived([
+		{
+			id: 'nav.home',
+			label: 'Go to Dashboard',
+			icon: '🏠',
+			action: () => { goto('/'); },
+		},
+		{
+			id: 'nav.settings',
+			label: 'Go to Settings',
+			icon: '⚙️',
+			action: () => { goto('/settings'); },
+		},
+		{
+			id: 'nav.help',
+			label: 'Go to Help',
+			icon: '❓',
+			action: () => { goto('/help'); },
+		},
+		{
+			id: 'theme.toggle',
+			label: `Switch to ${themeValue === 'dark' ? 'Light' : 'Dark'} theme`,
+			icon: themeValue === 'dark' ? '☀️' : '🌙',
+			action: () => { toggleTheme(); },
+		},
+	]);
+
+	// Global keyboard shortcut: Ctrl+K / Cmd+K opens the command palette
+	$effect(() => {
+		function handleKeydown(e: KeyboardEvent) {
+			if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+				e.preventDefault();
+				paletteOpen = true;
+			}
+		}
+		window.addEventListener('keydown', handleKeydown);
+		return () => window.removeEventListener('keydown', handleKeydown);
+	});
+
+	let statusItems = $derived([
+		{ label: 'Theme', value: themeValue },
+		{ label: 'Radix', value: 'v0.2.0' },
+	]);
 </script>
 
-<div class="app" data-theme={theme.value}>
-	<aside class="sidebar" class:collapsed={sidebarCollapsed}>
-		<nav class="sidebar-nav">
-			{#each navItems as item}
-				{@const active = page.url.pathname === item.href || (item.href !== '/' && page.url.pathname.startsWith(item.href + '/'))}
-				<a href={item.href} class="nav-link" class:active>
-					{#if item.icon}<span class="nav-icon">{item.icon}</span>{/if}
-					{#if !sidebarCollapsed}<span class="nav-label">{item.label}</span>{/if}
-				</a>
-			{/each}
-		</nav>
-	</aside>
+<div class="app" data-theme={themeValue}>
+	<Sidebar
+		items={navItems}
+		currentPath={page.url.pathname}
+		collapsed={sidebarCollapsed}
+		onToggle={() => (sidebarCollapsed = !sidebarCollapsed)}
+	/>
 
-	<div class="content">
-		<header class="topbar">
-			<button class="btn-ghost" onclick={() => sidebarCollapsed = !sidebarCollapsed} aria-label="Toggle sidebar">
-				{sidebarCollapsed ? '☰' : '◀'}
-			</button>
-			<div class="topbar-actions">
-				<button class="btn-ghost" onclick={() => theme.toggle()} aria-label="Toggle theme">
-					{theme.value === 'dark' ? '☀️' : '🌙'}
-				</button>
-			</div>
-		</header>
-		<main class="page">
-			{@render children()}
-		</main>
-		<footer class="status-bar">
-			<span class="status-item"><span class="status-label">Theme</span> <span class="status-value">{theme.value}</span></span>
-			<span class="status-spacer"></span>
-			<span class="status-item"><span class="status-label">Radix</span> <span class="status-value">v0.2.0</span></span>
-		</footer>
-	</div>
+	<PluginContentArea
+		theme={themeValue}
+		onThemeToggle={toggleTheme}
+		onSidebarToggle={() => (sidebarCollapsed = !sidebarCollapsed)}
+		onCommandPaletteOpen={() => (paletteOpen = true)}
+		{statusItems}
+	>
+		{@render children()}
+	</PluginContentArea>
+
+	<CommandPalette
+		bind:open={paletteOpen}
+		{commands}
+		onClose={() => (paletteOpen = false)}
+	/>
 </div>
 
 <style>
@@ -83,88 +133,6 @@
 		color: var(--color-text);
 	}
 
-	.app { display: flex; min-height: 100vh; }
-
-	.sidebar {
-		width: 220px;
-		flex-shrink: 0;
-		background: var(--color-surface);
-		border-right: 1px solid var(--color-border);
-		padding: 12px 8px;
-		display: flex;
-		flex-direction: column;
-		transition: width 0.15s ease;
-	}
-
-	.sidebar.collapsed { width: 52px; }
-
-	.content {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-	}
-
-	.topbar {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: 4px 8px;
-		border-bottom: 1px solid var(--color-border);
-		background: var(--color-surface);
-		height: 44px;
-	}
-
-	.page { flex: 1; padding: 24px; overflow-y: auto; }
-
-	.sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
-
-	.nav-link {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		padding: 8px 12px;
-		border-radius: 6px;
-		color: var(--color-text-muted);
-		text-decoration: none;
-		font-size: 0.875rem;
-		transition: background 0.12s, color 0.12s;
-	}
-
-	.nav-link:hover { background: var(--color-hover); color: var(--color-text); }
-	.nav-link.active { background: var(--color-accent-bg); color: var(--color-accent); font-weight: 500; }
-	.nav-icon { font-size: 1.1rem; width: 20px; text-align: center; }
-
-	.btn-ghost {
-		background: transparent;
-		border: none;
-		cursor: pointer;
-		padding: 6px 8px;
-		border-radius: 6px;
-		color: var(--color-text-muted);
-		font-size: 1rem;
-		display: inline-flex;
-		align-items: center;
-		transition: background 0.12s, color 0.12s;
-	}
-
-	.btn-ghost:hover { background: var(--color-hover); color: var(--color-text); }
-
-	.status-bar {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		padding: 4px 12px;
-		border-top: 1px solid var(--color-border);
-		background: var(--color-surface);
-		font-size: 0.75rem;
-		color: var(--color-text-muted);
-		height: 28px;
-	}
-
-	.status-spacer { flex: 1; }
-
-	.status-item { display: flex; gap: 4px; }
-	.status-label { color: var(--color-text-muted); }
-	.status-value { color: var(--color-text); font-weight: 500; }
+	/* Full-height flex row: sidebar (fixed) + content column (fills rest) */
+	.app { display: flex; height: 100vh; overflow: hidden; }
 </style>
