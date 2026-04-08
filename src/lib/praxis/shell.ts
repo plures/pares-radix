@@ -84,7 +84,7 @@ const shellFacts: PraxisFact[] = [
   {
     id: 'app.window',
     description:
-      'Desktop window geometry (position, size, maximized). Restored on app.booted by rule.window-state.',
+      "Desktop window geometry (position, size, maximized). Persisted from window.state.changed and restored through the layout's Tauri event wiring.",
     persist: true,
   },
   {
@@ -117,7 +117,7 @@ const shellEvents: PraxisEvent[] = [
   {
     id: 'window.state.changed',
     description:
-      'Desktop window geometry changed (position, resize, maximise). Emitted by Tauri backend.',
+      'Desktop window geometry changed (position, resize, maximize). Emitted by Tauri backend.',
     schema: '{ x: number; y: number; width: number; height: number; maximized: boolean }',
   },
   {
@@ -530,72 +530,7 @@ const shellRules: PraxisRule[] = [
     },
   },
 
-  // ── Rule 6: Tray Menu Sync ───────────────────────────────────────────────────
-  {
-    id: 'rule.tray-menu-sync',
-    description:
-      'On tray.menu.requested, emit app.tray with the nav.visible items formatted for the system tray.',
-    trigger: 'tray.menu.requested',
-    emits: ['app.tray'],
-    contract: defineContract({
-      examples: [
-        {
-          given: {
-            items: [
-              { href: '/dashboard', label: 'Dashboard', icon: '🏠' },
-              { href: '/settings', label: 'Settings', icon: '⚙️' },
-            ],
-          },
-          expect: {
-            fact: 'app.tray',
-            payload: {
-              items: [
-                { id: '/dashboard', label: 'Dashboard', path: '/dashboard' },
-                { id: '/settings', label: 'Settings', path: '/settings' },
-              ],
-            },
-          },
-          description: 'nav.visible hrefs are used directly as tray item IDs for reliable navigation',
-        },
-        {
-          given: { items: [] },
-          expect: { fact: 'app.tray', payload: { items: [] } },
-          description: 'empty nav results in empty tray menu',
-        },
-      ],
-      invariants: [
-        {
-          description: 'app.tray must always be emitted',
-          check: (output) => {
-            const o = output as { fact: string };
-            return o.fact === 'app.tray';
-          },
-        },
-        {
-          description: 'app.tray payload must have an items array',
-          check: (output) => {
-            const o = output as { payload: { items?: unknown } };
-            return Array.isArray(o.payload.items);
-          },
-        },
-      ],
-    }),
-    evaluate: async (event, ctx) => {
-      const ev = event as {
-        items: Array<{ href: string; label: string; icon?: string }>;
-      };
-      // Use href directly as the tray menu item ID so the Rust on_menu_event
-      // handler can emit the correct path without reconstruction.
-      const trayItems = ev.items.map((item) => ({
-        id: item.href,
-        label: item.label,
-        path: item.href,
-      }));
-      const payload = { items: trayItems };
-      ctx.emitFact('app.tray', payload);
-      return { fact: 'app.tray', payload };
-    },
-  },
+
 ];
 
 // ─── Constraints ─────────────────────────────────────────────────────────────

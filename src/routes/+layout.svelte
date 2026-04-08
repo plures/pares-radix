@@ -74,7 +74,11 @@
 		return () => {
 			// Await the promise before calling unlisten to handle the case where
 			// the component unmounts before the async listeners have resolved.
-			unlistenPromise.then((unlisten) => unlisten());
+			// Swallow setup failures here so early unmounts do not surface
+			// unhandled rejections from listenTauriEvents().
+			unlistenPromise
+				.then((unlisten) => unlisten())
+				.catch(() => {});
 		};
 	});
 
@@ -96,7 +100,9 @@
 			label: item.label,
 			path: item.href,
 		}));
-		tauriSetTrayMenu(trayItems);
+		void tauriSetTrayMenu(trayItems).catch((error) => {
+			console.error('Failed to sync tray menu', error);
+		});
 	});
 
 	let sidebarCollapsed = $state(false);
