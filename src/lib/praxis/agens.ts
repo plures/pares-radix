@@ -326,7 +326,7 @@ const agensRules: PraxisRule[] = [
             phase: 'response-composition',
             context: {
               messageId: 'msg-003',
-              conscousResult: 'The answer is 4',
+              consciousResult: 'The answer is 4',
               subconsciousInsights: [],
             },
           },
