@@ -34,7 +34,7 @@
 				{#if !collapsed}
 					<span class="nav-label">{item.label}</span>
 					{#if item.badge}
-						<span class="nav-badge" aria-label="{item.badge} unread">{item.badge}</span>
+						<span class="nav-badge" aria-label={`${item.badge} unread`}>{item.badge}</span>
 					{/if}
 				{/if}
 			</a>

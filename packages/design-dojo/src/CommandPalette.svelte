@@ -32,9 +32,12 @@
 	});
 
 	$effect(() => {
-		// Reset selection whenever the filtered list changes.
+		// Keep the selection in bounds whenever the filtered list changes.
 		// Reading filtered.length establishes the reactive dependency.
-		selectedIndex = filtered.length > 0 ? 0 : 0;
+		selectedIndex =
+			filtered.length > 0
+				? Math.min(Math.max(selectedIndex, 0), filtered.length - 1)
+				: 0;
 	});
 
 	function close() {

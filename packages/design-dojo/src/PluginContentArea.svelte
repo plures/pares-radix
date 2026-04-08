@@ -36,13 +36,15 @@
 				</button>
 			{/if}
 
-			<button
-				class="topbar-btn"
-				onclick={onThemeToggle}
-				aria-label="Toggle theme"
-			>
-				{theme === 'dark' ? '☀️' : '🌙'}
-			</button>
+			{#if onThemeToggle}
+				<button
+					class="topbar-btn"
+					onclick={onThemeToggle}
+					aria-label="Toggle theme"
+				>
+					{theme === 'dark' ? '☀️' : '🌙'}
+				</button>
+			{/if}
 		</div>
 	</header>
 
