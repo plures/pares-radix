@@ -62,3 +62,19 @@ export type {
   RadixExportMeta,
   RadixExport,
 } from './platform/data-transfer.js';
+export {
+  createPluresDBAdapter,
+  localStorageGraph,
+  setSharedGraph,
+  getSharedGraph,
+  setSharedAdapter,
+  getSharedAdapter,
+  FACT_PREFIX,
+  PLUGIN_DATA_PREFIX,
+  SETTING_PREFIX,
+} from './stores/plures-db-adapter.js';
+export type {
+  PluresDBGraph,
+  PluresDBAdapter,
+  PluresDBAdapterOptions,
+} from './stores/plures-db-adapter.js';

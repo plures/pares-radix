@@ -4,6 +4,14 @@
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
 	import { query, initPraxisFacts, toggleTheme, getTheme } from '$lib/stores/praxis-svelte.js';
+	import {
+		createPluresDBAdapter,
+		localStorageGraph,
+		setSharedGraph,
+		setSharedAdapter,
+	} from '$lib/stores/plures-db-adapter.js';
+	import { shellModule } from '$lib/praxis/shell.js';
+	import { agensModule } from '$lib/praxis/agens.js';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -12,8 +20,19 @@
 
 	let { children }: Props = $props();
 
-	// Initialise praxis facts once on mount
+	// Wire PluresDB adapter then initialise praxis facts once on mount.
+	// The adapter must be set before initPraxisFacts so that:
+	//   1. hydrateAll() restores persisted facts from PluresDB
+	//   2. emitFact() persists any new facts immediately
 	$effect(() => {
+		const db = localStorageGraph();
+		setSharedGraph(db);
+		setSharedAdapter(
+			createPluresDBAdapter({
+				db,
+				registry: [...shellModule.facts, ...agensModule.facts],
+			}),
+		);
 		initPraxisFacts();
 	});
 
