@@ -64,6 +64,10 @@ function loadPersistedTheme(): 'light' | 'dark' {
 
 function persistTheme(value: 'light' | 'dark'): void {
 	if (!browser) return;
+	// Keep the legacy 'radix-theme' key for backward compatibility — it is read
+	// by loadPersistedTheme() as a fallback on first boot before the adapter
+	// has persisted 'theme.applied'. The adapter is the canonical store.
+	localStorage.setItem(THEME_KEY, value);
 	document.documentElement.setAttribute('data-theme', value);
 }
 

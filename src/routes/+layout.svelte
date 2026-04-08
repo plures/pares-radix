@@ -12,6 +12,7 @@
 	} from '$lib/stores/plures-db-adapter.js';
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 
 	interface Props {
@@ -24,7 +25,9 @@
 	// The adapter must be set before initPraxisFacts so that:
 	//   1. hydrateAll() restores persisted facts from PluresDB
 	//   2. emitFact() persists any new facts immediately
-	$effect(() => {
+	// onMount is used (not $effect) because this setup has no reactive
+	// dependencies and must run exactly once.
+	onMount(() => {
 		const db = localStorageGraph();
 		setSharedGraph(db);
 		setSharedAdapter(
