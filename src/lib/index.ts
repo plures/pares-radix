@@ -32,6 +32,26 @@ export {
   validateUxExpectations,
 } from './praxis/ux-contracts.js';
 export {
+  shellModule,
+  defineContract,
+  validateModule,
+  scanRules,
+} from './praxis/shell.js';
+export type {
+  PraxisFact,
+  PraxisEvent,
+  ContractExample,
+  ContractInvariant,
+  Contract,
+  PraxisContext,
+  PraxisRule,
+  PraxisSystemState,
+  PraxisConstraint,
+  PraxisGate,
+  PraxisModule,
+  ValidationResult,
+} from './types/praxis.js';
+export {
   EXPORT_FORMAT_VERSION,
   createExport,
   validateImport,
