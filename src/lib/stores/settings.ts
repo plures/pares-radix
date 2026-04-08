@@ -1,25 +1,21 @@
 // Settings store — PluresDB-backed settings API
 //
 // Implements the SettingsAPI interface with reactive pub/sub.
-// Storage is proxied through a PluresDB-scoped key namespace so that
-// migration to real PluresDB only requires swapping the persistence layer.
+// All persistence is routed through the shared PluresDBGraph so that
+// swapping the backend (localStorage → real PluresDB) only requires
+// calling setSharedGraph() at startup — no other changes needed.
 
-import { browser } from '$app/environment';
 import type { SettingsAPI } from '$lib/types/plugin.js';
-
-const DB_PREFIX = 'pluresdb:setting:';
+import { getSharedGraph, SETTING_PREFIX } from './plures-db-adapter.js';
 
 const subscribers = new Map<string, Set<(value: unknown) => void>>();
 
 function load(key: string): unknown {
-	if (!browser) return undefined;
-	const raw = localStorage.getItem(`${DB_PREFIX}${key}`);
-	return raw !== null ? JSON.parse(raw) : undefined;
+	return getSharedGraph().get(`${SETTING_PREFIX}${key}`);
 }
 
 function persist(key: string, value: unknown): void {
-	if (!browser) return;
-	localStorage.setItem(`${DB_PREFIX}${key}`, JSON.stringify(value));
+	getSharedGraph().put(`${SETTING_PREFIX}${key}`, value);
 }
 
 export const settingsAPI: SettingsAPI = {
@@ -50,26 +46,19 @@ export const settingsAPI: SettingsAPI = {
 
 /** Remove all persisted settings from the PluresDB namespace. */
 export function clearAllSettings(): void {
-	if (!browser) return;
-	const keys: string[] = [];
-	for (let i = 0; i < localStorage.length; i++) {
-		const k = localStorage.key(i);
-		if (k?.startsWith(DB_PREFIX)) keys.push(k);
+	const graph = getSharedGraph();
+	for (const k of graph.keys(SETTING_PREFIX)) {
+		graph.delete(k);
 	}
-	keys.forEach((k) => localStorage.removeItem(k));
 	subscribers.clear();
 }
 
 /** Snapshot all persisted settings as a plain key→value record. */
 export function exportSettings(): Record<string, unknown> {
-	if (!browser) return {};
+	const graph = getSharedGraph();
 	const data: Record<string, unknown> = {};
-	for (let i = 0; i < localStorage.length; i++) {
-		const k = localStorage.key(i);
-		if (k?.startsWith(DB_PREFIX)) {
-			const raw = localStorage.getItem(k);
-			if (raw !== null) data[k.slice(DB_PREFIX.length)] = JSON.parse(raw);
-		}
+	for (const k of graph.keys(SETTING_PREFIX)) {
+		data[k.slice(SETTING_PREFIX.length)] = graph.get(k);
 	}
 	return data;
 }

@@ -17,6 +17,7 @@
 import { browser } from '$app/environment';
 import { getAllNavItems } from '$lib/platform/plugin-loader.js';
 import type { NavItem } from '$lib/types/plugin.js';
+import { getSharedAdapter } from './plures-db-adapter.js';
 
 // ─── Reactive Fact Store ─────────────────────────────────────────────────────
 
@@ -38,10 +39,12 @@ export function query<T = unknown>(factId: string): T | undefined {
 
 /**
  * Write a praxis fact, notifying all reactive subscribers.
- * This is the only way to update fact state — never mutate the map directly.
+ * Facts with persist: true are automatically written to PluresDB via the
+ * shared adapter (set via setSharedAdapter before initPraxisFacts).
  */
 export function emitFact(factId: string, value: unknown): void {
 	facts.set(factId, value);
+	getSharedAdapter()?.persistFact(factId, value);
 }
 
 // ─── Theme Fact Bridge ────────────────────────────────────────────────────────
@@ -61,6 +64,9 @@ function loadPersistedTheme(): 'light' | 'dark' {
 
 function persistTheme(value: 'light' | 'dark'): void {
 	if (!browser) return;
+	// Keep the legacy 'radix-theme' key for backward compatibility — it is read
+	// by loadPersistedTheme() as a fallback on first boot before the adapter
+	// has persisted 'theme.applied'. The adapter is the canonical store.
 	localStorage.setItem(THEME_KEY, value);
 	document.documentElement.setAttribute('data-theme', value);
 }
@@ -83,20 +89,35 @@ function toSidebarItems(navItems: NavItem[]) {
 // ─── Initialisation ───────────────────────────────────────────────────────────
 
 /**
- * Boot the praxis-svelte bridge: populate initial facts from persisted state
- * and plugin-loader aggregates.
+ * Boot the praxis-svelte bridge: hydrate persisted facts from PluresDB, then
+ * seed any facts that were not stored (theme, nav, app.ready).
  *
  * Call once from the root layout's `$effect` or `onMount`.
  */
 export function initPraxisFacts(): void {
-	// Seed theme.applied from persisted storage
-	const initialTheme = loadPersistedTheme();
-	emitFact('theme.applied', { value: initialTheme });
+	// 1. Restore all persist:true facts from PluresDB (adapter writes, adapter reads)
+	const adapter = getSharedAdapter();
+	if (adapter) {
+		for (const [factId, value] of adapter.hydrateAll()) {
+			facts.set(factId, value);
+		}
+	}
 
-	// Seed nav.visible from currently registered plugins
+	// 2. Seed theme.applied — use persisted value from adapter if available,
+	//    otherwise fall back to legacy localStorage key or default 'dark'.
+	if (!facts.has('theme.applied')) {
+		const initialTheme = loadPersistedTheme();
+		emitFact('theme.applied', { value: initialTheme });
+	} else {
+		// Ensure DOM attribute is applied from the hydrated value
+		const persisted = query<{ value: 'light' | 'dark' }>('theme.applied');
+		if (persisted?.value) persistTheme(persisted.value);
+	}
+
+	// 3. Seed nav.visible from currently registered plugins (always ephemeral)
 	emitFact('nav.visible', { items: toSidebarItems(getAllNavItems()) });
 
-	// Seed app.ready (always true for now — gates not yet wired to real checks)
+	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
 	emitFact('app.ready', { ready: true });
 }
 
