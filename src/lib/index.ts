@@ -37,6 +37,7 @@ export {
   validateModule,
   scanRules,
 } from './praxis/shell.js';
+export { agensModule } from './praxis/agens.js';
 export type {
   PraxisFact,
   PraxisEvent,
