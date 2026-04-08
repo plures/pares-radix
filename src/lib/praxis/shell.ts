@@ -111,7 +111,7 @@ const shellRules: PraxisRule[] = [
   {
     id: 'rule.plugin-registration',
     description:
-      'Validate manifest, resolve dependencies, emit plugin.registered or plugin.rejected',
+      'Validate manifest fields, reject duplicate plugin IDs, emit plugin.registered or plugin.rejected',
     trigger: 'plugin.install.requested',
     emits: ['plugin.registered', 'plugin.rejected'],
     contract: defineContract({
@@ -523,13 +523,12 @@ const shellConstraints: PraxisConstraint[] = [
 const shellGates: PraxisGate[] = [
   {
     id: 'app-ready',
-    description: 'All core plugins registered and all system constraints satisfied',
-    conditions: ['plugin.registered', 'nav.visible', 'theme.applied'],
+    description: 'Core plugins registered, navigation visible, and all system constraints satisfied',
+    conditions: ['plugin.registered', 'nav.visible'],
     check: (state: PraxisSystemState) => {
       const hasRequired =
         state.facts.has('plugin.registered') &&
-        state.facts.has('nav.visible') &&
-        state.facts.has('theme.applied');
+        state.facts.has('nav.visible');
       if (!hasRequired) return false;
       return shellConstraints.every((c) => c.check(state));
     },
