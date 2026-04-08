@@ -550,12 +550,12 @@ const shellRules: PraxisRule[] = [
             fact: 'app.tray',
             payload: {
               items: [
-                { id: 'dashboard', label: 'Dashboard', path: '/dashboard' },
-                { id: 'settings', label: 'Settings', path: '/settings' },
+                { id: '/dashboard', label: 'Dashboard', path: '/dashboard' },
+                { id: '/settings', label: 'Settings', path: '/settings' },
               ],
             },
           },
-          description: 'nav.visible items are mapped to tray menu items',
+          description: 'nav.visible hrefs are used directly as tray item IDs for reliable navigation',
         },
         {
           given: { items: [] },
@@ -584,8 +584,10 @@ const shellRules: PraxisRule[] = [
       const ev = event as {
         items: Array<{ href: string; label: string; icon?: string }>;
       };
+      // Use href directly as the tray menu item ID so the Rust on_menu_event
+      // handler can emit the correct path without reconstruction.
       const trayItems = ev.items.map((item) => ({
-        id: item.href.replace(/^\//, '').replace(/\//g, '-') || 'home',
+        id: item.href,
         label: item.label,
         path: item.href,
       }));

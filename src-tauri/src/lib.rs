@@ -232,11 +232,11 @@ pub fn run() {
                     if event.id() == "quit" {
                         app.exit(0);
                     } else {
-                        // All other items navigate — emit user-navigated event
+                        // Tray item IDs are the route paths (href). Emit directly.
                         let _ = handle.emit(
                             "user-navigated",
                             UserNavigatedPayload {
-                                path: format!("/{}", event.id().0),
+                                path: event.id().0.to_string(),
                             },
                         );
                     }

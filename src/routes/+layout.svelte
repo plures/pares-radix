@@ -47,9 +47,9 @@
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
 		// All handlers are no-ops in the browser; isTauri() guards are advisory.
-		let unlistenTauri: (() => void) | null = null;
-
-		listenTauriEvents({
+		// Store the promise so cleanup awaits resolution even if component unmounts
+		// before listenTauriEvents resolves.
+		const unlistenPromise = listenTauriEvents({
 			// On app-booted: restore persisted window geometry from app.window fact.
 			onAppBooted: async (_payload) => {
 				emitFact('app.ready', { ready: true });
@@ -69,12 +69,12 @@
 				emitFact('user.navigated', { path });
 				goto(path);
 			},
-		}).then((unlisten) => {
-			unlistenTauri = unlisten;
 		});
 
 		return () => {
-			unlistenTauri?.();
+			// Await the promise before calling unlisten to handle the case where
+			// the component unmounts before the async listeners have resolved.
+			unlistenPromise.then((unlisten) => unlisten());
 		};
 	});
 
@@ -87,11 +87,12 @@
 	);
 
 	// Sync tray menu whenever nav.visible changes (Tauri only).
-	// Converts nav items to tray items via the tray.menu.requested praxis event.
+	// Item hrefs are used directly as IDs so the Rust on_menu_event handler
+	// can emit the path without reconstruction (fixes path fidelity for nested routes).
 	$effect(() => {
 		if (!isTauri() || navItems.length === 0) return;
 		const trayItems = navItems.map((item) => ({
-			id: item.href.replace(/^\//, '').replace(/\//g, '-') || 'home',
+			id: item.href,
 			label: item.label,
 			path: item.href,
 		}));
