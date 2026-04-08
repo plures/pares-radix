@@ -3,7 +3,7 @@
 	import { Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
-	import { query, initPraxisFacts, toggleTheme, getTheme } from '$lib/stores/praxis-svelte.js';
+	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.js';
 	import {
 		createPluresDBAdapter,
 		localStorageGraph,
@@ -12,6 +12,12 @@
 	} from '$lib/stores/plures-db-adapter.js';
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
+	import {
+		listenTauriEvents,
+		tauriGetWindowState,
+		tauriSetTrayMenu,
+		isTauri,
+	} from '$lib/platform/tauri.js';
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 
@@ -37,6 +43,39 @@
 			}),
 		);
 		initPraxisFacts();
+
+		// ── Tauri 2 integration ────────────────────────────────────────────────
+		// Wire Tauri backend events → praxis facts (events not commands pattern).
+		// All handlers are no-ops in the browser; isTauri() guards are advisory.
+		let unlistenTauri: (() => void) | null = null;
+
+		listenTauriEvents({
+			// On app-booted: restore persisted window geometry from app.window fact.
+			onAppBooted: async (_payload) => {
+				emitFact('app.ready', { ready: true });
+				// Seed window state from the Rust backend (actual geometry).
+				const windowState = await tauriGetWindowState();
+				if (windowState) {
+					emitFact('app.window', windowState);
+				}
+			},
+			// On window-state-changed: persist geometry via the praxis adapter.
+			// rule.window-state fires; app.window (persist:true) is written to PluresDB.
+			onWindowStateChanged: (state) => {
+				emitFact('window.state.changed', state);
+			},
+			// On user-navigated (from tray click): route to the requested path.
+			onUserNavigated: ({ path }) => {
+				emitFact('user.navigated', { path });
+				goto(path);
+			},
+		}).then((unlisten) => {
+			unlistenTauri = unlisten;
+		});
+
+		return () => {
+			unlistenTauri?.();
+		};
 	});
 
 	// Reactive bindings via praxis query()
@@ -46,6 +85,18 @@
 	let navItems = $derived(
 		(query<{ items: { href: string; label: string; icon?: string; badge?: number }[] }>('nav.visible')?.items) ?? []
 	);
+
+	// Sync tray menu whenever nav.visible changes (Tauri only).
+	// Converts nav items to tray items via the tray.menu.requested praxis event.
+	$effect(() => {
+		if (!isTauri() || navItems.length === 0) return;
+		const trayItems = navItems.map((item) => ({
+			id: item.href.replace(/^\//, '').replace(/\//g, '-') || 'home',
+			label: item.label,
+			path: item.href,
+		}));
+		tauriSetTrayMenu(trayItems);
+	});
 
 	let sidebarCollapsed = $state(false);
 	let paletteOpen = $state(false);

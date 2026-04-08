@@ -2,3 +2,7 @@ node_modules/
 dist/
 build/
 .svelte-kit/
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/
