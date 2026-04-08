@@ -47,7 +47,13 @@ const agensFacts: PraxisFact[] = [
   {
     id: 'agent.memory.recalled',
     description:
-      'Relevant memories retrieved from PluresDB for cerebellum use (never forwarded raw to conscious)',
+      'Relevant memories recalled from PluresDB for cerebellum use (never forwarded raw to conscious)',
+    persist: false,
+  },
+  {
+    id: 'agent.memory.captured',
+    description:
+      'Memories or memory candidates captured from tool output for later storage or processing',
     persist: false,
   },
   {
@@ -339,11 +345,16 @@ const agensRules: PraxisRule[] = [
       ],
       invariants: [
         {
-          description: 'only context-assembly phase triggers conscious execution',
+          description:
+            'agent.conscious.executed outputs must be either a null-payload sentinel or a curated-context payload',
           check: (output) => {
-            const o = output as { fact: string; payload: unknown };
-            // When phase is not context-assembly the rule emits nothing meaningful
-            return o.fact === 'agent.conscious.executed';
+            const o = output as {
+              fact: string;
+              payload: { curatedContextOnly?: boolean } | null;
+            };
+            if (o.fact !== 'agent.conscious.executed') return false;
+            if (o.payload === null) return true;
+            return o.payload.curatedContextOnly === true;
           },
         },
         {
@@ -375,15 +386,29 @@ const agensRules: PraxisRule[] = [
       const hasInsights =
         Array.isArray(ev.context.subconsciousInsights) &&
         (ev.context.subconsciousInsights as unknown[]).length > 0;
+      const rawMessageId = ev.context.messageId;
+      const messageId =
+        typeof rawMessageId === 'string' ? rawMessageId.trim() : '';
+
+      if (!messageId) {
+        const payload = {
+          error: 'Missing or invalid context.messageId for context-assembly',
+          procedureId: ev.procedureId,
+          phase: ev.phase,
+          rejected: true,
+        };
+        ctx.emitFact('agent.conscious.rejected', payload);
+        return { fact: 'agent.conscious.rejected', payload };
+      }
 
       // Persist the execution attempt via praxis adapter (never direct db.put).
-      ctx.settings.set(
-        `agent.conscious.last.${ev.context.messageId as string}`,
-        { procedureId: ev.procedureId, phase: ev.phase },
-      );
+      ctx.settings.set(`agent.conscious.last.${messageId}`, {
+        procedureId: ev.procedureId,
+        phase: ev.phase,
+      });
 
       const payload = {
-        messageId: ev.context.messageId as string,
+        messageId,
         result: 'Conscious task completed with curated context',
         curatedContextOnly: true,
         usedInsights: hasInsights,
@@ -644,10 +669,18 @@ const agensRules: PraxisRule[] = [
       };
 
       if (!ev.safetyChecked) {
-        // Safety gate not passed — emit nothing (tool-safety constraint will flag this).
+        // Safety gate not passed — emit an explicit failed capture so the
+        // tool-safety constraint has a concrete fact to reject.
+        const memoryPayload = {
+          toolId: ev.toolId,
+          captured: false,
+          rawExposure: 'cerebellum-only' as const,
+        };
+        ctx.emitFact('agent.memory.recalled', memoryPayload);
+
         return {
           'agent.subconscious.insight': null,
-          'agent.memory.recalled': null,
+          'agent.memory.recalled': memoryPayload,
         };
       }
 
