@@ -1,3 +1,7 @@
+## [0.5.0] — 2026-04-23
+
+- feat(render): tri-mode rendering — GUI, TUI CSS, TUI native (6c51540)
+
 ## [0.4.0] — 2026-04-23
 
 - feat(design): Phase 2 — Rule Editor, hot-reload engine, decision ledger (c69e9ca)
