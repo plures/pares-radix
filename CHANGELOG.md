@@ -1,3 +1,7 @@
+## [0.6.0] — 2026-04-23
+
+- feat(design): Phase 3 — ComponentPicker, RouteEditor, SchemaRenderer (890e933)
+
 ## [0.5.0] — 2026-04-23
 
 - feat(render): tri-mode rendering — GUI, TUI CSS, TUI native (6c51540)
