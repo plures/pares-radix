@@ -1,3 +1,7 @@
+## [0.4.0] — 2026-04-23
+
+- feat(design): Phase 2 — Rule Editor, hot-reload engine, decision ledger (c69e9ca)
+
 ## [0.3.0] — 2026-04-23
 
 - feat(design): implement design mode Phase 1 — self-modifying praxis architecture (c3e6819)
