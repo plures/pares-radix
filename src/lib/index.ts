@@ -62,6 +62,14 @@ export {
 } from './platform/render-mode.js';
 export type { RenderMode } from './platform/render-mode.js';
 export { allMappings as tuiWidgetMappings, tuiTheme } from './platform/tui-mappings.js';
+export {
+  generateSchema,
+} from './praxis/llm-schema-gen.js';
+export type {
+  SchemaNode,
+  GenerationRequest,
+  GenerationResult,
+} from './praxis/llm-schema-gen.js';
 export type {
   PraxisFact,
   PraxisEvent,
