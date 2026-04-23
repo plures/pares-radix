@@ -55,6 +55,13 @@ export {
   getDecisionLedger,
 } from './praxis/hot-reload.js';
 export type { DesignDecision } from './praxis/hot-reload.js';
+export {
+  detectRenderMode,
+  renderModeClass,
+  tuiCssOverrides,
+} from './platform/render-mode.js';
+export type { RenderMode } from './platform/render-mode.js';
+export { allMappings as tuiWidgetMappings, tuiTheme } from './platform/tui-mappings.js';
 export type {
   PraxisFact,
   PraxisEvent,

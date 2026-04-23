@@ -14,6 +14,7 @@
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
+	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
 		listenTauriEvents,
 		tauriGetWindowState,
@@ -121,6 +122,7 @@
 
 	let sidebarCollapsed = $state(false);
 	let paletteOpen = $state(false);
+	let renderMode = $state<RenderMode>(detectRenderMode());
 
 	// Built-in platform commands for the command palette
 	let commands: CommandItem[] = $derived([
@@ -154,6 +156,18 @@
 			icon: designModeActive ? '🔒' : '🎨',
 			action: () => { emitFact('design.mode.active', { active: !designModeActive }); },
 		},
+		{
+			id: 'render.mode.gui',
+			label: 'Render: GUI Mode',
+			icon: '🖥️',
+			action: () => { renderMode = 'gui'; emitFact('render.mode', { mode: 'gui' }); },
+		},
+		{
+			id: 'render.mode.tui',
+			label: 'Render: TUI Mode (terminal aesthetics)',
+			icon: '⌨️',
+			action: () => { renderMode = 'tui-css'; emitFact('render.mode', { mode: 'tui-css' }); },
+		},
 	]);
 
 	// Global keyboard shortcuts
@@ -176,12 +190,13 @@
 
 	let statusItems = $derived([
 		{ label: 'Theme', value: themeValue },
+		{ label: 'Render', value: renderMode === 'gui' ? 'GUI' : renderMode === 'tui-css' ? '⌨️ TUI' : '📟 Native' },
 		{ label: 'Radix', value: 'v0.2.0' },
 		...(designModeActive ? [{ label: 'Design', value: '🎨 Active' }] : []),
 	]);
 </script>
 
-<div class="app" data-theme={themeValue}>
+<div class="app {renderModeClass(renderMode)}" data-theme={themeValue}>
 	<Sidebar
 		items={navItems}
 		currentPath={page.url.pathname}
@@ -204,6 +219,10 @@
 		{commands}
 		onClose={() => (paletteOpen = false)}
 	/>
+
+	{#if renderMode === 'tui-css'}
+		{@html `<style>${tuiCssOverrides}</style>`}
+	{/if}
 </div>
 
 <style>
