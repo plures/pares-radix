@@ -47,6 +47,14 @@ export type {
   DesignDraft,
   SchemaKind,
 } from './praxis/design.js';
+export {
+  registerForHotReload,
+  getLiveModules,
+  applySchemaChange,
+  recordDecision,
+  getDecisionLedger,
+} from './praxis/hot-reload.js';
+export type { DesignDecision } from './praxis/hot-reload.js';
 export type {
   PraxisFact,
   PraxisEvent,

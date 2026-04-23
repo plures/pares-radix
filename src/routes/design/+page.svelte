@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
 	import type { DesignSchema, SchemaKind } from '$lib/praxis/design.js';
+	import RuleEditor from '$lib/components/RuleEditor.svelte';
+	import { applySchemaChange, recordDecision, getDecisionLedger } from '$lib/praxis/hot-reload.js';
 
 	// Read schema registry from praxis facts
 	let registry = $derived(
@@ -14,6 +16,8 @@
 	let selectedKind = $state<SchemaKind | 'all'>('all');
 	let selectedSchema = $state<string | null>(null);
 	let searchQuery = $state('');
+	let editingSchema = $state<string | null>(null);
+	let showLedger = $state(false);
 
 	let schemas = $derived(() => {
 		let entries = Object.values(registry);
@@ -61,6 +65,45 @@
 			emitFact('design.schema.selected', { schemaId: id });
 		}
 	}
+
+	function startEditing(id: string) {
+		editingSchema = id;
+	}
+
+	function handleSave(definition: Record<string, unknown>) {
+		if (!editingSchema) return;
+		const schema = registry[editingSchema];
+		if (!schema) return;
+
+		// Record the before state
+		const before = { ...schema.definition };
+
+		// Apply to live modules via hot-reload
+		const updatedSchema = { ...schema, definition };
+		const result = applySchemaChange(updatedSchema);
+
+		// Record in decision ledger
+		recordDecision({
+			action: 'update',
+			schemaId: editingSchema,
+			schemaKind: schema.kind,
+			before,
+			after: definition,
+			hotReloadResult: result,
+		});
+
+		// Persist via praxis event
+		emitFact('design.schema.saved', { schemaId: editingSchema, definition });
+
+		editingSchema = null;
+	}
+
+	function cancelEditing() {
+		editingSchema = null;
+		emitFact('design.schema.reverted', { schemaId: editingSchema });
+	}
+
+	let decisionLedger = $derived(getDecisionLedger());
 </script>
 
 <div class="design-page">
@@ -119,9 +162,15 @@
 			</div>
 		</aside>
 
-		<!-- Detail panel -->
+	<!-- Detail panel -->
 		<main class="detail-panel">
-			{#if selectedSchemaData}
+			{#if editingSchema && registry[editingSchema]}
+				<RuleEditor
+					schema={registry[editingSchema]}
+					onSave={handleSave}
+					onCancel={cancelEditing}
+				/>
+			{:else if selectedSchemaData}
 				<div class="schema-detail">
 					<div class="detail-header">
 						<span class="detail-icon">{kindIcons[selectedSchemaData.kind]}</span>
@@ -141,9 +190,7 @@
 
 					{#if designModeActive}
 						<div class="edit-actions">
-							<button class="btn-primary" onclick={() => {
-								emitFact('design.schema.selected', { schemaId: selectedSchemaData?.id });
-							}}>
+							<button class="btn-primary" onclick={() => startEditing(selectedSchemaData?.id ?? '')}>
 								✏️ Edit Schema
 							</button>
 							{#if selectedSchemaData.userCreated}
@@ -174,6 +221,32 @@
 			{/if}
 		</main>
 	</div>
+
+	<!-- Decision Ledger -->
+	{#if designModeActive}
+		<footer class="ledger-bar">
+			<button class="ledger-toggle" onclick={() => showLedger = !showLedger}>
+				📜 Decision Ledger ({decisionLedger.length} entries)
+				<span class="chevron">{showLedger ? '▲' : '▼'}</span>
+			</button>
+			{#if showLedger && decisionLedger.length > 0}
+				<div class="ledger-entries">
+					{#each decisionLedger.toReversed() as entry}
+						<div class="ledger-entry">
+							<span class="ledger-action">{entry.action}</span>
+							<span class="ledger-schema">{entry.schemaId}</span>
+							<span class="ledger-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+							{#if entry.hotReloadResult.applied}
+								<span class="ledger-status ok">✅ applied</span>
+							{:else}
+								<span class="ledger-status err">❌ {entry.hotReloadResult.error}</span>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+		</footer>
+	{/if}
 </div>
 
 <style>
@@ -421,4 +494,57 @@
 	.empty-icon { font-size: 3rem; margin-bottom: 1rem; }
 	.empty-state h2 { margin: 0; }
 	.empty-state p { margin: 0.5rem 0 0; }
+
+	/* Decision Ledger */
+	.ledger-bar {
+		border-top: 1px solid var(--color-border);
+		padding: 0.5rem 0;
+	}
+
+	.ledger-toggle {
+		width: 100%;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.5rem;
+		border: none;
+		background: transparent;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		font-size: 0.8rem;
+	}
+
+	.ledger-entries {
+		max-height: 200px;
+		overflow-y: auto;
+		padding: 0.5rem;
+	}
+
+	.ledger-entry {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.25rem 0;
+		font-size: 0.75rem;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.ledger-action {
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		background: var(--color-accent-bg);
+		color: var(--color-accent);
+		font-weight: 500;
+		text-transform: uppercase;
+		font-size: 0.65rem;
+	}
+
+	.ledger-schema {
+		font-family: 'JetBrains Mono', monospace;
+		flex: 1;
+	}
+
+	.ledger-time { color: var(--color-text-muted); }
+	.ledger-status.ok { color: #22c55e; }
+	.ledger-status.err { color: var(--color-danger); }
 </style>

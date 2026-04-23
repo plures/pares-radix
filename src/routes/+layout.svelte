@@ -13,6 +13,7 @@
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
+	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import {
 		listenTauriEvents,
 		tauriGetWindowState,
@@ -48,6 +49,11 @@
 		// Initialize the design mode schema registry from all loaded praxis modules
 		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule);
 		emitFact('design.schema.registry', schemas);
+
+		// Register modules for hot-reload
+		registerForHotReload(shellModule);
+		registerForHotReload(agensModule);
+		registerForHotReload(designModule);
 
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
