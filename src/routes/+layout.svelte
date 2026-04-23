@@ -12,6 +12,7 @@
 	} from '$lib/stores/plures-db-adapter.js';
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
+	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
 	import {
 		listenTauriEvents,
 		tauriGetWindowState,
@@ -39,10 +40,14 @@
 		setSharedAdapter(
 			createPluresDBAdapter({
 				db,
-				registry: [...shellModule.facts, ...agensModule.facts],
+				registry: [...shellModule.facts, ...agensModule.facts, ...designModule.facts],
 			}),
 		);
 		initPraxisFacts();
+
+		// Initialize the design mode schema registry from all loaded praxis modules
+		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule);
+		emitFact('design.schema.registry', schemas);
 
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
@@ -89,6 +94,9 @@
 	let navItems = $derived(
 		(query<{ items: { href: string; label: string; icon?: string; badge?: number }[] }>('nav.visible')?.items) ?? []
 	);
+	let designModeActive = $derived(
+		(query<{ active: boolean }>('design.mode.active')?.active) ?? false
+	);
 
 	// Sync tray menu whenever nav.visible changes (Tauri only).
 	// Item hrefs are used directly as IDs so the Rust on_menu_event handler
@@ -134,14 +142,26 @@
 			icon: themeValue === 'dark' ? '☀️' : '🌙',
 			action: () => { toggleTheme(); },
 		},
+		{
+			id: 'design.mode.toggle',
+			label: designModeActive ? 'Exit Design Mode' : 'Enter Design Mode',
+			icon: designModeActive ? '🔒' : '🎨',
+			action: () => { emitFact('design.mode.active', { active: !designModeActive }); },
+		},
 	]);
 
-	// Global keyboard shortcut: Ctrl+K / Cmd+K opens the command palette
+	// Global keyboard shortcuts
 	$effect(() => {
 		function handleKeydown(e: KeyboardEvent) {
+			// Ctrl+K / Cmd+K → command palette
 			if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
 				e.preventDefault();
 				paletteOpen = true;
+			}
+			// Ctrl+Shift+D / Cmd+Shift+D → toggle design mode
+			if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'D') {
+				e.preventDefault();
+				emitFact('design.mode.active', { active: !designModeActive });
 			}
 		}
 		window.addEventListener('keydown', handleKeydown);
@@ -151,6 +171,7 @@
 	let statusItems = $derived([
 		{ label: 'Theme', value: themeValue },
 		{ label: 'Radix', value: 'v0.2.0' },
+		...(designModeActive ? [{ label: 'Design', value: '🎨 Active' }] : []),
 	]);
 </script>
 

@@ -38,6 +38,15 @@ export {
   scanRules,
 } from './praxis/shell.js';
 export { agensModule } from './praxis/agens.js';
+export {
+  designModule,
+  buildSchemaRegistry,
+} from './praxis/design.js';
+export type {
+  DesignSchema,
+  DesignDraft,
+  SchemaKind,
+} from './praxis/design.js';
 export type {
   PraxisFact,
   PraxisEvent,
