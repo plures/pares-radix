@@ -1,3 +1,7 @@
+## [0.7.0] — 2026-04-23
+
+- feat(design): Phase 4 — LLM-assisted schema generation from natural language (ed7ddb0)
+
 ## [0.6.0] — 2026-04-23
 
 - feat(design): Phase 3 — ComponentPicker, RouteEditor, SchemaRenderer (890e933)
