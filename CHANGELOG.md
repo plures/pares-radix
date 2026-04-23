@@ -1,3 +1,8 @@
+## [0.3.0] — 2026-04-23
+
+- feat(design): implement design mode Phase 1 — self-modifying praxis architecture (c3e6819)
+- docs: update copilot-instructions with praxis, design-dojo, automation rules (3db3288)
+
 ## [0.2.0] — 2026-04-23
 
 - feat(release): add target_version input for milestone-driven releases (6597944)
