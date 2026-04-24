@@ -1,3 +1,7 @@
+## [0.7.4] — 2026-04-24
+
+- fix(ci): resolve post-merge build failure from invalid Svelte 5 event modifier syntax (#55) (b7e1235)
+
 ## [0.7.3] — 2026-04-24
 
 - fix(ci): restore green typecheck + wire up ESLint after 890e933 regressions (#54) (a4e8e7d)
