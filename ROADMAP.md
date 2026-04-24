@@ -1,32 +1,34 @@
-# Pares Radix Roadmap
+# pares-radix Roadmap
 
-## Current: v0.2.x (pre-release)
+## Role in OASIS
+Pares Radix is the end‑user desktop shell for OASIS. It hosts domain plugins, enforces UX contracts, and provides the shared intelligence/data plumbing so every OASIS workflow feels coherent across platforms.
 
-## Phase 1: Platform Shell (v0.2) — IN PROGRESS
-- [ ] Plugin loader — discover, validate, and mount plugins with dependency resolution
-- [ ] Navigation system — persistent sidebar, breadcrumbs, mobile responsive
-- [ ] Settings framework — unified settings page with plugin settings slots
-- [ ] Dashboard — home page aggregating plugin widgets
-- [ ] Onboarding wizard — plugin-aware setup flow with dependency-ordered steps
+## Current State
+- Tauri 2 desktop shell port completed.
+- PluresDB persistence adapter and schema‑driven UI generation merged.
+- CI regressions currently open (multiple post‑merge failures).
 
-## Phase 2: Intelligence Layer (v0.3)
-- [ ] LLM provider config — shared model configuration across plugins
-- [ ] Token budgeting — track and limit token usage per plugin/session
-- [ ] Praxis inference engine — confidence scoring and decision ledger
-- [ ] Context assembly — build LLM context from active plugin state
-- [ ] UX contracts — journey expectations with prereqs, gates, empty states
+## Phase 1 — Platform Shell Stabilization
+- Fix CI regressions and lock green main.
+- Solidify plugin loader (validation, dependency resolution, lifecycle hooks).
+- Navigation system: persistent sidebar, breadcrumbs, and safe routing guards.
+- Unified settings + help aggregation from plugins.
+- Dashboard home with plugin widgets and onboarding flow.
 
-## Phase 3: Data Layer (v0.4)
-- [ ] PluresDB integration — shared database for all plugins
-- [ ] Import/export orchestration — plugin data portability
-- [ ] Backup & restore — full application state backup
-- [ ] Data migration framework — versioned schema upgrades
-- [ ] Search — unified search across all plugin data
+## Phase 2 — Shared Intelligence Layer
+- LLM provider configuration + token budgeting across plugins.
+- Context assembly from active plugin state + PluresDB facts.
+- Praxis rule enforcement + decision ledger surfaced in UI.
+- UX contracts: empty state enforcement and expectation validation.
 
-## Phase 4: Polish (v1.0)
-- [ ] Keyboard shortcuts — global and plugin-specific keybindings
-- [ ] Command palette — fuzzy search for all actions
-- [ ] Theme support — dark/light with design-dojo theme system
-- [ ] Accessibility — screen reader support, focus management
-- [ ] Performance — lazy plugin loading, code splitting
+## Phase 3 — Data & Portability
+- PluresDB‑backed data model for all plugin state.
+- Import/export orchestration + backup/restore of full app state.
+- Search across plugin data and history.
+- Data migration framework for plugin schema upgrades.
 
+## Phase 4 — Multi‑GUI + Polish
+- Multi‑arch packaging (Linux, Windows, macOS; Android/iOS via Tauri where supported).
+- Svelte GUI parity with Svelte TUI (design‑dojo terminal theme).
+- Native terminal UX via svelte‑ratatui pipeline.
+- Accessibility, performance, and command palette.
