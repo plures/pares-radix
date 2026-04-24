@@ -4,6 +4,7 @@
 	 * Part of Design Mode Phase 3.
 	 */
 
+	import { untrack } from 'svelte';
 	import { emitFact } from '$lib/stores/praxis-svelte.js';
 
 	interface RouteEntry {
@@ -30,8 +31,8 @@
 
 	let { pluginId, routes, navItems, onSave, onCancel }: Props = $props();
 
-	let editRoutes = $state<RouteEntry[]>(routes.map(r => ({ ...r, requires: [...r.requires] })));
-	let editNav = $state<NavEntry[]>(navItems.map(n => ({ ...n, children: [...n.children] })));
+	let editRoutes = $state<RouteEntry[]>(untrack(() => routes.map(r => ({ ...r, requires: [...r.requires] }))));
+	let editNav = $state<NavEntry[]>(untrack(() => navItems.map(n => ({ ...n, children: [...n.children] }))));
 	let activeTab = $state<'routes' | 'nav'>('routes');
 
 	function addRoute() {
