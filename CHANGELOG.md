@@ -1,3 +1,7 @@
+## [0.7.3] — 2026-04-24
+
+- fix(ci): restore green typecheck + wire up ESLint after 890e933 regressions (#54) (a4e8e7d)
+
 ## [0.7.2] — 2026-04-24
 
 - fix(svelte): resolve remaining warnings after post-merge CI failure at ed7ddb0 (#53) (d138aac)
