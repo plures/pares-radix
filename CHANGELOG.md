@@ -1,3 +1,7 @@
+## [0.7.2] — 2026-04-24
+
+- fix(svelte): resolve remaining warnings after post-merge CI failure at ed7ddb0 (#53) (d138aac)
+
 ## [0.7.1] — 2026-04-24
 
 - fix(typecheck): resolve post-merge CI build and typecheck failures (#52) (69ed662)

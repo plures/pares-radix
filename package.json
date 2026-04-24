@@ -1,6 +1,6 @@
 {
   "name": "@plures/pares-radix",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
   "type": "module",
   "scripts": {
