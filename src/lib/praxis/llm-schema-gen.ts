@@ -218,7 +218,7 @@ export async function generateSchema(
       confidence: parsed.confidence ?? 0.7,
       suggestions: parsed.suggestions ?? [],
     };
-  } catch (e) {
+  } catch {
     // LLM failed — fall back to templates
     return templateFallback(request, kind);
   }

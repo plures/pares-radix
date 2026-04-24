@@ -5,7 +5,6 @@
 	 */
 
 	import { untrack } from 'svelte';
-	import { emitFact } from '$lib/stores/praxis-svelte.js';
 
 	interface RouteEntry {
 		path: string;
@@ -100,7 +99,7 @@
 					{#if route.requires.length > 0}
 						<div class="requirements">
 							<span class="req-label">Data Requirements:</span>
-							{#each route.requires as req, reqIdx}
+							{#each route.requires as req}
 								<div class="req-row">
 									<input type="text" bind:value={req.type} placeholder="data type" />
 									<input type="number" bind:value={req.minCount} min="0" />

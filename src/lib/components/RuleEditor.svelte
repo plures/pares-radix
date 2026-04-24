@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
-	import type { DesignSchema, DesignDraft } from '$lib/praxis/design.js';
+	import type { DesignSchema } from '$lib/praxis/design.js';
 
 	interface Props {
 		schema: DesignSchema;
