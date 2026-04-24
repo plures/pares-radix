@@ -1,3 +1,8 @@
+## [0.7.1] — 2026-04-24
+
+- fix(typecheck): resolve post-merge CI build and typecheck failures (#52) (69ed662)
+- docs: refresh ROADMAP.md with OASIS strategic alignment (7481358)
+
 ## [0.7.0] — 2026-04-23
 
 - feat(design): Phase 4 — LLM-assisted schema generation from natural language (ed7ddb0)
