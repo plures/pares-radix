@@ -69,6 +69,8 @@ export interface PraxisContext {
   settings: SettingsAPI;
   /** Emit a fact with a value */
   emitFact: (factId: string, value: unknown) => void;
+  /** Query the current value of a fact */
+  query?: (factId: string) => unknown;
 }
 
 /** A platform rule — driven by a triggering event, emits facts */

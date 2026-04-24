@@ -61,7 +61,7 @@
 				<svelte:self
 					schema={child}
 					{editable}
-					onNodeSelect={(node, path) => onNodeSelect?.(node, [idx, ...path])}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
 				/>
 			{/each}
 		</div>
@@ -74,7 +74,7 @@
 				<svelte:self
 					schema={child}
 					{editable}
-					onNodeSelect={(node, path) => onNodeSelect?.(node, [idx, ...path])}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
 				/>
 			{/each}
 		</div>
@@ -113,7 +113,7 @@
 				<svelte:self
 					schema={child}
 					{editable}
-					onNodeSelect={(node, path) => onNodeSelect?.(node, [idx, ...path])}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
 				/>
 			{/each}
 		</div>
