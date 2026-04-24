@@ -26,7 +26,7 @@ import { getSharedAdapter } from './plures-db-adapter.js';
  * Uses Svelte 5 $state so that reads inside $derived or Svelte templates
  * are automatically tracked.
  */
-let facts = $state<Map<string, unknown>>(new Map());
+const facts = $state<Map<string, unknown>>(new Map());
 
 /**
  * Read a praxis fact reactively.
