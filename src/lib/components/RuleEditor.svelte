@@ -84,7 +84,7 @@
 		<span class="editor-kind">{schema.kind}</span>
 	</header>
 
-	<form class="editor-form" onsubmit|preventDefault={handleSave}>
+	<form class="editor-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
 		{#each editableFields() as field}
 			<div class="field-group">
 				<label for={field.key}>

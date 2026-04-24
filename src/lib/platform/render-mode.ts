@@ -18,11 +18,17 @@
 
 export type RenderMode = 'gui' | 'tui-css' | 'tui-native';
 
+/** Minimal shape of the Node.js process global used for environment detection */
+interface NodeProcess {
+  env: Record<string, string | undefined>;
+}
+
 /** Detect the initial render mode from environment */
 export function detectRenderMode(): RenderMode {
-  if (typeof process !== 'undefined') {
-    if (process.env.TAURI_TUI === '1') return 'tui-native';
-    if (process.env.RADIX_RENDER_MODE === 'tui-css') return 'tui-css';
+  const nodeProcess = (globalThis as Record<string, unknown>).process as NodeProcess | undefined;
+  if (nodeProcess !== undefined) {
+    if (nodeProcess.env.TAURI_TUI === '1') return 'tui-native';
+    if (nodeProcess.env.RADIX_RENDER_MODE === 'tui-css') return 'tui-css';
   }
 
   // Check URL params (useful for dev/testing)

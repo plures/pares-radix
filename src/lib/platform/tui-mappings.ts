@@ -11,7 +11,6 @@
  * 3. TUI Native — svelte-ratatui compiles components to ratatui widgets
  */
 
-import type { TuiWidgetMapping } from './types.js';
 
 // ─── design-dojo Layout Components ──────────────────────────────────────────
 
