@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
 	import type { DesignSchema, DesignDraft } from '$lib/praxis/design.js';
 
@@ -11,7 +12,7 @@
 	let { schema, onSave, onCancel }: Props = $props();
 
 	// Draft state
-	let draft = $state<Record<string, unknown>>({ ...schema.definition });
+	let draft = $state<Record<string, unknown>>(untrack(() => ({ ...schema.definition })));
 	let dirty = $state(false);
 
 	// Validation from praxis

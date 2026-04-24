@@ -10,6 +10,8 @@
 	 * Phase 4: LLM-assisted layout generation from natural language.
 	 */
 
+	import SchemaRenderer from './SchemaRenderer.svelte';
+
 	interface SchemaNode {
 		/** design-dojo component name */
 		component: string;
@@ -42,23 +44,21 @@
 	}
 </script>
 
+{#if editable}
 <div
-	class="schema-node"
-	class:editable
+	class="schema-node editable"
 	data-component={schema.component}
-	role={editable ? 'button' : undefined}
-	tabindex={editable ? 0 : undefined}
+	role="button"
+	tabindex="0"
 	onclick={() => handleClick(schema, [])}
 	onkeydown={(e) => { if (e.key === 'Enter') handleClick(schema, []); }}
 >
-	{#if editable}
-		<span class="node-label">{schema.component}</span>
-	{/if}
+	<span class="node-label">{schema.component}</span>
 
 	{#if schema.component === 'Box' || schema.component === 'Block'}
 		<div class="rendered-box" style:flex-direction={String(schema.props.direction ?? 'column')} style:gap={String(schema.props.gap ?? '0.5rem')}>
 			{#each schema.children as child, idx}
-				<svelte:self
+				<SchemaRenderer
 					schema={child}
 					{editable}
 					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
@@ -71,7 +71,7 @@
 				<h3 class="card-title">{schema.props.title}</h3>
 			{/if}
 			{#each schema.children as child, idx}
-				<svelte:self
+				<SchemaRenderer
 					schema={child}
 					{editable}
 					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
@@ -110,7 +110,7 @@
 		<!-- Fallback: render children in a generic container -->
 		<div class="rendered-generic">
 			{#each schema.children as child, idx}
-				<svelte:self
+				<SchemaRenderer
 					schema={child}
 					{editable}
 					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
@@ -119,6 +119,76 @@
 		</div>
 	{/if}
 </div>
+{:else}
+<div
+	class="schema-node"
+	data-component={schema.component}
+>
+	{#if schema.component === 'Box' || schema.component === 'Block'}
+		<div class="rendered-box" style:flex-direction={String(schema.props.direction ?? 'column')} style:gap={String(schema.props.gap ?? '0.5rem')}>
+			{#each schema.children as child, idx}
+				<SchemaRenderer
+					schema={child}
+					{editable}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+				/>
+			{/each}
+		</div>
+	{:else if schema.component === 'Card'}
+		<div class="rendered-card">
+			{#if schema.props.title}
+				<h3 class="card-title">{schema.props.title}</h3>
+			{/if}
+			{#each schema.children as child, idx}
+				<SchemaRenderer
+					schema={child}
+					{editable}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+				/>
+			{/each}
+		</div>
+	{:else if schema.component === 'Text'}
+		<p class="rendered-text" data-variant={schema.props.variant}>
+			{schema.props.content ?? ''}
+		</p>
+	{:else if schema.component === 'Button'}
+		<button class="rendered-button" disabled={Boolean(schema.props.disabled)}>
+			{schema.props.label ?? 'Button'}
+		</button>
+	{:else if schema.component === 'Input'}
+		<input
+			class="rendered-input"
+			type={String(schema.props.type ?? 'text')}
+			placeholder={String(schema.props.placeholder ?? '')}
+			value={String(schema.props.value ?? '')}
+		/>
+	{:else if schema.component === 'Badge'}
+		<span class="rendered-badge" data-variant={schema.props.variant}>
+			{schema.props.text ?? ''}
+		</span>
+	{:else if schema.component === 'ProgressBar'}
+		<div class="rendered-progress">
+			<div class="progress-fill" style:width="{Number(schema.props.value ?? 0)}%"></div>
+		</div>
+	{:else if schema.component === 'EmptyState'}
+		<div class="rendered-empty">
+			<span class="empty-icon">{schema.props.icon ?? '📭'}</span>
+			<p>{schema.props.message ?? 'Nothing here yet'}</p>
+		</div>
+	{:else}
+		<!-- Fallback: render children in a generic container -->
+		<div class="rendered-generic">
+			{#each schema.children as child, idx}
+				<SchemaRenderer
+					schema={child}
+					{editable}
+					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+				/>
+			{/each}
+		</div>
+	{/if}
+</div>
+{/if}
 
 <style>
 	.schema-node {
