@@ -17,6 +17,7 @@ use pares_agens_core::model::{
     ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher,
 };
 use pares_agens_core::optimization::OptimizationSafetyGate;
+use pares_agens_core::plugins::PluginRuntime;
 use pares_agens_core::praxis::GuidanceService;
 use pares_agens_core::secrets::InMemorySecretStore;
 use pares_agens_core::Event;
@@ -33,6 +34,7 @@ mod commands;
 mod mcp;
 mod migration;
 mod notifications;
+mod plugins;
 mod procedures;
 mod settings;
 mod state;
@@ -510,6 +512,7 @@ pub fn run() {
             // used for the default build so that no external dependencies or
             // vault unlocking are required on startup.
             let secret_store = Arc::new(InMemorySecretStore::new());
+            let plugin_runtime = Arc::new(PluginRuntime::new());
             app.manage(AppState {
                 ipc_handle: handle,
                 memory_store,
@@ -525,6 +528,8 @@ pub fn run() {
                 mcp_tools: Arc::clone(&mcp_tools),
                 license: Mutex::new(pares_agens_core::license::License::free()),
                 telemetry_service: Arc::clone(&telemetry_service),
+                plugin_runtime,
+                plugin_executor: None, // TODO: wire CrdtStore when available
             });
 
             // ── Initial router rebuild ─────────────────────────────────────
@@ -590,6 +595,15 @@ pub fn run() {
             commands::get_conversation_history,
             commands::get_telemetry_snapshot,
             commands::upload_telemetry_snapshot,
+            plugins::plugin_install,
+            plugins::plugin_list,
+            plugins::plugin_uninstall,
+            plugins::plugin_schema,
+            plugins::plugin_crud_create,
+            plugins::plugin_crud_list,
+            plugins::plugin_crud_update,
+            plugins::plugin_crud_delete,
+            plugins::plugin_crud_search,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pares Agens");

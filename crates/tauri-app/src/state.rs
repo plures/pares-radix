@@ -15,6 +15,8 @@ use pares_agens_core::secrets::{provider_api_key, SecretStore};
 use pares_models::config::{ProviderConfig, RouterConfig};
 use pares_models::ModelRouter;
 
+use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
+
 use crate::procedures::{ProcedureLogEntry, ProcedureRecord};
 use crate::telemetry::TelemetryService;
 
@@ -348,6 +350,10 @@ pub struct AppState {
     pub license: Mutex<License>,
     /// Anonymous telemetry aggregator backed by PluresDB state.
     pub telemetry_service: Arc<TelemetryService>,
+    /// Plugin runtime — manages installed plugins.
+    pub plugin_runtime: Arc<PluginRuntime>,
+    /// Plugin CRUD executor — performs entity operations against PluresDB.
+    pub plugin_executor: Option<Arc<PluginCrudExecutor>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +587,8 @@ mod tests {
             telemetry_service: Arc::new(TelemetryService::new(Arc::new(
                 pares_agens_core::InMemoryStateStore::new(),
             ))),
+            plugin_runtime: Arc::new(pares_agens_core::plugins::PluginRuntime::new()),
+            plugin_executor: None,
         };
 
         rebuild_model_router(&state).await;

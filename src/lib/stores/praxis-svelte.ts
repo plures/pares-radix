@@ -115,7 +115,10 @@ export function initPraxisFacts(): void {
 	}
 
 	// 3. Seed nav.visible from currently registered plugins (always ephemeral)
-	emitFact('nav.visible', { items: toSidebarItems(getAllNavItems()) });
+	const navItems = toSidebarItems(getAllNavItems());
+	// Always include the Plugins management page
+	navItems.push({ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined });
+	emitFact('nav.visible', { items: navItems });
 
 	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
 	emitFact('app.ready', { ready: true });
