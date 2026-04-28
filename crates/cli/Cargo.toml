@@ -1,0 +1,40 @@
+[package]
+name = "pares-agens-cli"
+description = "CLI binary for Pares Agens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pares-agens-cli"
+path = "src/main.rs"
+
+[lib]
+name = "pares_agens_migrate"
+path = "src/lib.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true
+futures-util = "0.3"
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+pares-agens-core = { path = "../core", features = ["embeddings"] }
+pares-agens-channels = { path = "../channels" }
+pares-models = { path = "../models" }
+pares-agens-agenda = { path = "../agenda" }
+pares-agens-tui = { path = "../tui" }
+crossterm = "0.28"
+ratatui = "0.29"
+
+[dev-dependencies]
+tempfile = "3"

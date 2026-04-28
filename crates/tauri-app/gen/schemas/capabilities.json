@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for Pares Agens","local":true,"windows":["main"],"permissions":["core:default","core:event:default","window-state:default","autostart:default","clipboard-manager:default"]}}

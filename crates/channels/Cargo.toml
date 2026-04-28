@@ -1,0 +1,26 @@
+[package]
+name = "pares-agens-channels"
+description = "Channel adapters (stdin, Telegram) for Pares Agens"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
+thiserror.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+teloxide.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+pares-agens-core = { path = "../core" }
+pares-agens-marketplace = { path = "../marketplace" }
+pares-agens-agenda = { path = "../agenda" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+serde_json = { workspace = true }
+pluresdb = { git = "https://github.com/plures/pluresdb", rev = "111dc919c8c2f1d4da7a1b4a1bac0d5a73adf7a3", features = ["embeddings"] }
