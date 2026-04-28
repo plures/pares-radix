@@ -1,3 +1,8 @@
+## [1.13.0] — 2026-04-28
+
+- feat: wire Tauri bridge for plugin CRUD (1958d0b)
+- Merge pares-agens Rust workspace into pares-radix (3d08315)
+
 ## [0.7.4] — 2026-04-24
 
 - fix(ci): resolve post-merge build failure from invalid Svelte 5 event modifier syntax (#55) (b7e1235)
