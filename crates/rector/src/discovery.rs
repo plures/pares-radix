@@ -299,10 +299,46 @@ impl MultiDiscovery {
             .collect()
     }
 
-    fn discover_lan(&self, _group: &str, _port: u16) -> Vec<ClusterNode> {
-        // TODO: implement actual UDP multicast announce/listen
-        // Requires async runtime; stubbed for now.
-        vec![]
+    fn discover_lan(&self, group: &str, port: u16) -> Vec<ClusterNode> {
+        use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+        use std::time::Duration;
+
+        const MAGIC: &[u8; 4] = b"PLRS";
+
+        let multicast_addr: Ipv4Addr = group.parse().unwrap_or(Ipv4Addr::new(239, 255, 77, 77));
+
+        // Announce ourselves
+        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+            let payload = serde_json::to_vec(&self.local_node).unwrap_or_default();
+            let mut packet = Vec::with_capacity(4 + payload.len());
+            packet.extend_from_slice(MAGIC);
+            packet.extend_from_slice(&payload);
+            let dest = SocketAddrV4::new(multicast_addr, port);
+            let _ = socket.send_to(&packet, dest);
+        }
+
+        // Listen for others (1 second)
+        let mut nodes = Vec::new();
+        if let Ok(socket) = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)) {
+            let _ = socket.join_multicast_v4(&multicast_addr, &Ipv4Addr::UNSPECIFIED);
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
+
+            let mut buf = [0u8; 65535];
+            loop {
+                match socket.recv_from(&mut buf) {
+                    Ok((len, _)) if len > 4 && &buf[..4] == MAGIC => {
+                        if let Ok(node) = serde_json::from_slice::<ClusterNode>(&buf[4..len]) {
+                            if node.id != self.local_node.id {
+                                nodes.push(node);
+                            }
+                        }
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        nodes
     }
 
     fn discover_pluresdb(&self) -> Vec<ClusterNode> {
@@ -321,6 +357,37 @@ impl MultiDiscovery {
         let key = format!("cluster:node:{}", self.local_node.id);
         let value = serde_json::to_value(&self.local_node).unwrap();
         self.store.put(&key, "rector", value);
+    }
+}
+
+/// Run a periodic LAN multicast announcer as a background task.
+///
+/// Sends a UDP multicast packet containing the local node's JSON representation
+/// at the given interval, until the shutdown signal is received.
+pub async fn run_lan_announcer(
+    local_node: &ClusterNode,
+    group: &str,
+    port: u16,
+    interval: std::time::Duration,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+
+    let multicast_addr: Ipv4Addr = group.parse().unwrap_or(Ipv4Addr::new(239, 255, 77, 77));
+
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => break,
+            _ = tokio::time::sleep(interval) => {
+                if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+                    let payload = serde_json::to_vec(local_node).unwrap_or_default();
+                    let mut packet = Vec::with_capacity(4 + payload.len());
+                    packet.extend_from_slice(b"PLRS");
+                    packet.extend_from_slice(&payload);
+                    let _ = socket.send_to(&packet, SocketAddrV4::new(multicast_addr, port));
+                }
+            }
+        }
     }
 }
 

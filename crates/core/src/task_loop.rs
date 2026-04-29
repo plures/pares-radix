@@ -37,10 +37,10 @@ impl Default for TaskLoopConfig {
         Self {
             idle_check_interval_ms: 5_000,
             max_tasks_per_cycle: 5,
-            min_idle_before_cycle_ms: 30_000,
+            min_idle_before_cycle_ms: 60_000,
             max_evaluation_time_ms: 60_000,
             quiet_hours_start: 23,
-            quiet_hours_end: 8,
+            quiet_hours_end: 7,
         }
     }
 }
@@ -230,13 +230,13 @@ mod tests {
     fn quiet_hours_wrap_midnight() {
         let config = TaskLoopConfig {
             quiet_hours_start: 23,
-            quiet_hours_end: 8,
+            quiet_hours_end: 7,
             ..Default::default()
         };
         // We can't easily test in_quiet_hours without mocking time,
         // but we verify the config is constructed correctly.
         assert_eq!(config.quiet_hours_start, 23);
-        assert_eq!(config.quiet_hours_end, 8);
+        assert_eq!(config.quiet_hours_end, 7);
     }
 
     #[test]

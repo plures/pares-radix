@@ -88,6 +88,11 @@ impl ToggleableModelClient {
 #[derive(Debug, Serialize, Deserialize)]
 struct CopilotAuthCache {
     oauth_token: String,
+    /// Epoch seconds when this OAuth token was cached. OAuth tokens don't
+    /// technically expire, but GitHub can revoke them. If the token is older
+    /// than 30 days, we force re-auth to avoid stale credentials.
+    #[serde(default)]
+    cached_at: u64,
 }
 
 const MODEL_OVERRIDE_STATE_KEY: &str = "agent.runtime_model_override";
@@ -2649,7 +2654,20 @@ async fn main() {
                     let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
                     let cached = std::fs::read_to_string(&auth_path)
                         .ok()
-                        .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok());
+                        .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok())
+                        .filter(|cache| {
+                            // Invalidate tokens older than 30 days
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            if cache.cached_at > 0 && now.saturating_sub(cache.cached_at) > 30 * 86400 {
+                                tracing::info!("Copilot OAuth token is >30 days old, forcing re-auth");
+                                let _ = std::fs::remove_file(&auth_path);
+                                return false;
+                            }
+                            true
+                        });
 
                     let oauth_token = if let Some(cache) = cached {
                         cache.oauth_token
@@ -2682,6 +2700,10 @@ async fn main() {
                         }
                         if let Ok(serialized) = serde_json::to_string_pretty(&CopilotAuthCache {
                             oauth_token: oauth_token.clone(),
+                            cached_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs(),
                         }) {
                             if let Err(e) = std::fs::write(&auth_path, serialized) {
                                 tracing::warn!("failed to persist copilot auth: {e}");
@@ -2788,6 +2810,16 @@ async fn main() {
                     }
                 }
             } else {
+                // Ensure fastembed cache is in a writable location
+                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH")
+                    .unwrap_or_else(|_| {
+                        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                        format!("{home}/.cache/fastembed")
+                    });
+                std::fs::create_dir_all(&fastembed_cache).ok();
+                #[allow(unused_unsafe)]
+                unsafe { std::env::set_var("FASTEMBED_CACHE_PATH", &fastembed_cache); }
+
                 match PluresDbStore::open_with_embeddings(&memory_path) {
                     Ok(store) => {
                         tracing::info!(
@@ -3152,7 +3184,19 @@ async fn main() {
                 let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
                 let cached = std::fs::read_to_string(&auth_path)
                     .ok()
-                    .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok());
+                    .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok())
+                    .filter(|cache| {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        if cache.cached_at > 0 && now.saturating_sub(cache.cached_at) > 30 * 86400 {
+                            tracing::info!("Copilot OAuth token is >30 days old, forcing re-auth");
+                            let _ = std::fs::remove_file(&auth_path);
+                            return false;
+                        }
+                        true
+                    });
 
                 let oauth_token = if let Some(cache) = cached {
                     cache.oauth_token
@@ -3181,6 +3225,10 @@ async fn main() {
                     }
                     if let Ok(serialized) = serde_json::to_string_pretty(&CopilotAuthCache {
                         oauth_token: token.clone(),
+                        cached_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
                     }) {
                         let _ = std::fs::write(&auth_path, serialized);
                     }
