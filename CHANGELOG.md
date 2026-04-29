@@ -1,3 +1,7 @@
+## [1.18.0] — 2026-04-29
+
+- feat(plugins): git adapter plugin + unified TOML/JSON manifest parsing (83a75ae)
+
 ## [1.17.0] — 2026-04-29
 
 - feat(core): add Chronos version timeline and content-addressed storage (69cb186)
