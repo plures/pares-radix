@@ -2973,6 +2973,24 @@ async fn main() {
             let mut registry = AgentRegistry::new();
             registry.register_builtins();
             let registry = Arc::new(registry);
+
+            // Auto-download BitNet model for cerebellum if not explicitly provided
+            let cerebellum_model_path = if cerebellum_model_path.is_some() {
+                cerebellum_model_path
+            } else {
+                let model_manager = pares_agens_core::model_download::ModelManager::new();
+                match model_manager.ensure_bitnet_model().await {
+                    Ok(path) => {
+                        tracing::info!(path = %path.display(), "Auto-downloaded BitNet model for cerebellum");
+                        Some(path)
+                    }
+                    Err(e) => {
+                        tracing::warn!("BitNet auto-download failed (will use heuristic classifier): {e}");
+                        None
+                    }
+                }
+            };
+
             let agent_factory = Arc::new(RuntimeAgentFactory {
                 store: Arc::clone(&store),
                 model_client: Arc::clone(&model_client),
@@ -3290,6 +3308,23 @@ async fn main() {
                 governor: Arc::clone(&governor),
                 plugin_runtime: None,
             });
+
+            // Auto-download BitNet for cerebellum if not explicitly provided
+            let cerebellum_model_path = if cerebellum_model_path.is_some() {
+                cerebellum_model_path
+            } else {
+                let model_manager = pares_agens_core::model_download::ModelManager::new();
+                match model_manager.ensure_bitnet_model().await {
+                    Ok(path) => {
+                        tracing::info!(path = %path.display(), "Auto-downloaded BitNet model for cerebellum (TUI)");
+                        Some(path)
+                    }
+                    Err(e) => {
+                        tracing::warn!("BitNet auto-download failed (will use heuristic classifier): {e}");
+                        None
+                    }
+                }
+            };
 
             let cerebellum = Cerebellum::new(CerebellumConfig::default());
             let cerebellum = if cerebellum_model_path.is_some() {

@@ -46,6 +46,7 @@ vault-core = { git = "https://github.com/plures/plures-vault", rev = "d4e4783ddd
 pares-agens-audit = { path = "../audit" }
 
 regex = "1"
+futures-util = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

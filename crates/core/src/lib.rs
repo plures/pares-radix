@@ -94,6 +94,8 @@ pub mod prompt_builder;
 pub mod renderers;
 /// Tool execution governance — policies, timeouts, blocked-command filtering.
 pub mod tool_governance;
+
+pub mod model_download;
 /// Heartbeat system — periodic proactive check-ins.
 pub mod heartbeat;
 /// Plugin framework — application platform for schema-driven apps.
