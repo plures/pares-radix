@@ -30,6 +30,10 @@
 //! # }
 //! ```
 
+/// Chronos version timeline — causal audit trail for every data mutation.
+pub mod chronos;
+/// Content-addressed deduplicating blob storage.
+pub mod content_store;
 /// High-level agent abstraction and in-memory storage.
 pub mod agent;
 /// Authentication helpers for external providers.

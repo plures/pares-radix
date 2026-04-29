@@ -33,6 +33,7 @@ reqwest.workspace = true
 semver = "1"
 toml = "0.8"
 base64 = "0.22"
+sha2 = "0.10"
 subtle = "2"
 pares-agens-privacy = { path = "../privacy" }
 walkdir.workspace = true

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use walkdir::WalkDir;
 
+use crate::content_store::ContentStore;
 use crate::plugins::executor::PluginCrudExecutor;
 use crate::plugins::error::PluginError;
 
@@ -88,9 +89,21 @@ fn language_from_ext(ext: &str) -> &str {
 
 /// Index a project directory, returning a [`ProjectIndex`] and storing
 /// file_index entities in PluresDB via the executor.
+///
+/// When a `content_store` is provided, file contents larger than 64KB are
+/// stored content-addressed and referenced by hash instead of inline.
 pub fn index_project(
     project_path: &str,
     executor: &PluginCrudExecutor,
+) -> Result<ProjectIndex, PluginError> {
+    index_project_with_content(project_path, executor, None)
+}
+
+/// Like [`index_project`] but with optional content-addressed storage.
+pub fn index_project_with_content(
+    project_path: &str,
+    executor: &PluginCrudExecutor,
+    content_store: Option<&ContentStore>,
 ) -> Result<ProjectIndex, PluginError> {
     let root = Path::new(project_path);
     if !root.is_dir() {
@@ -146,14 +159,24 @@ pub fn index_project(
 
     // Store each file as a file_index entity in PluresDB
     for f in &files {
+        let mut entity = json!({
+            "path": f.relative_path,
+            "language": f.language,
+            "size_bytes": f.size,
+        });
+
+        // Content-address files via ContentStore when available.
+        if let Some(cs) = content_store {
+            if let Ok(bytes) = std::fs::read(&f.path) {
+                let hash = cs.put(&bytes);
+                entity["content_hash"] = json!(hash);
+            }
+        }
+
         let _ = executor.create(
             "file_index",
             PLUGIN_NAME,
-            json!({
-                "path": f.relative_path,
-                "language": f.language,
-                "size_bytes": f.size,
-            }),
+            entity,
         );
     }
 

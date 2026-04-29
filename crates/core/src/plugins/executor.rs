@@ -9,6 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use super::error::PluginError;
+use crate::chronos::{ChronosAction, ChronosTimeline};
 use crate::praxis::write_gate::PraxisWriteGate;
 
 /// The PluresDB actor ID used for all plugin write operations.
@@ -27,35 +28,64 @@ const INSTALLED_PREFIX: &str = "plugin:_installed:";
 pub struct PluginCrudExecutor {
     store: Arc<CrdtStore>,
     write_gate: Option<Arc<PraxisWriteGate>>,
+    chronos: Option<Arc<ChronosTimeline>>,
 }
 
 impl PluginCrudExecutor {
     /// Create a new executor backed by the given CrdtStore.
     pub fn new(store: Arc<CrdtStore>) -> Self {
-        Self { store, write_gate: None }
+        Self { store, write_gate: None, chronos: None }
     }
 
     /// Create a new executor with a write gate.
     pub fn with_write_gate(store: Arc<CrdtStore>, gate: Arc<PraxisWriteGate>) -> Self {
-        Self { store, write_gate: Some(gate) }
+        Self { store, write_gate: Some(gate), chronos: None }
+    }
+
+    /// Create a new executor with a write gate and Chronos timeline.
+    pub fn with_chronos(
+        store: Arc<CrdtStore>,
+        gate: Arc<PraxisWriteGate>,
+        chronos: Arc<ChronosTimeline>,
+    ) -> Self {
+        Self {
+            store,
+            write_gate: Some(gate),
+            chronos: Some(chronos),
+        }
     }
 
     /// Validate data through the write gate before persisting.
     fn gate_put(&self, key: &str, actor: &str, data: Value) -> Result<(), PluginError> {
-        if let Some(gate) = &self.write_gate {
+        let warnings = if let Some(gate) = &self.write_gate {
             match gate.evaluate(key, &data, actor) {
                 Ok(warnings) => {
                     for w in &warnings {
                         warn!("praxis write-gate warning on '{key}': {w}");
                     }
+                    warnings
                 }
                 Err(rejection) => {
                     return Err(PluginError::Storage(rejection.to_string()));
                 }
             }
-        }
-        self.store.put(key, actor, data);
+        } else {
+            vec![]
+        };
+        self.store.put(key.to_string(), actor, data.clone());
+        // Determine action type — Create if node didn't exist, Update otherwise.
+        // For simplicity we always record; the caller can refine if needed.
+        self.record_chronos(key, actor, ChronosAction::Update, &data, &warnings);
         Ok(())
+    }
+
+    /// Record a Chronos entry after a successful write.
+    fn record_chronos(&self, key: &str, actor: &str, action: ChronosAction, data: &Value, warnings: &[String]) {
+        if let Some(chronos) = &self.chronos {
+            let constraint_results: Vec<String> = warnings.to_vec();
+            let entry = chronos.build_entry(key, actor, action, data, constraint_results, None);
+            chronos.record(&entry);
+        }
     }
 
     /// Create a new entity node in PluresDB.
