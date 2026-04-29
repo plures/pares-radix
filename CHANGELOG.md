@@ -1,3 +1,7 @@
+## [1.17.0] — 2026-04-29
+
+- feat(core): add Chronos version timeline and content-addressed storage (69cb186)
+
 ## [1.16.0] — 2026-04-29
 
 - feat: session resume (/resume command) and plugin hook system (cc32839)
