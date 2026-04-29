@@ -1,3 +1,7 @@
+## [1.30.0] — 2026-04-29
+
+- feat: add Docker QA, enhanced /status, error display, personality logging (c77e4eb)
+
 ## [1.29.0] — 2026-04-29
 
 - feat: auto-download BitNet models from HuggingFace on first use (60e8d03)
