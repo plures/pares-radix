@@ -33,6 +33,8 @@ pub mod guidance;
 pub mod ledger;
 /// PluresDB-backed praxis gate for native constraint evaluation.
 pub mod pluresdb_gate;
+/// Write gate — validates data before persistence to CrdtStore.
+pub mod write_gate;
 
 pub use constraints::{
     AuthorizationGate, TaskSizeConstraint, TaskSizeViolation, MAX_DESCRIPTION_WORD_COUNT,
@@ -44,3 +46,4 @@ pub use ledger::{
     LedgerStoreError, NoOpChannel, NotificationChannel, PluresDbLedgerStore, ValidationStatus,
 };
 pub use pluresdb_gate::PluresDbPraxisGate;
+pub use write_gate::PraxisWriteGate;

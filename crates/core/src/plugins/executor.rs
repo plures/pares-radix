@@ -5,9 +5,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use pluresdb::CrdtStore;
 use serde_json::{json, Value};
+use tracing::warn;
 use uuid::Uuid;
 
 use super::error::PluginError;
+use crate::praxis::write_gate::PraxisWriteGate;
 
 /// The PluresDB actor ID used for all plugin write operations.
 const ACTOR: &str = "pares-agens-plugin";
@@ -24,12 +26,36 @@ const INSTALLED_PREFIX: &str = "plugin:_installed:";
 /// Executes CRUD operations for plugin entities against PluresDB.
 pub struct PluginCrudExecutor {
     store: Arc<CrdtStore>,
+    write_gate: Option<Arc<PraxisWriteGate>>,
 }
 
 impl PluginCrudExecutor {
     /// Create a new executor backed by the given CrdtStore.
     pub fn new(store: Arc<CrdtStore>) -> Self {
-        Self { store }
+        Self { store, write_gate: None }
+    }
+
+    /// Create a new executor with a write gate.
+    pub fn with_write_gate(store: Arc<CrdtStore>, gate: Arc<PraxisWriteGate>) -> Self {
+        Self { store, write_gate: Some(gate) }
+    }
+
+    /// Validate data through the write gate before persisting.
+    fn gate_put(&self, key: &str, actor: &str, data: Value) -> Result<(), PluginError> {
+        if let Some(gate) = &self.write_gate {
+            match gate.evaluate(key, &data, actor) {
+                Ok(warnings) => {
+                    for w in &warnings {
+                        warn!("praxis write-gate warning on '{key}': {w}");
+                    }
+                }
+                Err(rejection) => {
+                    return Err(PluginError::Storage(rejection.to_string()));
+                }
+            }
+        }
+        self.store.put(key, actor, data);
+        Ok(())
     }
 
     /// Create a new entity node in PluresDB.
@@ -56,7 +82,7 @@ impl PluginCrudExecutor {
         data.insert("_created_at".into(), json!(now));
         data.insert("_updated_at".into(), json!(now));
 
-        self.store.put(&key, ACTOR, Value::Object(data));
+        self.gate_put(&key, ACTOR, Value::Object(data))?;
 
         // Update registry
         self.registry_add(plugin_name, entity_type, &id)?;
@@ -125,7 +151,7 @@ impl PluginCrudExecutor {
         }
         data.insert("_updated_at".into(), json!(Utc::now().to_rfc3339()));
 
-        self.store.put(&key, ACTOR, Value::Object(data));
+        self.gate_put(&key, ACTOR, Value::Object(data))?;
         Ok(())
     }
 
@@ -156,7 +182,7 @@ impl PluginCrudExecutor {
 
         data.insert("_deleted".into(), json!(true));
         data.insert("_updated_at".into(), json!(Utc::now().to_rfc3339()));
-        self.store.put(&key, ACTOR, Value::Object(data));
+        self.gate_put(&key, ACTOR, Value::Object(data))?;
 
         // Remove from registry
         if !plugin_name.is_empty() && !entity_type.is_empty() {
@@ -189,7 +215,7 @@ impl PluginCrudExecutor {
             json!(new_parent_id),
         );
         data.insert("_updated_at".into(), json!(Utc::now().to_rfc3339()));
-        self.store.put(&key, ACTOR, Value::Object(data));
+        self.gate_put(&key, ACTOR, Value::Object(data))?;
         Ok(())
     }
 
@@ -255,7 +281,7 @@ impl PluginCrudExecutor {
         manifest_json: &Value,
     ) -> Result<(), PluginError> {
         let key = format!("{INSTALLED_PREFIX}{name}");
-        self.store.put(&key, ACTOR, manifest_json.clone());
+        self.gate_put(&key, ACTOR, manifest_json.clone())?;
         Ok(())
     }
 

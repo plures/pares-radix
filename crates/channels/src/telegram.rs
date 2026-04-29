@@ -56,7 +56,7 @@ const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
 /// The runtime strips this marker before model processing and uses it only to
 /// decide whether to append tool execution details to the Telegram reply.
 pub const TELEGRAM_VERBOSE_TOOL_DETAILS_MARKER: &str = "__PARES_VERBOSE_TOOL_DETAILS__:";
-const TELEGRAM_HELP_COMMANDS: [(&str, &str); 22] = [
+const TELEGRAM_HELP_COMMANDS: [(&str, &str); 23] = [
     ("/start", "show this command list"),
     ("/help", "show this command list"),
     ("/status", "status + health snapshot"),
@@ -102,6 +102,10 @@ const TELEGRAM_HELP_COMMANDS: [(&str, &str); 22] = [
     (
         "/plugin",
         "manage plugins (list, install <path>, uninstall <name>, schema <name>)",
+    ),
+    (
+        "/praxis",
+        "write gate: constraints, log [n], violations [n]",
     ),
 ];
 const DEFAULT_LOG_TAIL_LINES: usize = 80;
@@ -436,6 +440,8 @@ pub struct TelegramConfig {
     pub plugin_runtime: Option<Arc<pares_agens_core::plugins::PluginRuntime>>,
     /// Optional plugin CRUD executor for entity counts.
     pub plugin_executor: Option<Arc<pares_agens_core::plugins::PluginCrudExecutor>>,
+    /// Optional praxis write gate for `/praxis` command.
+    pub write_gate: Option<Arc<pares_agens_core::praxis::write_gate::PraxisWriteGate>>,
 }
 
 impl TelegramConfig {
@@ -453,6 +459,7 @@ impl TelegramConfig {
             group_chat_policy: GroupChatPolicy::default(),
             plugin_runtime: None,
             plugin_executor: None,
+            write_gate: None,
         }
     }
 
@@ -1182,6 +1189,7 @@ impl ChannelAdapter for TelegramAdapter {
         let scheduler = self.config.scheduler.clone();
         let plugin_runtime = self.config.plugin_runtime.clone();
         let plugin_executor = self.config.plugin_executor.clone();
+        let write_gate = self.config.write_gate.clone();
         let event_spine = self.event_spine.clone();
         let verbose_by_chat = Arc::new(TokioMutex::new(HashMap::<i64, bool>::new()));
         let installer = std::sync::Arc::new(TokioMutex::new(
@@ -1202,6 +1210,7 @@ impl ChannelAdapter for TelegramAdapter {
             let scheduler = scheduler.clone();
             let plugin_runtime = plugin_runtime.clone();
             let plugin_executor = plugin_executor.clone();
+            let write_gate = write_gate.clone();
             let verbose_by_chat = verbose_by_chat.clone();
             let event_spine = event_spine.clone();
             let bot_username = bot_username.clone();
@@ -1837,6 +1846,67 @@ impl ChannelAdapter for TelegramAdapter {
                                     }
                                 } else {
                                     "Plugin framework not initialized.".to_string()
+                                };
+                                Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                Self::acknowledge_message(&bot, &msg).await;
+                                return respond(());
+                            }
+                            "praxis" => {
+                                let args: Vec<&str> = cmd_parts.collect();
+                                let reply = match args.first().copied() {
+                                    Some("constraints") => {
+                                        if let Some(gate) = &write_gate {
+                                            let cs = gate.list_constraints();
+                                            if cs.is_empty() {
+                                                "No write constraints registered.".to_string()
+                                            } else {
+                                                cs.iter().map(|c| {
+                                                    let sev = match c.severity {
+                                                        pares_agens_core::praxis::write_gate::WriteSeverity::Error => "error",
+                                                        pares_agens_core::praxis::write_gate::WriteSeverity::Warning => "warn",
+                                                    };
+                                                    let en = if c.enabled { "✓" } else { "✗" };
+                                                    format!("{en} [{sev}] {} — {}", c.name, c.description)
+                                                }).collect::<Vec<_>>().join("\n")
+                                            }
+                                        } else {
+                                            "Write gate not initialized.".to_string()
+                                        }
+                                    }
+                                    Some("log") => {
+                                        let n: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
+                                        if let Some(gate) = &write_gate {
+                                            let entries = gate.recent_decisions(n);
+                                            if entries.is_empty() {
+                                                "No decisions logged yet.".to_string()
+                                            } else {
+                                                entries.iter().map(|e| {
+                                                    let icon = if e.passed { "✓" } else { "✗" };
+                                                    let reason = e.reason.as_deref().unwrap_or("");
+                                                    format!("{icon} {} [{}] {reason}", e.key, e.constraint_id)
+                                                }).collect::<Vec<_>>().join("\n")
+                                            }
+                                        } else {
+                                            "Write gate not initialized.".to_string()
+                                        }
+                                    }
+                                    Some("violations") => {
+                                        let n: usize = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(10);
+                                        if let Some(gate) = &write_gate {
+                                            let entries = gate.violations(n);
+                                            if entries.is_empty() {
+                                                "No violations recorded.".to_string()
+                                            } else {
+                                                entries.iter().map(|e| {
+                                                    let reason = e.reason.as_deref().unwrap_or("");
+                                                    format!("✗ {} [{}] {reason}", e.key, e.constraint_id)
+                                                }).collect::<Vec<_>>().join("\n")
+                                            }
+                                        } else {
+                                            "Write gate not initialized.".to_string()
+                                        }
+                                    }
+                                    _ => "Usage: /praxis constraints | log [n] | violations [n]".to_string(),
                                 };
                                 Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
                                 Self::acknowledge_message(&bot, &msg).await;
