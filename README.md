@@ -75,9 +75,44 @@ export default {
 } satisfies RadixPlugin;
 ```
 
+## Backend Architecture (Rust)
+
+The Rust workspace (`crates/`) implements the headless runtime:
+
+| Crate | Purpose |
+|---|---|
+| **core** | Reactive event loop, executor, agent abstraction |
+| **channels** | Telegram adapter, HTML rendering, slash command parsing |
+| **cli** | `pares-agens` binary — headless daemon mode |
+| **models** | LLM router, provider adapters, streaming |
+| **praxis** | Decision ledger, write gate, constraint enforcement |
+| **plugins** | Schema-driven plugin framework (manifest, runtime, CRUD, hooks) |
+| **mcp-client** | Model Context Protocol client for tool servers |
+| **sync** | Hyperswarm-based peer sync |
+| **audit** | Audit trail and compliance logging |
+| **privacy** | PII detection and redaction |
+| **agenda** | Calendar/agenda integration |
+| **marketplace** | Plugin marketplace client |
+| **tui** | Terminal UI (ratatui) |
+| **tauri-app** | Tauri desktop integration |
+
+### Key Subsystems
+
+- **Event Spine** — bridges the agent to PluresDB's runtime
+- **Chronos Timeline** — causal audit trail for every data mutation
+- **Content Store** — content-addressed deduplicating blob storage
+- **Plugin Framework** — manifest-driven apps with lifecycle hooks and coding agent support
+- **Praxis Write Gate** — constraint enforcement before any state mutation
+- **Tool Governance** — execution policies, timeouts, blocked-command filtering
+- **Heartbeat** — periodic proactive check-ins
+- **Session Management** — save/restore conversation sessions
+- **Personality** — identity, tone, and behavioral rule contracts
+- **Prompt Builder** — dynamic system prompt assembly from personality + context
+- **Git Adapter** — repository operations for coding agent workflows
+
 ## Project Status
 
-🚧 **Phase 1 — Foundation** (in progress)
+🚧 **Active development** — core runtime stable, plugin ecosystem expanding.
 
 ## License
 

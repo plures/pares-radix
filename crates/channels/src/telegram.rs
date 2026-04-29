@@ -2393,9 +2393,9 @@ mod tests {
     #[test]
     fn build_nixos_update_command_contains_required_steps() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
-        assert!(command.contains("sudo nix flake update pares-agens"));
-        assert!(command.contains("sudo nixos-rebuild switch --flake .#'praxisbot'"));
-        assert!(command.contains("No new pares-agens commits on main"));
+        assert!(command.contains("git pull --ff-only"));
+        assert!(command.contains("cargo build --release -p pares-agens"));
+        assert!(command.contains("sudo systemctl restart pares-agens"));
     }
 
     #[test]
