@@ -106,3 +106,6 @@ pub mod task;
 pub mod task_manager;
 /// Task loop — idle-time evaluator that cycles open tasks.
 pub mod task_loop;
+
+pub mod health;
+pub mod pii_guard;

@@ -45,5 +45,7 @@ pluresdb-sea = { git = "https://github.com/plures/pluresdb", rev = "111dc919c8c2
 vault-core = { git = "https://github.com/plures/plures-vault", rev = "d4e4783ddd14f63af2699ea97f29ca5895ef6590", package = "vault-core", optional = true }
 pares-agens-audit = { path = "../audit" }
 
+regex = "1"
+
 [dev-dependencies]
 tempfile = "3"

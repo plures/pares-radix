@@ -23,6 +23,8 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::cerebellum::{Cerebellum, Route};
+use crate::chronos::{ChronosAction, ChronosTimeline};
+use crate::pii_guard::PiiGuard;
 use crate::delegation::aggregator::ResultAggregator;
 use crate::delegation::broker::DelegationBroker;
 use crate::event::Event;
@@ -165,6 +167,10 @@ pub struct Agent {
     hook_manager: Arc<HookManager>,
     /// Session manager for cross-restart persistence.
     session_manager: Option<Arc<SessionManager>>,
+    /// Chronos timeline for tool execution auditing.
+    chronos: Option<Arc<ChronosTimeline>>,
+    /// PII guard for redacting sensitive data before model calls.
+    pii_guard: PiiGuard,
 }
 
 #[derive(Debug, Clone)]
@@ -207,6 +213,8 @@ impl Agent {
             plugin_context: Mutex::new(None),
             hook_manager: Arc::new(HookManager::new()),
             session_manager: None,
+            chronos: None,
+            pii_guard: PiiGuard::new(),
         }
     }
 
@@ -241,12 +249,20 @@ impl Agent {
             plugin_context: Mutex::new(None),
             hook_manager: Arc::new(HookManager::new()),
             session_manager: None,
+            chronos: None,
+            pii_guard: PiiGuard::new(),
         }
     }
 
     /// Attach a session manager for cross-restart session persistence.
     pub fn with_session_manager(mut self, manager: Arc<SessionManager>) -> Self {
         self.session_manager = Some(manager);
+        self
+    }
+
+    /// Attach a Chronos timeline for tool execution auditing.
+    pub fn with_chronos(mut self, chronos: Arc<ChronosTimeline>) -> Self {
+        self.chronos = Some(chronos);
         self
     }
 
@@ -794,8 +810,32 @@ impl Agent {
                 _ => {}
             }
 
+            // PII guard: redact sensitive data from user messages before model call.
+            let messages_for_model: Vec<ChatMessage> = messages.iter().map(|m| {
+                if m.role == "user" {
+                    let (redacted, report) = self.pii_guard.redact(&m.content);
+                    if report.count > 0 {
+                        info!(redactions = ?report.redactions, "PII guard redacted sensitive data");
+                        if let Some(chronos) = &self.chronos {
+                            let entry = chronos.build_entry(
+                                "pii:redaction",
+                                "pii_guard",
+                                ChronosAction::Create,
+                                &serde_json::json!({"redactions": report.redactions, "count": report.count}),
+                                vec![],
+                                Some(format!("PII redaction: {} items", report.count)),
+                            );
+                            chronos.record(&entry);
+                        }
+                    }
+                    ChatMessage { content: redacted, ..m.clone() }
+                } else {
+                    m.clone()
+                }
+            }).collect();
+
             let model_start = Instant::now();
-            let completion = model_client.complete(&messages, &tools, options).await?;
+            let completion = model_client.complete(&messages_for_model, &tools, options).await?;
             let latency_ms = model_start.elapsed().as_millis();
             info!(turn, latency_ms, tool_calls = completion.tool_calls.len(), "model completion received");
 
@@ -831,9 +871,35 @@ impl Agent {
                             continue;
                         }
                         HookAction::ModifyContext(new_args) => {
+                            let call_id = Uuid::new_v4().to_string();
+                            if let Some(chronos) = &self.chronos {
+                                let entry = chronos.build_entry(
+                                    &format!("tool:call:{}", call_id),
+                                    "agent",
+                                    ChronosAction::Create,
+                                    &serde_json::json!({"tool": &tool_call.name, "args_modified": true}),
+                                    vec![],
+                                    Some(format!("Tool call: {}", tool_call.name)),
+                                );
+                                chronos.record(&entry);
+                            }
+                            let tool_start = Instant::now();
                             let tool_result = tool_dispatcher
                                 .call_tool(&tool_call.name, new_args)
                                 .await;
+                            let elapsed_ms = tool_start.elapsed().as_millis();
+                            if let Some(chronos) = &self.chronos {
+                                let success = !tool_result.starts_with("Error") && !tool_result.starts_with("⚠");
+                                let entry = chronos.build_entry(
+                                    &format!("tool:result:{}", call_id),
+                                    "agent",
+                                    ChronosAction::Update,
+                                    &serde_json::json!({"success": success, "elapsed_ms": elapsed_ms}),
+                                    vec![],
+                                    Some(format!("Tool result: {} ({}ms)", if success { "success" } else { "FAILED" }, elapsed_ms)),
+                                );
+                                chronos.record(&entry);
+                            }
                             // Fire PostToolUse hook.
                             let mut post_ctx = HookContext {
                                 tool_name: Some(tool_call.name.clone()),
@@ -844,9 +910,40 @@ impl Agent {
                             messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
                         }
                         _ => {
+                            let call_id = Uuid::new_v4().to_string();
+                            if let Some(chronos) = &self.chronos {
+                                let args_summary: String = serde_json::to_string(&tool_call.arguments)
+                                    .unwrap_or_default()
+                                    .chars()
+                                    .take(200)
+                                    .collect();
+                                let entry = chronos.build_entry(
+                                    &format!("tool:call:{}", call_id),
+                                    "agent",
+                                    ChronosAction::Create,
+                                    &serde_json::json!({"tool": &tool_call.name, "args": args_summary}),
+                                    vec![],
+                                    Some(format!("Tool call: {} with args: {}", tool_call.name, args_summary)),
+                                );
+                                chronos.record(&entry);
+                            }
+                            let tool_start = Instant::now();
                             let tool_result = tool_dispatcher
                                 .call_tool(&tool_call.name, tool_call.arguments)
                                 .await;
+                            let elapsed_ms = tool_start.elapsed().as_millis();
+                            if let Some(chronos) = &self.chronos {
+                                let success = !tool_result.starts_with("Error") && !tool_result.starts_with("⚠");
+                                let entry = chronos.build_entry(
+                                    &format!("tool:result:{}", call_id),
+                                    "agent",
+                                    ChronosAction::Update,
+                                    &serde_json::json!({"success": success, "elapsed_ms": elapsed_ms}),
+                                    vec![],
+                                    Some(format!("Tool result: {} ({}ms)", if success { "success" } else { "FAILED" }, elapsed_ms)),
+                                );
+                                chronos.record(&entry);
+                            }
                             // Fire PostToolUse hook.
                             let mut post_ctx = HookContext {
                                 tool_name: Some(tool_call.name.clone()),

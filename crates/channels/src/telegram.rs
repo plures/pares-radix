@@ -1265,6 +1265,14 @@ impl ChannelAdapter for TelegramAdapter {
                                 return respond(());
                             }
                             "status" | "health" => {
+                                // Show subsystem health from PluresDB if available
+                                let health_section = if cmd == "health" {
+                                    event_spine.as_ref().and_then(|es| {
+                                        pares_agens_core::health::SystemHealth::load_from_store(es.store())
+                                    }).map(|h| h.telegram_report())
+                                } else {
+                                    None
+                                };
                                 let memory = current_process_rss_kib()
                                     .map(|rss| format!("{rss} KiB"))
                                     .unwrap_or_else(|| "n/a".to_string());
@@ -1303,7 +1311,12 @@ impl ChannelAdapter for TelegramAdapter {
                                      PluresDB: {home}/.pares-agens/memory/",
                                     std::process::id(),
                                 );
-                                Self::send_reply_with_fallback(&bot, &msg, &status, None, event_spine.as_ref()).await;
+                                let full_status = if let Some(health) = health_section {
+                                    format!("{}\n\n{}", status, health)
+                                } else {
+                                    status
+                                };
+                                Self::send_reply_with_fallback(&bot, &msg, &full_status, None, event_spine.as_ref()).await;
                                 Self::acknowledge_message(&bot, &msg).await;
                                 return respond(());
                             }

@@ -318,6 +318,11 @@ impl EventSpineHandle {
         );
         warn!(chat_id, channel, error, will_retry, "event_spine_handle: delivery failure recorded");
     }
+
+    /// Get a reference to the underlying CRDT store.
+    pub fn store(&self) -> &Arc<CrdtStore> {
+        &self.store
+    }
 }
 
 #[cfg(test)]
