@@ -1,3 +1,7 @@
+## [1.24.0] — 2026-04-29
+
+- feat(rector): node discovery, cluster CLI & slash commands (c030ed9)
+
 ## [1.23.0] — 2026-04-29
 
 - feat(rector): add infrastructure orchestrator foundation (74ad73e)
