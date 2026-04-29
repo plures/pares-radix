@@ -1,3 +1,7 @@
+## [1.27.0] — 2026-04-29
+
+- feat(rector): add direct peer + LAN multicast discovery (14b90c9)
+
 ## [1.26.0] — 2026-04-29
 
 - feat: deep observability — health reporting, tool Chronos logging, PII guard (b5437b4)
