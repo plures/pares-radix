@@ -1,3 +1,7 @@
+## [1.29.0] — 2026-04-29
+
+- feat: auto-download BitNet models from HuggingFace on first use (60e8d03)
+
 ## [1.28.0] — 2026-04-29
 
 - feat: LAN multicast discovery + shortcoming mitigations (c89abb6)
