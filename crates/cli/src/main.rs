@@ -2752,10 +2752,14 @@ async fn main() {
             )));
             procedure_registry.register(Box::new(RunCommandProcedure));
 
+            // Initialize praxis write gate
+            let write_gate = Arc::new(pares_agens_core::praxis::PraxisWriteGate::new());
+
             // Initialize plugin framework
             let plugin_runtime = Arc::new(PluginRuntime::new());
-            let plugin_executor = Arc::new(PluginCrudExecutor::new(
+            let plugin_executor = Arc::new(PluginCrudExecutor::with_write_gate(
                 store.crdt_store_arc(),
+                Arc::clone(&write_gate),
             ));
 
             // Load persisted plugins from PluresDB
@@ -2852,6 +2856,7 @@ async fn main() {
                 Arc::clone(&plugin_runtime),
                 Arc::clone(&plugin_executor),
             );
+            config.write_gate = Some(Arc::clone(&write_gate));
             let adapter = TelegramAdapter::new(config);
 
             tracing::info!("Telegram adapter starting — bot is live");

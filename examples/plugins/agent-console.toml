@@ -1,0 +1,113 @@
+[plugin]
+name = "agent-console"
+version = "0.1.0"
+description = "AI coding agent — multi-file editing, project indexing, test execution, code review"
+author = "plures"
+
+[[schema.entities]]
+name = "project"
+display_name = "Project"
+icon = "📁"
+
+[[schema.entities.fields]]
+name = "name"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "path"
+field_type = "String"
+required = true
+description = "Local filesystem path to the project root"
+
+[[schema.entities.fields]]
+name = "indexed_at"
+field_type = "Date"
+required = false
+
+[[schema.entities.fields]]
+name = "file_count"
+field_type = "Number"
+required = false
+
+[[schema.entities]]
+name = "task"
+display_name = "Agent Task"
+icon = "🔧"
+
+[[schema.entities.fields]]
+name = "description"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "status"
+field_type = { Enum = ["pending", "planning", "executing", "testing", "reviewing", "done", "failed"] }
+required = true
+
+[[schema.entities.fields]]
+name = "files_modified"
+field_type = "Number"
+required = false
+
+[[schema.entities.fields]]
+name = "test_result"
+field_type = { Enum = ["not_run", "passing", "failing"] }
+required = false
+
+[[schema.entities]]
+name = "file_index"
+display_name = "Indexed File"
+icon = "📄"
+
+[[schema.entities.fields]]
+name = "path"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "language"
+field_type = "String"
+required = false
+
+[[schema.entities.fields]]
+name = "size_bytes"
+field_type = "Number"
+required = false
+
+[[schema.entities.fields]]
+name = "summary"
+field_type = "String"
+required = false
+description = "AI-generated summary of file purpose"
+
+[[schema.relationships]]
+name = "task_in_project"
+from_entity = "task"
+to_entity = "project"
+cardinality = "many_to_one"
+
+[[schema.relationships]]
+name = "file_in_project"
+from_entity = "file_index"
+to_entity = "project"
+cardinality = "many_to_one"
+
+[logic]
+
+[[logic.constraints]]
+name = "project_path_must_exist"
+description = "Project path must point to an existing directory"
+check = "path is valid directory"
+error_message = "Project path does not exist on the filesystem"
+
+[[logic.rules]]
+name = "auto_index_on_create"
+description = "When a project is created, automatically index its files"
+condition = "entity.type == project AND event == created"
+action = "trigger file indexing for project.path"
+
+[permissions]
+pluresdb_scopes = ["read", "write"]
+tool_access = ["run_command", "read_file", "write_file", "edit_file", "list_directory"]
+network = false

@@ -39,3 +39,4 @@ clap = { version = "4", features = ["derive", "env"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+walkdir = "2"
