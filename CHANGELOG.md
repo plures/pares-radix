@@ -1,3 +1,7 @@
+## [1.15.0] — 2026-04-29
+
+- feat: wire PraxisWriteGate into serve command + agent-console plugin (703c619)
+
 ## [1.14.0] — 2026-04-29
 
 - feat(praxis): add write gate for CrdtStore data validation (19577ed)
