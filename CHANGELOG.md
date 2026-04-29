@@ -1,3 +1,7 @@
+## [1.21.0] — 2026-04-29
+
+- feat: restore BitNet crates for local inference (c213137)
+
 ## [1.20.0] — 2026-04-29
 
 - feat: wire task loop into telegram — /tasks and /task commands (3bdafe7)

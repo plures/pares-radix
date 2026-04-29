@@ -1,6 +1,6 @@
 {
   "name": "@plures/design-dojo",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "description": "Design system UI primitives for Plures applications",
   "type": "module",
   "svelte": "./src/index.ts",
