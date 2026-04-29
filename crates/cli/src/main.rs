@@ -2857,6 +2857,11 @@ async fn main() {
                 Arc::clone(&plugin_executor),
             );
             config.write_gate = Some(Arc::clone(&write_gate));
+
+            // Task manager for /tasks and /task commands
+            let task_manager = Arc::new(pares_agens_core::task_manager::TaskManager::new(store.crdt_store_arc()));
+            config = config.with_task_manager(Arc::clone(&task_manager));
+
             let adapter = TelegramAdapter::new(config);
 
             tracing::info!("Telegram adapter starting — bot is live");

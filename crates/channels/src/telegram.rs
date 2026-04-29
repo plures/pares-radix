@@ -39,6 +39,7 @@ use pares_agens_core::channel_contract::{ChannelContract, GroupChatPolicy};
 use pares_agens_core::event_spine::EventSpineHandle;
 use pares_agens_core::renderers::telegram as html_renderer;
 use pares_agens_agenda::scheduler::Scheduler;
+use pares_agens_core::task_manager::TaskManager;
 
 const PARES_MODULUS_INDEX_URL: &str =
     "https://raw.githubusercontent.com/plures/pares-modulus/main/index.json";
@@ -56,7 +57,7 @@ const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
 /// The runtime strips this marker before model processing and uses it only to
 /// decide whether to append tool execution details to the Telegram reply.
 pub const TELEGRAM_VERBOSE_TOOL_DETAILS_MARKER: &str = "__PARES_VERBOSE_TOOL_DETAILS__:";
-const TELEGRAM_HELP_COMMANDS: [(&str, &str); 25] = [
+const TELEGRAM_HELP_COMMANDS: [(&str, &str); 27] = [
     ("/start", "show this command list"),
     ("/help", "show this command list"),
     ("/status", "status + health snapshot"),
@@ -108,6 +109,14 @@ const TELEGRAM_HELP_COMMANDS: [(&str, &str); 25] = [
     (
         "/praxis",
         "write gate: constraints, log [n], violations [n]",
+    ),
+    (
+        "/tasks",
+        "list open tasks (or /tasks all to include completed)",
+    ),
+    (
+        "/task <id>",
+        "show task details, complete, or cancel (/task <id> complete|cancel)",
     ),
 ];
 const DEFAULT_LOG_TAIL_LINES: usize = 80;
@@ -444,6 +453,8 @@ pub struct TelegramConfig {
     pub plugin_executor: Option<Arc<pares_agens_core::plugins::PluginCrudExecutor>>,
     /// Optional praxis write gate for `/praxis` command.
     pub write_gate: Option<Arc<pares_agens_core::praxis::write_gate::PraxisWriteGate>>,
+    /// Optional task manager for `/tasks` and `/task` commands.
+    pub task_manager: Option<Arc<TaskManager>>,
 }
 
 impl TelegramConfig {
@@ -462,6 +473,7 @@ impl TelegramConfig {
             plugin_runtime: None,
             plugin_executor: None,
             write_gate: None,
+            task_manager: None,
         }
     }
 
@@ -514,6 +526,13 @@ impl TelegramConfig {
     #[must_use]
     pub fn with_scheduler(mut self, scheduler: Arc<Scheduler>) -> Self {
         self.scheduler = Some(scheduler);
+        self
+    }
+
+    /// Enable `/tasks` and `/task` commands.
+    #[must_use]
+    pub fn with_task_manager(mut self, task_manager: Arc<TaskManager>) -> Self {
+        self.task_manager = Some(task_manager);
         self
     }
 
@@ -1192,6 +1211,7 @@ impl ChannelAdapter for TelegramAdapter {
         let plugin_runtime = self.config.plugin_runtime.clone();
         let plugin_executor = self.config.plugin_executor.clone();
         let write_gate = self.config.write_gate.clone();
+        let task_manager = self.config.task_manager.clone();
         let event_spine = self.event_spine.clone();
         let verbose_by_chat = Arc::new(TokioMutex::new(HashMap::<i64, bool>::new()));
         let installer = std::sync::Arc::new(TokioMutex::new(
@@ -1213,6 +1233,7 @@ impl ChannelAdapter for TelegramAdapter {
             let plugin_runtime = plugin_runtime.clone();
             let plugin_executor = plugin_executor.clone();
             let write_gate = write_gate.clone();
+            let task_manager = task_manager.clone();
             let verbose_by_chat = verbose_by_chat.clone();
             let event_spine = event_spine.clone();
             let bot_username = bot_username.clone();
@@ -1848,6 +1869,117 @@ impl ChannelAdapter for TelegramAdapter {
                                     }
                                 } else {
                                     "Plugin framework not initialized.".to_string()
+                                };
+                                Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                Self::acknowledge_message(&bot, &msg).await;
+                                return respond(());
+                            }
+                            "tasks" => {
+                                let Some(mgr) = &task_manager else {
+                                    Self::send_reply_with_fallback(&bot, &msg, "Task manager is unavailable.", None, event_spine.as_ref()).await;
+                                    Self::acknowledge_message(&bot, &msg).await;
+                                    return respond(());
+                                };
+                                let args: Vec<&str> = cmd_parts.collect();
+                                let include_all = args.first().copied() == Some("all");
+                                let chat_id_str = msg.chat.id.0.to_string();
+                                let tasks = mgr.tasks_for_chat(&chat_id_str, include_all);
+                                let reply = if tasks.is_empty() {
+                                    if include_all { "No tasks found.".to_string() } else { "No open tasks.".to_string() }
+                                } else {
+                                    let mut out = String::new();
+                                    for t in &tasks {
+                                        let status = match &t.status {
+                                            pares_agens_core::task::TaskStatus::Open => "⏳",
+                                            pares_agens_core::task::TaskStatus::InProgress => "🔄",
+                                            pares_agens_core::task::TaskStatus::Blocked => "🚫",
+                                            pares_agens_core::task::TaskStatus::Delegated => "👥",
+                                            pares_agens_core::task::TaskStatus::Completed => "✅",
+                                            pares_agens_core::task::TaskStatus::Failed => "❌",
+                                            pares_agens_core::task::TaskStatus::Cancelled => "🚮",
+                                        };
+                                        let short_id = &t.id[..8.min(t.id.len())];
+                                        let conds = t.completion_conditions.len();
+                                        let satisfied = t.completion_conditions.iter().filter(|c| c.satisfied).count();
+                                        if !out.is_empty() { out.push('\n'); }
+                                        out.push_str(&format!("{status} {short_id} — {} [{satisfied}/{conds}]", t.description));
+                                    }
+                                    out
+                                };
+                                Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                Self::acknowledge_message(&bot, &msg).await;
+                                return respond(());
+                            }
+                            "task" => {
+                                let Some(mgr) = &task_manager else {
+                                    Self::send_reply_with_fallback(&bot, &msg, "Task manager is unavailable.", None, event_spine.as_ref()).await;
+                                    Self::acknowledge_message(&bot, &msg).await;
+                                    return respond(());
+                                };
+                                let args: Vec<&str> = cmd_parts.collect();
+                                let reply = if args.is_empty() {
+                                    "Usage: /task <id> [complete|cancel]".to_string()
+                                } else {
+                                    let id_prefix = args[0];
+                                    // Find task by prefix match
+                                    let chat_id_str = msg.chat.id.0.to_string();
+                                    let all_tasks = mgr.tasks_for_chat(&chat_id_str, true);
+                                    let matched: Vec<_> = all_tasks.iter().filter(|t| t.id.starts_with(id_prefix)).collect();
+                                    if matched.is_empty() {
+                                        format!("No task found matching '{id_prefix}'.")
+                                    } else if matched.len() > 1 {
+                                        format!("Ambiguous prefix '{id_prefix}' — matches {} tasks. Be more specific.", matched.len())
+                                    } else {
+                                        let task = matched[0];
+                                        match args.get(1).copied() {
+                                            Some("complete") => {
+                                                // Satisfy RequesterAck conditions and check completion
+                                                for (i, cond) in task.completion_conditions.iter().enumerate() {
+                                                    if matches!(cond.condition_type, pares_agens_core::task::ConditionType::RequesterAck) && !cond.satisfied {
+                                                        mgr.satisfy_condition(&task.id, i);
+                                                    }
+                                                }
+                                                let completed = mgr.check_completion(&task.id);
+                                                if completed {
+                                                    format!("✅ Task {} completed.", &task.id[..8.min(task.id.len())])
+                                                } else {
+                                                    format!("👍 RequesterAck satisfied for {}. Other conditions still pending.", &task.id[..8.min(task.id.len())])
+                                                }
+                                            }
+                                            Some("cancel") => {
+                                                mgr.cancel_task(&task.id);
+                                                format!("🚮 Task {} cancelled.", &task.id[..8.min(task.id.len())])
+                                            }
+                                            None => {
+                                                // Show task details
+                                                let status = format!("{:?}", task.status);
+                                                let short_id = &task.id[..8.min(task.id.len())];
+                                                let mut out = format!("Task {short_id}\nStatus: {status}\nDescription: {}\nPriority: {}\nAttempts: {}",
+                                                    task.description, task.priority, task.attempts);
+                                                if let Some(ref parent) = task.parent_task {
+                                                    out.push_str(&format!("\nParent: {}", &parent[..8.min(parent.len())]));
+                                                }
+                                                if !task.subtasks.is_empty() {
+                                                    out.push_str(&format!("\nSubtasks: {}", task.subtasks.len()));
+                                                }
+                                                match &task.assigned_to {
+                                                    pares_agens_core::task::Assignment::Self_ => out.push_str("\nAssigned: self"),
+                                                    pares_agens_core::task::Assignment::Subagent(name) => out.push_str(&format!("\nAssigned: subagent({name})")),
+                                                    pares_agens_core::task::Assignment::User => out.push_str("\nAssigned: user"),
+                                                    pares_agens_core::task::Assignment::Unassigned => out.push_str("\nAssigned: unassigned"),
+                                                }
+                                                if !task.completion_conditions.is_empty() {
+                                                    out.push_str("\n\nConditions:");
+                                                    for cond in &task.completion_conditions {
+                                                        let icon = if cond.satisfied { "✅" } else { "⬜" };
+                                                        out.push_str(&format!("\n  {icon} {}", cond.description));
+                                                    }
+                                                }
+                                                out
+                                            }
+                                            Some(other) => format!("Unknown subcommand '{other}'. Usage: /task <id> [complete|cancel]"),
+                                        }
+                                    }
                                 };
                                 Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
                                 Self::acknowledge_message(&bot, &msg).await;
