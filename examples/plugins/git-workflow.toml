@@ -1,0 +1,76 @@
+[plugin]
+name = "git-workflow"
+version = "0.1.0"
+description = "Git repository management — import, export, branch, commit, PR workflows"
+author = "plures"
+
+[[schema.entities]]
+name = "repository"
+display_name = "Git Repository"
+icon = "📦"
+
+[[schema.entities.fields]]
+name = "name"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "path"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "remote_url"
+field_type = "String"
+required = false
+
+[[schema.entities.fields]]
+name = "current_branch"
+field_type = "String"
+required = false
+
+[[schema.entities.fields]]
+name = "last_synced"
+field_type = "Date"
+required = false
+
+[[schema.entities]]
+name = "commit_log"
+display_name = "Commit"
+icon = "📝"
+
+[[schema.entities.fields]]
+name = "hash"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "message"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "author"
+field_type = "String"
+required = true
+
+[[schema.entities.fields]]
+name = "timestamp"
+field_type = "Date"
+required = true
+
+[[schema.entities.fields]]
+name = "files_changed"
+field_type = "Number"
+required = false
+
+[[schema.relationships]]
+name = "commit_in_repo"
+from_entity = "commit_log"
+to_entity = "repository"
+cardinality = "many_to_one"
+
+[permissions]
+pluresdb_scopes = ["read", "write"]
+tool_access = ["run_command"]
+network = true

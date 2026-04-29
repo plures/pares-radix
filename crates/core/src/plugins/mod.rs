@@ -11,6 +11,7 @@ pub mod crud;
 pub mod error;
 pub mod executor;
 pub mod coding_agent;
+pub mod git_adapter;
 pub mod hooks;
 
 pub use manifest::*;
