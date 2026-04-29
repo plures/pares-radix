@@ -1,3 +1,7 @@
+## [1.20.0] — 2026-04-29
+
+- feat: wire task loop into telegram — /tasks and /task commands (3bdafe7)
+
 ## [1.19.0] — 2026-04-29
 
 - feat(core): add Praxis-driven task loop with PluresDB-backed task manager (2cffb59)
