@@ -1,3 +1,8 @@
+## [1.19.0] — 2026-04-29
+
+- feat(core): add Praxis-driven task loop with PluresDB-backed task manager (2cffb59)
+- chore: review pass — fix compilation, tests, help text, exports (6ed8b48)
+
 ## [1.18.0] — 2026-04-29
 
 - feat(plugins): git adapter plugin + unified TOML/JSON manifest parsing (83a75ae)
