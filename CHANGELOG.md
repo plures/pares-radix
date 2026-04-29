@@ -1,3 +1,7 @@
+## [1.25.0] — 2026-04-29
+
+- feat: NixOS deployer, ModelChain fallback, orchestrator deploy wiring (c4cb474)
+
 ## [1.24.0] — 2026-04-29
 
 - feat(rector): node discovery, cluster CLI & slash commands (c030ed9)
