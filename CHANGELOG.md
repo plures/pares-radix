@@ -1,3 +1,7 @@
+## [1.14.0] — 2026-04-29
+
+- feat(praxis): add write gate for CrdtStore data validation (19577ed)
+
 ## [1.13.0] — 2026-04-28
 
 - feat: wire Tauri bridge for plugin CRUD (1958d0b)
