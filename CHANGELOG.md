@@ -1,3 +1,7 @@
+## [1.23.0] — 2026-04-29
+
+- feat(rector): add infrastructure orchestrator foundation (74ad73e)
+
 ## [1.22.0] — 2026-04-29
 
 - feat(cerebellum): add message classifier with heuristic + model backend (6e13ab4)
