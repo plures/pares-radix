@@ -1,3 +1,7 @@
+## [1.26.0] — 2026-04-29
+
+- feat: deep observability — health reporting, tool Chronos logging, PII guard (b5437b4)
+
 ## [1.25.0] — 2026-04-29
 
 - feat: NixOS deployer, ModelChain fallback, orchestrator deploy wiring (c4cb474)
