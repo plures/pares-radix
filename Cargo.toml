@@ -17,6 +17,7 @@ members = [
     "crates/tui",
     "crates/bitnet-sys",
     "crates/bitnet",
+    "crates/rector",
 ]
 
 [workspace.package]
@@ -42,3 +43,4 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 walkdir = "2"
+toml = "0.8"
