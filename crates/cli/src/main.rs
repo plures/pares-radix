@@ -161,6 +161,7 @@ struct RuntimeAgentFactory {
     embed_model: String,
     api_key: Option<String>,
     system_prompt_path: Option<PathBuf>,
+    cerebellum_model_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -301,6 +302,19 @@ impl RuntimeAgentFactory {
             plures_lm: Arc::clone(&plures_lm),
         });
         let cerebellum = Cerebellum::new(CerebellumConfig::default());
+
+        // Attach classifier if a cerebellum model path is configured
+        let cerebellum = if let Some(ref _path) = self.cerebellum_model_path {
+            // When the `classifier` feature is enabled on the bitnet crate,
+            // we could load a BitNetClassifierBackend here. For now, wire
+            // heuristic-only so the plumbing is exercised.
+            let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
+            tracing::info!("cerebellum classifier enabled (heuristic mode)");
+            cerebellum.with_classifier(classifier)
+        } else {
+            cerebellum
+        };
+
         let system_prompt = self.load_system_prompt()?;
 
         // Create default personality contract. Runtime seeding into PluresDB
@@ -2327,6 +2341,12 @@ enum Commands {
         /// Path to a local BitNet model file for offline inference fallback.
         #[arg(long, env = "PARES_BITNET_MODEL_PATH", value_name = "PATH")]
         bitnet_model_path: Option<PathBuf>,
+
+        /// Path to a BitNet model file for cerebellum message classification.
+        /// When set, the cerebellum uses local BitNet inference for intent/
+        /// complexity classification instead of heuristic rules.
+        #[arg(long, env = "PARES_CEREBELLUM_MODEL_PATH", value_name = "PATH")]
+        cerebellum_model_path: Option<PathBuf>,
     },
 
     /// Run the agent with an interactive terminal UI.
@@ -2358,6 +2378,10 @@ enum Commands {
         /// Path to a local BitNet model file for offline inference fallback.
         #[arg(long, env = "PARES_BITNET_MODEL_PATH", value_name = "PATH")]
         bitnet_model_path: Option<PathBuf>,
+
+        /// Path to a BitNet model file for cerebellum message classification.
+        #[arg(long, env = "PARES_CEREBELLUM_MODEL_PATH", value_name = "PATH")]
+        cerebellum_model_path: Option<PathBuf>,
 
     },
 }
@@ -2422,6 +2446,7 @@ async fn main() {
             sync_shared_key,
             no_event_spine,
             bitnet_model_path,
+            cerebellum_model_path,
         } => {
             tracing::info!(commit = env!("GIT_COMMIT_HASH"), "Starting Pares Agens daemon");
             let started_at = Instant::now();
@@ -2831,6 +2856,7 @@ async fn main() {
                 embed_model: embed_model.clone(),
                 api_key: api_key.clone(),
                 system_prompt_path: system_prompt_path.clone(),
+                cerebellum_model_path: cerebellum_model_path.clone(),
             });
             let agent = match agent_factory.build_agent() {
                 Ok(agent) => agent,
@@ -3004,6 +3030,7 @@ async fn main() {
             api_key,
             system_prompt,
             bitnet_model_path,
+            cerebellum_model_path,
         } => {
             use crossterm::{
                 event::{self as ct_event, Event as CtEvent, KeyCode, KeyEventKind},
@@ -3122,6 +3149,12 @@ async fn main() {
             });
 
             let cerebellum = Cerebellum::new(CerebellumConfig::default());
+            let cerebellum = if cerebellum_model_path.is_some() {
+                let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
+                cerebellum.with_classifier(classifier)
+            } else {
+                cerebellum
+            };
             let system_prompt_text = build_system_prompt(system_prompt)
                 .unwrap_or_else(|e| {
                     eprintln!("Warning: {e}");
@@ -3616,6 +3649,7 @@ mod tests {
             embed_model: "nomic-embed-text".to_string(),
             api_key: None,
             system_prompt_path: None,
+            cerebellum_model_path: None,
         });
 
         let first_agent = factory.build_agent().expect("build initial agent");

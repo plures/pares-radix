@@ -12,5 +12,9 @@ links = "bitnet"
 # Requires the bitnet.cpp submodule at third_party/bitnet and CMake ≥ 3.21.
 # `cargo check --features native` type-checks without linking.
 native = []
+# GPU acceleration backends (each implies `native`).
+rocm = ["native"]
+cuda = ["native"]
+vulkan = ["native"]
 
 [build-dependencies]

@@ -24,6 +24,7 @@
 //! ```
 
 pub mod bridge;
+pub mod classifier;
 pub mod invoke;
 pub mod pipeline;
 pub mod router;
@@ -165,6 +166,8 @@ pub struct Cerebellum {
     pub pluresdb: Option<PluresDbBridge>,
     /// Last topic embedding seen per channel.
     topic_embeddings: Mutex<HashMap<String, Vec<f32>>>,
+    /// Optional message classifier for intent/complexity routing.
+    pub classifier: Option<classifier::CerebellumClassifier>,
 }
 
 impl Cerebellum {
@@ -174,6 +177,7 @@ impl Cerebellum {
             config,
             pluresdb: None,
             topic_embeddings: Mutex::new(HashMap::new()),
+            classifier: None,
         }
     }
 
@@ -183,7 +187,14 @@ impl Cerebellum {
             config,
             pluresdb: Some(bridge),
             topic_embeddings: Mutex::new(HashMap::new()),
+            classifier: None,
         }
+    }
+
+    /// Attach a message classifier to this cerebellum.
+    pub fn with_classifier(mut self, classifier: classifier::CerebellumClassifier) -> Self {
+        self.classifier = Some(classifier);
+        self
     }
 
     /// Main entry point: preprocess an event into an enriched context.
@@ -199,6 +210,26 @@ impl Cerebellum {
         memory: &PluresLm,
         _registry: &ProcedureRegistry,
     ) -> Result<CerebellumContext, CerebellumError> {
+        // 0. Classifier — adjust recall and routing hints
+        let classification = if let Some(ref clf) = self.classifier {
+            let q = extract_query(event);
+            q.as_deref().map(|msg| clf.classify(msg))
+        } else {
+            None
+        };
+
+        // Apply classifier hints to config overrides
+        let recall_limit = classification
+            .as_ref()
+            .map(|c| match c.complexity {
+                1 => 3,
+                2 => 5,
+                3 => self.config.recall_limit,
+                4 => self.config.recall_limit + 5,
+                _ => self.config.recall_limit + 10,
+            })
+            .unwrap_or(self.config.recall_limit);
+
         // 1. Autorecall
         let query = extract_query(event);
         let mut clear_history = false;
@@ -211,13 +242,20 @@ impl Cerebellum {
 
             let exclude_categories = parse_excluded_categories(&self.config.exclude_categories);
             let memories = memory
-                .recall(q, self.config.recall_limit, &exclude_categories)
+                .recall(q, recall_limit, &exclude_categories)
                 .await
                 .map_err(|e| CerebellumError::Memory(e.to_string()))?;
             memory.inject_context(&memories, Some(self.config.context_token_budget))
         } else {
             String::new()
         };
+
+        // Override clear_history with classifier topic_shift if available
+        if let Some(ref c) = classification {
+            if c.topic_shift {
+                clear_history = true;
+            }
+        }
 
         info!(
             event_kind = event.kind(),

@@ -11,7 +11,13 @@ repository.workspace = true
 # submodule and CMake ≥ 3.21 to be present.  Without this feature every
 # public function returns InferenceError::NativeUnavailable.
 inference = ["pares-agens-bitnet-sys/native"]
+# GPU acceleration backends (each implies `inference`).
+rocm = ["inference", "pares-agens-bitnet-sys/rocm"]
+cuda = ["inference", "pares-agens-bitnet-sys/cuda"]
+vulkan = ["inference", "pares-agens-bitnet-sys/vulkan"]
 model-client = ["dep:pares-agens-core", "dep:async-trait", "dep:tokio", "dep:tracing"]
+# Enable the ClassifierBackend implementation for cerebellum message classification.
+classifier = ["model-client"]
 
 [dependencies]
 pares-agens-bitnet-sys = { path = "../bitnet-sys" }

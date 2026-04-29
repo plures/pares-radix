@@ -42,8 +42,14 @@ pub mod runner;
 #[cfg(feature = "model-client")]
 pub mod model_client;
 
+#[cfg(feature = "classifier")]
+pub mod classifier_backend;
+
 pub use error::InferenceError;
 pub use runner::{BitNetContext, BitNetRunner, GenParams, TokenStream};
 
 #[cfg(feature = "model-client")]
 pub use model_client::BitnetModelClient;
+
+#[cfg(feature = "classifier")]
+pub use classifier_backend::BitNetClassifierBackend;
