@@ -98,3 +98,9 @@ pub mod heartbeat;
 pub mod plugins;
 /// Session persistence — save and restore conversation sessions.
 pub mod session;
+/// Praxis-driven task model — tracked units of work with completion conditions.
+pub mod task;
+/// Task manager — CRUD and lifecycle for tasks backed by PluresDB.
+pub mod task_manager;
+/// Task loop — idle-time evaluator that cycles open tasks.
+pub mod task_loop;
