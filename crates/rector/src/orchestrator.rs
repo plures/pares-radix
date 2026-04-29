@@ -1,3 +1,4 @@
+use crate::deployer::{DeployError, DeployResult, NixDeployer};
 use crate::node::ClusterNode;
 use crate::px_parser::PxFile;
 use crate::scheduler::{NodeAssignment, WorkloadScheduler};
@@ -161,6 +162,32 @@ impl Orchestrator {
             assignments,
             blocked,
         }
+    }
+
+    /// Deploy a single workload to a specific node.
+    ///
+    /// 1. Evaluate gate constraints
+    /// 2. Deploy via [`NixDeployer`]
+    /// 3. Return the result (PluresDB recording + Chronos logging are the
+    ///    caller's responsibility until those subsystems are wired in).
+    pub async fn deploy_workload(
+        &self,
+        workload: &crate::px_parser::PxWorkload,
+        node: &ClusterNode,
+    ) -> Result<DeployResult, DeployError> {
+        // 1. Evaluate gates
+        if !self.gates_pass(&workload.gates) {
+            return Err(DeployError::NixRebuildFailed(format!(
+                "gate constraints not met for workload '{}'",
+                workload.name
+            )));
+        }
+
+        // 2. Deploy via NixDeployer
+        NixDeployer::deploy(node, workload).await
+
+        // TODO: 3. Record in PluresDB
+        // TODO: 4. Log to Chronos
     }
 }
 

@@ -1,4 +1,5 @@
 pub mod cluster;
+pub mod deployer;
 pub mod discovery;
 pub mod node;
 pub mod orchestrator;

@@ -56,6 +56,8 @@ pub mod license;
 pub mod memory;
 /// LLM model client and tool dispatcher abstractions.
 pub mod model;
+/// Model selection chain — BitNet → conscious → deep fallback.
+pub mod model_chain;
 /// Optimization safety gates for runtime enforcement.
 pub mod optimization;
 /// Praxis decision ledger and approval gate procedures.
