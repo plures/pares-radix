@@ -253,6 +253,7 @@ fn parse_toml_manifest(toml_str: &str) -> Result<PluginManifest, PluginError> {
             tool_access: root.permissions.tool_access,
             network: root.permissions.network,
         },
+        hooks: Vec::new(),
     })
 }
 
@@ -273,6 +274,7 @@ mod tests {
             tools: Vec::new(),
             ui: None,
             permissions: PluginPermissions::default(),
+            hooks: Vec::new(),
         };
         rt.install(manifest).await.unwrap();
         assert_eq!(rt.list().await.len(), 1);
@@ -291,6 +293,7 @@ mod tests {
             tools: Vec::new(),
             ui: None,
             permissions: PluginPermissions::default(),
+            hooks: Vec::new(),
         };
         rt.install(manifest.clone()).await.unwrap();
         assert!(rt.install(manifest).await.is_err());
@@ -309,6 +312,7 @@ mod tests {
             tools: Vec::new(),
             ui: None,
             permissions: PluginPermissions::default(),
+            hooks: Vec::new(),
         };
         rt.install(manifest).await.unwrap();
         rt.uninstall("removable", false).await.unwrap();
@@ -342,6 +346,7 @@ mod tests {
             tools: Vec::new(),
             ui: None,
             permissions: PluginPermissions::default(),
+            hooks: Vec::new(),
         };
         rt.install(manifest).await.unwrap();
         let ctx = rt.schema_context().await;

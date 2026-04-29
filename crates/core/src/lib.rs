@@ -92,3 +92,5 @@ pub mod tool_governance;
 pub mod heartbeat;
 /// Plugin framework — application platform for schema-driven apps.
 pub mod plugins;
+/// Session persistence — save and restore conversation sessions.
+pub mod session;

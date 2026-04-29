@@ -11,6 +11,7 @@ pub mod crud;
 pub mod error;
 pub mod executor;
 pub mod coding_agent;
+pub mod hooks;
 
 pub use manifest::*;
 pub use runtime::PluginRuntime;

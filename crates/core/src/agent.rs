@@ -30,7 +30,9 @@ use crate::memory::entry::Exchange;
 use crate::memory::store::MemoryStore;
 use crate::memory::{passes_quality_gate, PluresLm};
 use crate::model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher};
+use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
 use crate::procedure::ProcedureRegistry;
+use crate::session::{SessionManager, SessionMetadata};
 
 // ---------------------------------------------------------------------------
 // Memory trait
@@ -159,6 +161,10 @@ pub struct Agent {
     personality_documents_cache: Mutex<Option<String>>,
     /// Cached plugin schema context for system prompt injection.
     plugin_context: Mutex<Option<String>>,
+    /// Hook manager for plugin lifecycle intercepts.
+    hook_manager: Arc<HookManager>,
+    /// Session manager for cross-restart persistence.
+    session_manager: Option<Arc<SessionManager>>,
 }
 
 #[derive(Debug, Clone)]
@@ -199,6 +205,8 @@ impl Agent {
             branch_state: Mutex::new(HashMap::new()),
             personality_documents_cache: Mutex::new(None),
             plugin_context: Mutex::new(None),
+            hook_manager: Arc::new(HookManager::new()),
+            session_manager: None,
         }
     }
 
@@ -231,7 +239,20 @@ impl Agent {
             branch_state: Mutex::new(HashMap::new()),
             personality_documents_cache: Mutex::new(None),
             plugin_context: Mutex::new(None),
+            hook_manager: Arc::new(HookManager::new()),
+            session_manager: None,
         }
+    }
+
+    /// Attach a session manager for cross-restart session persistence.
+    pub fn with_session_manager(mut self, manager: Arc<SessionManager>) -> Self {
+        self.session_manager = Some(manager);
+        self
+    }
+
+    /// Get a reference to the hook manager for plugin registration.
+    pub fn hook_manager(&self) -> &Arc<HookManager> {
+        &self.hook_manager
     }
 
     /// Attach a model client + tool dispatcher + system prompt to the agent.
@@ -544,6 +565,24 @@ impl Agent {
                 .await;
         }
 
+        // Persist session state for /resume support.
+        if let Some(session_mgr) = &self.session_manager {
+            let all_history = self.load_history(&session_channel).await;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let metadata = SessionMetadata {
+                started_at: now, // approximation; first message time would be better
+                last_message_at: now,
+                message_count: all_history.len(),
+                topic_summary: None,
+            };
+            session_mgr
+                .save_session(channel, &all_history, metadata)
+                .await;
+        }
+
         self.capture_exchange(content, &reply).await;
         self.spawn_procedure_writer(content, &reply);
 
@@ -724,13 +763,48 @@ impl Agent {
 
         let tools = tool_dispatcher.available_tools().await;
 
+        // Fire OnMessage hook.
+        let mut msg_ctx = HookContext {
+            message_text: Some(content.to_string()),
+            ..Default::default()
+        };
+        if let HookAction::Block(reason) = self.hook_manager.fire(HookPoint::OnMessage, &mut msg_ctx) {
+            return Err(format!("Message blocked by hook: {reason}"));
+        }
+
         let mut final_reply = None;
         let mut final_logprobs = None;
         for turn in 0..10 {
+            // Fire PreModelCall hook.
+            let mut pre_model_ctx = HookContext {
+                model_prompt: messages.last().map(|m| m.content.clone()),
+                ..Default::default()
+            };
+            match self.hook_manager.fire(HookPoint::PreModelCall, &mut pre_model_ctx) {
+                HookAction::Block(reason) => return Err(format!("Model call blocked by hook: {reason}")),
+                HookAction::InjectContext(text) => {
+                    // Prepend injected context to the system message.
+                    if let Some(sys) = messages.first_mut() {
+                        if sys.role == "system" {
+                            sys.content.push_str("\n\n");
+                            sys.content.push_str(&text);
+                        }
+                    }
+                }
+                _ => {}
+            }
+
             let model_start = Instant::now();
             let completion = model_client.complete(&messages, &tools, options).await?;
             let latency_ms = model_start.elapsed().as_millis();
             info!(turn, latency_ms, tool_calls = completion.tool_calls.len(), "model completion received");
+
+            // Fire PostModelCall hook.
+            let mut post_model_ctx = HookContext {
+                model_response: completion.content.clone(),
+                ..Default::default()
+            };
+            self.hook_manager.fire(HookPoint::PostModelCall, &mut post_model_ctx);
 
             if !completion.tool_calls.is_empty() {
                 let tool_calls = completion.tool_calls.clone();
@@ -742,10 +816,47 @@ impl Agent {
                 });
 
                 for tool_call in tool_calls {
-                    let tool_result = tool_dispatcher
-                        .call_tool(&tool_call.name, tool_call.arguments)
-                        .await;
-                    messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
+                    // Fire PreToolUse hook.
+                    let mut pre_ctx = HookContext {
+                        tool_name: Some(tool_call.name.clone()),
+                        tool_args: Some(tool_call.arguments.clone()),
+                        ..Default::default()
+                    };
+                    match self.hook_manager.fire(HookPoint::PreToolUse, &mut pre_ctx) {
+                        HookAction::Block(reason) => {
+                            messages.push(ChatMessage::tool_result(
+                                tool_call.id,
+                                format!("Tool blocked by hook: {reason}"),
+                            ));
+                            continue;
+                        }
+                        HookAction::ModifyContext(new_args) => {
+                            let tool_result = tool_dispatcher
+                                .call_tool(&tool_call.name, new_args)
+                                .await;
+                            // Fire PostToolUse hook.
+                            let mut post_ctx = HookContext {
+                                tool_name: Some(tool_call.name.clone()),
+                                tool_result: Some(tool_result.clone()),
+                                ..Default::default()
+                            };
+                            self.hook_manager.fire(HookPoint::PostToolUse, &mut post_ctx);
+                            messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
+                        }
+                        _ => {
+                            let tool_result = tool_dispatcher
+                                .call_tool(&tool_call.name, tool_call.arguments)
+                                .await;
+                            // Fire PostToolUse hook.
+                            let mut post_ctx = HookContext {
+                                tool_name: Some(tool_call.name.clone()),
+                                tool_result: Some(tool_result.clone()),
+                                ..Default::default()
+                            };
+                            self.hook_manager.fire(HookPoint::PostToolUse, &mut post_ctx);
+                            messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
+                        }
+                    }
                 }
                 continue;
             }
@@ -1318,6 +1429,113 @@ impl Agent {
                     content: message,
                 })
             }
+            "resume" => {
+                let subcommand = parts.next().unwrap_or("").to_ascii_lowercase();
+                match subcommand.as_str() {
+                    "list" | "" if subcommand == "list" => {
+                        // /resume list — show recent sessions
+                        if let Some(session_mgr) = &self.session_manager {
+                            let sessions = session_mgr.list_sessions(channel, 10).await;
+                            if sessions.is_empty() {
+                                return Some(Event::ModelResponse {
+                                    request_id: id.to_string(),
+                                    model: "command".into(),
+                                    content: "No saved sessions found.".into(),
+                                });
+                            }
+                            let mut lines = vec!["Recent sessions:".to_string()];
+                            for s in &sessions {
+                                let ts = chrono::DateTime::from_timestamp(s.started_at as i64, 0)
+                                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                    .unwrap_or_else(|| s.started_at.to_string());
+                                let topic = s.topic_summary.as_deref().unwrap_or("(no topic)");
+                                lines.push(format!(
+                                    "• {} — {} msgs, {} — {}",
+                                    s.key, s.message_count, ts, topic
+                                ));
+                            }
+                            return Some(Event::ModelResponse {
+                                request_id: id.to_string(),
+                                model: "command".into(),
+                                content: lines.join("\n"),
+                            });
+                        } else {
+                            return Some(Event::ModelResponse {
+                                request_id: id.to_string(),
+                                model: "command".into(),
+                                content: "Session persistence not configured.".into(),
+                            });
+                        }
+                    }
+                    _ => {
+                        // /resume (no args) — restore most recent session
+                        if let Some(session_mgr) = &self.session_manager {
+                            if let Some(saved) = session_mgr.load_active_session(channel).await {
+                                let count = saved.messages.len();
+                                // Restore into conversation history.
+                                {
+                                    let mut guard = self.conversation_history.lock().unwrap();
+                                    guard.insert(channel.to_string(), saved.messages);
+                                }
+                                return Some(Event::ModelResponse {
+                                    request_id: id.to_string(),
+                                    model: "command".into(),
+                                    content: format!(
+                                        "Resumed session with {count} messages."
+                                    ),
+                                });
+                            } else {
+                                return Some(Event::ModelResponse {
+                                    request_id: id.to_string(),
+                                    model: "command".into(),
+                                    content: "No session to resume.".into(),
+                                });
+                            }
+                        } else {
+                            return Some(Event::ModelResponse {
+                                request_id: id.to_string(),
+                                model: "command".into(),
+                                content: "Session persistence not configured.".into(),
+                            });
+                        }
+                    }
+                }
+            }
+            "sessions" => {
+                // Alias for /resume list
+                if let Some(session_mgr) = &self.session_manager {
+                    let sessions = session_mgr.list_sessions(channel, 10).await;
+                    if sessions.is_empty() {
+                        return Some(Event::ModelResponse {
+                            request_id: id.to_string(),
+                            model: "command".into(),
+                            content: "No saved sessions found.".into(),
+                        });
+                    }
+                    let mut lines = vec!["Recent sessions:".to_string()];
+                    for s in &sessions {
+                        let ts = chrono::DateTime::from_timestamp(s.started_at as i64, 0)
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_else(|| s.started_at.to_string());
+                        let topic = s.topic_summary.as_deref().unwrap_or("(no topic)");
+                        lines.push(format!(
+                            "• {} — {} msgs, {} — {}",
+                            s.key, s.message_count, ts, topic
+                        ));
+                    }
+                    return Some(Event::ModelResponse {
+                        request_id: id.to_string(),
+                        model: "command".into(),
+                        content: lines.join("\n"),
+                    });
+                } else {
+                    return Some(Event::ModelResponse {
+                        request_id: id.to_string(),
+                        model: "command".into(),
+                        content: "Session persistence not configured.".into(),
+                    });
+                }
+            }
             "clear" => {
                 let (previous_session, new_session) = {
                     let mut guard = match self.branch_state.lock() {
@@ -1370,6 +1588,11 @@ impl Agent {
                             });
                         }
                     }
+                }
+
+                // Archive the session for /resume support.
+                if let Some(session_mgr) = &self.session_manager {
+                    session_mgr.archive_session(channel).await;
                 }
 
                 info!(

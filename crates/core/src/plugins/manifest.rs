@@ -30,6 +30,10 @@ pub struct PluginManifest {
     /// Permissions the plugin requires.
     #[serde(default)]
     pub permissions: PluginPermissions,
+
+    /// Lifecycle hooks the plugin registers.
+    #[serde(default)]
+    pub hooks: Vec<crate::plugins::hooks::HookDeclaration>,
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────────
