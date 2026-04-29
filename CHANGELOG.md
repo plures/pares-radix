@@ -1,3 +1,7 @@
+## [1.22.0] — 2026-04-29
+
+- feat(cerebellum): add message classifier with heuristic + model backend (6e13ab4)
+
 ## [1.21.0] — 2026-04-29
 
 - feat: restore BitNet crates for local inference (c213137)
