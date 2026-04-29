@@ -1,3 +1,7 @@
+## [1.28.0] — 2026-04-29
+
+- feat: LAN multicast discovery + shortcoming mitigations (c89abb6)
+
 ## [1.27.0] — 2026-04-29
 
 - feat(rector): add direct peer + LAN multicast discovery (14b90c9)
