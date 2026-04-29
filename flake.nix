@@ -218,6 +218,12 @@ tar.extractall(os.environ['out'] + '/lib')
             extraFlags = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [];
+
+            bitnetModelPath = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to a BitNet model file for local inference.";
+            };
               description = "Additional command-line flags.";
             };
           };
@@ -281,6 +287,9 @@ tar.extractall(os.environ['out'] + '/lib')
                   syncArg = if cfg.syncTopicKey != null
                     then "--sync-topic-key ${cfg.syncTopicKey}"
                     else "";
+                  bitnetArg = if cfg.bitnetModelPath != null
+                    then "--bitnet-model-path ${cfg.bitnetModelPath}"
+                    else "";
                   escapedBraveApiKeyFile = if cfg.braveApiKeyFile != null
                     then lib.escapeShellArg (toString cfg.braveApiKeyFile)
                     else null;
@@ -306,6 +315,7 @@ tar.extractall(os.environ['out'] + '/lib')
                     ${modelArg} \
                     ${promptArg} \
                     ${syncArg} \
+                    ${bitnetArg} \
                     ${extraArgs}
                 '';
             };

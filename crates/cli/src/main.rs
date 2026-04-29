@@ -49,6 +49,7 @@ use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
 use pares_agens_core::tool_governance::{GovernanceVerdict, ToolGovernor};
 use pares_agens_core::Event;
 use pares_agens_core::{PluresDbStateStore, StateStore};
+use pares_agens_bitnet::BitnetModelClient;
 use pares_agens_migrate::{migrate, openclaw};
 use pares_models::config::{ProviderConfig, RouterConfig};
 use pares_models::router::ModelRouter;
@@ -2322,6 +2323,10 @@ enum Commands {
         /// into PluresDB.  Pass this flag to disable it.
         #[arg(long, env = "PARES_NO_EVENT_SPINE")]
         no_event_spine: bool,
+
+        /// Path to a local BitNet model file for offline inference fallback.
+        #[arg(long, env = "PARES_BITNET_MODEL_PATH", value_name = "PATH")]
+        bitnet_model_path: Option<PathBuf>,
     },
 
     /// Run the agent with an interactive terminal UI.
@@ -2349,6 +2354,10 @@ enum Commands {
         /// Path to a system prompt file.
         #[arg(long, value_name = "PATH")]
         system_prompt: Option<PathBuf>,
+
+        /// Path to a local BitNet model file for offline inference fallback.
+        #[arg(long, env = "PARES_BITNET_MODEL_PATH", value_name = "PATH")]
+        bitnet_model_path: Option<PathBuf>,
 
     },
 }
@@ -2412,6 +2421,7 @@ async fn main() {
             sync_topic_key,
             sync_shared_key,
             no_event_spine,
+            bitnet_model_path,
         } => {
             tracing::info!(commit = env!("GIT_COMMIT_HASH"), "Starting Pares Agens daemon");
             let started_at = Instant::now();
@@ -2511,7 +2521,11 @@ async fn main() {
             let mut runtime_config_control: Option<Arc<dyn TelegramConfigControl>> = None;
 
             let (model_client, deep_model_client): (Arc<dyn ModelClient>, Arc<dyn ModelClient>) =
-                if copilot {
+                if let Some(ref bitnet_path) = bitnet_model_path {
+                    tracing::info!(path = %bitnet_path.display(), "using local BitNet model");
+                    let client: Arc<dyn ModelClient> = Arc::new(BitnetModelClient::new(bitnet_path));
+                    (Arc::clone(&client), client)
+                } else if copilot {
                     let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
                     let cached = std::fs::read_to_string(&auth_path)
                         .ok()
@@ -2989,6 +3003,7 @@ async fn main() {
             copilot,
             api_key,
             system_prompt,
+            bitnet_model_path,
         } => {
             use crossterm::{
                 event::{self as ct_event, Event as CtEvent, KeyCode, KeyEventKind},
@@ -3004,7 +3019,10 @@ async fn main() {
 
             // Build model client
             let model_name_handle = Arc::new(RwLock::new(model.clone()));
-            let model_client: Arc<dyn ModelClient> = if copilot {
+            let model_client: Arc<dyn ModelClient> = if let Some(ref bitnet_path) = bitnet_model_path {
+                tracing::info!(path = %bitnet_path.display(), "using local BitNet model (TUI)");
+                Arc::new(BitnetModelClient::new(bitnet_path))
+            } else if copilot {
                 if model == "gpt-4.1" || model == "gpt-4o" {
                     model = "gpt-4.1".into();
                     *model_name_handle.write().await = model.clone();
