@@ -57,7 +57,7 @@ const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
 /// The runtime strips this marker before model processing and uses it only to
 /// decide whether to append tool execution details to the Telegram reply.
 pub const TELEGRAM_VERBOSE_TOOL_DETAILS_MARKER: &str = "__PARES_VERBOSE_TOOL_DETAILS__:";
-const TELEGRAM_HELP_COMMANDS: [(&str, &str); 27] = [
+const TELEGRAM_HELP_COMMANDS: [(&str, &str); 32] = [
     ("/start", "show this command list"),
     ("/help", "show this command list"),
     ("/status", "status + health snapshot"),
@@ -118,6 +118,11 @@ const TELEGRAM_HELP_COMMANDS: [(&str, &str); 27] = [
         "/task <id>",
         "show task details, complete, or cancel (/task <id> complete|cancel)",
     ),
+    ("/cluster status", "show cluster state"),
+    ("/cluster nodes", "list discovered nodes with capabilities"),
+    ("/cluster info", "show local node capabilities"),
+    ("/cluster deploy <file>", "deploy workloads from a .px file"),
+    ("/cluster workloads", "list running workloads"),
 ];
 const DEFAULT_LOG_TAIL_LINES: usize = 80;
 const MAX_LOG_TAIL_LINES: usize = 400;
@@ -2041,6 +2046,75 @@ impl ChannelAdapter for TelegramAdapter {
                                         }
                                     }
                                     _ => "Usage: /praxis constraints | log [n] | violations [n]".to_string(),
+                                };
+                                Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                Self::acknowledge_message(&bot, &msg).await;
+                                return respond(());
+                            }
+                            "cluster" => {
+                                let args: Vec<&str> = cmd_parts.collect();
+                                let reply = match args.first().copied() {
+                                    None | Some("status") => {
+                                        // Detect local capabilities as a single-node fallback
+                                        let caps = pares_rector::discovery::PluresDbDiscovery::detect_local_capabilities();
+                                        let local_node = pares_rector::node::ClusterNode {
+                                            id: "local".to_string(),
+                                            hostname: crate::cluster_hostname(),
+                                            addresses: vec![],
+                                            capabilities: caps,
+                                            status: pares_rector::node::NodeStatus::Online,
+                                            workloads: vec![],
+                                            last_seen: 0,
+                                            cpu_usage: 0.0,
+                                        };
+                                        let summary = pares_rector::cluster::ClusterSummary::from_nodes(&[local_node]);
+                                        pares_rector::cluster::format_cluster_status(&summary)
+                                    }
+                                    Some("nodes") => {
+                                        let caps = pares_rector::discovery::PluresDbDiscovery::detect_local_capabilities();
+                                        let local_node = pares_rector::node::ClusterNode {
+                                            id: "local".to_string(),
+                                            hostname: crate::cluster_hostname(),
+                                            addresses: vec![],
+                                            capabilities: caps,
+                                            status: pares_rector::node::NodeStatus::Online,
+                                            workloads: vec![],
+                                            last_seen: 0,
+                                            cpu_usage: 0.0,
+                                        };
+                                        pares_rector::cluster::format_cluster_nodes(&[local_node])
+                                    }
+                                    Some("info") => {
+                                        let caps = pares_rector::discovery::PluresDbDiscovery::detect_local_capabilities();
+                                        pares_rector::cluster::format_node_info(&caps)
+                                    }
+                                    Some("deploy") => {
+                                        if let Some(px_path) = args.get(1) {
+                                            match std::fs::read_to_string(px_path) {
+                                                Ok(content) => {
+                                                    let caps = pares_rector::discovery::PluresDbDiscovery::detect_local_capabilities();
+                                                    let local_node = pares_rector::node::ClusterNode {
+                                                        id: "local".to_string(),
+                                                        hostname: crate::cluster_hostname(),
+                                                        addresses: vec![],
+                                                        capabilities: caps,
+                                                        status: pares_rector::node::NodeStatus::Online,
+                                                        workloads: vec![],
+                                                        last_seen: 0,
+                                                        cpu_usage: 0.0,
+                                                    };
+                                                    pares_rector::cluster::format_deploy_result(&content, &[local_node])
+                                                }
+                                                Err(e) => format!("Failed to read .px file: {e}"),
+                                            }
+                                        } else {
+                                            "Usage: /cluster deploy <px-file>".to_string()
+                                        }
+                                    }
+                                    Some("workloads") => {
+                                        "No active workloads.".to_string()
+                                    }
+                                    _ => "Usage: /cluster [status | nodes | info | deploy <file> | workloads]".to_string(),
                                 };
                                 Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
                                 Self::acknowledge_message(&bot, &msg).await;

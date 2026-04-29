@@ -2264,6 +2264,12 @@ enum Commands {
         dry_run: bool,
     },
 
+    /// Cluster management commands.
+    Cluster {
+        #[command(subcommand)]
+        action: ClusterAction,
+    },
+
     /// Run the agent as a headless daemon with a channel adapter.
     Serve {
         /// Telegram bot token (from BotFather).
@@ -2386,6 +2392,28 @@ enum Commands {
     },
 }
 
+#[derive(Debug, clap::Subcommand)]
+enum ClusterAction {
+    /// Show cluster status.
+    Status,
+    /// List all discovered nodes.
+    Nodes,
+    /// Deploy workloads from a .px file.
+    Deploy {
+        /// Path to a .px constraint file.
+        px_file: String,
+    },
+    /// List running workloads.
+    Workloads,
+    /// Join this node to a cluster.
+    Join {
+        /// Hyperswarm topic key (hex).
+        topic_key: String,
+    },
+    /// Show this node's capabilities.
+    Info,
+}
+
 #[tokio::main]
 async fn main() {
     let initial_filter = build_env_filter("info").expect("default log level should be valid");
@@ -2403,6 +2431,61 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Cluster { action } => {
+            use pares_rector::cluster;
+            use pares_rector::discovery::PluresDbDiscovery;
+            use pares_rector::node::{ClusterNode, NodeStatus};
+
+            let caps = PluresDbDiscovery::detect_local_capabilities();
+            let hostname = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| {
+                    std::fs::read_to_string("/etc/hostname")
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_else(|_| "unknown".to_string())
+                });
+            let local_node = ClusterNode {
+                id: "local".to_string(),
+                hostname: hostname.clone(),
+                addresses: vec![],
+                capabilities: caps.clone(),
+                status: NodeStatus::Online,
+                workloads: vec![],
+                last_seen: 0,
+                cpu_usage: 0.0,
+            };
+            let nodes = vec![local_node];
+
+            match action {
+                ClusterAction::Status => {
+                    let summary = cluster::ClusterSummary::from_nodes(&nodes);
+                    println!("{}", cluster::format_cluster_status(&summary));
+                }
+                ClusterAction::Nodes => {
+                    println!("{}", cluster::format_cluster_nodes(&nodes));
+                }
+                ClusterAction::Info => {
+                    println!("{}", cluster::format_node_info(&caps));
+                }
+                ClusterAction::Deploy { px_file } => {
+                    match std::fs::read_to_string(&px_file) {
+                        Ok(content) => println!("{}", cluster::format_deploy_result(&content, &nodes)),
+                        Err(e) => {
+                            eprintln!("Failed to read {px_file}: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ClusterAction::Workloads => {
+                    println!("No active workloads.");
+                }
+                ClusterAction::Join { topic_key } => {
+                    println!("Joining cluster with topic key: {topic_key}");
+                    println!("(Hyperswarm join not yet wired — PluresDB sync must be configured separately)");
+                }
+            }
+        }
+
         Commands::Migrate {
             from,
             output,

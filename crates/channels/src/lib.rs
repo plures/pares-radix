@@ -17,6 +17,17 @@ pub mod stdin;
 pub mod tauri_ipc;
 pub mod telegram;
 
+/// Get the local hostname for cluster display.
+pub(crate) fn cluster_hostname() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| {
+            std::fs::read_to_string("/etc/hostname")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "unknown".to_string())
+        })
+}
+
 /// Validate that the license permits running the given number of channel adapters.
 ///
 /// Allows zero or one adapter on any tier.  More than one adapter requires a
