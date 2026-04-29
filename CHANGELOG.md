@@ -1,3 +1,7 @@
+## [1.16.0] — 2026-04-29
+
+- feat: session resume (/resume command) and plugin hook system (cc32839)
+
 ## [1.15.0] — 2026-04-29
 
 - feat: wire PraxisWriteGate into serve command + agent-console plugin (703c619)
