@@ -3092,6 +3092,9 @@ async fn main() {
                     let formatted = format_documents_for_prompt(&docs);
                     agent_handle.read().await.set_personality_documents(Some(formatted));
                     tracing::info!(count = docs.len(), "loaded personality documents into agent");
+                    for doc in &docs {
+                        tracing::info!("  {} ({} chars)", doc.doc_type, doc.content.len());
+                    }
                 }
             }
 

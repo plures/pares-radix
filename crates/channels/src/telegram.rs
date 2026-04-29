@@ -1301,13 +1301,24 @@ impl ChannelAdapter for TelegramAdapter {
                                     format!("{hours}h {mins}m")
                                 };
                                 let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
+                                let plugin_line = if let Some(ref pr) = plugin_runtime {
+                                    let count = pr.list().await.len();
+                                    format!("Plugins: {count} installed")
+                                } else {
+                                    "Plugins: none".to_string()
+                                };
+                                let cerebellum_line = if std::path::Path::new(&format!("{home}/.pares-agens/models/bitnet")).exists() {
+                                    "Cerebellum: BitNet (local)"
+                                } else {
+                                    "Cerebellum: heuristic"
+                                };
                                 let status = format!(
                                     "Pares Agens v{version} ({commit})\n\
                                      PID: {} | RSS: {memory} | Uptime: {uptime}\n\
                                      Model: {model_line}\n\
+                                     {cerebellum_line}\n\
                                      Event Spine: {event_spine_status}\n\
-                                     Rendering: HTML + plain text fallback\n\
-                                     Tool Governance: active (30s timeout)\n\
+                                     {plugin_line}\n\
                                      PluresDB: {home}/.pares-agens/memory/",
                                     std::process::id(),
                                 );
@@ -1376,7 +1387,7 @@ impl ChannelAdapter for TelegramAdapter {
                                             }
                                         }
                                         Err(e) => {
-                                            format!("Failed to update deep model escalation: {e}")
+                                            format!("⚠️ Failed to update deep model escalation: {e}")
                                         }
                                     },
                                     Err(usage) => usage.to_string(),
@@ -1407,7 +1418,7 @@ impl ChannelAdapter for TelegramAdapter {
                                                 let (_, deep) = control.current_models().await;
                                                 format!("Updated primary model to {model}\nDeep: {deep}")
                                             }
-                                            Err(e) => format!("Failed to update primary model: {e}"),
+                                            Err(e) => format!("⚠️ Failed to update primary model: {e}"),
                                         }
                                     }
                                     Ok(ModelCommand::SetDeep(model)) => {
@@ -1416,7 +1427,7 @@ impl ChannelAdapter for TelegramAdapter {
                                                 let (primary, _) = control.current_models().await;
                                                 format!("Updated deep model to {model}\nPrimary: {primary}")
                                             }
-                                            Err(e) => format!("Failed to update deep model: {e}"),
+                                            Err(e) => format!("⚠️ Failed to update deep model: {e}"),
                                         }
                                     }
                                     Err(e) => e.to_string(),
@@ -1466,7 +1477,7 @@ impl ChannelAdapter for TelegramAdapter {
                                     Ok(ConfigCommand::SetModel(model)) => {
                                         match control.set_model(&model).await {
                                             Ok(()) => format!("Updated runtime model to {model}"),
-                                            Err(e) => format!("Failed to update model: {e}"),
+                                            Err(e) => format!("⚠️ Failed to update model: {e}"),
                                         }
                                     }
                                     Ok(ConfigCommand::SetEndpoint(endpoint)) => {
@@ -1474,7 +1485,7 @@ impl ChannelAdapter for TelegramAdapter {
                                             Ok(()) => {
                                                 format!("Updated runtime endpoint to {endpoint}")
                                             }
-                                            Err(e) => format!("Failed to update endpoint: {e}"),
+                                            Err(e) => format!("⚠️ Failed to update endpoint: {e}"),
                                         }
                                     }
                                     Ok(ConfigCommand::SetLogLevel(log_level)) => {
@@ -1482,7 +1493,7 @@ impl ChannelAdapter for TelegramAdapter {
                                             Ok(()) => {
                                                 format!("Updated runtime log level to {log_level}")
                                             }
-                                            Err(e) => format!("Failed to update log level: {e}"),
+                                            Err(e) => format!("⚠️ Failed to update log level: {e}"),
                                         }
                                     }
                                     Err(e) => e.to_string(),
@@ -1756,7 +1767,7 @@ impl ChannelAdapter for TelegramAdapter {
                                                 sched.add(task).await;
                                                 reply
                                             }
-                                            Err(e) => format!("Error: {e}\nUsage: /cron add '<schedule>' '<command>'"),
+                                            Err(e) => format!("⚠️ {e}\nUsage: /cron add '<schedule>' '<command>'"),
                                         }
                                     }
                                     Some("remove") | Some("rm") | Some("delete") => {

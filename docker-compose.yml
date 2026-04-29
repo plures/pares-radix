@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  pares-agens:
+    build: .
+    environment:
+      RUST_LOG: info
+      PARES_MODEL_CACHE: /home/test/.cache/pares-models
+    volumes:
+      - model-cache:/home/test/.cache/pares-models
+    command: ["tui"]
+    stdin_open: true
+    tty: true
+
+  qa-test:
+    build: .
+    environment:
+      RUST_LOG: info
+    command: ["--version"]
+
+volumes:
+  model-cache:

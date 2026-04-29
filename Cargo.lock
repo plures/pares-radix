@@ -3728,7 +3728,7 @@ dependencies = [
 
 [[package]]
 name = "mcp-client"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4435,7 +4435,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-agenda"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-audit"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4466,7 +4466,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "pares-agens-bitnet-sys",
@@ -4478,11 +4478,11 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet-sys"
-version = "1.27.0"
+version = "1.28.0"
 
 [[package]]
 name = "pares-agens-channels"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "pares-agens-agenda",
@@ -4502,7 +4502,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-cli"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4531,7 +4531,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-core"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4563,7 +4563,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-marketplace"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4573,7 +4573,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-praxis"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "chrono",
  "pest",
@@ -4586,7 +4586,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-privacy"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "regex",
  "serde",
@@ -4597,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-sync"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "chrono",
  "serde",
@@ -4633,7 +4633,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-tui"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4649,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "pares-models"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4676,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "pares-rector"
-version = "1.27.0"
+version = "1.28.0"
 dependencies = [
  "hostname",
  "num_cpus",
