@@ -2409,6 +2409,12 @@ enum ClusterAction {
     Join {
         /// Hyperswarm topic key (hex).
         topic_key: String,
+        /// Comma-separated direct peers (ip:port,ip:port).
+        #[arg(long)]
+        direct: Option<String>,
+        /// Enable LAN multicast discovery.
+        #[arg(long)]
+        lan: bool,
     },
     /// Show this node's capabilities.
     Info,
@@ -2479,8 +2485,14 @@ async fn main() {
                 ClusterAction::Workloads => {
                     println!("No active workloads.");
                 }
-                ClusterAction::Join { topic_key } => {
+                ClusterAction::Join { topic_key, direct, lan } => {
                     println!("Joining cluster with topic key: {topic_key}");
+                    if let Some(ref peers) = direct {
+                        println!("Direct peers: {peers}");
+                    }
+                    if lan {
+                        println!("LAN multicast discovery enabled");
+                    }
                     println!("(Hyperswarm join not yet wired — PluresDB sync must be configured separately)");
                 }
             }

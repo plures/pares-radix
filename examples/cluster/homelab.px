@@ -1,19 +1,28 @@
-# homelab.px — 3-node home cluster
-#
-# Example constraint file for a typical homelab deployment with
-# pares-agens running on a primary node and pluresdb-peer replicated
-# across all nodes for resilient data storage.
+# Homelab cluster example with multi-mode discovery.
+
+[discovery]
+
+[[discovery.direct]]
+address = "praxisbot.local"
+port = 7700
+
+[[discovery.direct]]
+address = "10.0.0.5"
+port = 7700
+
+[discovery.lan]
+enabled = true
+multicast_group = "239.255.77.77"
+port = 7700
+
+[discovery.hyperswarm]
+enabled = false
+topic_key = ""
 
 [[node_requirement]]
 name = "minimum_nodes"
 count_check = ">= 2"
-error = "Need at least 2 healthy nodes"
-
-[[constraint]]
-name = "deploy_safe"
-check = "healthy_nodes >= 2 AND cpu_avg < 80"
-severity = "error"
-message = "Cluster not healthy for deployment"
+error = "Homelab cluster requires at least 2 healthy nodes"
 
 [[workload]]
 name = "pluresdb-peer"
@@ -23,35 +32,9 @@ placement = "everywhere"
 
 [workload.resources]
 cpu = 1.0
-memory = "1G"
+memory = "2G"
 
 [workload.health]
 protocol = "tcp"
-target = "localhost:3100"
+target = "tcp://localhost:3100"
 interval_secs = 10
-
-[[workload]]
-name = "pares-agens"
-image = "nixos#pares-radix"
-replicas = 1
-placement = "prefer_idle"
-gates = ["deploy_safe"]
-
-[workload.resources]
-cpu = 2.0
-memory = "4G"
-
-[workload.health]
-protocol = "http"
-target = "http://localhost:18789/health"
-interval_secs = 30
-
-[workload.on_failure]
-policy = "restart"
-max_attempts = 3
-
-[[rule]]
-name = "self_heal"
-when_condition = "workload.health_failures >= 3"
-action = "restart workload on different_node"
-log_message = "Self-healed {workload.name}"

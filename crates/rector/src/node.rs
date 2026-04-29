@@ -13,7 +13,7 @@ pub struct ClusterNode {
     pub cpu_usage: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NodeCapabilities {
     pub cpu_cores: u32,
     pub memory_total_mb: u64,

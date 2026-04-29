@@ -4,12 +4,14 @@
 //! PluresDB-backed discovery that uses the CRDT store (synced via
 //! Hyperswarm) to announce and discover cluster nodes.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::node::{ClusterNode, NodeCapabilities};
+use crate::node::{ClusterNode, NodeCapabilities, NodeStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
@@ -185,10 +187,146 @@ fn detect_idle_state() -> bool {
     false
 }
 
+// ── Direct peer + LAN multicast discovery ─────────────────────────────
+
+/// A parsed peer address (host:port).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerAddress {
+    pub address: String,
+    pub port: u16,
+}
+
+impl PeerAddress {
+    /// Parse "10.0.0.5:7700", "[::1]:7700", or "host.local:7700".
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim();
+        if let Some(idx) = s.rfind(':') {
+            let port = s[idx + 1..].parse().ok()?;
+            let addr = s[..idx].trim_matches(|c| c == '[' || c == ']').to_string();
+            if addr.is_empty() {
+                return None;
+            }
+            Some(Self { address: addr, port })
+        } else {
+            None
+        }
+    }
+}
+
+/// Discovery modes supported by the multi-mode discovery engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DiscoveryMode {
+    /// Static list of known peer addresses.
+    Direct(Vec<PeerAddress>),
+    /// LAN multicast announce/listen.
+    Lan { multicast_group: String, port: u16 },
+    /// PluresDB CRDT store (existing).
+    PluresDb,
+}
+
+/// Multi-mode discovery: combines Direct, LAN, and PluresDB discovery.
+pub struct MultiDiscovery {
+    modes: Vec<DiscoveryMode>,
+    store: Arc<dyn DiscoveryStore>,
+    local_node: ClusterNode,
+}
+
+impl MultiDiscovery {
+    pub fn new(store: Arc<dyn DiscoveryStore>, local_node: ClusterNode) -> Self {
+        Self {
+            modes: vec![DiscoveryMode::PluresDb],
+            store,
+            local_node,
+        }
+    }
+
+    pub fn add_direct_peers(&mut self, peers: Vec<PeerAddress>) {
+        self.modes.push(DiscoveryMode::Direct(peers));
+    }
+
+    pub fn add_lan(&mut self, group: &str, port: u16) {
+        self.modes.push(DiscoveryMode::Lan {
+            multicast_group: group.into(),
+            port,
+        });
+    }
+
+    /// Discover nodes from all configured modes, deduplicating by node ID.
+    pub fn discover_all(&self) -> Vec<ClusterNode> {
+        let mut nodes = Vec::new();
+        let mut seen = HashSet::new();
+
+        for mode in &self.modes {
+            let found = match mode {
+                DiscoveryMode::Direct(peers) => self.discover_direct(peers),
+                DiscoveryMode::Lan { multicast_group, port } => {
+                    self.discover_lan(multicast_group, *port)
+                }
+                DiscoveryMode::PluresDb => self.discover_pluresdb(),
+            };
+            for node in found {
+                if seen.insert(node.id.clone()) {
+                    nodes.push(node);
+                }
+            }
+        }
+        nodes
+    }
+
+    fn discover_direct(&self, peers: &[PeerAddress]) -> Vec<ClusterNode> {
+        peers
+            .iter()
+            .map(|p| {
+                // Try to find in store first
+                let key = format!("cluster:node:direct:{}", p.address);
+                if let Some(existing) = self.store.get(&key) {
+                    if let Ok(node) = serde_json::from_value::<ClusterNode>(existing) {
+                        return node;
+                    }
+                }
+                // Create minimal node from address
+                ClusterNode {
+                    id: format!("direct-{}-{}", p.address, p.port),
+                    hostname: p.address.clone(),
+                    addresses: vec![format!("{}:{}", p.address, p.port)],
+                    capabilities: NodeCapabilities::default(),
+                    status: NodeStatus::Online,
+                    workloads: vec![],
+                    last_seen: now_epoch_secs(),
+                    cpu_usage: 0.0,
+                }
+            })
+            .collect()
+    }
+
+    fn discover_lan(&self, _group: &str, _port: u16) -> Vec<ClusterNode> {
+        // TODO: implement actual UDP multicast announce/listen
+        // Requires async runtime; stubbed for now.
+        vec![]
+    }
+
+    fn discover_pluresdb(&self) -> Vec<ClusterNode> {
+        let now = now_epoch_secs();
+        let keys = self.store.keys_with_prefix("cluster:node:");
+        keys.into_iter()
+            .filter_map(|key| self.store.get(&key))
+            .filter_map(|v| serde_json::from_value::<ClusterNode>(v).ok())
+            .filter(|n| now.saturating_sub(n.last_seen) <= STALE_THRESHOLD_SECS)
+            .collect()
+    }
+
+    /// Announce this node to the PluresDB store.
+    pub fn announce(&mut self) {
+        self.local_node.last_seen = now_epoch_secs();
+        let key = format!("cluster:node:{}", self.local_node.id);
+        let value = serde_json::to_value(&self.local_node).unwrap();
+        self.store.put(&key, "rector", value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::NodeStatus;
     use std::collections::HashMap;
     use std::sync::Mutex;
 
@@ -284,5 +422,100 @@ mod tests {
         let nodes = vec![test_node("a"), test_node("b")];
         let disc = StaticDiscovery::new(nodes);
         assert_eq!(disc.discover().len(), 2);
+    }
+
+    // ── PeerAddress tests ─────────────────────────────────────────────
+
+    #[test]
+    fn peer_address_parse_ipv4() {
+        let p = PeerAddress::parse("10.0.0.5:7700").unwrap();
+        assert_eq!(p.address, "10.0.0.5");
+        assert_eq!(p.port, 7700);
+    }
+
+    #[test]
+    fn peer_address_parse_ipv6() {
+        let p = PeerAddress::parse("[::1]:7700").unwrap();
+        assert_eq!(p.address, "::1");
+        assert_eq!(p.port, 7700);
+    }
+
+    #[test]
+    fn peer_address_parse_hostname() {
+        let p = PeerAddress::parse("host.local:8080").unwrap();
+        assert_eq!(p.address, "host.local");
+        assert_eq!(p.port, 8080);
+    }
+
+    #[test]
+    fn peer_address_parse_invalid() {
+        assert!(PeerAddress::parse("noport").is_none());
+        assert!(PeerAddress::parse(":7700").is_none());
+    }
+
+    // ── MultiDiscovery tests ──────────────────────────────────────────
+
+    #[test]
+    fn multi_discovery_direct_peers() {
+        let store: Arc<dyn DiscoveryStore> = Arc::new(MemStore::new());
+        let local = test_node("local");
+        let mut md = MultiDiscovery::new(Arc::clone(&store), local);
+        md.add_direct_peers(vec![
+            PeerAddress { address: "10.0.0.5".into(), port: 7700 },
+            PeerAddress { address: "10.0.0.6".into(), port: 7700 },
+        ]);
+        let nodes = md.discover_all();
+        // Should include direct peers (no PluresDB nodes stored)
+        assert_eq!(nodes.len(), 2);
+        assert!(nodes[0].id.starts_with("direct-"));
+    }
+
+    #[test]
+    fn multi_discovery_deduplication() {
+        let store: Arc<dyn DiscoveryStore> = Arc::new(MemStore::new());
+        let local = test_node("local");
+        let mut md = MultiDiscovery::new(Arc::clone(&store), local.clone());
+
+        // Announce local via store so PluresDB mode finds it
+        md.announce();
+
+        // Also add as direct peer with same id pattern won't collide,
+        // but add another peer that IS in the store under same id
+        let key = "cluster:node:direct:10.0.0.5";
+        let mut dup = test_node("dup-node");
+        dup.last_seen = now_epoch_secs();
+        store.put(key, "rector", serde_json::to_value(&dup).unwrap());
+
+        md.add_direct_peers(vec![PeerAddress { address: "10.0.0.5".into(), port: 7700 }]);
+
+        let nodes = md.discover_all();
+        // PluresDB finds "local", direct finds "dup-node" — both unique
+        let ids: Vec<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains(&"local"));
+        assert!(ids.contains(&"dup-node"));
+        // No duplicates
+        let unique: HashSet<&str> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), unique.len());
+    }
+
+    #[test]
+    fn multi_discovery_direct_uses_store_entry() {
+        let store: Arc<dyn DiscoveryStore> = Arc::new(MemStore::new());
+        let local = test_node("local");
+        let md = MultiDiscovery::new(Arc::clone(&store), local);
+
+        // Pre-populate store with a rich node entry for this direct peer
+        let mut rich_node = test_node("rich-peer");
+        rich_node.capabilities.cpu_cores = 32;
+        store.put(
+            "cluster:node:direct:10.0.0.99",
+            "rector",
+            serde_json::to_value(&rich_node).unwrap(),
+        );
+
+        let results = md.discover_direct(&[PeerAddress { address: "10.0.0.99".into(), port: 7700 }]);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "rich-peer");
+        assert_eq!(results[0].capabilities.cpu_cores, 32);
     }
 }

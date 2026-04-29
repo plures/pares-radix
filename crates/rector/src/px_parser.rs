@@ -12,6 +12,8 @@ pub struct PxFile {
     pub rule: Vec<PxRule>,
     #[serde(default)]
     pub node_requirement: Vec<PxNodeRequirement>,
+    #[serde(default)]
+    pub discovery: Option<DiscoveryConfig>,
 }
 
 // Re-export with the logical names the rest of the crate uses.
@@ -157,6 +159,45 @@ pub struct PxNodeRequirement {
     pub error: String,
 }
 
+// ── Discovery config ──────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiscoveryConfig {
+    #[serde(default)]
+    pub direct: Vec<DirectPeer>,
+    pub lan: Option<LanConfig>,
+    pub hyperswarm: Option<HyperswarmConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DirectPeer {
+    pub address: String,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LanConfig {
+    pub enabled: bool,
+    #[serde(default = "default_multicast")]
+    pub multicast_group: String,
+    #[serde(default = "default_discovery_port")]
+    pub port: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HyperswarmConfig {
+    pub enabled: bool,
+    pub topic_key: String,
+}
+
+fn default_multicast() -> String {
+    "239.255.77.77".into()
+}
+
+fn default_discovery_port() -> u16 {
+    7700
+}
+
 // ── Parsing ───────────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -271,5 +312,39 @@ log_message = "Auto-scaled {workload.name} to {workload.replicas}"
         let json = serde_json::to_string(&px).unwrap();
         let back: PxFile = serde_json::from_str(&json).unwrap();
         assert_eq!(back.workload.len(), 2);
+    }
+
+    #[test]
+    fn parse_discovery_config() {
+        let input = r#"
+[discovery]
+
+[[discovery.direct]]
+address = "praxisbot.local"
+port = 7700
+
+[[discovery.direct]]
+address = "10.0.0.5"
+port = 7700
+
+[discovery.lan]
+enabled = true
+multicast_group = "239.255.77.77"
+port = 7700
+
+[discovery.hyperswarm]
+enabled = false
+topic_key = ""
+"#;
+        let px = parse(input).unwrap();
+        let disc = px.discovery.unwrap();
+        assert_eq!(disc.direct.len(), 2);
+        assert_eq!(disc.direct[0].address, "praxisbot.local");
+        assert_eq!(disc.direct[0].port, 7700);
+        let lan = disc.lan.unwrap();
+        assert!(lan.enabled);
+        assert_eq!(lan.multicast_group, "239.255.77.77");
+        let hs = disc.hyperswarm.unwrap();
+        assert!(!hs.enabled);
     }
 }
