@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { pluginSchema } from '$lib/plugins/plugin-api.js';
+	import { pluginSchema as _pluginSchema } from '$lib/plugins/plugin-api.js';
 	import EntityList from '$lib/plugins/EntityList.svelte';
 	import type { PluginInfo } from '$lib/plugins/plugin-api.js';
 	import { plugins } from '$lib/stores/plugins.js';
