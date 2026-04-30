@@ -1,3 +1,7 @@
+## [1.31.0] — 2026-04-30
+
+- feat: add USER.md, AGENTS.md, HEARTBEAT.md to personality config (c0b3ce9)
+
 ## [1.30.1] — 2026-04-30
 
 - fix: lint error — unused pluginSchema import in plugin detail page (0861b78)
