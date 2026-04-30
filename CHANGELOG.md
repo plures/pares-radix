@@ -1,3 +1,7 @@
+## [1.30.1] — 2026-04-30
+
+- fix: lint error — unused pluginSchema import in plugin detail page (0861b78)
+
 ## [1.30.0] — 2026-04-29
 
 - feat: add Docker QA, enhanced /status, error display, personality logging (c77e4eb)
