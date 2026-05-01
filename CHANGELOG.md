@@ -1,3 +1,7 @@
+## [1.37.0] — 2026-05-01
+
+- feat: navigation system — breadcrumbs, nav guards, platform widgets (#49, #50, #51) (7cacbde)
+
 ## [1.36.0] — 2026-05-01
 
 - feat: extend .px language with personality + safety block types (d00b13b)
