@@ -125,7 +125,7 @@ impl ChronosTimeline {
                 }
             })
             .collect();
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
         entries.truncate(limit);
         entries
     }
@@ -155,7 +155,7 @@ impl ChronosTimeline {
                 }
             })
             .collect();
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
         entries.truncate(limit);
         entries
     }
@@ -175,7 +175,7 @@ impl ChronosTimeline {
                 }
             })
             .collect();
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
         entries.truncate(limit);
         entries
     }
@@ -188,7 +188,7 @@ impl ChronosTimeline {
             .into_iter()
             .filter_map(|r| serde_json::from_value(r.data).ok())
             .collect();
-        entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
         entries.truncate(limit);
         entries
     }

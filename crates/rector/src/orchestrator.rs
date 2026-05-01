@@ -2,7 +2,7 @@ use crate::deployer::{DeployError, DeployResult, NixDeployer};
 use crate::node::ClusterNode;
 use crate::px_parser::PxFile;
 use crate::scheduler::{NodeAssignment, WorkloadScheduler};
-use crate::workload::{WorkloadState, WorkloadStatus};
+use crate::workload::WorkloadState;
 
 // ── Result types ──────────────────────────────────────────────────────
 
@@ -197,15 +197,15 @@ impl Orchestrator {
 fn evaluate_count_check(actual: usize, check: &str) -> bool {
     let check = check.trim();
     if let Some(rest) = check.strip_prefix(">=") {
-        rest.trim().parse::<usize>().map_or(false, |n| actual >= n)
+        rest.trim().parse::<usize>().is_ok_and(|n| actual >= n)
     } else if let Some(rest) = check.strip_prefix("<=") {
-        rest.trim().parse::<usize>().map_or(false, |n| actual <= n)
+        rest.trim().parse::<usize>().is_ok_and(|n| actual <= n)
     } else if let Some(rest) = check.strip_prefix('>') {
-        rest.trim().parse::<usize>().map_or(false, |n| actual > n)
+        rest.trim().parse::<usize>().is_ok_and(|n| actual > n)
     } else if let Some(rest) = check.strip_prefix('<') {
-        rest.trim().parse::<usize>().map_or(false, |n| actual < n)
+        rest.trim().parse::<usize>().is_ok_and(|n| actual < n)
     } else if let Some(rest) = check.strip_prefix("==") {
-        rest.trim().parse::<usize>().map_or(false, |n| actual == n)
+        rest.trim().parse::<usize>() == Ok(actual)
     } else {
         false
     }

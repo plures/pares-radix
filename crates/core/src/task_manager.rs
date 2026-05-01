@@ -44,11 +44,11 @@ impl TaskManager {
 
     fn store_task(&self, task: &Task) {
         let value = serde_json::to_value(task).expect("Task serializes to JSON");
-        self.store.put(&Self::task_key(&task.id), ACTOR, value);
+        self.store.put(Self::task_key(&task.id), ACTOR, value);
     }
 
     fn load_task(&self, id: &str) -> Option<Task> {
-        let record = self.store.get(&Self::task_key(id))?;
+        let record = self.store.get(Self::task_key(id))?;
         serde_json::from_value(record.data).ok()
     }
 

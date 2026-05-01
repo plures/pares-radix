@@ -1,4 +1,4 @@
-use crate::node::{ClusterNode, NodeStatus};
+use crate::node::ClusterNode;
 use crate::px_parser::{PlacementStrategy, PxWorkload, ReplicaSpec};
 
 #[derive(Debug, Clone)]

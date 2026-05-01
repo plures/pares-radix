@@ -146,7 +146,7 @@ impl PluginCrudExecutor {
                 // Apply filters
                 if let Some(Value::Object(filter_map)) = filters {
                     let matches = filter_map.iter().all(|(k, v)| {
-                        data.get(k).map_or(false, |actual| actual == v)
+                        data.get(k) == Some(v)
                     });
                     if !matches {
                         continue;
@@ -462,7 +462,7 @@ mod tests {
 
         let items = executor.list("item", "inventory", None, 50).unwrap();
         assert_eq!(
-            items[0].get(&format!("_parent_room")).unwrap().as_str().unwrap(),
+            items[0].get("_parent_room".to_string()).unwrap().as_str().unwrap(),
             room_id
         );
     }

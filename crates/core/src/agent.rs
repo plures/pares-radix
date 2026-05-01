@@ -1551,17 +1551,17 @@ impl Agent {
                                     s.key, s.message_count, ts, topic
                                 ));
                             }
-                            return Some(Event::ModelResponse {
+                            Some(Event::ModelResponse {
                                 request_id: id.to_string(),
                                 model: "command".into(),
                                 content: lines.join("\n"),
-                            });
+                            })
                         } else {
-                            return Some(Event::ModelResponse {
+                            Some(Event::ModelResponse {
                                 request_id: id.to_string(),
                                 model: "command".into(),
                                 content: "Session persistence not configured.".into(),
-                            });
+                            })
                         }
                     }
                     _ => {
@@ -1574,26 +1574,26 @@ impl Agent {
                                     let mut guard = self.conversation_history.lock().unwrap();
                                     guard.insert(channel.to_string(), saved.messages);
                                 }
-                                return Some(Event::ModelResponse {
+                                Some(Event::ModelResponse {
                                     request_id: id.to_string(),
                                     model: "command".into(),
                                     content: format!(
                                         "Resumed session with {count} messages."
                                     ),
-                                });
+                                })
                             } else {
-                                return Some(Event::ModelResponse {
+                                Some(Event::ModelResponse {
                                     request_id: id.to_string(),
                                     model: "command".into(),
                                     content: "No session to resume.".into(),
-                                });
+                                })
                             }
                         } else {
-                            return Some(Event::ModelResponse {
+                            Some(Event::ModelResponse {
                                 request_id: id.to_string(),
                                 model: "command".into(),
                                 content: "Session persistence not configured.".into(),
-                            });
+                            })
                         }
                     }
                 }
@@ -1620,17 +1620,17 @@ impl Agent {
                             s.key, s.message_count, ts, topic
                         ));
                     }
-                    return Some(Event::ModelResponse {
+                    Some(Event::ModelResponse {
                         request_id: id.to_string(),
                         model: "command".into(),
                         content: lines.join("\n"),
-                    });
+                    })
                 } else {
-                    return Some(Event::ModelResponse {
+                    Some(Event::ModelResponse {
                         request_id: id.to_string(),
                         model: "command".into(),
                         content: "Session persistence not configured.".into(),
-                    });
+                    })
                 }
             }
             "clear" => {

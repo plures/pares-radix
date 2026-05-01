@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn disabled_constraint_is_skipped() {
-        let mut gate = PraxisWriteGate::new();
+        let gate = PraxisWriteGate::new();
         // Disable the no-secrets check
         {
             let mut constraints = gate.constraints.write().unwrap();

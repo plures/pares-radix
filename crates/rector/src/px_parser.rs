@@ -87,7 +87,9 @@ impl Default for ReplicaSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum PlacementStrategy {
+    #[default]
     PreferIdle,
     Everywhere,
     Spread,
@@ -97,11 +99,6 @@ pub enum PlacementStrategy {
     Pin(String),
 }
 
-impl Default for PlacementStrategy {
-    fn default() -> Self {
-        PlacementStrategy::PreferIdle
-    }
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceSpec {

@@ -161,7 +161,7 @@ fn detect_gpu_model() -> Option<String> {
         for line in stdout.lines() {
             if line.contains("VGA") || line.contains("3D controller") || line.contains("Display") {
                 // Extract the model name after the last colon
-                if let Some(model) = line.split(':').last() {
+                if let Some(model) = line.split(':').next_back() {
                     let model = model.trim();
                     if !model.is_empty() {
                         return Some(model.to_string());

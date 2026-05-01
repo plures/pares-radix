@@ -3394,22 +3394,19 @@ async fn main() {
                                 app.input.insert(app.input_cursor, c);
                                 app.input_cursor += 1;
                             }
-                            KeyCode::Backspace => {
-                                if app.input_cursor > 0 {
+                            KeyCode::Backspace
+                                if app.input_cursor > 0 => {
                                     app.input_cursor -= 1;
                                     app.input.remove(app.input_cursor);
                                 }
-                            }
-                            KeyCode::Left => {
-                                if app.input_cursor > 0 {
+                            KeyCode::Left
+                                if app.input_cursor > 0 => {
                                     app.input_cursor -= 1;
                                 }
-                            }
-                            KeyCode::Right => {
-                                if app.input_cursor < app.input.len() {
+                            KeyCode::Right
+                                if app.input_cursor < app.input.len() => {
                                     app.input_cursor += 1;
                                 }
-                            }
                             KeyCode::Home => {
                                 app.input_cursor = 0;
                             }
