@@ -1,0 +1,24 @@
+[package]
+name = "pares-omniscient"
+version = "0.1.0"
+edition = "2021"
+description = "Two-pass semantic filesystem indexer with cluster-aware cross-system search"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+notify = "8"
+sha2 = "0.10"
+mime_guess = "2"
+walkdir = "2"
+chrono = { version = "0.4", features = ["serde"] }
+
+# PluresDB integration (will wire later)
+# pluresdb = { path = "../../pluresdb" }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["test-util", "macros"] }
