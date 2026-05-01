@@ -1,3 +1,7 @@
+## [1.34.1] — 2026-05-01
+
+- fix: suppress ci-feedback issue spam (24h dedup window) (3e44bda)
+
 ## [1.34.0] — 2026-05-01
 
 - feat: plugin dependency validation + topological install ordering (#48) (c49946b)
