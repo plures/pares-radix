@@ -21,4 +21,10 @@ pub enum PluginError {
 
     #[error("TOML parse error: {0}")]
     TomlParse(String),
+
+    #[error("plugin '{plugin}' requires '{dependency}' which is not installed")]
+    MissingDependency { plugin: String, dependency: String },
+
+    #[error("circular dependency detected involving: {0}")]
+    CircularDependency(String),
 }

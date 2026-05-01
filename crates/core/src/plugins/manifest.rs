@@ -34,6 +34,10 @@ pub struct PluginManifest {
     /// Lifecycle hooks the plugin registers.
     #[serde(default)]
     pub hooks: Vec<crate::plugins::hooks::HookDeclaration>,
+
+    /// Plugin dependencies (other plugin names that must be installed first).
+    #[serde(default)]
+    pub dependencies: Vec<String>,
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────────
@@ -282,6 +286,7 @@ fn parse_toml_manifest_unified(toml_str: &str) -> Result<PluginManifest, Manifes
         ui: None,
         permissions,
         hooks: Vec::new(),
+            dependencies: Vec::new(),
     })
 }
 
@@ -330,6 +335,7 @@ fn parse_json_manifest(json: &str) -> Result<PluginManifest, ManifestError> {
             network: false,
         },
         hooks: vec![],
+        dependencies: vec![],
     })
 }
 
