@@ -1,3 +1,7 @@
+## [1.32.0] — 2026-05-01
+
+- feat: add pares-omniscient crate — two-pass semantic filesystem indexer (5c5b713)
+
 ## [1.31.1] — 2026-05-01
 
 - fix: resolve all 40 clippy warnings — zero warnings achieved (f6fcf65)
