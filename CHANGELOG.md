@@ -1,3 +1,7 @@
+## [1.31.1] — 2026-05-01
+
+- fix: resolve all 40 clippy warnings — zero warnings achieved (f6fcf65)
+
 ## [1.31.0] — 2026-04-30
 
 - feat: add USER.md, AGENTS.md, HEARTBEAT.md to personality config (c0b3ce9)
