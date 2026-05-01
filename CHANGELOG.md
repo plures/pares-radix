@@ -1,3 +1,7 @@
+## [1.34.0] — 2026-05-01
+
+- feat: plugin dependency validation + topological install ordering (#48) (c49946b)
+
 ## [1.33.0] — 2026-05-01
 
 - feat: omniscient plugin manifest + runtime adapter (b1a6434)
