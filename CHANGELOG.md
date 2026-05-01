@@ -1,3 +1,7 @@
+## [1.36.0] — 2026-05-01
+
+- feat: extend .px language with personality + safety block types (d00b13b)
+
 ## [1.35.0] — 2026-05-01
 
 - feat: personality evolution architecture + default personality files (fa0e27f)
