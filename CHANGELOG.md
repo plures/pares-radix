@@ -1,3 +1,7 @@
+## [1.33.0] — 2026-05-01
+
+- feat: omniscient plugin manifest + runtime adapter (b1a6434)
+
 ## [1.32.0] — 2026-05-01
 
 - feat: add pares-omniscient crate — two-pass semantic filesystem indexer (5c5b713)
