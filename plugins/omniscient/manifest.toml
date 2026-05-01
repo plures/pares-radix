@@ -1,0 +1,137 @@
+[plugin]
+name = "omniscient"
+version = "0.1.0"
+description = "Semantic filesystem intelligence — two-pass indexer with cross-system search and security analysis"
+author = "plures"
+
+[capabilities]
+requires = ["pluresdb", "bitnet", "rector"]
+background = true  # runs inotify watcher as persistent service
+
+[schema]
+
+[[schema.entities]]
+name = "FileNode"
+description = "An indexed file with metadata, vectors, and enrichment"
+fields = [
+    { name = "node_id", type = "string", description = "Cluster node this file lives on" },
+    { name = "path", type = "string", description = "Absolute path on the node" },
+    { name = "content_hash", type = "string", description = "SHA-256 for dedup across nodes" },
+    { name = "mime", type = "string" },
+    { name = "content_class", type = "string", description = "text|code|pdf|image|office|binary|audio|video|archive" },
+    { name = "size", type = "number" },
+    { name = "modified", type = "datetime" },
+    { name = "extracted_text", type = "text", optional = true },
+    { name = "raw_vector", type = "vector", dimensions = 384, optional = true },
+    { name = "summary", type = "text", optional = true, description = "Pass 2: LLM-generated summary" },
+    { name = "entities", type = "string[]", optional = true, description = "Pass 2: extracted entities" },
+    { name = "purpose", type = "string", optional = true, description = "Pass 2: classified purpose" },
+    { name = "risk_score", type = "number", optional = true, description = "Security risk (0-1)" },
+    { name = "enriched_vector", type = "vector", dimensions = 384, optional = true },
+    { name = "enriched_at", type = "datetime", optional = true },
+]
+
+[[schema.entities]]
+name = "SecurityAlert"
+description = "Flagged file with anomalous security characteristics"
+fields = [
+    { name = "file_node_id", type = "reference", target = "FileNode" },
+    { name = "alert_type", type = "string", description = "high-entropy|suspicious-imports|unsigned|capability-escalation" },
+    { name = "severity", type = "string", description = "info|warning|critical" },
+    { name = "details", type = "text" },
+    { name = "acknowledged", type = "boolean", default = false },
+]
+
+[[schema.relationships]]
+name = "REFERENCES"
+from = "FileNode"
+to = "FileNode"
+description = "File references or imports another file"
+
+[[schema.relationships]]
+name = "DUPLICATE_OF"
+from = "FileNode"
+to = "FileNode"
+description = "Same content_hash on different nodes"
+
+[logic]
+
+[[logic.rules]]
+name = "high-entropy-binary-alert"
+description = "Flag binaries with entropy > 7.5 as potentially packed/encrypted"
+trigger = "on_store"
+condition = "entity.content_class == 'binary' && entity.risk_score > 0.5"
+action = "create_alert('high-entropy', 'warning', 'Binary has high entropy — possibly packed or encrypted')"
+
+[[logic.rules]]
+name = "dedup-cross-node"
+description = "When a file is indexed, check for same content_hash on other nodes and create DUPLICATE_OF edge"
+trigger = "on_store"
+condition = "true"
+action = "link_duplicates(entity.content_hash)"
+
+[[logic.constraints]]
+name = "no-secrets-in-index"
+description = "Never store actual file content for files matching secret patterns"
+check = "!path_matches(entity.path, ['*.pem', '*.key', '*secret*', '*.env', '*token*'])"
+severity = "error"
+
+[tools]
+
+[[tools.definitions]]
+name = "omniscient_search"
+description = "Semantic search across all indexed files on all systems"
+parameters = [
+    { name = "query", type = "string", required = true, description = "Natural language search query" },
+    { name = "node", type = "string", required = false, description = "Filter to specific node" },
+    { name = "type", type = "string", required = false, description = "Filter by content class" },
+    { name = "limit", type = "number", required = false, description = "Max results (default 10)" },
+    { name = "rerank", type = "boolean", required = false, description = "Use LLM reranking (default true)" },
+]
+
+[[tools.definitions]]
+name = "omniscient_index"
+description = "Index a directory into the omniscient filesystem database"
+parameters = [
+    { name = "path", type = "string", required = true, description = "Directory to index" },
+    { name = "recursive", type = "boolean", required = false, description = "Recurse into subdirectories (default true)" },
+]
+
+[[tools.definitions]]
+name = "omniscient_status"
+description = "Get omniscient index statistics"
+parameters = []
+
+[[tools.definitions]]
+name = "omniscient_security_scan"
+description = "Analyze binaries in a path for security risks"
+parameters = [
+    { name = "path", type = "string", required = true },
+    { name = "threshold", type = "number", required = false, description = "Risk score threshold (default 0.3)" },
+]
+
+[permissions]
+pluresdb_scopes = ["read", "write", "vector_search", "graph_traverse"]
+tool_access = ["filesystem_read", "bitnet_inference"]
+network = false  # fully local, no cloud
+
+[hooks]
+
+[[hooks.declarations]]
+event = "OnMessage"
+description = "Check if user message is a file search query and auto-route"
+priority = 50
+
+[[hooks.declarations]]
+event = "PreToolUse"
+description = "Augment tool context with relevant file information from the index"
+priority = 30
+
+[service]
+# Background daemon configuration
+watch_paths = ["~", "~/projects", "/etc"]
+ignore_patterns = [".git", "node_modules", "target", ".cache", "__pycache__", "result"]
+max_file_size_mb = 100
+enrichment_batch_size = 20
+enrichment_interval_seconds = 300
+scan_on_start = true

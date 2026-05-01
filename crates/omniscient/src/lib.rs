@@ -24,7 +24,9 @@ pub mod scanner;
 pub mod enrichment;
 pub mod query;
 pub mod store;
+pub mod plugin;
 
 pub use file_node::{FileNode, FileNodeBuilder, NodeIdentity};
 pub use scanner::{Scanner, ScanConfig, ScanEvent};
 pub use query::{Query, QueryResult, QueryConfig};
+pub use plugin::{OmniscientPlugin, OmniscientConfig};

@@ -15,6 +15,7 @@ sha2 = "0.10"
 mime_guess = "2"
 walkdir = "2"
 chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
 
 # PluresDB integration (will wire later)
 # pluresdb = { path = "../../pluresdb" }
