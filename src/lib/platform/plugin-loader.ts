@@ -122,7 +122,30 @@ export function getAllSettings(): PluginSetting[] {
 
 /** All dashboard widgets, sorted by priority */
 export function getAllDashboardWidgets(): DashboardWidget[] {
-  const widgets: DashboardWidget[] = [];
+  const widgets: DashboardWidget[] = [
+    // Platform widgets (always present)
+    {
+      id: 'platform.cluster',
+      title: '🖥️ Cluster',
+      component: () => import('../components/widgets/ClusterStatus.svelte'),
+      colspan: 2,
+      priority: 10,
+    },
+    {
+      id: 'platform.personality',
+      title: '🧠 Personality',
+      component: () => import('../components/widgets/PersonalityRules.svelte'),
+      colspan: 1,
+      priority: 20,
+    },
+    {
+      id: 'platform.omniscient',
+      title: '🔍 File Index',
+      component: () => import('../components/widgets/OmniscientIndex.svelte'),
+      colspan: 1,
+      priority: 30,
+    },
+  ];
   for (const [, { plugin, active }] of plugins) {
     if (!active) continue;
     widgets.push(...(plugin.dashboardWidgets ?? []));

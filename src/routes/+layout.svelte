@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
+	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
 	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.js';
@@ -211,6 +212,7 @@
 		onCommandPaletteOpen={() => (paletteOpen = true)}
 		{statusItems}
 	>
+		<Breadcrumbs />
 		{@render children()}
 	</PluginContentArea>
 

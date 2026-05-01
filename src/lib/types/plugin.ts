@@ -65,7 +65,7 @@ export interface PluginRoute {
   /** URL path (relative to plugin, e.g. "/" becomes "/financial-advisor/") */
   path: string;
   /** Svelte component loader */
-  component: () => Promise<{ default: typeof SvelteComponent }>;
+  component: () => Promise<{ default: any }>;
   /** Page title */
   title?: string;
   /** Data prerequisites — page shows empty state if unmet */
@@ -110,7 +110,7 @@ export interface DashboardWidget {
   /** Display title */
   title: string;
   /** Widget component */
-  component: () => Promise<{ default: typeof SvelteComponent }>;
+  component: () => Promise<{ default: any }>;
   /** Grid column span (1-4) */
   colspan?: number;
   /** Sort priority (lower = first) */
@@ -123,7 +123,7 @@ export interface HelpSection {
   /** Emoji or icon */
   icon: string;
   /** Markdown content or component */
-  content: string | (() => Promise<{ default: typeof SvelteComponent }>);
+  content: string | (() => Promise<{ default: any }>);
   /** Sort priority */
   priority?: number;
   /** Links to relevant plugin pages shown as "See also" */

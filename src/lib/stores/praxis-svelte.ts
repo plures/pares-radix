@@ -116,8 +116,15 @@ export function initPraxisFacts(): void {
 
 	// 3. Seed nav.visible from currently registered plugins (always ephemeral)
 	const navItems = toSidebarItems(getAllNavItems());
-	// Always include the Plugins management page
-	navItems.push({ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined });
+	// Platform nav items (always present)
+	navItems.unshift(
+		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
+	);
+	navItems.push(
+		{ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined },
+		{ href: '/settings', label: 'Settings', icon: '⚙️', badge: undefined },
+		{ href: '/help', label: 'Help', icon: '❓', badge: undefined },
+	);
 	emitFact('nav.visible', { items: navItems });
 
 	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
