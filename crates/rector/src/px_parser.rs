@@ -14,6 +14,10 @@ pub struct PxFile {
     pub node_requirement: Vec<PxNodeRequirement>,
     #[serde(default)]
     pub discovery: Option<DiscoveryConfig>,
+    #[serde(default)]
+    pub personality: Vec<PxPersonality>,
+    #[serde(default)]
+    pub safety: Vec<PxSafety>,
 }
 
 // Re-export with the logical names the rest of the crate uses.
@@ -29,6 +33,12 @@ impl PxFile {
     }
     pub fn node_requirements(&self) -> &[PxNodeRequirement] {
         &self.node_requirement
+    }
+    pub fn personality_rules(&self) -> &[PxPersonality] {
+        &self.personality
+    }
+    pub fn safety_axioms(&self) -> &[PxSafety] {
+        &self.safety
     }
 }
 
@@ -195,6 +205,104 @@ fn default_discovery_port() -> u16 {
     7700
 }
 
+// ── Personality ───────────────────────────────────────────────────────
+
+/// A personality rule — behavioral constraint learned from user interaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxPersonality {
+    pub name: String,
+    /// The rule text (what the agent should do/not do).
+    pub rule: String,
+    /// Confidence score 0.0–1.0.
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+    /// How this rule was learned.
+    #[serde(default = "default_source")]
+    pub source: PersonalitySource,
+    /// Behavioral category.
+    #[serde(default)]
+    pub category: String,
+    /// Evidence that supports this rule.
+    #[serde(default)]
+    pub evidence: Vec<PxEvidence>,
+    /// Rule status.
+    #[serde(default = "default_status")]
+    pub status: PersonalityStatus,
+    /// Names of rules this conflicts with.
+    #[serde(default)]
+    pub conflicts_with: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum PersonalitySource {
+    #[default]
+    Explicit,
+    Corrective,
+    Frustration,
+    Implicit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+#[derive(Default)]
+pub enum PersonalityStatus {
+    #[default]
+    Active,
+    Proposed,
+    Logged,
+    Rejected,
+    Deprecated,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxEvidence {
+    pub signal: String,
+    #[serde(default)]
+    pub when: Option<String>,
+    #[serde(default)]
+    pub interaction: Option<String>,
+    #[serde(default = "default_evidence_confidence")]
+    pub confidence: f32,
+}
+
+fn default_confidence() -> f32 {
+    0.90
+}
+
+fn default_source() -> PersonalitySource {
+    PersonalitySource::Explicit
+}
+
+fn default_status() -> PersonalityStatus {
+    PersonalityStatus::Active
+}
+
+fn default_evidence_confidence() -> f32 {
+    1.0
+}
+
+// ── Safety Axiom ──────────────────────────────────────────────────────
+
+/// A safety axiom — inviolable constraint that cannot be overridden.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxSafety {
+    pub name: String,
+    /// The safety rule text.
+    pub rule: String,
+    /// Whether this can ever be overridden (must always be false for true axioms).
+    #[serde(default)]
+    pub overridable: bool,
+    /// What happens when this is violated.
+    #[serde(default = "default_violation_action")]
+    pub on_violation: String,
+}
+
+fn default_violation_action() -> String {
+    "reject".into()
+}
+
 // ── Parsing ───────────────────────────────────────────────────────────
 
 #[derive(Debug, thiserror::Error)]
@@ -345,3 +453,31 @@ topic_key = ""
         assert!(!hs.enabled);
     }
 }
+
+    #[test]
+    fn parse_personality_px() {
+        let input = include_str!("../../../config/radix-personality.px");
+        let px = parse(input).expect("personality.px should parse");
+        assert_eq!(px.safety.len(), 5);
+        assert_eq!(px.personality.len(), 14);
+
+        // Safety axioms are never overridable
+        for s in &px.safety {
+            assert!(!s.overridable, "safety axiom {} must not be overridable", s.name);
+        }
+
+        // All personality rules have confidence > 0
+        for p in &px.personality {
+            assert!(p.confidence > 0.0, "rule {} has zero confidence", p.name);
+            assert!(p.confidence <= 1.0, "rule {} has confidence > 1.0", p.name);
+        }
+
+        // Check specific rules
+        let push = px.personality.iter().find(|p| p.name == "push-without-asking").unwrap();
+        assert_eq!(push.confidence, 0.98);
+        assert_eq!(push.source, PersonalitySource::Explicit);
+        assert_eq!(push.evidence.len(), 1);
+
+        let harm = px.safety.iter().find(|s| s.name == "do-no-harm").unwrap();
+        assert_eq!(harm.on_violation, "reject");
+    }
