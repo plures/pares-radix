@@ -7,3 +7,8 @@ build/
 src-tauri/target/
 src-tauri/gen/
 /target
+chronos
+pares-agens
+pares-cache
+plures-object
+pluresdb
