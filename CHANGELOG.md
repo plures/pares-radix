@@ -1,3 +1,7 @@
+## [1.37.1] — 2026-05-02
+
+- fix: resolve lint errors in plugin.ts (remove unused SvelteComponent import) (84b1ee2)
+
 ## [1.37.0] — 2026-05-01
 
 - feat: navigation system — breadcrumbs, nav guards, platform widgets (#49, #50, #51) (7cacbde)
