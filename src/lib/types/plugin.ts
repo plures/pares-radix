@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * pares-radix Plugin API
  *
@@ -5,7 +6,6 @@
  * Every plugin implements RadixPlugin. The runtime handles everything else.
  */
 
-import type { SvelteComponent } from 'svelte';
 
 // ─── Plugin Manifest ────────────────────────────────────────────────────────
 
