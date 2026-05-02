@@ -9,6 +9,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <vector>
+#include <thread>
 
 struct BitNetModel {
     llama_model *model;
@@ -49,6 +50,12 @@ BitNetContext *bitnet_context_create(const BitNetModel *model) {
     llama_context_params params = llama_context_default_params();
     params.n_ctx = 4096;
     params.n_batch = 512;
+    
+    /* Use all available CPU cores for maximum throughput */
+    int n_cores = std::thread::hardware_concurrency();
+    if (n_cores <= 0) n_cores = 4;
+    params.n_threads = n_cores;
+    params.n_threads_batch = n_cores;
 
     llama_context *ctx = llama_new_context_with_model(
         const_cast<llama_model *>(model->model), params);
