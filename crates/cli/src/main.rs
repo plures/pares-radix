@@ -2442,6 +2442,16 @@ enum Commands {
         #[arg(long, default_value = "text")]
         format: String,
     },
+
+    /// Test the cerebellum classifier on a message (non-interactive).
+    Classify {
+        /// Message to classify.
+        message: String,
+
+        /// Path to BitNet model for classification.
+        #[arg(long)]
+        bitnet_model_path: PathBuf,
+    },
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -3585,6 +3595,37 @@ async fn main() {
             } else {
                 eprintln!("ERROR: specify --copilot or --bitnet-model-path");
                 std::process::exit(1);
+            }
+        }
+
+        Commands::Classify { message, bitnet_model_path } => {
+            use crate::bitnet_classifier::BitNetClassifier;
+            use pares_agens_core::cerebellum::classifier::ClassifierBackend;
+
+            let start = std::time::Instant::now();
+
+            match BitNetClassifier::new(&bitnet_model_path) {
+                Ok(classifier) => {
+                    let elapsed_load = start.elapsed();
+                    eprintln!("Model loaded in {:.1}s", elapsed_load.as_secs_f64());
+
+                    let class_start = std::time::Instant::now();
+                    match classifier.classify("", &message) {
+                        Ok(json) => {
+                            let elapsed = class_start.elapsed();
+                            eprintln!("Classification took {:.0}ms", elapsed.as_millis());
+                            println!("{json}");
+                        }
+                        Err(e) => {
+                            eprintln!("Classification failed: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load classifier: {e}");
+                    std::process::exit(1);
+                }
             }
         }
     }
