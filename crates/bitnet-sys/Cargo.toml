@@ -18,3 +18,4 @@ cuda = ["native"]
 vulkan = ["native"]
 
 [build-dependencies]
+cc = "1"
