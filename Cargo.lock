@@ -4616,6 +4616,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "hostname",
  "pares-agens-audit",
  "pares-agens-praxis",
  "pares-agens-privacy",

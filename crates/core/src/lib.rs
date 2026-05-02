@@ -112,3 +112,4 @@ pub mod task_loop;
 pub mod health;
 pub mod error_display;
 pub mod pii_guard;
+pub mod telemetry;

@@ -171,6 +171,8 @@ pub struct Agent {
     chronos: Option<Arc<ChronosTimeline>>,
     /// PII guard for redacting sensitive data before model calls.
     pii_guard: PiiGuard,
+    /// Telemetry logger for interaction tracking.
+    pub telemetry: Option<Arc<crate::telemetry::TelemetryLogger>>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +217,7 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
+            telemetry: None,
         }
     }
 
@@ -251,6 +254,7 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
+            telemetry: None,
         }
     }
 
@@ -352,6 +356,12 @@ impl Agent {
         store: Arc<dyn pares_agens_audit::store::AuditStore>,
     ) -> Self {
         self.audit_store = Some(store);
+        self
+    }
+
+    /// Attach a telemetry logger for interaction tracking.
+    pub fn with_telemetry(mut self, logger: Arc<crate::telemetry::TelemetryLogger>) -> Self {
+        self.telemetry = Some(logger);
         self
     }
 
@@ -601,6 +611,27 @@ impl Agent {
 
         self.capture_exchange(content, &reply).await;
         self.spawn_procedure_writer(content, &reply);
+
+        // Log telemetry for this interaction
+        if let Some(ref telem) = self.telemetry {
+            let record = crate::telemetry::TelemetryRecord {
+                timestamp: chrono::Utc::now().to_rfc3339(),
+                node: String::new(), // filled by logger
+                interaction_id: id.to_string(),
+                user_message: content.to_string(),
+                entities: vec![], // TODO: pass from cerebellum context
+                context_items: vec![], // TODO: pass from cerebellum context
+                model: model_label.to_string(),
+                latency_ms: 0, // TODO: measure from preprocess start
+                tools_used: vec![], // TODO: collect from tool loop
+                response: reply.clone(),
+                response_len: reply.len(),
+                route: "conscious".into(), // TODO: pass from cerebellum
+                topic_shifted: false, // TODO: pass from cerebellum
+                previous_interaction_id: None, // filled by logger
+            };
+            telem.log(record);
+        }
 
         Some(Event::ModelResponse {
             request_id: id.to_string(),
