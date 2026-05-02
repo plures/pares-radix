@@ -169,6 +169,10 @@ pub struct Cerebellum {
     topic_embeddings: Mutex<HashMap<String, Vec<f32>>>,
     /// Optional message classifier for intent/complexity routing.
     pub classifier: Option<classifier::CerebellumClassifier>,
+    /// Persistent managed context window.
+    context_items: Mutex<Vec<context_manager::ContextItem>>,
+    /// Relevance scorer with learned weights.
+    relevance_scorer: Mutex<context_manager::RelevanceScorer>,
 }
 
 impl Cerebellum {
@@ -179,6 +183,8 @@ impl Cerebellum {
             pluresdb: None,
             topic_embeddings: Mutex::new(HashMap::new()),
             classifier: None,
+            context_items: Mutex::new(Vec::new()),
+            relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
         }
     }
 
@@ -189,6 +195,8 @@ impl Cerebellum {
             pluresdb: Some(bridge),
             topic_embeddings: Mutex::new(HashMap::new()),
             classifier: None,
+            context_items: Mutex::new(Vec::new()),
+            relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
         }
     }
 
@@ -196,6 +204,22 @@ impl Cerebellum {
     pub fn with_classifier(mut self, classifier: classifier::CerebellumClassifier) -> Self {
         self.classifier = Some(classifier);
         self
+    }
+
+    /// Record the outcome of a model interaction.
+    ///
+    /// Call this after the conscious model responds. The cerebellum uses
+    /// this to adjust relevance weights — context items that were present
+    /// during successful interactions get boosted; failed ones get decayed.
+    pub fn record_outcome(&self, success: bool) {
+        let items = self.context_items.lock().unwrap();
+        let mut scorer = self.relevance_scorer.lock().unwrap();
+        scorer.record_outcome(&items, success);
+        tracing::debug!(
+            success,
+            context_items = items.len(),
+            "cerebellum outcome recorded"
+        );
     }
 
     /// Main entry point: preprocess an event into an enriched context.
@@ -211,30 +235,18 @@ impl Cerebellum {
         memory: &PluresLm,
         _registry: &ProcedureRegistry,
     ) -> Result<CerebellumContext, CerebellumError> {
-        // 0. Classifier — adjust recall and routing hints
-        let classification = if let Some(ref clf) = self.classifier {
-            let q = extract_query(event);
-            q.as_deref().map(|msg| clf.classify(msg))
-        } else {
-            None
-        };
-
-        // Apply classifier hints to config overrides
-        let recall_limit = classification
-            .as_ref()
-            .map(|c| match c.complexity {
-                1 => 3,
-                2 => 5,
-                3 => self.config.recall_limit,
-                4 => self.config.recall_limit + 5,
-                _ => self.config.recall_limit + 10,
-            })
-            .unwrap_or(self.config.recall_limit);
-
-        // 1. Autorecall
+        // 0. Extract entities from the message (fast, no model)
         let query = extract_query(event);
+        let entities = query
+            .as_deref()
+            .map(context_manager::EntityExtractor::extract)
+            .unwrap_or_default();
+
+        // 1. Recall relevant memories and convert to ContextItems
         let mut clear_history = false;
-        let learned_context = if let Some(q) = &query {
+        let mut query_similarities = std::collections::HashMap::new();
+
+        let recalled_items = if let Some(q) = &query {
             let query_embedding = memory
                 .embed_text(q)
                 .await
@@ -243,26 +255,92 @@ impl Cerebellum {
 
             let exclude_categories = parse_excluded_categories(&self.config.exclude_categories);
             let memories = memory
-                .recall(q, recall_limit, &exclude_categories)
+                .recall(q, self.config.recall_limit, &exclude_categories)
                 .await
                 .map_err(|e| CerebellumError::Memory(e.to_string()))?;
-            memory.inject_context(&memories, Some(self.config.context_token_budget))
+
+            // Convert recalled memories to ContextItems
+            memories
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    let id = format!("mem:{i}");
+                    // Score decays with rank (top result = 1.0, #10 = 0.5)
+                    let sim = 1.0 - (i as f32 * 0.05).min(0.5);
+                    query_similarities.insert(id.clone(), sim);
+                    context_manager::ContextItem {
+                        id,
+                        content: m.content.clone(),
+                        tokens: m.content.len() / 4, // rough estimate
+                        relevance: 0.0, // scored by manager
+                        source: context_manager::ContextSource::Memory,
+                        age_turns: 0,
+                        success_count: 0,
+                        failure_count: 0,
+                    }
+                })
+                .collect::<Vec<_>>()
         } else {
-            String::new()
+            vec![]
         };
 
-        // Override clear_history with classifier topic_shift if available
-        if let Some(ref c) = classification {
-            if c.topic_shift {
-                clear_history = true;
+        // 2. Manage context window — add new, score all, drop lowest
+        let managed = {
+            let mut items = self.context_items.lock().unwrap();
+            let scorer = self.relevance_scorer.lock().unwrap();
+
+            // Clear on topic shift
+            if clear_history {
+                items.clear();
             }
-        }
+
+            // Add entity-derived context items
+            for entity in &entities {
+                let id = entity.context_key.clone();
+                if !items.iter().any(|i| i.id == id) {
+                    items.push(context_manager::ContextItem {
+                        id,
+                        content: format!("{:?}: {}", entity.kind, entity.value),
+                        tokens: 10,
+                        relevance: 0.0,
+                        source: context_manager::ContextSource::Entity,
+                        age_turns: 0,
+                        success_count: 0,
+                        failure_count: 0,
+                    });
+                }
+            }
+
+            context_manager::manage_context(
+                &mut items,
+                recalled_items,
+                &entities,
+                &scorer,
+                &query_similarities,
+                self.config.context_token_budget,
+            )
+        };
+
+        // Build the context string from managed items
+        let learned_context = if managed.items.is_empty() {
+            String::new()
+        } else {
+            let mut ctx = String::from("## Recalled Context\n");
+            for item in &managed.items {
+                ctx.push_str(&format!("- [rel:{:.2}] {}\n", item.relevance, item.content));
+            }
+            ctx
+        };
 
         info!(
             event_kind = event.kind(),
             context_len = learned_context.len(),
+            context_items = managed.items.len(),
+            tokens_used = managed.tokens_used,
+            token_budget = managed.token_budget,
             topic_shifted = clear_history,
-            "autorecall complete"
+            entities = entities.len(),
+            "context managed"
         );
 
         // 2. Authorization gate (ADR-0012)
