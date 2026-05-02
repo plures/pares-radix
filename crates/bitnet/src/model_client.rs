@@ -118,6 +118,13 @@ impl ModelClient for BitnetModelClient {
                 let tok = tok_result?;
                 let piece = ctx.decode_token(tok)?;
                 output.push_str(&piece);
+                // Stop on text-level end markers (GGUF may not set EOS token correctly)
+                if output.contains("<|end|>") || output.contains("<|eot_id|>") || output.contains("<|end_of_text|>") {
+                    if let Some(pos) = output.find("<|end") .or_else(|| output.find("<|eot")) {
+                        output.truncate(pos);
+                    }
+                    break;
+                }
             }
             Ok(output)
         })

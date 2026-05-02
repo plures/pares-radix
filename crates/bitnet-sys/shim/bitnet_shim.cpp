@@ -158,5 +158,13 @@ int bitnet_sample(BitNetContext *ctx, const BitNetGenParams *params) {
 
     llama_sampler_apply(ctx->smpl, &candidates);
 
-    return candidates.data[candidates.selected].id;
+    int id = candidates.data[candidates.selected].id;
+
+    /* Check for end-of-generation tokens */
+    const llama_model *model = ctx->owner->model;
+    if (llama_token_is_eog(model, id)) {
+        return -1; /* BITNET_TOKEN_EOS */
+    }
+
+    return id;
 }

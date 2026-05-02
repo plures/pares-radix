@@ -139,6 +139,14 @@ impl BitNetClassifier {
                                 Ok(token_id) => {
                                     if let Ok(piece) = ctx.decode_token(token_id) {
                                         output.push_str(&piece);
+                                        // Stop on text-level end markers
+                                        if output.contains("<|end|>") || output.contains("<|eot_id|>") || output.contains("<|end_of_text|>") {
+                                            // Trim the stop marker
+                                            if let Some(pos) = output.find("<|end") .or_else(|| output.find("<|eot")) {
+                                                output.truncate(pos);
+                                            }
+                                            break;
+                                        }
                                     }
                                 }
                                 Err(_) => break,
