@@ -308,14 +308,23 @@ impl RuntimeAgentFactory {
         });
         let cerebellum = Cerebellum::new(CerebellumConfig::default());
 
-        // Attach classifier if a cerebellum model path is configured
-        let cerebellum = if let Some(ref _path) = self.cerebellum_model_path {
-            // When the `classifier` feature is enabled on the bitnet crate,
-            // we could load a BitNetClassifierBackend here. For now, wire
-            // heuristic-only so the plumbing is exercised.
-            let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
-            tracing::info!("cerebellum classifier enabled (heuristic mode)");
-            cerebellum.with_classifier(classifier)
+        // Attach BitNet classifier if a cerebellum model path is configured
+        let cerebellum = if let Some(ref path) = self.cerebellum_model_path {
+            match crate::bitnet_classifier::BitNetClassifier::new(path) {
+                Ok(backend) => {
+                    let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::with_backend(
+                        std::sync::Arc::new(backend),
+                        vec![],
+                    );
+                    tracing::info!("cerebellum classifier enabled (BitNet)");
+                    cerebellum.with_classifier(classifier)
+                }
+                Err(e) => {
+                    tracing::warn!("BitNet classifier failed to load: {e}, falling back to heuristic");
+                    let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
+                    cerebellum.with_classifier(classifier)
+                }
+            }
         } else {
             cerebellum
         };
@@ -3330,9 +3339,22 @@ async fn main() {
             };
 
             let cerebellum = Cerebellum::new(CerebellumConfig::default());
-            let cerebellum = if cerebellum_model_path.is_some() {
-                let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
-                cerebellum.with_classifier(classifier)
+            let cerebellum = if let Some(ref path) = cerebellum_model_path {
+                match crate::bitnet_classifier::BitNetClassifier::new(path) {
+                    Ok(backend) => {
+                        let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::with_backend(
+                            Arc::new(backend),
+                            vec![],
+                        );
+                        tracing::info!("cerebellum classifier enabled (BitNet)");
+                        cerebellum.with_classifier(classifier)
+                    }
+                    Err(e) => {
+                        tracing::warn!("BitNet classifier load failed: {e}, using heuristic");
+                        let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
+                        cerebellum.with_classifier(classifier)
+                    }
+                }
             } else {
                 cerebellum
             };
