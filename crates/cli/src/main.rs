@@ -2404,6 +2404,44 @@ enum Commands {
         cerebellum_model_path: Option<PathBuf>,
 
     },
+
+    /// Send a single prompt and print the response (non-interactive, for benchmarking).
+    Ask {
+        /// The prompt to send.
+        prompt: String,
+
+        /// OpenAI-compatible API URL.
+        #[arg(long, env = "PARES_MODEL_URL", default_value = "https://models.inference.ai.azure.com")]
+        model_url: String,
+
+        /// Model name to use.
+        #[arg(long, env = "PARES_MODEL", default_value = "gpt-4.1")]
+        model: String,
+
+        /// Use GitHub Copilot device flow authentication.
+        #[arg(long)]
+        copilot: bool,
+
+        /// API key for the model provider.
+        #[arg(long, env = "PARES_API_KEY")]
+        api_key: Option<String>,
+
+        /// Use BitNet for inference instead of cloud model.
+        #[arg(long)]
+        bitnet_model_path: Option<PathBuf>,
+
+        /// Path to cerebellum classifier model.
+        #[arg(long)]
+        cerebellum_model_path: Option<PathBuf>,
+
+        /// System prompt file.
+        #[arg(long)]
+        system_prompt: Option<PathBuf>,
+
+        /// Output format: text (default) or json.
+        #[arg(long, default_value = "text")]
+        format: String,
+    },
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -3472,6 +3510,80 @@ async fn main() {
 
             if let Err(e) = result {
                 eprintln!("TUI error: {e}");
+                std::process::exit(1);
+            }
+        }
+
+        Commands::Ask {
+            prompt,
+            model_url,
+            model,
+            copilot,
+            api_key,
+            bitnet_model_path,
+            cerebellum_model_path,
+            system_prompt,
+            format,
+        } => {
+            use std::io::Write;
+            let start = std::time::Instant::now();
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+
+            let sys_prompt = system_prompt
+                .and_then(|p| std::fs::read_to_string(p).ok())
+                .unwrap_or_else(|| "You are a helpful assistant. Be concise.".into());
+
+            type CM = pares_agens_core::model::ChatMessage;
+            let messages: Vec<CM> = vec![
+                CM { role: "system".into(), content: sys_prompt.clone(), tool_call_id: None, tool_calls: None },
+                CM { role: "user".into(), content: prompt.clone(), tool_call_id: None, tool_calls: None },
+            ];
+
+            // Build model client
+            if let Some(ref path) = bitnet_model_path {
+                let client = BitnetModelClient::new(path);
+                let mc: Arc<dyn ModelClient> = Arc::new(client);
+                match mc.complete(&messages[..], &[], &pares_agens_core::model::ChatOptions::default()).await {
+                    Ok(resp) => {
+                        let elapsed = start.elapsed();
+                        if format == "json" {
+                            println!("{}", serde_json::json!({"response": resp.content.unwrap_or_default(), "model": "bitnet", "latency_ms": elapsed.as_millis(), "prompt": prompt}));
+                        } else {
+                            print!("{}", resp.content.unwrap_or_default());
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                    Err(e) => { eprintln!("ERROR: {e}"); std::process::exit(1); }
+                }
+            } else if copilot {
+                let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
+                let cached = std::fs::read_to_string(&auth_path)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok());
+                let oauth_token = match cached {
+                    Some(c) => c.oauth_token,
+                    None => {
+                        eprintln!("No cached Copilot auth. Run 'pares-radix tui --copilot' first.");
+                        std::process::exit(1);
+                    }
+                };
+                let auth = CopilotAuth::new(oauth_token);
+                let client = CopilotModelClient::new(auth, model.clone());
+                let mc: Arc<dyn ModelClient> = Arc::new(client);
+                match mc.complete(&messages[..], &[], &pares_agens_core::model::ChatOptions::default()).await {
+                    Ok(resp) => {
+                        let elapsed = start.elapsed();
+                        if format == "json" {
+                            println!("{}", serde_json::json!({"response": resp.content.unwrap_or_default(), "model": model, "latency_ms": elapsed.as_millis(), "prompt": prompt}));
+                        } else {
+                            print!("{}", resp.content.unwrap_or_default());
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                    Err(e) => { eprintln!("ERROR: {e}"); std::process::exit(1); }
+                }
+            } else {
+                eprintln!("ERROR: specify --copilot or --bitnet-model-path");
                 std::process::exit(1);
             }
         }

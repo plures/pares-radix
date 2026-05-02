@@ -9,6 +9,8 @@ use pares_agens_core::cerebellum::classifier::{
 use pares_agens_bitnet::BitNetRunner;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 /// BitNet-powered classifier that uses single-token prompts for speed.
 ///
@@ -24,6 +26,11 @@ use std::sync::Arc;
 /// | Cluster (batched) | 256+ | ~2ms amortized |
 pub struct BitNetClassifier {
     runner: Arc<BitNetRunner>,
+    // Metrics
+    total_classifications: AtomicU64,
+    total_latency_us: AtomicU64,
+    min_latency_us: AtomicU64,
+    max_latency_us: AtomicU64,
 }
 
 impl BitNetClassifier {
@@ -33,6 +40,10 @@ impl BitNetClassifier {
             .map_err(|e| format!("failed to load BitNet model: {e}"))?;
         Ok(Self {
             runner: Arc::new(runner),
+            total_classifications: AtomicU64::new(0),
+            total_latency_us: AtomicU64::new(0),
+            min_latency_us: AtomicU64::new(u64::MAX),
+            max_latency_us: AtomicU64::new(0),
         })
     }
 
@@ -145,9 +156,32 @@ impl BitNetClassifier {
 
 impl ClassifierBackend for BitNetClassifier {
     fn classify(&self, _system_prompt: &str, user_message: &str) -> Result<String, String> {
+        let start = Instant::now();
+
         let intent = self.classify_intent_fast(user_message);
         let complexity = self.classify_complexity_fast(user_message);
         let needs_tools = self.needs_tools_fast(user_message);
+
+        let elapsed_us = start.elapsed().as_micros() as u64;
+
+        // Update metrics
+        self.total_classifications.fetch_add(1, Ordering::Relaxed);
+        self.total_latency_us.fetch_add(elapsed_us, Ordering::Relaxed);
+        self.min_latency_us.fetch_min(elapsed_us, Ordering::Relaxed);
+        self.max_latency_us.fetch_max(elapsed_us, Ordering::Relaxed);
+
+        let count = self.total_classifications.load(Ordering::Relaxed);
+        let avg_us = self.total_latency_us.load(Ordering::Relaxed) / count.max(1);
+
+        tracing::info!(
+            intent = ?intent,
+            complexity,
+            needs_tools,
+            latency_ms = elapsed_us / 1000,
+            avg_latency_ms = avg_us / 1000,
+            total_classifications = count,
+            "BitNet cerebellum classification"
+        );
 
         // Construct the JSON that the existing classifier expects
         let classification = MessageClassification {
