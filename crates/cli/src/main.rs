@@ -309,6 +309,7 @@ impl RuntimeAgentFactory {
         let cerebellum = Cerebellum::new(CerebellumConfig::default());
 
         // Attach BitNet classifier if a cerebellum model path is configured
+        #[cfg(feature = "bitnet-native")]
         let cerebellum = if let Some(ref path) = self.cerebellum_model_path {
             match crate::bitnet_classifier::BitNetClassifier::new(path) {
                 Ok(backend) => {
@@ -2450,6 +2451,7 @@ enum Commands {
     },
 
     /// Test the cerebellum classifier on a message (non-interactive).
+    #[cfg(feature = "bitnet-native")]
     Classify {
         /// Message to classify.
         message: String,
@@ -3038,6 +3040,7 @@ async fn main() {
             let registry = Arc::new(registry);
 
             // Auto-download BitNet model for cerebellum if not explicitly provided
+            #[cfg(feature = "bitnet-native")]
             let cerebellum_model_path = if cerebellum_model_path.is_some() {
                 cerebellum_model_path
             } else {
@@ -3415,6 +3418,7 @@ async fn main() {
             };
 
             let cerebellum = Cerebellum::new(CerebellumConfig::default());
+            #[cfg(feature = "bitnet-native")]
             let cerebellum = if let Some(ref path) = cerebellum_model_path {
                 match crate::bitnet_classifier::BitNetClassifier::new(path) {
                     Ok(backend) => {
@@ -3627,6 +3631,7 @@ async fn main() {
             }
         }
 
+        #[cfg(feature = "bitnet-native")]
         Commands::Classify { message, bitnet_model_path } => {
             use crate::bitnet_classifier::BitNetClassifier;
             use pares_agens_core::cerebellum::classifier::ClassifierBackend;
@@ -4051,4 +4056,5 @@ mod tests {
         );
     }
 }
+#[cfg(feature = "bitnet-native")]
 pub mod bitnet_classifier;
