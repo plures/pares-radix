@@ -3202,6 +3202,13 @@ async fn main() {
                     Arc::new(pares_agens_core::state::InMemoryStateStore::default());
                 let mut heartbeat = pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
                 heartbeat.load_config().await;
+                // Disable quiet hours if env var says so
+                if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
+                    let mut cfg = heartbeat.config().clone();
+                    cfg.quiet_hours_enabled = false;
+                    heartbeat.set_config(cfg).await;
+                    tracing::info!("heartbeat quiet hours disabled");
+                }
                 tokio::spawn(async move {
                     heartbeat.run(shutdown_rx).await;
                 });

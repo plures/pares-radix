@@ -22,6 +22,8 @@ pub struct HeartbeatConfig {
     pub enabled: bool,
     /// Interval between heartbeats in minutes.
     pub interval_mins: u32,
+    /// Whether quiet hours are enforced.
+    pub quiet_hours_enabled: bool,
     /// Start of quiet hours (hour, 0-23). Heartbeats are suppressed during quiet hours.
     pub quiet_hours_start: u8,
     /// End of quiet hours (hour, 0-23).
@@ -35,6 +37,7 @@ impl Default for HeartbeatConfig {
         Self {
             enabled: true,
             interval_mins: 30,
+            quiet_hours_enabled: true,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
             max_proactive_per_day: 6,
@@ -45,6 +48,9 @@ impl Default for HeartbeatConfig {
 impl HeartbeatConfig {
     /// Check if the current time falls within quiet hours.
     pub fn is_quiet_hour(&self) -> bool {
+        if !self.quiet_hours_enabled {
+            return false;
+        }
         let hour = Local::now().hour() as u8;
         if self.quiet_hours_start <= self.quiet_hours_end {
             // e.g. 9..17
@@ -276,6 +282,7 @@ mod tests {
     #[test]
     fn quiet_hours_wrap_midnight() {
         let config = HeartbeatConfig {
+            quiet_hours_enabled: true,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
             ..Default::default()
