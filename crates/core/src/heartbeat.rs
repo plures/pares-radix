@@ -220,12 +220,16 @@ impl HeartbeatRunner {
             }
         }
 
-        // 3. Check if any promises were made ("I'll do X")
+        // 3. Check for unfulfilled promises
+        // (Promises are stored in Chronos under key "agent:promise".
+        //  The heartbeat checks if any recent promises are uncompleted.)
+        // TODO: query Chronos for recent agent:promise entries where completed=false
+        // For now, check state fallback
         if let Some(promises) = self.state.get("agent_promises").await {
             if let Some(arr) = promises.as_array() {
                 for promise in arr {
                     if let Some(what) = promise.get("what").and_then(|w| w.as_str()) {
-                        if promise.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) == false {
+                        if !promise.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) {
                             work_items.push(format!("unfulfilled promise: {what}"));
                         }
                     }

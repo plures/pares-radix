@@ -607,6 +607,7 @@ impl Agent {
 
         self.capture_exchange(content, &reply).await;
         self.spawn_procedure_writer(content, &reply);
+        self.detect_and_store_promises(content, &reply).await;
 
         // Log interaction to Chronos (PluresDB + JSONL)
         if let Some(ref chronos) = self.chronos {
@@ -1206,6 +1207,66 @@ impl Agent {
             }
         }
         last_response
+    }
+
+
+    /// Detect commitment language in agent responses and store as promises.
+    ///
+    /// Scans for patterns like "I'll", "I will", "Let me", "Going to",
+    /// "I'm going to" and stores them as pending tasks that the heartbeat
+    /// checks every 30 seconds.
+    async fn detect_and_store_promises(&self, _user_msg: &str, agent_reply: &str) {
+        // Commitment patterns (case-insensitive)
+        let commitment_patterns = [
+            "i'll ", "i will ", "let me ", "going to ", "i'm going to ",
+            "i am going to ", "i can ", "i'll go ahead",
+            "want me to ", // user asks, agent implies yes by responding
+        ];
+
+        let lower = agent_reply.to_lowercase();
+
+        // Find sentences containing commitment language
+        let mut promises: Vec<String> = Vec::new();
+        for sentence in agent_reply.split(['.', '!', '\n']) {
+            let sentence_lower = sentence.to_lowercase();
+            let trimmed = sentence.trim();
+            if trimmed.len() < 10 || trimmed.len() > 200 {
+                continue; // too short or too long
+            }
+            for pattern in &commitment_patterns {
+                if sentence_lower.contains(pattern) {
+                    promises.push(trimmed.to_string());
+                    break;
+                }
+            }
+        }
+
+        if promises.is_empty() {
+            return;
+        }
+
+        // Store promises as Chronos entries for heartbeat to find
+        if let Some(ref chronos) = self.chronos {
+            for p in &promises {
+                let entry = chronos.build_entry(
+                    "agent:promise",
+                    "agent",
+                    crate::chronos::ChronosAction::Create,
+                    &serde_json::json!({
+                        "what": p,
+                        "completed": false,
+                    }),
+                    vec![],
+                    Some(format!("promise: {}", &p[..p.len().min(80)])),
+                );
+                chronos.record(&entry);
+            }
+
+            tracing::info!(
+                promises = promises.len(),
+                "agent promises detected and logged to Chronos"
+            );
+        }
     }
 
     fn extract_domain_tags(&self, question: &str) -> Vec<String> {
