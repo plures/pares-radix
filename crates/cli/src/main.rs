@@ -3195,6 +3195,19 @@ async fn main() {
             });
             tracing::info!("Scheduler started");
 
+            // Spawn heartbeat runner
+            let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+            {
+                let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
+                    Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+                let mut heartbeat = pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                heartbeat.load_config().await;
+                tokio::spawn(async move {
+                    heartbeat.run(shutdown_rx).await;
+                });
+                tracing::info!("Heartbeat runner started");
+            }
+
             let memory_monitor = spawn_memory_monitor();
             let watchdog = spawn_systemd_watchdog();
 
@@ -3202,6 +3215,8 @@ async fn main() {
                 run_adapter_with_recovery(&adapter, Arc::clone(&agent_handle), tool_trace_store)
                     .await;
 
+            // Stop heartbeat
+            let _ = shutdown_tx.send(true);
             if let Err(e) = systemd_notify("STOPPING=1") {
                 tracing::warn!("failed to send systemd STOPPING=1: {e}");
             }
