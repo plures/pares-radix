@@ -172,7 +172,6 @@ pub struct Agent {
     /// PII guard for redacting sensitive data before model calls.
     pii_guard: PiiGuard,
     /// Telemetry logger for interaction tracking.
-    pub telemetry: Option<Arc<crate::telemetry::TelemetryLogger>>,
 }
 
 #[derive(Debug, Clone)]
@@ -217,7 +216,6 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
-            telemetry: None,
         }
     }
 
@@ -254,7 +252,6 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
-            telemetry: None,
         }
     }
 
@@ -360,22 +357,9 @@ impl Agent {
     }
 
     /// Attach a telemetry logger for interaction tracking.
-    pub fn with_telemetry(mut self, logger: Arc<crate::telemetry::TelemetryLogger>) -> Self {
-        self.telemetry = Some(logger);
-        self
-    }
 
     /// Create and attach telemetry from PARES_TELEMETRY_DIR env var.
     /// No-op if the env var is not set.
-    pub fn with_telemetry_from_env(self) -> Self {
-        if let Ok(dir) = std::env::var("PARES_TELEMETRY_DIR") {
-            let logger = Arc::new(crate::telemetry::TelemetryLogger::new(dir.into()));
-            tracing::info!(dir = %std::env::var("PARES_TELEMETRY_DIR").unwrap_or_default(), "telemetry enabled");
-            self.with_telemetry(logger)
-        } else {
-            self
-        }
-    }
 
     /// Handle a single event and optionally return a response event.
     pub async fn handle_event(&self, event: Event) -> Option<Event> {
@@ -624,25 +608,22 @@ impl Agent {
         self.capture_exchange(content, &reply).await;
         self.spawn_procedure_writer(content, &reply);
 
-        // Log telemetry for this interaction
-        if let Some(ref telem) = self.telemetry {
-            let record = crate::telemetry::TelemetryRecord {
-                timestamp: chrono::Utc::now().to_rfc3339(),
-                node: String::new(), // filled by logger
-                interaction_id: id.to_string(),
-                user_message: content.to_string(),
-                entities: vec![], // TODO: pass from cerebellum context
-                context_items: vec![], // TODO: pass from cerebellum context
-                model: model_label.to_string(),
-                latency_ms: 0, // TODO: measure from preprocess start
-                tools_used: vec![], // TODO: collect from tool loop
-                response: reply.clone(),
-                response_len: reply.len(),
-                route: "conscious".into(), // TODO: pass from cerebellum
-                topic_shifted: false, // TODO: pass from cerebellum
-                previous_interaction_id: None, // filled by logger
-            };
-            telem.log(record);
+        // Log interaction to Chronos (PluresDB + JSONL)
+        if let Some(ref chronos) = self.chronos {
+            let entry = chronos.build_entry(
+                &format!("agent:interaction:{}", channel.unwrap_or("unknown")),
+                "agent",
+                crate::chronos::ChronosAction::ResponseGenerated,
+                &serde_json::json!({
+                    "user_message": content,
+                    "response": &reply,
+                    "response_len": reply.len(),
+                    "model": model_label,
+                }),
+                vec![],
+                Some(format!("response to: {}", &content[..content.len().min(80)])),
+            );
+            chronos.record(&entry);
         }
 
         Some(Event::ModelResponse {

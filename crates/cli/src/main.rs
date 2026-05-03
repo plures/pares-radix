@@ -352,7 +352,12 @@ impl RuntimeAgentFactory {
                 .with_delegation(delegation_broker)
                 .with_turn_store(turn_store)
                 .with_personality(personality)
-                .with_telemetry_from_env(),
+                .with_chronos({
+                    let chronos = pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
+                        self.store.store().clone()
+                    );
+                    Arc::new(chronos)
+                }),
         ))
     }
 }
@@ -3424,7 +3429,7 @@ async fn main() {
                         system_prompt_text,
                     )
                     .with_turn_store(Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>)
-                    .with_telemetry_from_env(),
+                    ,
             );
 
             // Set up terminal

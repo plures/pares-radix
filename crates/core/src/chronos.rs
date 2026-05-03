@@ -37,6 +37,18 @@ pub enum ChronosAction {
     Update,
     Delete,
     Move,
+    /// Agent received a user message.
+    MessageReceived,
+    /// Agent generated a response.
+    ResponseGenerated,
+    /// A tool was invoked.
+    ToolInvoked,
+    /// Context manager adjusted the window.
+    ContextManaged,
+    /// Model was called (conscious/deep/bitnet).
+    ModelCalled,
+    /// Outcome recorded (user correction or acceptance).
+    OutcomeRecorded,
 }
 
 impl std::fmt::Display for ChronosAction {
@@ -46,19 +58,49 @@ impl std::fmt::Display for ChronosAction {
             Self::Update => write!(f, "Update"),
             Self::Delete => write!(f, "Delete"),
             Self::Move => write!(f, "Move"),
+            Self::MessageReceived => write!(f, "MessageReceived"),
+            Self::ResponseGenerated => write!(f, "ResponseGenerated"),
+            Self::ToolInvoked => write!(f, "ToolInvoked"),
+            Self::ContextManaged => write!(f, "ContextManaged"),
+            Self::ModelCalled => write!(f, "ModelCalled"),
+            Self::OutcomeRecorded => write!(f, "OutcomeRecorded"),
         }
     }
 }
 
 /// Causal version timeline backed by PluresDB.
+///
+/// Stores to PluresDB (primary) and optionally writes JSONL to a file sink
+/// for cross-machine debugging and analysis.
 pub struct ChronosTimeline {
     store: Arc<CrdtStore>,
+    /// Optional JSONL output directory. When set, every record() also
+    /// appends the entry as one JSON line to `<dir>/YYYY-MM-DD.jsonl`.
+    jsonl_dir: Option<std::path::PathBuf>,
 }
 
 impl ChronosTimeline {
     /// Create a new timeline backed by the given store.
     pub fn new(store: Arc<CrdtStore>) -> Self {
-        Self { store }
+        Self { store, jsonl_dir: None }
+    }
+
+    /// Create a timeline with JSONL file output.
+    pub fn with_jsonl(store: Arc<CrdtStore>, dir: std::path::PathBuf) -> Self {
+        std::fs::create_dir_all(&dir).ok();
+        Self { store, jsonl_dir: Some(dir) }
+    }
+
+    /// Enable JSONL output from an environment variable.
+    pub fn with_jsonl_from_env(store: Arc<CrdtStore>) -> Self {
+        if let Ok(dir) = std::env::var("PARES_TELEMETRY_DIR") {
+            let path = std::path::PathBuf::from(dir);
+            std::fs::create_dir_all(&path).ok();
+            tracing::info!(dir = %path.display(), "chronos JSONL output enabled");
+            Self { store, jsonl_dir: Some(path) }
+        } else {
+            Self { store, jsonl_dir: None }
+        }
     }
 
     /// Build a new [`ChronosEntry`] for a write, automatically resolving the
@@ -108,6 +150,22 @@ impl ChronosTimeline {
             CHRONOS_ACTOR,
             json!({ "entry_id": entry.id, "timestamp": entry.timestamp }),
         );
+
+        // JSONL file sink — one line per entry, daily files.
+        if let Some(ref dir) = self.jsonl_dir {
+            if let Ok(json) = serde_json::to_string(entry) {
+                let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                let path = dir.join(format!("{date}.jsonl"));
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    use std::io::Write;
+                    let _ = writeln!(file, "{json}");
+                }
+            }
+        }
     }
 
     /// Get the version history for a key (newest first), up to `limit`.

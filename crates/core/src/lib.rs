@@ -75,7 +75,6 @@ pub mod source;
 /// Key-value state store backed by PluresDB.
 pub mod state;
 /// Privacy-first anonymous telemetry aggregation primitives.
-pub mod telemetry;
 
 pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};
@@ -112,4 +111,3 @@ pub mod task_loop;
 pub mod health;
 pub mod error_display;
 pub mod pii_guard;
-pub mod telemetry;
