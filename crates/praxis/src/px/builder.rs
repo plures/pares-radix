@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use super::{
     FunctionMode, PxAction, PxCapture, PxConstraint, PxContract, PxDocument,
-    PxExample, PxFact, PxField, PxFunction, PxImport, PxRule, PxTrigger, Rule,
+    PxExample, PxFact, PxField, PxFunction, PxImport, PxMatchArm, PxProcedure,
+    PxProcedureTrigger, PxRule, PxStep, PxTrigger, Rule,
 };
 
 /// Build a PxDocument from parsed pest pairs.
@@ -18,6 +19,7 @@ pub fn build(pairs: Pairs<'_, Rule>) -> PxDocument {
         contracts: vec![],
         functions: vec![],
         triggers: vec![],
+        procedures: vec![],
     };
 
     for pair in pairs {
@@ -46,6 +48,7 @@ fn push_pair_into_document(pair: Pair<'_, Rule>, doc: &mut PxDocument) {
         Rule::contract_decl => doc.contracts.push(build_contract(pair)),
         Rule::function_decl => doc.functions.push(build_function(pair)),
         Rule::trigger_decl => doc.triggers.push(build_trigger(pair)),
+        Rule::procedure_decl => doc.procedures.push(build_procedure(pair)),
         Rule::EOI => {}
         _ => {}
     }
@@ -225,27 +228,42 @@ fn build_constraint(pair: Pair<'_, Rule>) -> PxConstraint {
     let name = next_str(&mut inner);
 
     let mut scope = None;
-    let mut when_expr = String::new();
-    let mut require_expr = String::new();
+    let mut phases = vec![];
+    let mut trait_category = None;
+    let mut weight = None;
+    let mut prompt_injection = None;
+    let mut when_expr = None;
+    let mut require_expr = None;
     let mut severity = "warning".to_string();
     let mut message = None;
 
     let Some(constraint_body) = inner.find(|p| p.as_rule() == Rule::constraint_body) else {
-        return PxConstraint { name, scope, when_expr, require_expr, severity, message };
+        return PxConstraint { name, scope, phases, trait_category, weight, prompt_injection, when_expr, require_expr, severity, message };
     };
 
     for child in constraint_body.into_inner() {
         match child.as_rule() {
             Rule::scope_clause => scope = child.into_inner().next().map(|p| p.as_str().to_string()),
-            Rule::when_expr => when_expr = child.into_inner().next().map(|p| p.as_str().to_string()).unwrap_or_default(),
-            Rule::require_expr => require_expr = child.into_inner().next().map(|p| p.as_str().to_string()).unwrap_or_default(),
+            Rule::phase_clause => {
+                if let Some(csv) = child.into_inner().find(|p| p.as_rule() == Rule::ident_csv) {
+                    phases = csv.into_inner()
+                        .filter(|p| p.as_rule() == Rule::ident)
+                        .map(|p| p.as_str().to_string())
+                        .collect();
+                }
+            }
+            Rule::trait_clause => trait_category = child.into_inner().next().map(|p| p.as_str().to_string()),
+            Rule::weight_clause => weight = child.into_inner().next().and_then(|p| p.as_str().parse().ok()),
+            Rule::prompt_clause => prompt_injection = child.into_inner().next().map(|p| unquote(p.as_str())),
+            Rule::when_expr => when_expr = child.into_inner().next().map(|p| p.as_str().to_string()),
+            Rule::require_expr => require_expr = child.into_inner().next().map(|p| p.as_str().to_string()),
             Rule::severity_clause => severity = child.into_inner().next().map(|p| p.as_str().to_string()).unwrap_or_default(),
-            Rule::message_clause => message = child.into_inner().next().map(|p| p.as_str().trim_matches('"').trim_matches('\'').to_string()),
+            Rule::message_clause => message = child.into_inner().next().map(|p| unquote(p.as_str())),
             _ => {}
         }
     }
 
-    PxConstraint { name, scope, when_expr, require_expr, severity, message }
+    PxConstraint { name, scope, phases, trait_category, weight, prompt_injection, when_expr, require_expr, severity, message }
 }
 
 fn build_contract(pair: Pair<'_, Rule>) -> PxContract {
@@ -355,6 +373,99 @@ fn build_trigger(pair: Pair<'_, Rule>) -> PxTrigger {
     }
 
     PxTrigger { name, on_event, schedule, run }
+}
+
+fn build_procedure(pair: Pair<'_, Rule>) -> PxProcedure {
+    let mut inner = pair.into_inner();
+    let name = next_str(&mut inner);
+
+    let mut trigger = None;
+    let mut given = None;
+    let mut steps = vec![];
+
+    let Some(body) = inner.find(|p| p.as_rule() == Rule::procedure_body) else {
+        return PxProcedure { name, trigger, given, steps };
+    };
+
+    for child in body.into_inner() {
+        match child.as_rule() {
+            Rule::procedure_trigger_clause => {
+                if let Some(kind_pair) = child.into_inner().find(|p| p.as_rule() == Rule::procedure_trigger_kind) {
+                    let mut ki = kind_pair.into_inner();
+                    let kind_str = ki.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+                    let params = ki.next().map(parse_value);
+                    trigger = Some(PxProcedureTrigger { kind: kind_str, params });
+                }
+            }
+            Rule::given_clause => given = child.into_inner().next().map(|p| unquote(p.as_str())),
+            Rule::step_list => {
+                steps = child.into_inner()
+                    .filter(|p| p.as_rule() == Rule::step_decl)
+                    .map(build_step)
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+
+    PxProcedure { name, trigger, given, steps }
+}
+
+fn build_step(pair: Pair<'_, Rule>) -> PxStep {
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::step_call => {
+            let mut parts = inner.into_inner();
+            let name = next_str(&mut parts);
+            let mut params = serde_json::Value::Object(serde_json::Map::new());
+            let mut output_var = None;
+
+            for p in parts {
+                match p.as_rule() {
+                    Rule::map_val => params = parse_value(p),
+                    Rule::param_pair => {
+                        let mut kv = p.into_inner();
+                        let k = next_str(&mut kv);
+                        let v = kv.next().map(parse_value).unwrap_or(serde_json::Value::Null);
+                        if let Some(obj) = params.as_object_mut() {
+                            obj.insert(k, v);
+                        }
+                    }
+                    Rule::ident => output_var = Some(p.as_str().to_string()),
+                    _ => {}
+                }
+            }
+
+            PxStep::Call { name, params, output_var }
+        }
+        Rule::step_match => {
+            let arms = inner.into_inner()
+                .filter(|p| p.as_rule() == Rule::match_arm_list)
+                .flat_map(|mal| mal.into_inner().filter(|p| p.as_rule() == Rule::match_arm))
+                .map(|arm| {
+                    let mut ai = arm.into_inner();
+                    let condition = ai.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+                    let result = ai.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+                    PxMatchArm { condition, result }
+                })
+                .collect();
+            PxStep::Match { arms }
+        }
+        Rule::step_when => {
+            let mut wi = inner.into_inner();
+            let condition = wi.next().map(|p| p.as_str().to_string()).unwrap_or_default();
+            let steps = wi
+                .find(|p| p.as_rule() == Rule::step_list)
+                .map(|sl| sl.into_inner().filter(|p| p.as_rule() == Rule::step_decl).map(build_step).collect())
+                .unwrap_or_default();
+            PxStep::When { condition, steps }
+        }
+        _ => PxStep::Call {
+            name: "unknown".into(),
+            params: serde_json::Value::Null,
+            output_var: None,
+        },
+    }
 }
 
 // === Helpers ===

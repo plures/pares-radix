@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::{
     FunctionMode, PxConstraint, PxContract, PxDocument, PxFact, PxFunction,
-    PxImport, PxRule, PxTrigger,
+    PxImport, PxProcedure, PxRule, PxStep, PxTrigger,
 };
 
 /// A compiled PluresDB record ready for storage.
@@ -46,6 +46,9 @@ pub fn compile(doc: &PxDocument) -> Vec<CompiledRecord> {
     }
     for trigger in &doc.triggers {
         records.push(compile_trigger(trigger));
+    }
+    for procedure in &doc.procedures {
+        records.push(compile_procedure(procedure));
     }
 
     records
@@ -121,6 +124,10 @@ fn compile_constraint(constraint: &PxConstraint) -> CompiledRecord {
             "type": "constraint",
             "name": constraint.name,
             "scope": constraint.scope,
+            "phases": constraint.phases,
+            "trait_category": constraint.trait_category,
+            "weight": constraint.weight,
+            "prompt_injection": constraint.prompt_injection,
             "when": constraint.when_expr,
             "require": constraint.require_expr,
             "severity": constraint.severity,
@@ -196,6 +203,48 @@ fn compile_trigger(trigger: &PxTrigger) -> CompiledRecord {
     }
 }
 
+fn compile_procedure(procedure: &PxProcedure) -> CompiledRecord {
+    let steps: Vec<serde_json::Value> = procedure.steps.iter().map(compile_step).collect();
+
+    CompiledRecord {
+        key: format!("px:procedure/{}", procedure.name),
+        data: json!({
+            "type": "procedure",
+            "name": procedure.name,
+            "trigger": procedure.trigger.as_ref().map(|t| json!({
+                "kind": t.kind,
+                "params": t.params,
+            })),
+            "given": procedure.given,
+            "steps": steps,
+        }),
+        embed: true,
+    }
+}
+
+fn compile_step(step: &PxStep) -> serde_json::Value {
+    match step {
+        PxStep::Call { name, params, output_var } => json!({
+            "kind": "call",
+            "name": name,
+            "params": params,
+            "output_var": output_var,
+        }),
+        PxStep::Match { arms } => json!({
+            "kind": "match",
+            "arms": arms.iter().map(|a| json!({
+                "condition": a.condition,
+                "result": a.result,
+            })).collect::<Vec<_>>(),
+        }),
+        PxStep::When { condition, steps } => json!({
+            "kind": "when",
+            "condition": condition,
+            "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
+        }),
+    }
+}
+
 /// Summary of compilation results.
 #[derive(Debug)]
 pub struct CompileResult {
@@ -212,6 +261,7 @@ pub struct CompileStats {
     pub contracts: usize,
     pub functions: usize,
     pub triggers: usize,
+    pub procedures: usize,
     pub total: usize,
 }
 
@@ -226,6 +276,7 @@ pub fn compile_with_stats(doc: &PxDocument) -> CompileResult {
         contracts: doc.contracts.len(),
         functions: doc.functions.len(),
         triggers: doc.triggers.len(),
+        procedures: doc.procedures.len(),
         total: records.len(),
     };
     CompileResult { records, stats }
@@ -241,7 +292,7 @@ mod tests {
         PxDocument {
             imports: vec![], facts: vec![], rules: vec![],
             constraints: vec![], contracts: vec![], functions: vec![],
-            triggers: vec![],
+            triggers: vec![], procedures: vec![],
         }
     }
 
@@ -306,8 +357,12 @@ mod tests {
         doc.constraints.push(PxConstraint {
             name: "no_deploy_during_azsecpak".into(),
             scope: None,
-            when_expr: "deployment.target == usme".into(),
-            require_expr: "deployment.azsecpak_window == false".into(),
+            phases: vec![],
+            trait_category: None,
+            weight: None,
+            prompt_injection: None,
+            when_expr: Some("deployment.target == usme".into()),
+            require_expr: Some("deployment.azsecpak_window == false".into()),
             severity: "error".into(),
             message: Some("Cannot deploy during AzSecPak window".into()),
         });
@@ -328,8 +383,10 @@ mod tests {
             lets: vec![], actions: vec![], captures: vec![],
         });
         doc.constraints.push(PxConstraint {
-            name: "c".into(), scope: None, when_expr: "".into(),
-            require_expr: "".into(), severity: "warning".into(), message: None,
+            name: "c".into(), scope: None, phases: vec![],
+            trait_category: None, weight: None, prompt_injection: None,
+            when_expr: Some("".into()),
+            require_expr: Some("".into()), severity: "warning".into(), message: None,
         });
 
         let result = compile_with_stats(&doc);

@@ -6,7 +6,7 @@ COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 
 document = { SOI ~ NEWLINE* ~ (statement ~ NEWLINE*)* ~ EOI }
 
-statement = _{ import_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl }
+statement = _{ import_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl | procedure_decl }
 
 // === Imports ===
 import_decl = { "import" ~ rust_path ~ ("as" ~ ident)? }
@@ -35,13 +35,31 @@ capture_entry = { "fact:" ~ string ~ ("category:" ~ ident)? ~ ("tags:" ~ list_va
 
 // === Constraints ===
 constraint_decl = { "constraint" ~ ident ~ ":" ~ NEWLINE ~ constraint_body }
-constraint_body = { scope_clause? ~ when_expr ~ require_expr ~ severity_clause ~ message_clause? }
+constraint_body = { scope_clause? ~ phase_clause? ~ trait_clause? ~ weight_clause? ~ prompt_clause? ~ when_expr? ~ require_expr? ~ severity_clause ~ message_clause? }
 scope_clause = { "scope:" ~ ident ~ NEWLINE }
+phase_clause = { "phase:" ~ ident_csv ~ NEWLINE }
+trait_clause = { "trait:" ~ ident ~ NEWLINE }
+weight_clause = { "weight:" ~ float ~ NEWLINE }
+prompt_clause = { "prompt:" ~ string ~ NEWLINE }
 when_expr = { "when:" ~ expr ~ NEWLINE }
 require_expr = { "require:" ~ expr ~ NEWLINE }
 severity_clause = { "severity:" ~ severity_level ~ NEWLINE }
 severity_level = { "error" | "warning" | "info" }
 message_clause = { "message:" ~ string ~ NEWLINE }
+ident_csv = { ident ~ ("," ~ ident)* }
+
+// === Procedures ===
+procedure_decl = { "procedure" ~ ident ~ ":" ~ NEWLINE ~ procedure_body }
+procedure_body = { procedure_trigger_clause? ~ given_clause? ~ step_list }
+procedure_trigger_clause = { "trigger:" ~ procedure_trigger_kind ~ NEWLINE }
+procedure_trigger_kind = { "on_write" ~ map_val? | "before_response" | "after_response" | "cron" ~ map_val? | "manual" }
+step_list = { (step_decl ~ NEWLINE)+ }
+step_decl = { step_match | step_when | step_call }
+step_call = { ident ~ (map_val | param_pair*) ~ ("->" ~ "$" ~ ident)? }
+step_match = { "match:" ~ NEWLINE ~ match_arm_list }
+match_arm_list = { (match_arm ~ NEWLINE)+ }
+match_arm = { expr ~ "->" ~ ident }
+step_when = { "when" ~ expr ~ ":" ~ NEWLINE ~ step_list }
 
 // === Contracts ===
 contract_decl = { "contract" ~ ident ~ ":" ~ NEWLINE ~ contract_body }
@@ -99,4 +117,5 @@ map_val = { "{" ~ (ident ~ ":" ~ value ~ ("," ~ ident ~ ":" ~ value)*)? ~ "}" }
 
 // === Tokens ===
 ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+var_ref = @{ "$" ~ ident }
 NEWLINE = _{ "\n" | "\r\n" }

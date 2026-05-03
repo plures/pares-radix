@@ -22,6 +22,7 @@ pub struct PxDocument {
     pub contracts: Vec<PxContract>,
     pub functions: Vec<PxFunction>,
     pub triggers: Vec<PxTrigger>,
+    pub procedures: Vec<PxProcedure>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,8 +71,12 @@ pub struct PxCapture {
 pub struct PxConstraint {
     pub name: String,
     pub scope: Option<String>,
-    pub when_expr: String,
-    pub require_expr: String,
+    pub phases: Vec<String>,
+    pub trait_category: Option<String>,
+    pub weight: Option<f64>,
+    pub prompt_injection: Option<String>,
+    pub when_expr: Option<String>,
+    pub require_expr: Option<String>,
     pub severity: String,
     pub message: Option<String>,
 }
@@ -117,6 +122,43 @@ pub struct PxTrigger {
     pub on_event: String,
     pub schedule: Option<String>,
     pub run: String,
+}
+
+/// A procedure — a sequence of steps triggered by events.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxProcedure {
+    pub name: String,
+    pub trigger: Option<PxProcedureTrigger>,
+    pub given: Option<String>,
+    pub steps: Vec<PxStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxProcedureTrigger {
+    pub kind: String,
+    pub params: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PxStep {
+    Call {
+        name: String,
+        params: serde_json::Value,
+        output_var: Option<String>,
+    },
+    Match {
+        arms: Vec<PxMatchArm>,
+    },
+    When {
+        condition: String,
+        steps: Vec<PxStep>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxMatchArm {
+    pub condition: String,
+    pub result: String,
 }
 
 /// Parse a .px source string into a document AST.
@@ -200,6 +242,31 @@ contract auto_merge_behavior:
         assert_eq!(rule.captures[0].content, "Merged PR");
         assert_eq!(rule.captures[0].category.as_deref(), Some("work_in_progress"));
         assert_eq!(rule.captures[0].tags, vec!["lifecycle", "merge"]);
+    }
+
+    #[test]
+    fn parse_personality_constraint() {
+        let source = r#"
+constraint warmth:
+  phase: user_communication, error_reporting
+  trait: warmth
+  weight: 0.8
+  prompt: "Use a warm, approachable tone."
+  severity: info
+"#;
+
+        let doc = parse(source).expect("expected valid .px");
+        assert_eq!(doc.constraints.len(), 1);
+        let c = &doc.constraints[0];
+        assert_eq!(c.name, "warmth");
+        assert_eq!(c.trait_category.as_deref(), Some("warmth"));
+        assert_eq!(c.phases, vec!["user_communication", "error_reporting"]);
+        assert!((c.weight.unwrap() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(c.prompt_injection.as_deref(), Some("Use a warm, approachable tone."));
+        assert_eq!(c.severity, "info");
+        // when/require are optional for personality constraints
+        assert!(c.when_expr.is_none());
+        assert!(c.require_expr.is_none());
     }
 }
 pub mod compiler;
