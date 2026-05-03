@@ -21,7 +21,8 @@ pub struct HeartbeatConfig {
     /// Whether the heartbeat system is enabled.
     pub enabled: bool,
     /// Interval between heartbeats in minutes.
-    pub interval_mins: u32,
+    /// Interval between heartbeat ticks in seconds.
+    pub interval_secs: u32,
     /// Whether quiet hours are enforced.
     pub quiet_hours_enabled: bool,
     /// Start of quiet hours (hour, 0-23). Heartbeats are suppressed during quiet hours.
@@ -36,7 +37,7 @@ impl Default for HeartbeatConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_mins: 30,
+            interval_secs: 30,
             quiet_hours_enabled: true,
             quiet_hours_start: 23,
             quiet_hours_end: 8,
@@ -111,7 +112,7 @@ impl HeartbeatRunner {
                 Ok(config) => {
                     self.config = config;
                     info!(
-                        interval_mins = self.config.interval_mins,
+                        interval_secs = self.config.interval_secs,
                         quiet_start = self.config.quiet_hours_start,
                         quiet_end = self.config.quiet_hours_end,
                         "heartbeat config loaded from PluresDB"
@@ -157,11 +158,11 @@ impl HeartbeatRunner {
     /// 4. There are checklist items to process
     pub async fn run(&self, mut shutdown: watch::Receiver<bool>) {
         info!(
-            interval_mins = self.config.interval_mins,
+            interval_secs = self.config.interval_secs,
             "heartbeat runner started"
         );
 
-        let interval_duration = Duration::from_secs(self.config.interval_mins as u64 * 60);
+        let interval_duration = Duration::from_secs(self.config.interval_secs as u64);
         let mut interval = time::interval(interval_duration);
         // Skip the immediate first tick
         interval.tick().await;
@@ -182,52 +183,84 @@ impl HeartbeatRunner {
     }
 
     /// Execute a single heartbeat tick.
+    ///
+    /// This is the cerebellum-gated heartbeat:
+    /// 1. Check for pending work (zero tokens — pure PluresDB/state queries)
+    /// 2. Only escalate to the conscious model if there's actual work
+    /// 3. Skip silently if nothing needs attention
     async fn tick(&self) {
         if !self.config.enabled {
-            debug!("heartbeat skipped — disabled");
             return;
         }
 
         if self.config.is_quiet_hour() {
-            debug!("heartbeat skipped — quiet hours");
             return;
         }
 
-        // Check daily limit
+        // ── Cerebellum gate (zero tokens) ────────────────────────────
+        // Check for work without calling any model.
+        let mut work_items: Vec<String> = Vec::new();
+
+        // 1. Check pending tasks in state
+        if let Some(tasks) = self.state.get("pending_tasks").await {
+            if let Some(arr) = tasks.as_array() {
+                for task in arr {
+                    if let Some(desc) = task.get("description").and_then(|d| d.as_str()) {
+                        work_items.push(format!("pending task: {desc}"));
+                    }
+                }
+            }
+        }
+
+        // 2. Check checklist items
+        let checklist = self.load_checklist().await;
+        for item in &checklist {
+            if item.enabled {
+                work_items.push(format!("checklist: {}", item.command));
+            }
+        }
+
+        // 3. Check if any promises were made ("I'll do X")
+        if let Some(promises) = self.state.get("agent_promises").await {
+            if let Some(arr) = promises.as_array() {
+                for promise in arr {
+                    if let Some(what) = promise.get("what").and_then(|w| w.as_str()) {
+                        if promise.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) == false {
+                            work_items.push(format!("unfulfilled promise: {what}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Gate decision ─────────────────────────────────────────────
+        if work_items.is_empty() {
+            // Nothing to do — skip silently (zero tokens)
+            return;
+        }
+
+        // Check daily limit before spending tokens
         let today = Local::now().format("%Y-%m-%d").to_string();
         let (count, date) = self.load_daily_count().await;
         let count = if date == today { count } else { 0 };
 
         if count >= self.config.max_proactive_per_day as u32 {
-            debug!(count, max = self.config.max_proactive_per_day, "heartbeat skipped — daily limit reached");
+            debug!(count, max = self.config.max_proactive_per_day, "heartbeat gated — daily limit");
             return;
         }
 
-        // Load checklist
-        let checklist = self.load_checklist().await;
-        let active: Vec<_> = checklist.into_iter().filter(|item| item.enabled).collect();
+        // ── Escalate to conscious (tokens spent here) ────────────────
+        info!(items = work_items.len(), "heartbeat: work found, escalating");
 
-        if active.is_empty() {
-            debug!("heartbeat tick — no checklist items");
-            return;
+        let combined = work_items.join("\n");
+        if let Some(spine) = &self.event_spine {
+            spine.emit_inbound_message(
+                0,
+                "heartbeat",
+                &format!("[heartbeat] Work needs attention:\n{combined}"),
+            );
         }
 
-        info!(items = active.len(), "heartbeat tick — processing checklist");
-
-        for item in &active {
-            info!(id = %item.id, desc = %item.description, cmd = %item.command, "heartbeat item");
-
-            // Emit through event spine if available
-            if let Some(spine) = &self.event_spine {
-                spine.emit_inbound_message(
-                    0, // system chat
-                    "heartbeat",
-                    &format!("[heartbeat] {}", item.command),
-                );
-            }
-        }
-
-        // Increment daily count
         self.save_daily_count(count + 1, &today).await;
     }
 
@@ -273,7 +306,7 @@ mod tests {
     fn default_config_values() {
         let config = HeartbeatConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.interval_mins, 30);
+        assert_eq!(config.interval_secs, 30);
         assert_eq!(config.quiet_hours_start, 23);
         assert_eq!(config.quiet_hours_end, 8);
         assert_eq!(config.max_proactive_per_day, 6);
@@ -306,7 +339,7 @@ mod tests {
         let config = HeartbeatConfig::default();
         let json = serde_json::to_value(&config).unwrap();
         let back: HeartbeatConfig = serde_json::from_value(json).unwrap();
-        assert_eq!(back.interval_mins, config.interval_mins);
+        assert_eq!(back.interval_secs, config.interval_secs);
         assert_eq!(back.quiet_hours_start, config.quiet_hours_start);
     }
 
@@ -329,7 +362,7 @@ mod tests {
         let state = Arc::new(crate::InMemoryStateStore::new());
         let mut runner = HeartbeatRunner::new(state);
         runner.load_config().await;
-        assert_eq!(runner.config().interval_mins, 30);
+        assert_eq!(runner.config().interval_secs, 30);
     }
 
     #[tokio::test]
@@ -337,7 +370,7 @@ mod tests {
         let state = Arc::new(crate::InMemoryStateStore::new());
         let custom = HeartbeatConfig {
             enabled: false,
-            interval_mins: 15,
+            interval_secs: 15,
             quiet_hours_start: 22,
             quiet_hours_end: 7,
             max_proactive_per_day: 4,
@@ -349,7 +382,7 @@ mod tests {
         let mut runner = HeartbeatRunner::new(state);
         runner.load_config().await;
         assert!(!runner.config().enabled);
-        assert_eq!(runner.config().interval_mins, 15);
+        assert_eq!(runner.config().interval_secs, 15);
         assert_eq!(runner.config().quiet_hours_start, 22);
     }
 }
