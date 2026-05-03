@@ -365,6 +365,18 @@ impl Agent {
         self
     }
 
+    /// Create and attach telemetry from PARES_TELEMETRY_DIR env var.
+    /// No-op if the env var is not set.
+    pub fn with_telemetry_from_env(self) -> Self {
+        if let Ok(dir) = std::env::var("PARES_TELEMETRY_DIR") {
+            let logger = Arc::new(crate::telemetry::TelemetryLogger::new(dir.into()));
+            tracing::info!(dir = %std::env::var("PARES_TELEMETRY_DIR").unwrap_or_default(), "telemetry enabled");
+            self.with_telemetry(logger)
+        } else {
+            self
+        }
+    }
+
     /// Handle a single event and optionally return a response event.
     pub async fn handle_event(&self, event: Event) -> Option<Event> {
         let request_id = Uuid::new_v4();

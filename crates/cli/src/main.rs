@@ -351,7 +351,8 @@ impl RuntimeAgentFactory {
                 .with_deep_model(Arc::clone(&self.deep_model_client))
                 .with_delegation(delegation_broker)
                 .with_turn_store(turn_store)
-                .with_personality(personality),
+                .with_personality(personality)
+                .with_telemetry_from_env(),
         ))
     }
 }
@@ -3422,7 +3423,8 @@ async fn main() {
                         Arc::clone(&tool_dispatcher),
                         system_prompt_text,
                     )
-                    .with_turn_store(Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>),
+                    .with_turn_store(Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>)
+                    .with_telemetry_from_env(),
             );
 
             // Set up terminal
