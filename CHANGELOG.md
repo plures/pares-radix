@@ -1,3 +1,7 @@
+## [1.39.2] — 2026-05-06
+
+- fix(tui): event drain was inside key-event block — responses never displayed (87b9a3d)
+
 ## [1.39.1] — 2026-05-06
 
 - fix: resolve all workspace compile errors (d9aab88)
