@@ -3530,7 +3530,8 @@ async fn main() {
                     }
                 }
 
-                // Drain app events (non-blocking)
+                // Drain app events (non-blocking) — MUST be outside the key-event block
+                // so agent responses are picked up even when no key is pressed.
                 while let Ok(ev) = event_rx.try_recv() {
                     match ev {
                         AppEvent::AgentResponse(content) => {
