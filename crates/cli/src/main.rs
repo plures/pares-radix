@@ -355,7 +355,7 @@ impl RuntimeAgentFactory {
                 .with_personality(personality)
                 .with_chronos({
                     let chronos = pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
-                        self.store.store().clone()
+                        self.store.crdt_store_arc()
                     );
                     Arc::new(chronos)
                 }),

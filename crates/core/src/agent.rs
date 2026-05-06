@@ -171,7 +171,7 @@ pub struct Agent {
     chronos: Option<Arc<ChronosTimeline>>,
     /// PII guard for redacting sensitive data before model calls.
     pii_guard: PiiGuard,
-    /// Telemetry logger for interaction tracking.
+    // Telemetry logger for interaction tracking.
 }
 
 #[derive(Debug, Clone)]
@@ -612,7 +612,7 @@ impl Agent {
         // Log interaction to Chronos (PluresDB + JSONL)
         if let Some(ref chronos) = self.chronos {
             let entry = chronos.build_entry(
-                &format!("agent:interaction:{}", channel.unwrap_or("unknown")),
+                &format!("agent:interaction:{channel}"),
                 "agent",
                 crate::chronos::ChronosAction::ResponseGenerated,
                 &serde_json::json!({
@@ -1449,7 +1449,7 @@ impl Agent {
                             request_id: id.to_string(),
                             model: "command".into(),
                             content: format!(
-                                "{action} session '{new_branch}'. Previous session was archived."
+                                "{} session '{}'. Previous session was archived.", action, new_branch
                             ),
                         })
                     }
@@ -1552,7 +1552,7 @@ impl Agent {
                 Some(Event::ModelResponse {
                     request_id: id.to_string(),
                     model: "command".into(),
-                    content: format!("{action} branch '{new_branch}' from '{current_branch}'."),
+                    content: format!("{} branch '{}' from '{}'.", action, new_branch, current_branch),
                 })
             }
             "branches" => {
@@ -1779,8 +1779,8 @@ impl Agent {
 
                 info!(
                     channel,
-                    from_session = previous_session.as_str(),
-                    to_session = new_session.as_str(),
+                    from_session = %previous_session,
+                    to_session = %new_session,
                     trigger = "/clear",
                     "conversation session transitioned"
                 );
@@ -1789,7 +1789,7 @@ impl Agent {
                     request_id: id.to_string(),
                     model: "command".into(),
                     content: format!(
-                        "Cleared conversation context. Started new session '{new_session}'."
+                        "Cleared conversation context. Started new session '{}'.", new_session
                     ),
                 })
             }

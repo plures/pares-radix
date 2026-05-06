@@ -226,3 +226,46 @@ mod tests {
         assert_eq!(second.previous_interaction_id, Some("chain-001".into()));
     }
 }
+
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TelemetryAggregate {
+    pub total_model_calls: u64,
+    pub total_latency_ms: u64,
+    pub tool_usage: HashMap<String, u64>,
+    pub last_uploaded_at: Option<String>,
+}
+
+impl TelemetryAggregate {
+    pub fn record_model_call(&mut self, latency_ms: u64) {
+        self.total_model_calls += 1;
+        self.total_latency_ms += latency_ms;
+    }
+    pub fn record_tool_usage(&mut self, tool_name: &str) {
+        *self.tool_usage.entry(tool_name.to_string()).or_insert(0) += 1;
+    }
+    pub fn mark_uploaded_now(&mut self) {
+        self.last_uploaded_at = Some(chrono::Utc::now().to_rfc3339());
+    }
+    pub fn snapshot(&self) -> TelemetrySnapshot {
+        TelemetrySnapshot {
+            total_model_calls: self.total_model_calls,
+            avg_latency_ms: if self.total_model_calls > 0 { self.total_latency_ms / self.total_model_calls } else { 0 },
+            top_tools: {
+                let mut tools: Vec<_> = self.tool_usage.iter().collect();
+                tools.sort_by(|a, b| b.1.cmp(a.1));
+                tools.into_iter().take(10).map(|(k, v)| (k.clone(), *v)).collect()
+            },
+            last_uploaded_at: self.last_uploaded_at.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TelemetrySnapshot {
+    pub total_model_calls: u64,
+    pub avg_latency_ms: u64,
+    pub top_tools: Vec<(String, u64)>,
+    pub last_uploaded_at: Option<String>,
+}
