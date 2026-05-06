@@ -76,6 +76,8 @@ pub mod source;
 pub mod state;
 /// Privacy-first anonymous telemetry aggregation primitives.
 pub mod telemetry;
+/// Shared slash command registry for all channel adapters.
+pub mod commands;
 
 pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};

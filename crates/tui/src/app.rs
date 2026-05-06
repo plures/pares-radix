@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use pares_agens_core::agent::Agent;
 use pares_agens_core::Event;
+use pares_agens_core::commands::{CommandRegistry, CommandContext, CommandResult};
 
 /// A single chat message displayed in the TUI.
 #[derive(Clone, Debug)]
@@ -69,54 +70,30 @@ impl App {
 
     /// Handle a slash command. Returns true if it was a command.
     pub fn handle_command(&mut self, input: &str) -> bool {
-        let trimmed = input.trim();
-        match trimmed {
-            "/quit" | "/exit" | "/q" => {
-                let _ = self.event_tx.send(AppEvent::Quit);
-                return true;
-            }
-            "/clear" => {
+        let registry = CommandRegistry::new();
+        let ctx = CommandContext {
+            primary_model: self.current_model.clone(),
+            deep_model: String::from("claude-opus-4.6"),
+            endpoint: String::from("copilot"),
+            message_count: self.messages.len(),
+            memory_count: 0,
+        };
+        match registry.execute(input, &ctx) {
+            CommandResult::NotACommand => false,
+            CommandResult::Response(text) => { self.push_system(&text); true }
+            CommandResult::ClearHistory => {
                 self.messages.clear();
-                self.push_system("Chat cleared.");
                 self.scroll_offset = 0;
-                return true;
+                self.push_system("Chat cleared.");
+                true
             }
-            "/status" => {
-                let status = format!(
-                    "Model: {}\nMessages: {}\nThinking: {}",
-                    self.current_model,
-                    self.messages.len(),
-                    self.thinking
-                );
-                self.push_system(&status);
-                return true;
+            CommandResult::Quit => { let _ = self.event_tx.send(AppEvent::Quit); true }
+            CommandResult::SwitchModel(name) => {
+                self.current_model = name.clone();
+                self.push_system(&format!("Model switched to: {name}"));
+                true
             }
-            "/help" => {
-                self.push_system(
-                    "Commands:\n  /model <name> — switch model\n  /status — show status\n  /clear — clear chat\n  /quit — exit\n  /help — this message",
-                );
-                return true;
-            }
-            _ => {}
         }
-
-        if let Some(model) = trimmed.strip_prefix("/model ") {
-            let model = model.trim();
-            if model.is_empty() {
-                self.push_system(&format!("Current model: {}", self.current_model));
-            } else {
-                self.current_model = model.to_string();
-                self.push_system(&format!("Model switched to: {model}"));
-            }
-            return true;
-        }
-
-        if trimmed == "/model" {
-            self.push_system(&format!("Current model: {}", self.current_model));
-            return true;
-        }
-
-        false
     }
 
     /// Submit the current input buffer.
