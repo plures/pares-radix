@@ -3464,6 +3464,11 @@ async fn main() {
             execute!(stdout, EnterAlternateScreen).expect("failed to enter alternate screen");
             let backend = CrosstermBackend::new(stdout);
             let mut terminal = Terminal::new(backend).expect("failed to create terminal");
+            terminal.clear().expect("failed to clear terminal");
+
+            // Suppress tracing output so it doesn't corrupt TUI display.
+            // Logs are still captured by Chronos JSONL if PARES_TELEMETRY_DIR is set.
+            let _ = log_filter_handle.modify(|f| *f = build_env_filter("off").unwrap());
 
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             let mut app = App::new(agent, model.clone(), event_tx);
