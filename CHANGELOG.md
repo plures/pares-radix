@@ -1,3 +1,7 @@
+## [1.39.1] — 2026-05-06
+
+- fix: resolve all workspace compile errors (d9aab88)
+
 ## [1.39.0] — 2026-05-06
 
 - feat(praxis): extend .px grammar with procedures and personality constraints (5c1ad00)
