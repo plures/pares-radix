@@ -2492,12 +2492,32 @@ enum ClusterAction {
 
 #[tokio::main]
 async fn main() {
+    // Set up default log directory
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    let log_dir = PathBuf::from(&home).join(".pares-agens/logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+
+    // Default Chronos JSONL to ~/.pares-agens/logs/chronos/
+    if std::env::var("PARES_TELEMETRY_DIR").is_err() {
+        unsafe { std::env::set_var("PARES_TELEMETRY_DIR", log_dir.join("chronos")); }
+    }
+
     let initial_filter = build_env_filter("info").expect("default log level should be valid");
     let (filter_layer, log_filter_handle) = tracing_subscriber::reload::Layer::new(initial_filter);
+
+    let log_file_path = log_dir.join("pares-radix.log");
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file_path)
+        .expect("failed to open log file");
+
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(
             tracing_subscriber::fmt::layer()
+                .with_writer(std::sync::Mutex::new(log_file))
+                .with_ansi(false)
                 .with_target(true)
                 .with_thread_ids(true)
                 .with_thread_names(true),
@@ -3455,7 +3475,12 @@ async fn main() {
                         system_prompt_text,
                     )
                     .with_turn_store(Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>)
-                    ,
+                    .with_chronos({
+                        let chronos = pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
+                            store.crdt_store_arc()
+                        );
+                        Arc::new(chronos)
+                    }),
             );
 
             // Set up terminal
@@ -3465,10 +3490,6 @@ async fn main() {
             let backend = CrosstermBackend::new(stdout);
             let mut terminal = Terminal::new(backend).expect("failed to create terminal");
             terminal.clear().expect("failed to clear terminal");
-
-            // Suppress tracing output so it doesn't corrupt TUI display.
-            // Logs are still captured by Chronos JSONL if PARES_TELEMETRY_DIR is set.
-            let _ = log_filter_handle.modify(|f| *f = build_env_filter("off").unwrap());
 
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             let mut app = App::new(agent, model.clone(), event_tx);
