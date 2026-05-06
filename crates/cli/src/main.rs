@@ -2308,7 +2308,7 @@ enum Commands {
         model_url: String,
 
         /// Model name to use.
-        #[arg(long, env = "PARES_MODEL", default_value = "gpt-4o")]
+        #[arg(long, env = "PARES_MODEL", default_value = "claude-sonnet-4.5")]
         model: String,
 
         /// Use GitHub Copilot device flow authentication.
@@ -2316,7 +2316,7 @@ enum Commands {
         copilot: bool,
 
         /// Deep model name used for low-confidence escalation.
-        #[arg(long, env = "PARES_DEEP_MODEL", default_value = "gpt-4.1")]
+        #[arg(long, env = "PARES_DEEP_MODEL", default_value = "claude-opus-4.6")]
         deep_model: String,
 
         /// Deep model API URL (defaults to --model-url).
@@ -2389,7 +2389,7 @@ enum Commands {
         model_url: String,
 
         /// Model name to use.
-        #[arg(long, env = "PARES_MODEL", default_value = "gpt-4.1")]
+        #[arg(long, env = "PARES_MODEL", default_value = "claude-sonnet-4.5")]
         model: String,
 
         /// Use GitHub Copilot device flow authentication.
@@ -2424,7 +2424,7 @@ enum Commands {
         model_url: String,
 
         /// Model name to use.
-        #[arg(long, env = "PARES_MODEL", default_value = "gpt-4.1")]
+        #[arg(long, env = "PARES_MODEL", default_value = "claude-sonnet-4.5")]
         model: String,
 
         /// Use GitHub Copilot device flow authentication.
@@ -2462,6 +2462,20 @@ enum Commands {
         #[arg(long)]
         bitnet_model_path: PathBuf,
     },
+
+    /// Show or manage configuration.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum ConfigAction {
+    /// Show current configuration.
+    Show,
+    /// Print config file path.
+    Path,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -2649,10 +2663,10 @@ async fn main() {
             let mut runtime_log_level = "info".to_string();
 
             // Apply config file defaults when CLI wasn't explicitly set
-            if model == "gpt-4o" {
+            if model == "claude-sonnet-4.5" {
                 model = radix_config.model.primary.clone();
             }
-            if deep_model == "gpt-4.1" {
+            if deep_model == "claude-opus-4.6" {
                 deep_model = radix_config.model.deep.clone();
             }
             if model_url == "https://models.inference.ai.azure.com" {
@@ -2809,13 +2823,17 @@ async fn main() {
                     // Default fallback chain for Copilot: if the primary model
                     // is unavailable (enterprise-only, rate-limited, etc.), try
                     // progressively simpler models.
-                    let conscious_fallbacks = vec![
-                        "gpt-4o".to_string(),
-                        "gpt-4o-mini".to_string(),
-                        "claude-3.5-sonnet".to_string(),
-                    ];
+                    let conscious_fallbacks = if radix_config.model.fallbacks.is_empty() {
+                        vec![
+                            "claude-sonnet-4.5".to_string(),
+                            "gpt-4o".to_string(),
+                            "gpt-4o-mini".to_string(),
+                        ]
+                    } else {
+                        radix_config.model.fallbacks.clone()
+                    };
                     let deep_fallbacks = vec![
-                        "claude-3.5-sonnet".to_string(),
+                        "claude-sonnet-4.5".to_string(),
                         "gpt-4o".to_string(),
                     ];
 
@@ -3306,7 +3324,7 @@ async fn main() {
             let mut model = model;
 
             // Apply config file defaults
-            if model == "gpt-4.1" {
+            if model == "claude-sonnet-4.5" {
                 model = radix_config.model.primary.clone();
             }
             let copilot = copilot || radix_config.model.copilot;
@@ -3375,7 +3393,7 @@ async fn main() {
                 Arc::new(CopilotModelClient::new_with_model_handle(
                     auth,
                     Arc::clone(&model_name_handle),
-                ).with_fallbacks(if radix_config.model.fallbacks.is_empty() { vec!["gpt-4o".into(), "gpt-4o-mini".into()] } else { radix_config.model.fallbacks.clone() }))
+                ).with_fallbacks(if radix_config.model.fallbacks.is_empty() { vec!["claude-sonnet-4.5".into(), "gpt-4o".into()] } else { radix_config.model.fallbacks.clone() }))
             } else {
                 let provider_config = ProviderConfig::new(&model_url, api_key.clone());
                 let router_config = RouterConfig::single("default", provider_config);
@@ -3608,7 +3626,7 @@ async fn main() {
 
             // Apply config file defaults
             let mut model = model;
-            if model == "gpt-4.1" {
+            if model == "claude-sonnet-4.5" {
                 model = radix_config.model.primary.clone();
             }
             let copilot = copilot || radix_config.model.copilot;
@@ -3703,6 +3721,15 @@ async fn main() {
                 }
             }
         }
+
+        Commands::Config { action } => match action {
+            ConfigAction::Show => {
+                println!("{}", toml::to_string_pretty(&radix_config).unwrap_or_default());
+            }
+            ConfigAction::Path => {
+                println!("{}", config::RadixConfig::config_path().display());
+            }
+        },
     }
 }
 
