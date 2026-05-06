@@ -138,6 +138,7 @@ impl App {
             content: trimmed.clone(),
             timestamp: chrono::Utc::now(),
         });
+        self.scroll_to_bottom();
         self.thinking = true;
 
         // Spawn agent call
@@ -154,9 +155,14 @@ impl App {
                 Some(Event::ModelResponse { content, .. }) => {
                     let _ = tx.send(AppEvent::AgentResponse(content));
                 }
-                _ => {
+                Some(_other) => {
                     let _ = tx.send(AppEvent::AgentResponse(
-                        "(no response from agent)".to_string(),
+                        "(unexpected response type from agent)".to_string(),
+                    ));
+                }
+                None => {
+                    let _ = tx.send(AppEvent::AgentResponse(
+                        "(agent returned no response)".to_string(),
                     ));
                 }
             }
@@ -178,5 +184,14 @@ impl App {
             content,
             timestamp: chrono::Utc::now(),
         });
+        self.scroll_to_bottom();
+    }
+
+    /// Auto-scroll to show the latest message.
+    pub fn scroll_to_bottom(&mut self) {
+        let total_lines: u16 = self.messages.iter().map(|m| {
+            m.content.lines().count() as u16 + 1
+        }).sum::<u16>() + 2;
+        self.scroll_offset = total_lines.saturating_sub(20);
     }
 }
