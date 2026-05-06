@@ -1046,7 +1046,7 @@ impl Agent {
     async fn load_history(&self, channel: &str) -> Vec<ChatMessage> {
         // Fast path: check in-memory cache first.
         {
-            let guard = self.conversation_history.lock().unwrap();
+            let guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = guard.get(channel) {
                 if !cached.is_empty() {
                     return Self::trim_to_token_budget(cached);
@@ -1068,7 +1068,7 @@ impl Agent {
                         "hydrated conversation history from PluresDB"
                     );
                     // Cache for future calls.
-                    let mut guard = self.conversation_history.lock().unwrap();
+                    let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
                     guard.insert(channel.to_string(), messages);
                     return trimmed;
                 }
@@ -1089,7 +1089,7 @@ impl Agent {
     async fn persist_turn(&self, channel: &str, session_id: &str, new_messages: &[ChatMessage]) {
         // Update in-memory cache.
         {
-            let mut guard = self.conversation_history.lock().unwrap();
+            let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
             let history = guard.entry(channel.to_string()).or_default();
             history.extend(new_messages.iter().cloned());
             let compacted = Self::trim_to_token_budget(history);
@@ -1368,7 +1368,7 @@ impl Agent {
     }
 
     fn resolve_branch_channel(&self, channel: &str) -> String {
-        let guard = self.branch_state.lock().unwrap();
+        let guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
         let state = guard.get(channel).cloned().unwrap_or_default();
         Self::scoped_channel(channel, &state.active)
     }
@@ -1423,7 +1423,7 @@ impl Agent {
                         let requested_name = requested_name.trim();
 
                         let (new_branch, created) = {
-                            let mut guard = self.branch_state.lock().unwrap();
+                            let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                             let state = guard.entry(channel.to_string()).or_default();
                             let branch = if requested_name.is_empty() {
                                 let mut idx = 1usize;
@@ -1446,7 +1446,7 @@ impl Agent {
                         let new_branch_channel = Self::scoped_channel(channel, &new_branch);
 
                         {
-                            let mut history = self.conversation_history.lock().unwrap();
+                            let mut history = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
                             history.entry(new_branch_channel).or_default();
                         }
 
@@ -1465,7 +1465,7 @@ impl Agent {
                     }
                     "list" => {
                         let (active, branches) = {
-                            let guard = self.branch_state.lock().unwrap();
+                            let guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                             let state = guard.get(channel).cloned().unwrap_or_default();
                             (state.active, state.branches)
                         };
@@ -1495,7 +1495,7 @@ impl Agent {
                         }
 
                         {
-                            let mut guard = self.branch_state.lock().unwrap();
+                            let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                             let state = guard.entry(channel.to_string()).or_default();
                             state.branches.insert(target.clone());
                             state.active = target.clone();
@@ -1523,7 +1523,7 @@ impl Agent {
                 let snapshot = self.load_history(&current_branch_channel).await;
 
                 let (new_branch, created) = {
-                    let mut guard = self.branch_state.lock().unwrap();
+                    let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                     let state = guard.entry(channel.to_string()).or_default();
                     let mut branch = if requested_name.is_empty() {
                         let mut idx = 1usize;
@@ -1550,7 +1550,7 @@ impl Agent {
                 let new_branch_channel = Self::scoped_channel(channel, &new_branch);
 
                 {
-                    let mut history = self.conversation_history.lock().unwrap();
+                    let mut history = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
                     history.insert(new_branch_channel, snapshot);
                 }
 
@@ -1567,7 +1567,7 @@ impl Agent {
             }
             "branches" => {
                 let (active, branches) = {
-                    let guard = self.branch_state.lock().unwrap();
+                    let guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                     let state = guard.get(channel).cloned().unwrap_or_default();
                     (state.active, state.branches)
                 };
@@ -1597,7 +1597,7 @@ impl Agent {
                 }
 
                 let switched = {
-                    let mut guard = self.branch_state.lock().unwrap();
+                    let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                     let state = guard.entry(channel.to_string()).or_default();
                     if state.branches.contains(&target) {
                         state.active = target.clone();
@@ -1666,7 +1666,7 @@ impl Agent {
                                 let count = saved.messages.len();
                                 // Restore into conversation history.
                                 {
-                                    let mut guard = self.conversation_history.lock().unwrap();
+                                    let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
                                     guard.insert(channel.to_string(), saved.messages);
                                 }
                                 Some(Event::ModelResponse {
