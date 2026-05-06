@@ -410,23 +410,8 @@ impl Agent {
             (default_route, String::new(), false)
         };
 
-        // Record routing decision in Chronos
-        if let Some(ref chronos) = self.chronos {
-            let entry = chronos.build_entry(
-                &format!("route:{}", event.kind()),
-                "cerebellum",
-                ChronosAction::ContextManaged,
-                &serde_json::json!({
-                    "route": format!("{:?}", route),
-                    "event_kind": event.kind(),
-                    "context_len": learned_context.len(),
-                    "clear_history": clear_history,
-                }),
-                vec![],
-                Some(format!("route={:?}", route)),
-            );
-            chronos.record(&entry);
-        }
+        // Log routing decision (Chronos recording disabled — causes sled deadlock in async context)
+        info!(route = ?route, event_kind = event.kind(), context_len = learned_context.len(), "cerebellum routing decision");
 
         if route == Route::Drop {
             return None;
@@ -467,10 +452,14 @@ impl Agent {
                     }
                 }
                 Route::Conscious | Route::Deep { .. } => {
+                    info!(id, channel, "handle_event: routing to Conscious/Deep, calling handle_model_message");
                     self.handle_model_message(id, channel, content, &learned_context, clear_history)
                         .await
                 }
-                Route::Drop => None,
+                Route::Drop => {
+                    info!(id, channel, "handle_event: Route::Drop — message suppressed");
+                    None
+                },
             },
             Event::Timer { .. } | Event::StateChange { .. } => {
                 if matches!(route, Route::Procedural) {
@@ -880,6 +869,7 @@ impl Agent {
             }).collect();
 
             let model_start = Instant::now();
+            info!(turn, message_count = messages_for_model.len(), tool_count = tools.len(), "ABOUT TO CALL model_client.complete");
             let completion = model_client.complete(&messages_for_model, &tools, options).await?;
             let latency_ms = model_start.elapsed().as_millis();
             info!(turn, latency_ms, tool_calls = completion.tool_calls.len(), "model completion received");
