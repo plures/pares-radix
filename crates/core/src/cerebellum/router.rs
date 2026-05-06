@@ -37,11 +37,6 @@ pub fn decide(event: &Event, learned_context: &str, config: &CerebellumConfig) -
 fn decide_message(content: &str, learned_context: &str, config: &CerebellumConfig) -> Route {
     let signals = analyze(content);
 
-    // Drop noise (exact single-word acks like "ok", "yes", "no")
-    if signals.simple && signals.token_estimate == 1 {
-        return Route::Drop;
-    }
-
     // Short commands go to conscious
     if signals.simple && !signals.analytical {
         return Route::Conscious;
