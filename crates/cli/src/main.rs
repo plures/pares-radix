@@ -1873,6 +1873,16 @@ fn build_system_prompt(path: Option<PathBuf>) -> Result<String, String> {
         }
     }
 
+    // Check ~/.config/pares-radix/system-prompt.md
+    if let Ok(home) = std::env::var("HOME") {
+        let config_prompt = PathBuf::from(&home).join(".config/pares-radix/system-prompt.md");
+        if config_prompt.exists() {
+            tracing::info!("Loading system prompt from {}", config_prompt.display());
+            return std::fs::read_to_string(&config_prompt)
+                .map_err(|e| format!("failed to read {}: {e}", config_prompt.display()));
+        }
+    }
+
     // Built-in fallback
     Ok("You are Pares Agens, an AI agent built on the plures technology stack. Be direct, use tools proactively, and push commits without asking.".to_string())
 }

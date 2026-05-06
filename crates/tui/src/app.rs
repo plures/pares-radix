@@ -177,6 +177,8 @@ impl App {
         let total_lines: u16 = self.messages.iter().map(|m| {
             m.content.lines().count() as u16 + 1
         }).sum::<u16>() + 2;
-        self.scroll_offset = total_lines.saturating_sub(20);
+        // Estimate visible area as ~35 lines (standard terminal minus input/status)
+        let visible = 35u16;
+        self.scroll_offset = total_lines.saturating_sub(visible);
     }
 }

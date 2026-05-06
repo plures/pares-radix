@@ -422,6 +422,7 @@ impl Agent {
                 ..
             } => match route {
                 Route::Procedural => {
+                    info!("handle_event: routing to Procedural");
                     self.dispatch_procedures(&Event::Message {
                         id: id.clone(),
                         channel: channel.clone(),
@@ -472,6 +473,7 @@ impl Agent {
         learned_context: &str,
         clear_history: bool,
     ) -> Option<Event> {
+        info!(id, channel, "handle_model_message: starting model call");
         let session_channel = self.resolve_branch_channel(channel);
         let session_id = Self::branch_label(&session_channel);
         let model_client = match &self.model_client {

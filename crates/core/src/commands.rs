@@ -56,12 +56,9 @@ impl CommandRegistry {
             )),
             "/memory" => {
                 if args.is_empty() {
-                    CommandResult::Response("Usage: /memory <query> — search memories".into())
+                    CommandResult::Response("Usage: /memory <query> — or just ask the agent, it searches memory automatically.".into())
                 } else {
-                    CommandResult::Response(format!(
-                        "Memory search for '{}' (not yet wired to PluresDB in this adapter)",
-                        args
-                    ))
+                    CommandResult::NotACommand // Let it pass through to the agent for PluresDB search
                 }
             }
             "/tools" => CommandResult::Response(
