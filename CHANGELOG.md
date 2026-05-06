@@ -1,3 +1,7 @@
+## [1.40.0] — 2026-05-06
+
+- feat: default logging to ~/.pares-agens/logs/, Chronos always-on (cc283cb)
+
 ## [1.39.3] — 2026-05-06
 
 - fix(tui): suppress tracing output + clear terminal on startup (48dbb6c)
