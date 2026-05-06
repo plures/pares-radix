@@ -118,7 +118,7 @@ impl App {
         self.scroll_to_bottom();
         self.thinking = true;
 
-        // Spawn agent call
+        // Spawn agent call with timeout
         let agent = Arc::clone(&self.agent);
         let tx = self.event_tx.clone();
         tokio::spawn(async move {
@@ -128,18 +128,26 @@ impl App {
                 sender: "user".into(),
                 content: trimmed,
             };
-            match agent.handle_event(event).await {
-                Some(Event::ModelResponse { content, .. }) => {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                agent.handle_event(event),
+            ).await {
+                Ok(Some(Event::ModelResponse { content, .. })) => {
                     let _ = tx.send(AppEvent::AgentResponse(content));
                 }
-                Some(_other) => {
+                Ok(Some(_other)) => {
                     let _ = tx.send(AppEvent::AgentResponse(
                         "(unexpected response type from agent)".to_string(),
                     ));
                 }
-                None => {
+                Ok(None) => {
                     let _ = tx.send(AppEvent::AgentResponse(
-                        "(agent returned no response)".to_string(),
+                        "(agent returned no response — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
+                    ));
+                }
+                Err(_timeout) => {
+                    let _ = tx.send(AppEvent::AgentResponse(
+                        "(request timed out after 30s — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
                     ));
                 }
             }
