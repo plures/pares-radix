@@ -125,7 +125,7 @@ impl App {
         // Spawn agent call with timeout
         let agent = Arc::clone(&self.agent);
         let tx = self.event_tx.clone();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let event = Event::Message {
                 id: uuid::Uuid::new_v4().to_string(),
                 channel: "tui".into(),
@@ -136,23 +136,24 @@ impl App {
                 std::time::Duration::from_secs(30),
                 agent.handle_event(event),
             ).await {
-                Ok(Some(Event::ModelResponse { content, .. })) => {
-                    let _ = tx.send(AppEvent::AgentResponse(content));
-                }
-                Ok(Some(_other)) => {
-                    let _ = tx.send(AppEvent::AgentResponse(
-                        "(unexpected response type from agent)".to_string(),
-                    ));
-                }
-                Ok(None) => {
-                    let _ = tx.send(AppEvent::AgentResponse(
-                        "(agent returned no response — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
-                    ));
-                }
-                Err(_timeout) => {
-                    let _ = tx.send(AppEvent::AgentResponse(
-                        "(request timed out after 30s — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
-                    ));
+                Ok(Some(Event::ModelResponse { content, .. })) => content,
+                Ok(Some(_other)) => "(unexpected response type)".to_string(),
+                Ok(None) => "(agent returned no response — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
+                Err(_timeout) => "(timed out after 30s)".to_string(),
+            }
+        });
+        // Spawn a watcher that catches panics from the agent task
+        let tx2 = self.event_tx.clone();
+        tokio::spawn(async move {
+            match handle.await {
+                Ok(content) => { let _ = tx2.send(AppEvent::AgentResponse(content)); }
+                Err(join_err) => {
+                    let msg = if join_err.is_panic() {
+                        "(internal error — agent panicked, check logs)".to_string()
+                    } else {
+                        "(agent task cancelled)".to_string()
+                    };
+                    let _ = tx2.send(AppEvent::AgentResponse(msg));
                 }
             }
         });

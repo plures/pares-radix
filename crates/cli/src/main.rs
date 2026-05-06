@@ -3556,21 +3556,37 @@ async fn main() {
                                 app.submit_input();
                             }
                             KeyCode::Char(c) => {
-                                app.input.insert(app.input_cursor, c);
-                                app.input_cursor += 1;
+                                // Clamp cursor to valid char boundary
+                                let cursor = app.input_cursor.min(app.input.len());
+                                app.input.insert(cursor, c);
+                                app.input_cursor = cursor + c.len_utf8();
                             }
                             KeyCode::Backspace
                                 if app.input_cursor > 0 => {
-                                    app.input_cursor -= 1;
-                                    app.input.remove(app.input_cursor);
+                                    // Find previous char boundary
+                                    let new_cursor = app.input[..app.input_cursor]
+                                        .char_indices()
+                                        .next_back()
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
+                                    app.input.remove(new_cursor);
+                                    app.input_cursor = new_cursor;
                                 }
                             KeyCode::Left
                                 if app.input_cursor > 0 => {
-                                    app.input_cursor -= 1;
+                                    app.input_cursor = app.input[..app.input_cursor]
+                                        .char_indices()
+                                        .next_back()
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(0);
                                 }
                             KeyCode::Right
                                 if app.input_cursor < app.input.len() => {
-                                    app.input_cursor += 1;
+                                    app.input_cursor = app.input[app.input_cursor..]
+                                        .char_indices()
+                                        .nth(1)
+                                        .map(|(i, _)| app.input_cursor + i)
+                                        .unwrap_or(app.input.len());
                                 }
                             KeyCode::Home => {
                                 app.input_cursor = 0;
