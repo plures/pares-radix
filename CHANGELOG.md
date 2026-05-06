@@ -1,3 +1,26 @@
+## [1.39.0] — 2026-05-06
+
+- feat(praxis): extend .px grammar with procedures and personality constraints (5c1ad00)
+- docs: rewrite ADR-0016 — PluresDB as agent runtime (e3a2eed)
+- docs: ADR-0016 personality as praxis constraints (.px) (776f80c)
+- fix: gate bitnet native inference behind feature flag (5386833)
+- feat: promise detection — agent tracks commitments automatically (bc88cb6)
+- feat: cerebellum-gated heartbeat — frequent ticks, zero token burn (bfa7777)
+- feat: quiet hours optional — disabled via PARES_HEARTBEAT_NO_QUIET env (3c48e59)
+- fix: spawn heartbeat runner in serve command (a82dc09)
+- docs: ADR-0015 Chronos logging pattern — one log, multiple formats (47de647)
+- refactor: Chronos IS the log — unified logging with JSONL output (658cdcc)
+- feat: wire telemetry into serve + TUI agent paths (5ea984a)
+- feat: Chronos telemetry — JSONL interaction logging with causal chains (fbaca0e)
+- feat: wire context manager into cerebellum preprocess pipeline (dc7557c)
+- feat: context manager — cerebellum as trained procedure engine (d1beae6)
+- feat: classify subcommand + BitNet classifier test results (d92e209)
+- fix: BitNet stop token handling + text-level end marker detection (8fe2739)
+- feat: add 'ask' subcommand for non-interactive benchmarking (7eb37e2)
+- feat: wire BitNet classifier into TUI agent factory (d4f9a2a)
+- feat: BitNet cerebellum classifier — single-token classification for speed (0ecea58)
+- feat: BitNet native inference on CPU — shim wraps llama.cpp (492188c)
+
 ## [1.38.0] — 2026-05-02
 
 - feat: rename binary from pares-agens-cli to pares-radix (bdf0ea1)
