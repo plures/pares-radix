@@ -1,3 +1,7 @@
+## [1.39.3] — 2026-05-06
+
+- fix(tui): suppress tracing output + clear terminal on startup (48dbb6c)
+
 ## [1.39.2] — 2026-05-06
 
 - fix(tui): event drain was inside key-event block — responses never displayed (87b9a3d)
