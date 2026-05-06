@@ -360,10 +360,14 @@ impl Cerebellum {
         let mut approval_required: Option<ApprovalRequest> = None;
 
         match gate_result {
-            // Level 2: skip duplicate — override route to Drop
+            // Level 2: skip duplicate — only suppress tool/action events, never user messages
             RuleResult::Warning { ref message } if message.starts_with("skip:") => {
-                debug!(message, "authorization gate: duplicate action suppressed");
-                route = Route::Drop;
+                if !matches!(event, Event::Message { .. }) {
+                    debug!(message, "authorization gate: duplicate action suppressed");
+                    route = Route::Drop;
+                } else {
+                    debug!(message, "authorization gate: skip suppressed for user message (never drop messages)");
+                }
                 guidance.push(message.clone());
             }
             // Level 3: known failure — warn, keep original route

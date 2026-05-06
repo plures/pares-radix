@@ -40,6 +40,8 @@ pub struct App {
     pub input: String,
     pub input_cursor: usize,
     pub scroll_offset: u16,
+    pub user_scrolled: bool,
+    pub viewport_height: u16,
     pub thinking: bool,
     pub current_model: String,
     pub agent: Arc<Agent>,
@@ -61,6 +63,8 @@ impl App {
             input: String::new(),
             input_cursor: 0,
             scroll_offset: 0,
+            user_scrolled: false,
+            viewport_height: 35,
             thinking: false,
             current_model: model_name,
             agent,
@@ -172,13 +176,14 @@ impl App {
         self.scroll_to_bottom();
     }
 
-    /// Auto-scroll to show the latest message.
+    /// Auto-scroll to show the latest message (respects user scroll position).
     pub fn scroll_to_bottom(&mut self) {
+        if self.user_scrolled {
+            return; // Don't auto-scroll if user manually scrolled up
+        }
         let total_lines: u16 = self.messages.iter().map(|m| {
-            m.content.lines().count() as u16 + 1
+            m.content.lines().count() as u16 + 2
         }).sum::<u16>() + 2;
-        // Estimate visible area as ~35 lines (standard terminal minus input/status)
-        let visible = 35u16;
-        self.scroll_offset = total_lines.saturating_sub(visible);
+        self.scroll_offset = total_lines.saturating_sub(self.viewport_height);
     }
 }

@@ -3531,6 +3531,7 @@ async fn main() {
 
             // Main loop
             let result: Result<(), Box<dyn std::error::Error>> = 'main_loop: loop {
+                app.viewport_height = terminal.size().map(|r| r.height.saturating_sub(6)).unwrap_or(35);
                 match terminal.draw(|f| pares_agens_tui::ui::draw(f, &app)) {
                     Ok(_) => {}
                     Err(e) => break 'main_loop Err(e.into()),
@@ -3578,10 +3579,28 @@ async fn main() {
                                 app.input_cursor = app.input.len();
                             }
                             KeyCode::PageUp => {
-                                app.scroll_offset = app.scroll_offset.saturating_add(10);
+                                app.scroll_offset = app.scroll_offset.saturating_add(5);
+                                app.user_scrolled = true;
                             }
                             KeyCode::PageDown => {
-                                app.scroll_offset = app.scroll_offset.saturating_sub(10);
+                                if app.scroll_offset > 5 {
+                                    app.scroll_offset -= 5;
+                                } else {
+                                    app.scroll_offset = 0;
+                                    app.user_scrolled = false;
+                                }
+                            }
+                            KeyCode::Up => {
+                                app.scroll_offset = app.scroll_offset.saturating_add(1);
+                                app.user_scrolled = true;
+                            }
+                            KeyCode::Down => {
+                                if app.scroll_offset > 0 {
+                                    app.scroll_offset -= 1;
+                                    if app.scroll_offset == 0 {
+                                        app.user_scrolled = false;
+                                    }
+                                }
                             }
                             KeyCode::Esc => {
                                 break 'main_loop Ok(());

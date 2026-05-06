@@ -410,6 +410,24 @@ impl Agent {
             (default_route, String::new(), false)
         };
 
+        // Record routing decision in Chronos
+        if let Some(ref chronos) = self.chronos {
+            let entry = chronos.build_entry(
+                &format!("route:{}", event.kind()),
+                "cerebellum",
+                ChronosAction::ContextManaged,
+                &serde_json::json!({
+                    "route": format!("{:?}", route),
+                    "event_kind": event.kind(),
+                    "context_len": learned_context.len(),
+                    "clear_history": clear_history,
+                }),
+                vec![],
+                Some(format!("route={:?}", route)),
+            );
+            chronos.record(&entry);
+        }
+
         if route == Route::Drop {
             return None;
         }
