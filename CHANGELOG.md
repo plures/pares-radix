@@ -1,3 +1,7 @@
+## [1.40.1] — 2026-05-06
+
+- fix(tui): auto-scroll to bottom, better error reporting (da2ad5e)
+
 ## [1.40.0] — 2026-05-06
 
 - feat: default logging to ~/.pares-agens/logs/, Chronos always-on (cc283cb)
