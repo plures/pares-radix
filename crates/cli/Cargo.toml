@@ -37,6 +37,7 @@ pares-agens-bitnet = { path = "../bitnet", features = ["model-client"] }
 crossterm = "0.28"
 ratatui = "0.29"
 pares-rector = { path = "../rector" }
+toml = "0.8"
 
 [features]
 default = []

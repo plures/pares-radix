@@ -7,6 +7,8 @@
 //! pares-agens serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
 //! ```
 
+mod config;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -2525,6 +2527,7 @@ async fn main() {
         .init();
 
     let cli = Cli::parse();
+    let radix_config = config::RadixConfig::load();
 
     match cli.command {
         Commands::Cluster { action } => {
@@ -2645,17 +2648,19 @@ async fn main() {
             let mut deep_escalation_enabled = default_deep_escalation_enabled();
             let mut runtime_log_level = "info".to_string();
 
+            // Apply config file defaults when CLI wasn't explicitly set
+            if model == "gpt-4o" {
+                model = radix_config.model.primary.clone();
+            }
+            if deep_model == "gpt-4.1" {
+                deep_model = radix_config.model.deep.clone();
+            }
+            if model_url == "https://models.inference.ai.azure.com" {
+                model_url = radix_config.model.endpoint.clone();
+            }
+            let copilot = copilot || radix_config.model.copilot;
+
             if copilot {
-                if model == "gpt-4o" {
-                    // Benchmark 2026-04-16: GPT-4.1 = 90% combined (GPQA+coding)
-                    // at 3.7s avg. Fastest frontier model on Copilot Enterprise.
-                    model = "gpt-4.1".into();
-                }
-                if deep_model == "gpt-4.1" {
-                    // Benchmark 2026-04-16: Opus 4.6 = only model scoring 100%
-                    // on BOTH GPQA Diamond AND coding. Worth the latency.
-                    deep_model = "claude-opus-4.6".into();
-                }
                 tracing::info!("Copilot auth enabled");
                 tracing::info!("Model: {model} (copilot)");
             } else {
@@ -3300,16 +3305,18 @@ async fn main() {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
             let mut model = model;
 
+            // Apply config file defaults
+            if model == "gpt-4.1" {
+                model = radix_config.model.primary.clone();
+            }
+            let copilot = copilot || radix_config.model.copilot;
+
             // Build model client
             let model_name_handle = Arc::new(RwLock::new(model.clone()));
             let model_client: Arc<dyn ModelClient> = if let Some(ref bitnet_path) = bitnet_model_path {
                 tracing::info!(path = %bitnet_path.display(), "using local BitNet model (TUI)");
                 Arc::new(BitnetModelClient::new(bitnet_path))
             } else if copilot {
-                if model == "gpt-4.1" || model == "gpt-4o" {
-                    model = "gpt-4.1".into();
-                    *model_name_handle.write().await = model.clone();
-                }
                 let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
                 let cached = std::fs::read_to_string(&auth_path)
                     .ok()
@@ -3368,7 +3375,7 @@ async fn main() {
                 Arc::new(CopilotModelClient::new_with_model_handle(
                     auth,
                     Arc::clone(&model_name_handle),
-                ).with_fallbacks(vec!["gpt-4o".into(), "gpt-4o-mini".into()]))
+                ).with_fallbacks(if radix_config.model.fallbacks.is_empty() { vec!["gpt-4o".into(), "gpt-4o-mini".into()] } else { radix_config.model.fallbacks.clone() }))
             } else {
                 let provider_config = ProviderConfig::new(&model_url, api_key.clone());
                 let router_config = RouterConfig::single("default", provider_config);
@@ -3598,6 +3605,13 @@ async fn main() {
             use std::io::Write;
             let start = std::time::Instant::now();
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+
+            // Apply config file defaults
+            let mut model = model;
+            if model == "gpt-4.1" {
+                model = radix_config.model.primary.clone();
+            }
+            let copilot = copilot || radix_config.model.copilot;
 
             let sys_prompt = system_prompt
                 .and_then(|p| std::fs::read_to_string(p).ok())
