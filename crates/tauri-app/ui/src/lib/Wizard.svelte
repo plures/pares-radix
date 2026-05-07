@@ -265,86 +265,86 @@
 </script>
 
 {#if visible}
-<div
+<Box
   class="wizard-overlay"
   role="dialog"
   aria-modal="true"
   aria-label="Setup Wizard"
 >
-  <div class="wizard-card">
+  <Box class="wizard-card">
     <!-- Progress bar -->
-    <div class="wizard-progress" role="progressbar" aria-valuenow={step + 1} aria-valuemin="1" aria-valuemax="5">
+    <Box class="wizard-progress" role="progressbar" aria-valuenow={step + 1} aria-valuemin="1" aria-valuemax="5">
       {#each [0, 1, 2, 3, 4] as i}
-        <div class="wizard-progress-step {i <= step ? 'active' : ''}"></div>
+        <Box class="wizard-progress-step {i <= step ? 'active' : ''}"></Box>
       {/each}
-    </div>
+    </Box>
 
     <!-- ── Step 0 — Agent Name ─────────────────────────────────────────── -->
     {#if step === 0}
-      <div class="wizard-step" aria-live="polite">
-        <h2 class="wizard-title">Welcome to Pares Agens</h2>
-        <p class="wizard-desc">Let's get you set up. First, what should your agent be called?</p>
+      <Box class="wizard-step" aria-live="polite">
+        <Text size="lg" class="wizard-title">Welcome to Pares Agens</Text>
+        <Text class="wizard-desc">Let's get you set up. First, what should your agent be called?</Text>
         <Input
           placeholder="Pares Agens"
           maxLength={64}
           bind:value={agentName}
           onsubmit={() => { saveState(); goNext(); }}
         />
-        <div class="wizard-footer">
-          <span></span>
+        <Box class="wizard-footer">
+          <Text inline></Text>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }}>
             Next →
           </Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
     {/if}
 
     <!-- ── Step 1 — Model ─────────────────────────────────────────────── -->
     {#if step === 1}
-      <div class="wizard-step" aria-live="polite">
-        <h2 class="wizard-title">Choose your model</h2>
-        <p class="wizard-desc">How do you want to run your AI models?</p>
+      <Box class="wizard-step" aria-live="polite">
+        <Text size="lg" class="wizard-title">Choose your model</Text>
+        <Text class="wizard-desc">How do you want to run your AI models?</Text>
 
-        <div class="model-cards">
+        <Box class="model-cards">
           <!-- Local / Docker -->
           <label class="model-card {modelSource === 'local' ? 'selected' : ''}">
             <input type="radio" name="model-source" value="local" bind:group={modelSource} class="sr-only" />
-            <span class="model-card-title">🐳 Local (Docker)</span>
-            <span class="model-card-desc">Run models privately on your machine via Docker Model Runner. No API key needed.</span>
+            <Text inline class="model-card-title">🐳 Local (Docker)</Text>
+            <Text inline class="model-card-desc">Run models privately on your machine via Docker Model Runner. No API key needed.</Text>
             {#if modelSource === 'local'}
-              <span class="detection-badge {dockerStatus === 'found' ? 'badge-ok' : dockerStatus === 'checking' ? 'badge-checking' : 'badge-warn'}">
+              <Text inline class="detection-badge {dockerStatus === 'found' ? 'badge-ok' : dockerStatus === 'checking' ? 'badge-checking' : 'badge-warn'}">
                 {dockerStatus === 'found'    ? '✓ Docker runner detected'
                  : dockerStatus === 'checking' ? '⌛ Checking…'
                  : '⚠ Docker runner not found — start it first'}
-              </span>
+              </Text>
             {/if}
           </label>
 
           <!-- Cloud -->
           <label class="model-card {modelSource === 'cloud' ? 'selected' : ''}">
             <input type="radio" name="model-source" value="cloud" bind:group={modelSource} class="sr-only" />
-            <span class="model-card-title">☁ Cloud provider</span>
-            <span class="model-card-desc">Use OpenAI, Anthropic, or Google. Requires an API key.</span>
+            <Text inline class="model-card-title">☁ Cloud provider</Text>
+            <Text inline class="model-card-desc">Use OpenAI, Anthropic, or Google. Requires an API key.</Text>
           </label>
 
           <!-- Skip -->
           <label class="model-card {modelSource === 'skip' ? 'selected' : ''}">
             <input type="radio" name="model-source" value="skip" bind:group={modelSource} class="sr-only" />
-            <span class="model-card-title">⏭ Configure later</span>
-            <span class="model-card-desc">Skip for now — change model settings any time.</span>
+            <Text inline class="model-card-title">⏭ Configure later</Text>
+            <Text inline class="model-card-desc">Skip for now — change model settings any time.</Text>
           </label>
-        </div>
+        </Box>
 
         <!-- Cloud sub-form -->
         {#if modelSource === 'cloud'}
-          <div class="cloud-config">
+          <Box class="cloud-config">
             <Select
               label="Provider"
               options={[{value: 'openai', label: 'OpenAI'}, {value: 'anthropic', label: 'Anthropic'}, {value: 'google', label: 'Google'}]}
               bind:value={cloudProvider} />
             <label class="wizard-label">
               API Key
-              <div class="api-key-row">
+              <Box class="api-key-row">
                 <Input
                   password
                   placeholder="sk-…"
@@ -353,32 +353,32 @@
                 <Button variant="outline" onclick={validateKey} disabled={!apiKey.trim() || apiKeyStatus === 'checking'}>
                   {apiKeyStatus === 'checking' ? '⌛' : 'Verify'}
                 </Button>
-              </div>
+              </Box>
               {#if apiKeyStatus === 'valid'}
-                <span class="key-status ok">✓ Key valid</span>
+                <Text inline class="key-status ok">✓ Key valid</Text>
               {:else if apiKeyStatus === 'invalid'}
-                <span class="key-status err">✗ Invalid key</span>
+                <Text inline class="key-status err">✗ Invalid key</Text>
               {:else if apiKeyStatus === 'error'}
-                <span class="key-status warn">⚠ Provider error — try again</span>
+                <Text inline class="key-status warn">⚠ Provider error — try again</Text>
               {/if}
             </label>
-          </div>
+          </Box>
         {/if}
 
-        <div class="wizard-footer">
+        <Box class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }} disabled={!modelSource}>
             Next →
           </Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
     {/if}
 
     <!-- ── Step 2 — Personality ────────────────────────────────────────── -->
     {#if step === 2}
-      <div class="wizard-step" aria-live="polite">
-        <h2 class="wizard-title">Personality</h2>
-        <p class="wizard-desc">Optionally customise your agent's system prompt. Leave blank for the default.</p>
+      <Box class="wizard-step" aria-live="polite">
+        <Text size="lg" class="wizard-title">Personality</Text>
+        <Text class="wizard-desc">Optionally customise your agent's system prompt. Leave blank for the default.</Text>
         <label class="wizard-label">
           System prompt
           <textarea
@@ -388,68 +388,68 @@
             bind:value={systemPrompt}
           ></textarea>
         </label>
-        <div class="wizard-footer">
+        <Box class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }}>Next →</Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
     {/if}
 
     <!-- ── Step 3 — Hyperswarm ─────────────────────────────────────────── -->
     {#if step === 3}
-      <div class="wizard-step" aria-live="polite">
-        <h2 class="wizard-title">Sync across hosts (optional)</h2>
-        <p class="wizard-desc">Set up Hyperswarm now or skip and configure later.</p>
+      <Box class="wizard-step" aria-live="polite">
+        <Text size="lg" class="wizard-title">Sync across hosts (optional)</Text>
+        <Text class="wizard-desc">Set up Hyperswarm now or skip and configure later.</Text>
 
-        <div class="model-cards">
+        <Box class="model-cards">
           <label class="model-card {swarmMode === 'new' ? 'selected' : ''}">
             <input type="radio" name="swarm-mode" value="new" bind:group={swarmMode} class="sr-only" />
-            <span class="model-card-title">✨ New swarm</span>
-            <span class="model-card-desc">Generate a new topic + key and share with other hosts.</span>
+            <Text inline class="model-card-title">✨ New swarm</Text>
+            <Text inline class="model-card-desc">Generate a new topic + key and share with other hosts.</Text>
           </label>
           <label class="model-card {swarmMode === 'join' ? 'selected' : ''}">
             <input type="radio" name="swarm-mode" value="join" bind:group={swarmMode} class="sr-only" />
-            <span class="model-card-title">🔗 Join existing swarm</span>
-            <span class="model-card-desc">Enter a topic + key from another host and verify them.</span>
+            <Text inline class="model-card-title">🔗 Join existing swarm</Text>
+            <Text inline class="model-card-desc">Enter a topic + key from another host and verify them.</Text>
           </label>
           <label class="model-card {swarmMode === 'skip' ? 'selected' : ''}">
             <input type="radio" name="swarm-mode" value="skip" bind:group={swarmMode} class="sr-only" />
-            <span class="model-card-title">⏭ Skip for now</span>
-            <span class="model-card-desc">Continue without Hyperswarm setup.</span>
+            <Text inline class="model-card-title">⏭ Skip for now</Text>
+            <Text inline class="model-card-desc">Continue without Hyperswarm setup.</Text>
           </label>
-        </div>
+        </Box>
 
         {#if swarmMode === 'new'}
-          <div class="cloud-config">
+          <Box class="cloud-config">
             <Button variant="outline" onclick={createSwarmInvite}>
               {swarmTopic && swarmSharedKey ? 'Regenerate topic + key' : 'Generate topic + key'}
             </Button>
             {#if swarmTopic && swarmSharedKey}
-              <p class="wizard-desc">
+              <Text class="wizard-desc">
                 Share this with other hosts:
                 <br />
                 <strong>Topic:</strong> <code>{swarmTopic}</code>
                 <br />
                 <strong>Key:</strong> <code>{swarmSharedKey}</code>
-              </p>
+              </Text>
             {/if}
-          </div>
+          </Box>
         {:else if swarmMode === 'join'}
-          <div class="cloud-config">
+          <Box class="cloud-config">
             <Input label="Topic (64 hex chars)" placeholder="a7f3..." bind:value={swarmTopic} />
             <Input label="Shared key" password placeholder="b92c..." bind:value={swarmSharedKey} />
             <Button variant="outline" onclick={verifyJoinSwarm} disabled={!swarmTopic.trim() || !swarmSharedKey.trim() || swarmVerifyStatus === 'checking'}>
               {swarmVerifyStatus === 'checking' ? 'Verifying…' : 'Verify join'}
             </Button>
             {#if swarmVerifyStatus === 'success'}
-              <span class="key-status ok">✓ Verified — topic + key are valid</span>
+              <Text inline class="key-status ok">✓ Verified — topic + key are valid</Text>
             {:else if swarmVerifyStatus === 'error' && swarmVerifyError}
-              <span class="key-status err">{swarmVerifyError}</span>
+              <Text inline class="key-status err">{swarmVerifyError}</Text>
             {/if}
-          </div>
+          </Box>
         {/if}
 
-        <div class="wizard-footer">
+        <Box class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid"
             onclick={() => { saveState(); goNext(); }}
@@ -457,33 +457,33 @@
           >
             Next →
           </Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
     {/if}
 
     <!-- ── Step 4 — Done / Summary ─────────────────────────────────────── -->
     {#if step === 4}
-      <div class="wizard-step" aria-live="polite">
-        <h2 class="wizard-title">You're all set!</h2>
-        <p class="wizard-desc" id="wizard-done-summary">
+      <Box class="wizard-step" aria-live="polite">
+        <Text size="lg" class="wizard-title">You're all set!</Text>
+        <Text class="wizard-desc" id="wizard-done-summary">
           {agentName.trim() || 'Pares Agens'} is ready.
-        </p>
-        <ul class="wizard-summary-list">
+        </Text>
+        <Box class="wizard-summary-list">
           {#each summaryItems as item}
-            <li class="wizard-summary-item">
-              <span class="wizard-summary-label">{item.label}:</span>
+            <Box class="wizard-summary-item">
+              <Text inline class="wizard-summary-label">{item.label}:</Text>
               {item.value}
-            </li>
+            </Box>
           {/each}
-        </ul>
-        <div class="wizard-footer">
+        </Box>
+        <Box class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={finishWizard}>Launch →</Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
     {/if}
-  </div>
-</div>
+  </Box>
+</Box>
 {/if}
 
 <style>
