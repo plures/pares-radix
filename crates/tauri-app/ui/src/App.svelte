@@ -9,6 +9,7 @@
   import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
   import { activeView, sidebarOpen, commandPaletteOpen, panelOpen, panelHeight } from './lib/store.js';
+  import { praxisViolationCount } from './lib/praxis.js';
   import TerminalPanel from './lib/TerminalPanel.svelte';
   import { listen, handleNotificationAction, minimizeWindow, maximizeWindow, closeWindow } from './api.js';
 
@@ -155,6 +156,9 @@
   <StatusBar>
     <StatusBarItem>pares-radix</StatusBarItem>
     <StatusBarItem>PluresDB: connected</StatusBarItem>
+    {#if $praxisViolationCount > 0}
+      <StatusBarItem>⚠️ {$praxisViolationCount} violation{$praxisViolationCount > 1 ? 's' : ''}</StatusBarItem>
+    {/if}
     <StatusBarItem>
       <Button variant="ghost" size="sm" onclick={() => $panelOpen = !$panelOpen}>
         {$panelOpen ? '▼' : '▲'} Terminal
