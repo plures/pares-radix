@@ -498,13 +498,13 @@
 
   <form method="dialog" onsubmit={(e) => e.preventDefault()}>
     <header class="dialog-header">
-      <h2>Settings</h2>
+      <Text size="lg" weight="bold">Settings</Text>
       <Button variant="ghost" size="sm"
         onclick={() => { open = false; }}>✕</Button>
     </header>
 
     <!-- Tab bar -->
-    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+    <Box role="tablist" aria-label="Settings sections">
       {#each TABS as tab, i}
         <Button
           variant={activeTab === tab ? 'solid' : 'ghost'}
@@ -513,19 +513,18 @@
           {tab.charAt(0).toUpperCase() + tab.slice(1)}
         </Button>
       {/each}
-    </div>
+    </Box>
 
     <!-- Providers panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-providers"
       aria-labelledby="tab-providers"
-      class="settings-panel"
       hidden={activeTab !== 'providers'}>
 
       <!-- Ollama quick configure — visible immediately when Settings opens -->
-      <div class="pref-section ollama-section">
-        <p class="pref-section-title">Ollama</p>
+      <Box>
+        <Text weight="bold">Ollama</Text>
         <Input
           label="Endpoint URL"
           bind:value={ollamaUrl}
@@ -534,17 +533,17 @@
           label="Model"
           bind:value={ollamaModel}
           placeholder="llama3" />
-        <p class="pref-hint">
+        <Text>
           Changes are applied on Save. Run <code>ollama pull {ollamaModel || 'llama3'}</code> to
           ensure the model is available locally.
-        </p>
-      </div>
+        </Text>
+      </Box>
 
       <hr class="section-divider" aria-hidden="true" />
 
       {#if showProviderForm}
-        <div class="provider-form">
-          <h3 class="pref-section-title">{editProviderName === null ? 'Add Provider' : 'Edit Provider'}</h3>
+        <Box>
+          <Text size="lg" weight="bold">{editProviderName === null ? 'Add Provider' : 'Edit Provider'}</Text>
           <Input
             label="Name"
             bind:value={providerFormName}
@@ -563,17 +562,17 @@
             label="Models (comma-separated)"
             bind:value={providerFormModels}
             placeholder="llama3, llama3.1:8b" />
-          <div class="provider-form-actions">
+          <Box>
             <Button variant="outline" onclick={() => { showProviderForm = false; }}>Cancel</Button>
             <Button variant="solid" size="sm" onclick={saveProvider}>Save</Button>
-          </div>
-        </div>
+          </Box>
+        </Box>
       {:else}
-        <div class="panel-toolbar">
+        <Box>
           <Button variant="solid" size="sm" onclick={openAddProvider}>+ Add Provider</Button>
-        </div>
+        </Box>
         {#if providers.length === 0}
-          <p class="panel-empty">No providers configured.</p>
+          <Text>No providers configured.</Text>
         {:else}
           <table class="provider-table">
             <thead>
@@ -604,18 +603,17 @@
           </table>
         {/if}
       {/if}
-    </div>
+    </Box>
 
     <!-- Routing panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-routing"
       aria-labelledby="tab-routing"
-      class="settings-panel"
       hidden={activeTab !== 'routing'}>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Route each use-case to a specific provider and model.</p>
+      <Box>
+        <Text weight="bold">Route each use-case to a specific provider and model.</Text>
 
         {#each [
           { label: 'Interactive', providerVal: routingInteractiveProvider, modelVal: routingInteractiveModel,
@@ -625,8 +623,8 @@
           { label: 'Coding', providerVal: routingCodingProvider, modelVal: routingCodingModel,
             setProvider: v => { routingCodingProvider = v; }, setModel: v => { routingCodingModel = v; } },
         ] as row}
-          <div class="routing-row">
-            <span class="routing-label">{row.label}</span>
+          <Box>
+            <Text inline>{row.label}</Text>
             <Select
               options={[{value: '', label: '— provider —'}, ...providers.map(p => ({value: p.name, label: p.name}))]}
               value={row.providerVal}
@@ -635,33 +633,32 @@
               placeholder="model ID"
               value={row.modelVal}
               onchange={(v) => row.setModel(v)} />
-          </div>
+          </Box>
         {/each}
-      </div>
-    </div>
+      </Box>
+    </Box>
 
     <!-- Channels panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-channels"
       aria-labelledby="tab-channels"
-      class="settings-panel"
       hidden={activeTab !== 'channels'}>
 
-      <div class="channel-cards">
+      <Box>
         {#each channelAdapters as adapter (adapter.kind)}
           {@const enabled = adapter.enabled}
-          <div class="channel-card" class:channel-card-active={enabled}>
-            <div class="channel-card-header">
-              <span class="channel-name">{adapter.kind}</span>
+          <Box>
+            <Box>
+              <Text inline>{adapter.kind}</Text>
               <Toggle
                 checked={enabled}
                 label="Enable {adapter.kind} channel"
                 onchange={() => toggleAdapter(adapter.kind)} />
-            </div>
+            </Box>
 
             {#if enabled}
-              <div class="channel-fields">
+              <Box>
                 {#if adapter.kind === 'telegram'}
                   <Input
                     label="Bot Token"
@@ -677,23 +674,22 @@
                     value={adapter.phoneNumber ?? ''}
                     onchange={(v) => setAdapterField(adapter.kind, 'phoneNumber', v)} />
                 {/if}
-              </div>
+              </Box>
             {/if}
-          </div>
+          </Box>
         {/each}
-      </div>
-    </div>
+      </Box>
+    </Box>
 
     <!-- Preferences panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-preferences"
       aria-labelledby="tab-preferences"
-      class="settings-panel"
       hidden={activeTab !== 'preferences'}>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Identity</p>
+      <Box>
+        <Text weight="bold">Identity</Text>
         <Input label="Agent Name" bind:value={prefAgentName} placeholder="Pares Agens" />
         <label>
           Personality Notes
@@ -704,100 +700,97 @@
           System Prompt
           <textarea bind:value={prefSystemPrompt} rows="3"></textarea>
         </label>
-      </div>
+      </Box>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Memory</p>
-        <div class="pref-toggle-row">
-          <div class="pref-toggle-text">
-            <span class="pref-label">Auto-recall</span>
-            <span class="pref-hint">Retrieve relevant memories each turn</span>
-          </div>
+      <Box>
+        <Text weight="bold">Memory</Text>
+        <Box>
+          <Box>
+            <Text inline>Auto-recall</Text>
+            <Text inline>Retrieve relevant memories each turn</Text>
+          </Box>
           <Toggle label="Enable auto-recall" bind:checked={prefAutoRecall} />
-        </div>
-        <div class="pref-checkbox-group">
-          <span class="pref-hint">Capture categories</span>
-          <div class="checkbox-grid">
+        </Box>
+        <Box>
+          <Text inline>Capture categories</Text>
+          <Box>
             {#each ALL_CAPTURE_CATEGORIES as cat}
-              <label class="checkbox-item">
-                <input type="checkbox"
-                  checked={prefCaptureCategories.includes(cat)}
-                  onchange={() => toggleCategory(cat)} />
-                {cat}
-              </label>
+              <Toggle
+                checked={prefCaptureCategories.includes(cat)}
+                label={cat}
+                onchange={() => toggleCategory(cat)} />
             {/each}
-          </div>
-        </div>
-      </div>
+          </Box>
+        </Box>
+      </Box>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Notifications &amp; Startup</p>
-        <div class="pref-toggle-row">
-          <div class="pref-toggle-text">
-            <span class="pref-label">Desktop notifications</span>
-            <span class="pref-hint">Alert when the agent responds</span>
-          </div>
+      <Box>
+        <Text weight="bold">Notifications &amp; Startup</Text>
+        <Box>
+          <Box>
+            <Text inline>Desktop notifications</Text>
+            <Text inline>Alert when the agent responds</Text>
+          </Box>
           <Toggle label="Enable desktop notifications" bind:checked={prefNotificationsEnabled} />
-        </div>
-        <div class="pref-toggle-row">
-          <div class="pref-toggle-text">
-            <span class="pref-label">Launch at login</span>
-            <span class="pref-hint">Start minimised to the system tray</span>
-          </div>
+        </Box>
+        <Box>
+          <Box>
+            <Text inline>Launch at login</Text>
+            <Text inline>Start minimised to the system tray</Text>
+          </Box>
           <Toggle label="Launch at login" bind:checked={prefAutoStart} />
-        </div>
+        </Box>
         <Input label="Activation hotkey" bind:value={prefActivationHotkey} placeholder="Ctrl+Space" />
-      </div>
-    </div>
+      </Box>
+    </Box>
 
     <!-- MCP panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-mcp"
       aria-labelledby="tab-mcp"
-      class="settings-panel"
       hidden={activeTab !== 'mcp'}>
 
-      <div class="mcp-header">
-        <h3 class="panel-title">MCP Servers</h3>
-        <div class="mcp-header-actions">
+      <Box>
+        <Text size="lg" weight="bold">MCP Servers</Text>
+        <Box>
           <Button variant="solid" size="sm" onclick={() => openMcpForm(null)}>
             + Add Server
           </Button>
           <Button variant="outline" size="sm" onclick={restartMcp} disabled={mcpRestarting}>
             {mcpRestarting ? '↻ Restarting…' : '↻ Restart All'}
           </Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {#if showMcpForm}
-        <div class="mcp-form">
+        <Box>
           <Input label="Name" bind:value={mcpFormName} placeholder="e.g. filesystem" />
           <Input label="Command" bind:value={mcpFormCommand} placeholder="e.g. uvx, npx, node" />
           <Input label="Arguments" bind:value={mcpFormArgs} placeholder="e.g. mcp-server-filesystem /tmp" />
           <Toggle label="Enabled" bind:checked={mcpFormEnabled} />
-          <div class="form-actions">
+          <Box>
             <Button variant="solid" size="sm" onclick={saveMcpServer}>
               {editMcpName ? 'Update' : 'Add'}
             </Button>
             <Button variant="outline" size="sm" onclick={() => { showMcpForm = false; }}>
               Cancel
             </Button>
-          </div>
-        </div>
+          </Box>
+        </Box>
       {/if}
 
       {#if mcpServers.length === 0}
-        <p class="empty-state">No MCP servers configured. Add one to enable tool use.</p>
+        <Text>No MCP servers configured. Add one to enable tool use.</Text>
       {:else}
-        <div class="mcp-server-list">
+        <Box>
           {#each mcpServers as server}
-            <div class="mcp-server-card" class:disabled={!server.enabled}>
-              <div class="mcp-server-info">
-                <span class="mcp-server-name">{server.name}</span>
+            <Box>
+              <Box>
+                <Text inline>{server.name}</Text>
                 <code class="mcp-server-cmd">{server.command} {server.args.join(' ')}</code>
-              </div>
-              <div class="mcp-server-actions">
+              </Box>
+              <Box>
                 <Button variant="ghost" size="sm" onclick={() => toggleMcpServer(server.name)}>
                   {server.enabled ? '🟢' : '⚪'}
                 </Button>
@@ -807,57 +800,56 @@
                 <Button variant="ghost" size="sm" onclick={() => removeMcpServer(server.name)}>
                   🗑
                 </Button>
-              </div>
-            </div>
+              </Box>
+            </Box>
           {/each}
-        </div>
+        </Box>
       {/if}
 
       {#if mcpTools.length > 0}
-        <div class="mcp-tools-section">
-          <h4 class="mcp-tools-title">Discovered Tools ({mcpTools.length})</h4>
-          <div class="mcp-tools-list">
+        <Box>
+          <Text weight="bold">Discovered Tools ({mcpTools.length})</Text>
+          <Box>
             {#each mcpTools as tool}
-              <div class="mcp-tool-item">
-                <span class="mcp-tool-name">{tool.name}</span>
-                <span class="mcp-tool-server">{tool.serverName}</span>
+              <Box>
+                <Text inline>{tool.name}</Text>
+                <Text inline>{tool.serverName}</Text>
                 {#if tool.description}
-                  <span class="mcp-tool-desc">{tool.description}</span>
+                  <Text inline>{tool.description}</Text>
                 {/if}
-              </div>
+              </Box>
             {/each}
-          </div>
-        </div>
+          </Box>
+        </Box>
       {/if}
-    </div>
+    </Box>
 
     <!-- Telemetry panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-telemetry"
       aria-labelledby="tab-telemetry"
-      class="settings-panel"
       hidden={activeTab !== 'telemetry'}>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Privacy-first telemetry</p>
-        <p class="pref-hint">Anonymous metrics only. No conversation content, prompts, tool arguments, or personal identifiers are collected.</p>
+      <Box>
+        <Text weight="bold">Privacy-first telemetry</Text>
+        <Text>Anonymous metrics only. No conversation content, prompts, tool arguments, or personal identifiers are collected.</Text>
 
-        <div class="pref-toggle-row">
-          <div class="pref-toggle-text">
-            <span class="pref-label">Enable telemetry (opt-in)</span>
-            <span class="pref-hint">Off by default</span>
-          </div>
+        <Box>
+          <Box>
+            <Text inline>Enable telemetry (opt-in)</Text>
+            <Text inline>Off by default</Text>
+          </Box>
           <Toggle label="Enable anonymous telemetry" bind:checked={telemetryEnabled} />
-        </div>
+        </Box>
 
-        <div class="pref-toggle-row">
-          <div class="pref-toggle-text">
-            <span class="pref-label">Enable upload</span>
-            <span class="pref-hint">Manual upload of local aggregate metrics</span>
-          </div>
+        <Box>
+          <Box>
+            <Text inline>Enable upload</Text>
+            <Text inline>Manual upload of local aggregate metrics</Text>
+          </Box>
           <Toggle label="Enable telemetry upload" bind:checked={telemetryUploadEnabled} disabled={!telemetryEnabled} />
-        </div>
+        </Box>
 
         <Input
           label="Upload endpoint"
@@ -870,37 +862,37 @@
           {telemetryUploading ? 'Uploading…' : 'Upload now'}
         </Button>
         {#if telemetryUploadError}
-          <p class="upgrade-error" role="alert">{telemetryUploadError}</p>
+          <Text>{telemetryUploadError}</Text>
         {/if}
-      </div>
+      </Box>
 
-      <div class="pref-section">
-        <p class="pref-section-title">Local telemetry dashboard</p>
-        <div class="routing-row">
-          <span class="routing-label">Model calls today</span>
+      <Box>
+        <Text weight="bold">Local telemetry dashboard</Text>
+        <Box>
+          <Text inline>Model calls today</Text>
           <strong>{telemetryModelCallsToday()}</strong>
-        </div>
-        <div class="routing-row">
-          <span class="routing-label">Avg response latency</span>
+        </Box>
+        <Box>
+          <Text inline>Avg response latency</Text>
           <strong>{telemetrySnapshot.avgLatencyMs == null ? '—' : `${Math.round(telemetrySnapshot.avgLatencyMs)} ms`}</strong>
-        </div>
-        <div class="routing-row">
-          <span class="routing-label">Latency range</span>
+        </Box>
+        <Box>
+          <Text inline>Latency range</Text>
           <strong>{telemetrySnapshot.latencyMinMs == null ? '—' : `${telemetrySnapshot.latencyMinMs}–${telemetrySnapshot.latencyMaxMs} ms`}</strong>
-        </div>
-        <div class="routing-row">
-          <span class="routing-label">Samples</span>
+        </Box>
+        <Box>
+          <Text inline>Samples</Text>
           <strong>{telemetrySnapshot.latencySampleCount ?? 0}</strong>
-        </div>
-        <div class="routing-row">
-          <span class="routing-label">Last upload</span>
+        </Box>
+        <Box>
+          <Text inline>Last upload</Text>
           <strong>{telemetrySnapshot.lastUploadAt ? new Date(telemetrySnapshot.lastUploadAt).toLocaleString() : 'Never'}</strong>
-        </div>
+        </Box>
 
         <hr class="section-divider" aria-hidden="true" />
-        <p class="pref-hint">Tool usage frequency</p>
+        <Text>Tool usage frequency</Text>
         {#if telemetryToolEntries().length === 0}
-          <p class="panel-empty">No tool usage recorded yet.</p>
+          <Text>No tool usage recorded yet.</Text>
         {:else}
           <table class="provider-table">
             <thead>
@@ -919,32 +911,28 @@
             </tbody>
           </table>
         {/if}
-      </div>
-    </div>
+      </Box>
+    </Box>
 
     <!-- License panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-license"
       aria-labelledby="tab-license"
-      class="settings-panel"
       hidden={activeTab !== 'license'}>
 
-      <div class="license-status-row">
-        <span
-          class="license-badge"
-          class:license-pro={licenseStatus.tier === 'pro' && licenseStatus.valid}
-          class:license-free={!(licenseStatus.tier === 'pro' && licenseStatus.valid)}>
+      <Box>
+        <Text inline>
           {licenseStatus.tier === 'pro' && licenseStatus.valid ? 'Pro' : 'Free'}
-        </span>
+        </Text>
         {#if licenseStatus.expires_at}
-          <span class="pref-hint">Expires: {new Date(licenseStatus.expires_at).toLocaleDateString()}</span>
+          <Text inline>Expires: {new Date(licenseStatus.expires_at).toLocaleDateString()}</Text>
         {/if}
-      </div>
+      </Box>
 
       {#if !(licenseStatus.tier === 'pro' && licenseStatus.valid)}
-        <div class="upgrade-features">
-          <p>Unlock the full power of Pares Agens:</p>
+        <Box>
+          <Text>Unlock the full power of Pares Agens:</Text>
           <ul class="feature-list">
             <li>✅ Multiple channel adapters</li>
             <li>✅ Multi-provider model routing</li>
@@ -953,37 +941,36 @@
             <li>✅ Praxis audit export</li>
             <li>✅ Procedure editor</li>
           </ul>
-        </div>
+        </Box>
 
-        <div class="upgrade-activate">
+        <Box>
           <Input
             label="License Key"
             bind:value={licenseKey}
             placeholder="XXXX-XXXX-XXXX-XXXX"
             onsubmit={activateLicense} />
           {#if licenseError}
-            <p class="upgrade-error" role="alert">{licenseError}</p>
+            <Text>{licenseError}</Text>
           {/if}
           <Button variant="solid"
             onclick={activateLicense}
             disabled={licenseActivating}>
             {licenseActivating ? 'Activating…' : 'Activate'}
           </Button>
-        </div>
+        </Box>
       {:else}
-        <p class="pref-hint" style="margin-top: 12px;">Pro features are active. Thank you for your support!</p>
+        <Text>Pro features are active. Thank you for your support!</Text>
       {/if}
-    </div>
+    </Box>
 
     <!-- Marketplace panel -->
-    <div
+    <Box
       role="tabpanel"
       id="panel-marketplace"
       aria-labelledby="tab-marketplace"
-      class="settings-panel"
       hidden={activeTab !== 'marketplace'}>
       <MarketplaceTab />
-    </div>
+    </Box>
 
     <footer class="dialog-footer">
       <Button variant="outline" onclick={() => { open = false; }}>Cancel</Button>
