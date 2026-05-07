@@ -1,5 +1,5 @@
 <script>
-  const invoke = window.__TAURI__?.core?.invoke ?? (async () => []);
+  import { getChronosEntries } from './api.js';
   
   let entries = $state([]);
   let loading = $state(true);
@@ -9,7 +9,7 @@
   async function loadEntries() {
     loading = true;
     try {
-      const result = await invoke('chronos_recent', { limit: 50 });
+      const result = await getChronosEntries(50);
       entries = result || [];
     } catch {
       entries = [

@@ -5,8 +5,7 @@
 <script>
   import { Tabs } from '@plures/design-dojo/layout';
   import { Input } from '@plures/design-dojo/primitives';
-
-  const invoke = window.__TAURI__?.core?.invoke ?? (async () => '');
+  import { runCommand } from './api.js';
 
   let activeTab = $state('terminal');
   let terminalOutput = $state('$ pares-radix ready\n');
@@ -26,7 +25,7 @@
     terminalOutput += `$ ${cmd}\n`;
     terminalInput = '';
     try {
-      const result = await invoke('run_shell_command', { command: cmd });
+      const result = await runCommand(cmd);
       terminalOutput += result + '\n';
     } catch (e) {
       terminalOutput += `Error: ${e}\n`;

@@ -1,5 +1,5 @@
 <script>
-  const { invoke } = window.__TAURI__.core;
+  import { getMemories, getPraxisGuidance, getAnalysisEvents, triggerPraxisAnalysis, getSourceSpans } from './api.js';
 
   const CATEGORY_CSS = {
     'code-pattern': 'memory-code',
@@ -37,7 +37,7 @@
 
   async function refreshMemories() {
     try {
-      memories = await invoke('get_memories');
+      memories = await getMemories();
     } catch {
       // Memories are non-critical — swallow the error silently.
     }
@@ -45,12 +45,11 @@
 
   async function refreshGuidance() {
     try {
-      // Load guidance for all categories
       for (const category of GUIDANCE_CATEGORIES) {
-        const guidance = await invoke('get_praxis_guidance', { category: category.id });
+        const guidance = await getPraxisGuidance(category.id);
         guidanceData[category.id] = guidance;
       }
-      guidanceData = { ...guidanceData }; // Trigger reactivity
+      guidanceData = { ...guidanceData };
     } catch (error) {
       console.warn('Failed to load Praxis guidance:', error);
     }
@@ -58,7 +57,7 @@
 
   async function refreshAnalysisEvents() {
     try {
-      analysisEvents = await invoke('get_analysis_events', { limit: 5 });
+      analysisEvents = await getAnalysisEvents(5);
     } catch (error) {
       console.warn('Failed to load analysis events:', error);
     }
@@ -68,9 +67,8 @@
     if (isAnalyzing) return;
     isAnalyzing = true;
     try {
-      const count = await invoke('trigger_praxis_analysis');
+      const count = await triggerPraxisAnalysis();
       console.log(`Analyzed ${count} memories`);
-      // Refresh guidance after analysis
       await refreshGuidance();
       await refreshAnalysisEvents();
     } catch (error) {
@@ -80,12 +78,11 @@
     }
   }
 
-  async function showSourceSpans(spanIds) {
+  async function showSourceSpansHandler(spanIds) {
     try {
-      const spans = await invoke('get_source_spans', { spanIds });
+      const spans = await getSourceSpans(spanIds);
       console.log('Source spans:', spans);
       showSourceTraces = true;
-      // In a real implementation, you'd show these spans in a modal or expanded view
     } catch (error) {
       console.error('Failed to load source spans:', error);
     }
@@ -186,7 +183,7 @@
               {#if guidance.source_spans?.length > 0}
                 <button 
                   class="source-link"
-                  onclick={() => showSourceSpans(guidance.source_spans)}
+                  onclick={() => showSourceSpansHandler(guidance.source_spans)}
                   title="View source memories"
                 >
                   📎 {guidance.source_spans.length} source{guidance.source_spans.length !== 1 ? 's' : ''}

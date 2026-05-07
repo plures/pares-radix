@@ -1,9 +1,6 @@
 <script>
   import '@plures/design-dojo/tokens.css';
-  import { readText as readClipboardText } from '@tauri-apps/plugin-clipboard-manager';
-
-  const { invoke } = window.__TAURI__.core;
-  const { listen } = window.__TAURI__.event;
+  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, readClipboardText, isTauri } from './api.js';
 
   let { settingsOpen = $bindable(false), proceduresOpen = $bindable(false), agentName = 'Pares Agens' } = $props();
 
@@ -45,15 +42,9 @@
     return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function hasTauriRuntime() {
-    return typeof window !== 'undefined' && !!window.__TAURI__;
-  }
-
   async function readClipboard() {
-    if (!hasTauriRuntime()) return '';
     try {
-      const value = await readClipboardText();
-      return (value ?? '').replace(/\r\n/g, '\n');
+      return await readClipboardText();
     } catch {
       return '';
     }
@@ -97,7 +88,7 @@
   // ── Load conversation history from PluresDB on mount ──────────────────
   $effect(() => {
     if (historyLoaded) return;
-    invoke('get_conversation_history', { channel: 'desktop', limit: 30 })
+    getConversationHistory({ channel: 'desktop', limit: 30 })
       .then((history) => {
         if (history && history.length > 0) {
           messages = history.map((m, i) => ({
@@ -117,8 +108,7 @@
 
   // ── Streaming listener ────────────────────────────────────────────────
   $effect(() => {
-    const unlistenChunk = listen('model-chunk', (event) => {
-      const { request_id, content, done } = event.payload;
+    const unlistenChunk = listenEvent('model-chunk', ({ request_id, content, done }) => {
       const idx = messages.findLastIndex(m => m.id === request_id);
       if (idx >= 0) {
         if (done) {
@@ -130,8 +120,7 @@
       }
     });
 
-    const unlistenResponse = listen('model-response', (event) => {
-      const { request_id, content } = event.payload;
+    const unlistenResponse = listenEvent('model-response', ({ request_id, content }) => {
       const idx = messages.findLastIndex(m => m.id === request_id);
       if (idx >= 0) {
         messages[idx] = { ...messages[idx], content, streaming: false };
@@ -142,8 +131,7 @@
       busy = false;
     });
 
-    const unlistenError = listen('model-error', (event) => {
-      const { request_id, error } = event.payload;
+    const unlistenError = listenEvent('model-error', ({ request_id, error }) => {
       const idx = messages.findLastIndex(m => m.id === request_id);
       if (idx >= 0) {
         messages[idx] = { ...messages[idx], content: `⚠️ ${error}`, streaming: false };
@@ -162,7 +150,7 @@
   });
 
   $effect(() => {
-    if (!hasTauriRuntime()) return;
+    if (!isTauri) return;
     refreshClipboard();
     const interval = setInterval(() => { refreshClipboard(); }, CLIPBOARD_POLL_INTERVAL_MS);
     const handleFocus = () => { refreshClipboard(); };
@@ -201,7 +189,7 @@
     messages = [...messages, { role: 'agent', content: '', time: fmtTime(), id: responseId, streaming: true }];
 
     try {
-      const response = await invoke('send_message', { content, requestId: responseId });
+      const response = await apiSendMessage(content, responseId);
       if (response) {
         const idx = messages.findLastIndex(m => m.id === responseId);
         if (idx >= 0 && messages[idx].streaming) {
@@ -232,12 +220,12 @@
   }
 
   $effect(() => {
-    const unlisten = listen('show-settings', () => { settingsOpen = true; });
-    const unlistenFocusInput = listen('focus-chat-input', () => {
+    const unlisten = listenEvent('show-settings', () => { settingsOpen = true; });
+    const unlistenFocusInput = listenEvent('focus-chat-input', () => {
       requestAnimationFrame(() => inputEl?.focus());
     });
-    const unlistenNotificationAction = listen('notification-action', (event) => {
-      const prompt = event.payload?.prompt;
+    const unlistenNotificationAction = listenEvent('notification-action', (payload) => {
+      const prompt = payload?.prompt;
       if (prompt) {
         inputValue = inputValue.trim() ? `${prompt}\n\n${inputValue}` : prompt;
       }
