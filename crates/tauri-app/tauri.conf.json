@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd ui && npm ci && npm run build",
+    "beforeBuildCommand": "cd /home/kbristol/.openclaw/workspace/repos/plures/pares-radix/crates/tauri-app/ui && npm ci && npm run build",
     "beforeDevCommand": "cd ui && npm run dev"
   },
   "app": {

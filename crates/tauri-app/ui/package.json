@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "postinstall": "sed -i \"12d\" node_modules/@plures/design-dojo/dist/index.js 2>/dev/null || true"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.0.0",
