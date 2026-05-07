@@ -2,13 +2,16 @@
   import '@plures/design-dojo/tokens.css';
   import { StatusBar, StatusBarItem, TitleBar, Sidebar } from '@plures/design-dojo/layout';
 
-  import Chat from './lib/Chat.svelte';
-  import Settings from './lib/Settings.svelte';
-  import Procedures from './lib/Procedures.svelte';
+  import { onMount } from 'svelte';
+  import { initBuiltinPlugins } from './lib/plugins/index.js';
+  import { activePlugins } from './lib/plugins/registry.js';
+  import PluginManager from './lib/PluginManager.svelte';
   import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
   import { activeView, sidebarOpen, commandPaletteOpen } from './lib/store.js';
+
+  onMount(() => { initBuiltinPlugins(); });
 
   const tauriCore = typeof window !== 'undefined' ? window.__TAURI__?.core : undefined;
   const tauriEvent = typeof window !== 'undefined' ? window.__TAURI__?.event : undefined;
@@ -20,11 +23,7 @@
   /** @type {{ id: string, title: string, body: string, actions: { id: string, label: string }[] }[]} */
   let actionableNotifications = $state([]);
 
-  const activities = [
-    { id: 'chat', icon: '💬', label: 'Chat' },
-    { id: 'procedures', icon: '⚡', label: 'Procedures' },
-    { id: 'settings', icon: '⚙️', label: 'Settings' },
-  ];
+  // Activities are now derived from active plugins + extensions button
 
   function handleWizardComplete(/** @type {string} */ name) {
     agentName = name;
@@ -116,25 +115,38 @@
 
   <div class="workspace">
     <nav class="activity-bar">
-      {#each activities as act}
+      {#each $activePlugins as plugin (plugin.id)}
         <button
           class="activity-btn"
-          class:active={$activeView === act.id}
-          onclick={() => $activeView = act.id}
-          title={act.label}
+          class:active={$activeView === plugin.id}
+          onclick={() => $activeView = plugin.id}
+          title={plugin.name}
         >
-          {act.icon}
+          {plugin.icon}
         </button>
       {/each}
+      <button
+        class="activity-btn"
+        class:active={$activeView === 'extensions'}
+        onclick={() => $activeView = 'extensions'}
+        title="Extensions"
+      >
+        🧩
+      </button>
     </nav>
 
     <main class="editor-area">
-      {#if $activeView === 'chat'}
-        <Chat {agentName} settingsOpen={false} proceduresOpen={false} />
-      {:else if $activeView === 'procedures'}
-        <Procedures open={true} />
-      {:else if $activeView === 'settings'}
-        <Settings open={true} />
+      {#each $activePlugins as plugin (plugin.id)}
+        {#if $activeView === plugin.id && plugin.component}
+          {#if plugin.id === 'chat'}
+            <plugin.component agentName={agentName} settingsOpen={false} proceduresOpen={false} />
+          {:else}
+            <plugin.component open={true} />
+          {/if}
+        {/if}
+      {/each}
+      {#if $activeView === 'extensions'}
+        <PluginManager />
       {/if}
     </main>
 

@@ -1,14 +1,16 @@
 <script>
   import { commandPaletteOpen, activeView, sidebarOpen } from './store.js';
+  import { allCommands } from './plugins/registry.js';
 
   let query = $state('');
   let selectedIndex = $state(0);
 
-  // Commands registry
-  const commands = [
+  // Built-in commands
+  const builtinCommands = [
     { id: 'view.chat', label: 'View: Chat', action: () => { $activeView = 'chat'; close(); } },
     { id: 'view.procedures', label: 'View: Procedures', action: () => { $activeView = 'procedures'; close(); } },
     { id: 'view.settings', label: 'View: Settings', action: () => { $activeView = 'settings'; close(); } },
+    { id: 'view.extensions', label: 'View: Extensions', action: () => { $activeView = 'extensions'; close(); } },
     { id: 'view.config', label: 'View: Config Browser', action: () => { $activeView = 'config-browser'; close(); } },
     { id: 'view.timeline', label: 'View: Timeline (Chronos)', action: () => { $activeView = 'chronicle'; close(); } },
     { id: 'sidebar.toggle', label: 'Toggle Sidebar', action: () => { $sidebarOpen = !$sidebarOpen; close(); } },
@@ -16,6 +18,12 @@
     { id: 'model.switch', label: 'Switch Model...', action: () => close() },
     { id: 'memory.search', label: 'Search Memory...', action: () => close() },
   ];
+
+  // Merge built-in + plugin commands
+  let commands = $derived([
+    ...builtinCommands,
+    ...$allCommands.map(cmd => ({ ...cmd, action: () => close() })),
+  ]);
 
   $effect(() => {
     if ($commandPaletteOpen) {
