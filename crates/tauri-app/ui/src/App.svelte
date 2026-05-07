@@ -9,7 +9,8 @@
   import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
-  import { activeView, sidebarOpen, commandPaletteOpen } from './lib/store.js';
+  import { activeView, sidebarOpen, commandPaletteOpen, panelOpen, panelHeight } from './lib/store.js';
+  import TerminalPanel from './lib/TerminalPanel.svelte';
 
   onMount(() => { initBuiltinPlugins(); });
 
@@ -49,6 +50,10 @@
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
       e.preventDefault();
       $commandPaletteOpen = !$commandPaletteOpen;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+      e.preventDefault();
+      $panelOpen = !$panelOpen;
     }
   }
 
@@ -136,17 +141,24 @@
     </nav>
 
     <main class="editor-area">
-      {#each $activePlugins as plugin (plugin.id)}
-        {#if $activeView === plugin.id && plugin.component}
-          {#if plugin.id === 'chat'}
-            <plugin.component agentName={agentName} settingsOpen={false} proceduresOpen={false} />
-          {:else}
-            <plugin.component open={true} />
+      <div class="editor-content">
+        {#each $activePlugins as plugin (plugin.id)}
+          {#if $activeView === plugin.id && plugin.component}
+            {#if plugin.id === 'chat'}
+              <plugin.component agentName={agentName} settingsOpen={false} proceduresOpen={false} />
+            {:else}
+              <plugin.component open={true} />
+            {/if}
           {/if}
+        {/each}
+        {#if $activeView === 'extensions'}
+          <PluginManager />
         {/if}
-      {/each}
-      {#if $activeView === 'extensions'}
-        <PluginManager />
+      </div>
+      {#if $panelOpen}
+        <div class="bottom-panel" style:height="{$panelHeight}px">
+          <TerminalPanel />
+        </div>
       {/if}
     </main>
 
@@ -160,6 +172,11 @@
   <StatusBar>
     <StatusBarItem>pares-radix</StatusBarItem>
     <StatusBarItem>PluresDB: connected</StatusBarItem>
+    <StatusBarItem>
+      <button class="panel-toggle-btn" onclick={() => $panelOpen = !$panelOpen} title="Toggle Terminal (Ctrl+`)">
+        {$panelOpen ? '▼' : '▲'} Terminal
+      </button>
+    </StatusBarItem>
   </StatusBar>
 </div>
 
@@ -182,6 +199,32 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .editor-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .bottom-panel {
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+
+  .panel-toggle-btn {
+    background: transparent;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  .panel-toggle-btn:hover {
+    color: var(--accent);
   }
 
   .activity-bar {

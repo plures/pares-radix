@@ -1,5 +1,5 @@
 <script>
-  import { commandPaletteOpen, activeView, sidebarOpen } from './store.js';
+  import { commandPaletteOpen, activeView, sidebarOpen, panelOpen } from './store.js';
   import { allCommands } from './plugins/registry.js';
 
   let query = $state('');
@@ -14,6 +14,7 @@
     { id: 'view.config', label: 'View: Config Browser', action: () => { $activeView = 'config-browser'; close(); } },
     { id: 'view.timeline', label: 'View: Timeline (Chronos)', action: () => { $activeView = 'chronicle'; close(); } },
     { id: 'sidebar.toggle', label: 'Toggle Sidebar', action: () => { $sidebarOpen = !$sidebarOpen; close(); } },
+    { id: 'panel.toggle', label: 'Toggle Terminal Panel', action: () => { $panelOpen = !$panelOpen; close(); } },
     { id: 'theme.toggle', label: 'Toggle Theme', action: () => close() },
     { id: 'model.switch', label: 'Switch Model...', action: () => close() },
     { id: 'memory.search', label: 'Search Memory...', action: () => close() },

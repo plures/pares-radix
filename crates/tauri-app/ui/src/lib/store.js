@@ -10,6 +10,8 @@ export const activeView = writable('chat');
 export const sidebarOpen = writable(true);
 export const sidebarPanel = writable('memory');
 export const commandPaletteOpen = writable(false);
+export const panelOpen = writable(false);
+export const panelHeight = writable(200);
 
 // Plugin registry
 export const plugins = writable([
