@@ -12,6 +12,8 @@
   import { praxisViolationCount } from './lib/praxis.js';
   import TerminalPanel from './lib/TerminalPanel.svelte';
   import { listen, handleNotificationAction, minimizeWindow, maximizeWindow, closeWindow } from './api.js';
+  // PraxisDevOverlay requires @plures/praxis peer dep — install when needed
+  // import { PraxisDevOverlay } from '@plures/design-dojo/praxis';
 
   onMount(() => { initBuiltinPlugins(); });
 
@@ -164,6 +166,8 @@
     <StatusBarItem value="PluresDB: connected" color="success" />
   </StatusBar>
 </Box>
+
+<!-- PraxisDevOverlay (enable after installing @plures/praxis) -->
 
 <style>
   :global(.shell) {
