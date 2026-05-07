@@ -38,8 +38,8 @@ body {
 
 /* ── Layout ─────────────────────────────────────────────────────────────── */
 #app {
-  display: grid;
-  grid-template-columns: 240px 1fr;
+  display: flex;
+  flex-direction: column;
   height: 100vh;
   overflow: hidden;
 }

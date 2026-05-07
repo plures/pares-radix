@@ -1,8 +1,11 @@
 <script>
+  import '@plures/design-dojo/tokens.css';
+  import { StatusBar, StatusBarItem, TitleBar, Sidebar } from '@plures/design-dojo/layout';
+
   import Chat from './lib/Chat.svelte';
-  import MemorySidebar from './lib/MemorySidebar.svelte';
   import Settings from './lib/Settings.svelte';
   import Procedures from './lib/Procedures.svelte';
+  import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
 
   const tauriCore = typeof window !== 'undefined' ? window.__TAURI__?.core : undefined;
@@ -10,12 +13,18 @@
   const invoke = tauriCore?.invoke;
   const listen = tauriEvent?.listen;
 
+  let activeView = $state('chat');
+  let sidebarOpen = $state(true);
+  let agentName = $state('Pares Agens');
+
   /** @type {{ id: string, title: string, body: string, actions: { id: string, label: string }[] }[]} */
   let actionableNotifications = $state([]);
-  let settingsOpen = $state(false);
-  let proceduresOpen = $state(false);
-  /** Agent display name — set by the wizard on first run, used in Chat. */
-  let agentName = $state('Pares Agens');
+
+  const activities = [
+    { id: 'chat', icon: '💬', label: 'Chat' },
+    { id: 'procedures', icon: '⚡', label: 'Procedures' },
+    { id: 'settings', icon: '⚙️', label: 'Settings' },
+  ];
 
   function handleWizardComplete(/** @type {string} */ name) {
     agentName = name;
@@ -28,10 +37,7 @@
   async function triggerNotificationAction(notificationId, action) {
     if (invoke) {
       try {
-        await invoke('handle_notification_action', {
-          notificationId,
-          action
-        });
+        await invoke('handle_notification_action', { notificationId, action });
       } catch (err) {
         console.warn('Failed to handle notification action:', err);
       }
@@ -49,10 +55,24 @@
         ...actionableNotifications.filter((n) => n.id !== payload.id)
       ].slice(0, 3);
     });
-    return () => {
-      unlisten.then((fn) => fn?.());
-    };
+    return () => { unlisten.then((fn) => fn?.()); };
   });
+
+  function handleMinimize() {
+    if (typeof window !== 'undefined' && window.__TAURI__) {
+      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().minimize());
+    }
+  }
+  function handleMaximize() {
+    if (typeof window !== 'undefined' && window.__TAURI__) {
+      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().toggleMaximize());
+    }
+  }
+  function handleClose() {
+    if (typeof window !== 'undefined' && window.__TAURI__) {
+      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().close());
+    }
+  }
 </script>
 
 {#if actionableNotifications.length > 0}
@@ -70,10 +90,7 @@
               {action.label}
             </button>
           {/each}
-          <button
-            type="button"
-            class="actionable-btn secondary"
-            onclick={() => dismissNotification(notification.id)}>
+          <button type="button" class="actionable-btn secondary" onclick={() => dismissNotification(notification.id)}>
             Dismiss
           </button>
         </div>
@@ -83,7 +100,111 @@
 {/if}
 
 <Wizard onComplete={handleWizardComplete} />
-<MemorySidebar />
-<Chat bind:settingsOpen bind:proceduresOpen {agentName} />
-<Settings bind:open={settingsOpen} />
-<Procedures bind:open={proceduresOpen} />
+
+<div class="shell">
+  <TitleBar title="pares-radix" onminimize={handleMinimize} onmaximize={handleMaximize} onclose={handleClose} />
+
+  <div class="workspace">
+    <nav class="activity-bar">
+      {#each activities as act}
+        <button
+          class="activity-btn"
+          class:active={activeView === act.id}
+          onclick={() => activeView = act.id}
+          title={act.label}
+        >
+          {act.icon}
+        </button>
+      {/each}
+    </nav>
+
+    <main class="editor-area">
+      {#if activeView === 'chat'}
+        <Chat {agentName} settingsOpen={false} proceduresOpen={false} />
+      {:else if activeView === 'procedures'}
+        <Procedures open={true} />
+      {:else if activeView === 'settings'}
+        <Settings open={true} />
+      {/if}
+    </main>
+
+    {#if sidebarOpen}
+      <Sidebar>
+        <MemorySidebar />
+      </Sidebar>
+    {/if}
+  </div>
+
+  <StatusBar>
+    <StatusBarItem>pares-radix</StatusBarItem>
+    <StatusBarItem>PluresDB: connected</StatusBarItem>
+  </StatusBar>
+</div>
+
+<style>
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .workspace {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .editor-area {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .activity-bar {
+    width: 48px;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .activity-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 18px;
+    cursor: pointer;
+    transition: background var(--transition);
+    position: relative;
+  }
+
+  .activity-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .activity-btn.active {
+    background: var(--bg-elevated);
+  }
+
+  .activity-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--accent);
+    border-radius: 1px;
+  }
+</style>
