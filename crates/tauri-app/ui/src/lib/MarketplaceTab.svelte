@@ -6,6 +6,7 @@
   import { Button, Input, Text } from '@plures/design-dojo/primitives';
   import { Box, Tabs } from '@plures/design-dojo/layout';
   import { List, ListItem } from '@plures/design-dojo/data';
+  import { Badge } from '@plures/design-dojo';
 
   /**
    * @typedef {{ id: string, name: string, version: string, description: string, author: string, mean_score: number, review_count: number }} CatalogEntry
@@ -110,9 +111,9 @@
   }
 </script>
 
-<div class="marketplace-root">
+<Box class="marketplace-root">
   <!-- Section toggle -->
-  <div class="mkt-sections" role="tablist" aria-label="Marketplace sections">
+  <Box class="mkt-sections" role="tablist" aria-label="Marketplace sections">
     <Button
       variant={activeSection === 'search' ? 'solid' : 'ghost'}
       size="sm"
@@ -125,15 +126,15 @@
       onclick={() => { activeSection = 'installed'; }}>
       Installed
       {#if installed.length > 0}
-        <span class="mkt-badge">{installed.length}</span>
+        <Badge variant="accent" size="sm">{installed.length}</Badge>
       {/if}
     </Button>
-  </div>
+  </Box>
 
   <!-- Discover panel -->
   {#if activeSection === 'search'}
-    <div role="tabpanel" class="mkt-panel">
-      <div class="mkt-search-row">
+    <Box role="tabpanel" class="mkt-panel">
+      <Box class="mkt-search-row">
         <Input
           bind:value={searchQuery}
           placeholder="Search procedures…"
@@ -144,28 +145,28 @@
           disabled={searching || !searchQuery.trim()}>
           {searching ? 'Searching…' : 'Search'}
         </Button>
-      </div>
+      </Box>
 
       {#if searchError}
-        <p class="mkt-error" role="alert">{searchError}</p>
+        <Text color="error" role="alert">{searchError}</Text>
       {/if}
 
       {#if searchResults.length === 0 && !searching}
-        <p class="pref-hint">Enter a query above to discover community procedures.</p>
+        <Text dim>Enter a query above to discover community procedures.</Text>
       {:else}
-        <ul class="mkt-results" aria-label="Search results">
+        <List aria-label="Search results">
           {#each searchResults as entry (entry.id)}
-            <li class="mkt-card">
-              <div class="mkt-card-header">
-                <span class="mkt-card-name">{entry.name}</span>
-                <span class="mkt-card-version">v{entry.version}</span>
-                <span class="mkt-card-score" aria-label="Rating">{formatScore(entry.mean_score)}</span>
-              </div>
-              <p class="mkt-card-desc">{entry.description}</p>
-              <div class="mkt-card-footer">
-                <span class="mkt-card-author">by {entry.author}</span>
+            <ListItem class="mkt-card">
+              <Box class="mkt-card-header">
+                <Text inline bold>{entry.name}</Text>
+                <Text inline dim>v{entry.version}</Text>
+                <Text inline color="accent" aria-label="Rating">{formatScore(entry.mean_score)}</Text>
+              </Box>
+              <Text dim>{entry.description}</Text>
+              <Box class="mkt-card-footer">
+                <Text inline dim>by {entry.author}</Text>
                 {#if entry.review_count > 0}
-                  <span class="mkt-card-reviews">{entry.review_count} review{entry.review_count === 1 ? '' : 's'}</span>
+                  <Text inline dim>{entry.review_count} review{entry.review_count === 1 ? '' : 's'}</Text>
                 {/if}
                 {#if isInstalled(entry.id)}
                   <Button variant="outline" size="sm"
@@ -180,148 +181,91 @@
                     {installing === entry.id ? 'Installing…' : 'Install'}
                   </Button>
                 {/if}
-              </div>
-            </li>
+              </Box>
+            </ListItem>
           {/each}
-        </ul>
+        </List>
       {/if}
-    </div>
+    </Box>
   {/if}
 
   <!-- Installed panel -->
   {#if activeSection === 'installed'}
-    <div role="tabpanel" class="mkt-panel">
+    <Box role="tabpanel" class="mkt-panel">
       {#if availableUpdates.length > 0}
-        <div class="mkt-update-banner" role="status">
-          <span>{availableUpdates.length} update{availableUpdates.length === 1 ? '' : 's'} available</span>
+        <Box class="mkt-update-banner" role="status">
+          <Text inline>{availableUpdates.length} update{availableUpdates.length === 1 ? '' : 's'} available</Text>
           <Button variant="solid" size="sm"
             onclick={updateAll}
             disabled={updatingAll}>
             {updatingAll ? 'Updating…' : 'Update All'}
           </Button>
-        </div>
+        </Box>
       {/if}
 
       {#if installed.length === 0}
-        <p class="pref-hint">No procedures installed yet. Use the Discover tab to find and install procedures.</p>
+        <Text dim>No procedures installed yet. Use the Discover tab to find and install procedures.</Text>
       {:else}
-        <ul class="mkt-installed-list" aria-label="Installed procedures">
+        <List aria-label="Installed procedures">
           {#each installed as skill (skill.id)}
             {@const hasUpdate = availableUpdates.some(u => u.skill_id === skill.id)}
-            <li class="mkt-card" class:mkt-has-update={hasUpdate}>
-              <div class="mkt-card-header">
-                <span class="mkt-card-name">{skill.name}</span>
-                <span class="mkt-card-version">v{skill.version}</span>
+            <ListItem class="mkt-card {hasUpdate ? 'mkt-has-update' : ''}">
+              <Box class="mkt-card-header">
+                <Text inline bold>{skill.name}</Text>
+                <Text inline dim>v{skill.version}</Text>
                 {#if hasUpdate}
-                  <span class="mkt-update-dot" aria-label="Update available">●</span>
+                  <Text inline color="accent" aria-label="Update available">●</Text>
                 {/if}
-              </div>
-              <p class="mkt-card-desc">{skill.description}</p>
-              <div class="mkt-card-footer">
-                <span class="mkt-card-meta">
+              </Box>
+              <Text dim>{skill.description}</Text>
+              <Box class="mkt-card-footer">
+                <Text inline dim>
                   Installed {skill.installed_at}
                   {#if skill.last_used}
                     · Last used {skill.last_used}
                   {:else}
                     · Never used
                   {/if}
-                </span>
+                </Text>
                 <Button variant="outline" size="sm"
                   onclick={() => remove(skill.id)}
                   disabled={removing === skill.id}>
                   {removing === skill.id ? 'Removing…' : 'Remove'}
                 </Button>
-              </div>
-            </li>
+              </Box>
+            </ListItem>
           {/each}
-        </ul>
+        </List>
       {/if}
-    </div>
+    </Box>
   {/if}
-</div>
+</Box>
 
 <style>
-  .marketplace-root {
+  :global(.marketplace-root) {
     display: flex;
     flex-direction: column;
     gap: var(--space-3, 12px);
   }
 
-  /* Section toggles */
-  .mkt-sections {
+  :global(.mkt-sections) {
     display: flex;
     gap: 0;
     border-bottom: 1px solid var(--color-border, #3a3a4a);
   }
 
-  .mkt-section-btn {
-    padding: 6px 14px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--color-muted, #888);
-    cursor: pointer;
-    font-size: 0.875rem;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    transition: color 0.15s, border-color 0.15s;
-  }
-
-  .mkt-section-btn.active,
-  .mkt-section-btn:hover {
-    color: var(--color-text, #e0e0e0);
-    border-bottom-color: var(--color-accent, #7c6af7);
-  }
-
-  .mkt-badge {
-    background: var(--color-accent, #7c6af7);
-    color: #fff;
-    font-size: 0.7rem;
-    border-radius: 999px;
-    padding: 1px 6px;
-    line-height: 1.4;
-  }
-
-  /* Panel */
-  .mkt-panel {
+  :global(.mkt-panel) {
     display: flex;
     flex-direction: column;
     gap: var(--space-3, 12px);
   }
 
-  /* Search row */
-  .mkt-search-row {
+  :global(.mkt-search-row) {
     display: flex;
     gap: 8px;
   }
 
-  .mkt-search-input {
-    flex: 1;
-    padding: 6px 10px;
-    border-radius: var(--radius-sm, 4px);
-    border: 1px solid var(--color-border, #3a3a4a);
-    background: var(--color-surface, #1e1e2e);
-    color: var(--color-text, #e0e0e0);
-    font-size: 0.875rem;
-  }
-
-  .mkt-search-btn {
-    white-space: nowrap;
-  }
-
-  /* Cards */
-  .mkt-results,
-  .mkt-installed-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .mkt-card {
+  :global(.mkt-card) {
     padding: 10px 12px;
     border-radius: var(--radius-sm, 4px);
     border: 1px solid var(--color-border, #3a3a4a);
@@ -331,46 +275,17 @@
     gap: 4px;
   }
 
-  .mkt-has-update {
+  :global(.mkt-has-update) {
     border-color: var(--color-accent, #7c6af7);
   }
 
-  .mkt-card-header {
+  :global(.mkt-card-header) {
     display: flex;
     align-items: baseline;
     gap: 8px;
   }
 
-  .mkt-card-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    color: var(--color-text, #e0e0e0);
-  }
-
-  .mkt-card-version {
-    font-size: 0.78rem;
-    color: var(--color-muted, #888);
-  }
-
-  .mkt-card-score {
-    margin-left: auto;
-    font-size: 0.8rem;
-    color: var(--color-accent, #7c6af7);
-  }
-
-  .mkt-update-dot {
-    margin-left: auto;
-    color: var(--color-accent, #7c6af7);
-    font-size: 0.7rem;
-  }
-
-  .mkt-card-desc {
-    font-size: 0.82rem;
-    color: var(--color-muted, #aaa);
-    margin: 0;
-  }
-
-  .mkt-card-footer {
+  :global(.mkt-card-footer) {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -378,42 +293,7 @@
     margin-top: 4px;
   }
 
-  .mkt-card-author,
-  .mkt-card-reviews,
-  .mkt-card-meta {
-    font-size: 0.78rem;
-    color: var(--color-muted, #888);
-    flex: 1;
-  }
-
-  .mkt-btn-install,
-  .mkt-btn-remove {
-    padding: 3px 10px;
-    font-size: 0.8rem;
-    border-radius: var(--radius-sm, 4px);
-    border: 1px solid var(--color-border, #3a3a4a);
-    cursor: pointer;
-  }
-
-  .mkt-btn-remove {
-    background: transparent;
-    color: var(--color-danger, #e06c75);
-    border-color: var(--color-danger, #e06c75);
-  }
-
-  .mkt-btn-remove:hover:not(:disabled) {
-    background: var(--color-danger, #e06c75);
-    color: #fff;
-  }
-
-  .mkt-btn-remove:disabled,
-  .mkt-btn-install:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Update banner */
-  .mkt-update-banner {
+  :global(.mkt-update-banner) {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -421,21 +301,5 @@
     border-radius: var(--radius-sm, 4px);
     background: color-mix(in srgb, var(--color-accent, #7c6af7) 12%, transparent);
     border: 1px solid var(--color-accent, #7c6af7);
-    font-size: 0.875rem;
-    color: var(--color-text, #e0e0e0);
-  }
-
-  /* Error */
-  .mkt-error {
-    color: var(--color-danger, #e06c75);
-    font-size: 0.82rem;
-    margin: 0;
-  }
-
-  /* Hint */
-  .pref-hint {
-    font-size: 0.82rem;
-    color: var(--color-muted, #888);
-    margin: 0;
   }
 </style>
