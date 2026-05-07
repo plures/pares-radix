@@ -112,7 +112,7 @@
   placeholder="Type a command..."
 />
 
-<Wizard onComplete={handleWizardComplete} />
+{#if false}<Wizard onComplete={handleWizardComplete} />{/if}
 
 <Box border="none" class="shell" height="100vh">
   <TitleBar title="pares-radix" onminimize={handleMinimize} onmaximize={handleMaximize} onclose={handleClose} />

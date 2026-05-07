@@ -275,7 +275,7 @@
     <!-- Progress bar -->
     <Box border="none" class="wizard-progress" role="progressbar" aria-valuenow={step + 1} aria-valuemin="1" aria-valuemax="5">
       {#each [0, 1, 2, 3, 4] as i}
-        <Box border="none" class="wizard-progress-step {i <= step ? 'active' : ''}"></Box>
+        <span class="wizard-progress-step {i <= step ? 'active' : ''}"></span>
       {/each}
     </Box>
 
