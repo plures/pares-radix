@@ -40,13 +40,13 @@
   }
 </script>
 
-<Box class="terminal-panel">
+<Box border="none" class="terminal-panel">
   <Tabs {tabs} bind:activeTab ontabchange={(key) => activeTab = key}>
     {#snippet children({ activeTab: currentTab })}
-      <Box class="panel-content">
+      <Box border="none" class="panel-content">
         {#if currentTab === 'terminal'}
           <Text class="output" monospace>{terminalOutput}</Text>
-          <Box class="input-row">
+          <Box border="none" class="input-row">
             <Text monospace class="prompt">$</Text>
             <Input
               bind:value={terminalInput}

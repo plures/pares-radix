@@ -55,13 +55,13 @@
 </script>
 
 <Box padding={4} class="config-browser">
-  <Box class="cb-header">
+  <Box border="none" class="cb-header">
     <Text>Config Browser</Text>
     <Button variant="outline" size="sm" onclick={loadConfig}>↻ Reload</Button>
   </Box>
 
-  <Box class="cb-content">
-    <Box class="tree-panel">
+  <Box border="none" class="cb-content">
+    <Box border="none" class="tree-panel">
       {#if loading}
         <Text>Loading...</Text>
       {:else}

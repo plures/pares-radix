@@ -523,7 +523,7 @@
       hidden={activeTab !== 'providers'}>
 
       <!-- Ollama quick configure — visible immediately when Settings opens -->
-      <Box>
+      <Box border="none">
         <Text weight="bold">Ollama</Text>
         <Input
           label="Endpoint URL"
@@ -542,7 +542,7 @@
       <hr class="section-divider" aria-hidden="true" />
 
       {#if showProviderForm}
-        <Box>
+        <Box border="none">
           <Text size="lg" weight="bold">{editProviderName === null ? 'Add Provider' : 'Edit Provider'}</Text>
           <Input
             label="Name"
@@ -562,13 +562,13 @@
             label="Models (comma-separated)"
             bind:value={providerFormModels}
             placeholder="llama3, llama3.1:8b" />
-          <Box>
+          <Box border="none">
             <Button variant="outline" onclick={() => { showProviderForm = false; }}>Cancel</Button>
             <Button variant="solid" size="sm" onclick={saveProvider}>Save</Button>
           </Box>
         </Box>
       {:else}
-        <Box>
+        <Box border="none">
           <Button variant="solid" size="sm" onclick={openAddProvider}>+ Add Provider</Button>
         </Box>
         {#if providers.length === 0}
@@ -612,7 +612,7 @@
       aria-labelledby="tab-routing"
       hidden={activeTab !== 'routing'}>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Route each use-case to a specific provider and model.</Text>
 
         {#each [
@@ -623,7 +623,7 @@
           { label: 'Coding', providerVal: routingCodingProvider, modelVal: routingCodingModel,
             setProvider: v => { routingCodingProvider = v; }, setModel: v => { routingCodingModel = v; } },
         ] as row}
-          <Box>
+          <Box border="none">
             <Text inline>{row.label}</Text>
             <Select
               options={[{value: '', label: '— provider —'}, ...providers.map(p => ({value: p.name, label: p.name}))]}
@@ -645,11 +645,11 @@
       aria-labelledby="tab-channels"
       hidden={activeTab !== 'channels'}>
 
-      <Box>
+      <Box border="none">
         {#each channelAdapters as adapter (adapter.kind)}
           {@const enabled = adapter.enabled}
-          <Box>
-            <Box>
+          <Box border="none">
+            <Box border="none">
               <Text inline>{adapter.kind}</Text>
               <Toggle
                 checked={enabled}
@@ -658,7 +658,7 @@
             </Box>
 
             {#if enabled}
-              <Box>
+              <Box border="none">
                 {#if adapter.kind === 'telegram'}
                   <Input
                     label="Bot Token"
@@ -688,7 +688,7 @@
       aria-labelledby="tab-preferences"
       hidden={activeTab !== 'preferences'}>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Identity</Text>
         <Input label="Agent Name" bind:value={prefAgentName} placeholder="Pares Agens" />
         <label>
@@ -702,18 +702,18 @@
         </label>
       </Box>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Memory</Text>
-        <Box>
-          <Box>
+        <Box border="none">
+          <Box border="none">
             <Text inline>Auto-recall</Text>
             <Text inline>Retrieve relevant memories each turn</Text>
           </Box>
           <Toggle label="Enable auto-recall" bind:checked={prefAutoRecall} />
         </Box>
-        <Box>
+        <Box border="none">
           <Text inline>Capture categories</Text>
-          <Box>
+          <Box border="none">
             {#each ALL_CAPTURE_CATEGORIES as cat}
               <Toggle
                 checked={prefCaptureCategories.includes(cat)}
@@ -724,17 +724,17 @@
         </Box>
       </Box>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Notifications &amp; Startup</Text>
-        <Box>
-          <Box>
+        <Box border="none">
+          <Box border="none">
             <Text inline>Desktop notifications</Text>
             <Text inline>Alert when the agent responds</Text>
           </Box>
           <Toggle label="Enable desktop notifications" bind:checked={prefNotificationsEnabled} />
         </Box>
-        <Box>
-          <Box>
+        <Box border="none">
+          <Box border="none">
             <Text inline>Launch at login</Text>
             <Text inline>Start minimised to the system tray</Text>
           </Box>
@@ -751,9 +751,9 @@
       aria-labelledby="tab-mcp"
       hidden={activeTab !== 'mcp'}>
 
-      <Box>
+      <Box border="none">
         <Text size="lg" weight="bold">MCP Servers</Text>
-        <Box>
+        <Box border="none">
           <Button variant="solid" size="sm" onclick={() => openMcpForm(null)}>
             + Add Server
           </Button>
@@ -764,12 +764,12 @@
       </Box>
 
       {#if showMcpForm}
-        <Box>
+        <Box border="none">
           <Input label="Name" bind:value={mcpFormName} placeholder="e.g. filesystem" />
           <Input label="Command" bind:value={mcpFormCommand} placeholder="e.g. uvx, npx, node" />
           <Input label="Arguments" bind:value={mcpFormArgs} placeholder="e.g. mcp-server-filesystem /tmp" />
           <Toggle label="Enabled" bind:checked={mcpFormEnabled} />
-          <Box>
+          <Box border="none">
             <Button variant="solid" size="sm" onclick={saveMcpServer}>
               {editMcpName ? 'Update' : 'Add'}
             </Button>
@@ -783,14 +783,14 @@
       {#if mcpServers.length === 0}
         <Text>No MCP servers configured. Add one to enable tool use.</Text>
       {:else}
-        <Box>
+        <Box border="none">
           {#each mcpServers as server}
-            <Box>
-              <Box>
+            <Box border="none">
+              <Box border="none">
                 <Text inline>{server.name}</Text>
                 <code class="mcp-server-cmd">{server.command} {server.args.join(' ')}</code>
               </Box>
-              <Box>
+              <Box border="none">
                 <Button variant="ghost" size="sm" onclick={() => toggleMcpServer(server.name)}>
                   {server.enabled ? '🟢' : '⚪'}
                 </Button>
@@ -807,11 +807,11 @@
       {/if}
 
       {#if mcpTools.length > 0}
-        <Box>
+        <Box border="none">
           <Text weight="bold">Discovered Tools ({mcpTools.length})</Text>
-          <Box>
+          <Box border="none">
             {#each mcpTools as tool}
-              <Box>
+              <Box border="none">
                 <Text inline>{tool.name}</Text>
                 <Text inline>{tool.serverName}</Text>
                 {#if tool.description}
@@ -831,20 +831,20 @@
       aria-labelledby="tab-telemetry"
       hidden={activeTab !== 'telemetry'}>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Privacy-first telemetry</Text>
         <Text>Anonymous metrics only. No conversation content, prompts, tool arguments, or personal identifiers are collected.</Text>
 
-        <Box>
-          <Box>
+        <Box border="none">
+          <Box border="none">
             <Text inline>Enable telemetry (opt-in)</Text>
             <Text inline>Off by default</Text>
           </Box>
           <Toggle label="Enable anonymous telemetry" bind:checked={telemetryEnabled} />
         </Box>
 
-        <Box>
-          <Box>
+        <Box border="none">
+          <Box border="none">
             <Text inline>Enable upload</Text>
             <Text inline>Manual upload of local aggregate metrics</Text>
           </Box>
@@ -866,25 +866,25 @@
         {/if}
       </Box>
 
-      <Box>
+      <Box border="none">
         <Text weight="bold">Local telemetry dashboard</Text>
-        <Box>
+        <Box border="none">
           <Text inline>Model calls today</Text>
           <strong>{telemetryModelCallsToday()}</strong>
         </Box>
-        <Box>
+        <Box border="none">
           <Text inline>Avg response latency</Text>
           <strong>{telemetrySnapshot.avgLatencyMs == null ? '—' : `${Math.round(telemetrySnapshot.avgLatencyMs)} ms`}</strong>
         </Box>
-        <Box>
+        <Box border="none">
           <Text inline>Latency range</Text>
           <strong>{telemetrySnapshot.latencyMinMs == null ? '—' : `${telemetrySnapshot.latencyMinMs}–${telemetrySnapshot.latencyMaxMs} ms`}</strong>
         </Box>
-        <Box>
+        <Box border="none">
           <Text inline>Samples</Text>
           <strong>{telemetrySnapshot.latencySampleCount ?? 0}</strong>
         </Box>
-        <Box>
+        <Box border="none">
           <Text inline>Last upload</Text>
           <strong>{telemetrySnapshot.lastUploadAt ? new Date(telemetrySnapshot.lastUploadAt).toLocaleString() : 'Never'}</strong>
         </Box>
@@ -921,7 +921,7 @@
       aria-labelledby="tab-license"
       hidden={activeTab !== 'license'}>
 
-      <Box>
+      <Box border="none">
         <Text inline>
           {licenseStatus.tier === 'pro' && licenseStatus.valid ? 'Pro' : 'Free'}
         </Text>
@@ -931,7 +931,7 @@
       </Box>
 
       {#if !(licenseStatus.tier === 'pro' && licenseStatus.valid)}
-        <Box>
+        <Box border="none">
           <Text>Unlock the full power of Pares Agens:</Text>
           <ul class="feature-list">
             <li>✅ Multiple channel adapters</li>
@@ -943,7 +943,7 @@
           </ul>
         </Box>
 
-        <Box>
+        <Box border="none">
           <Input
             label="License Key"
             bind:value={licenseKey}

@@ -88,10 +88,10 @@
   const guidanceTabs = GUIDANCE_CATEGORIES.map(c => ({ key: c.id, label: c.name, icon: c.icon }));
 </script>
 
-<Box class="memory-sidebar">
+<Box border="none" class="memory-sidebar">
   <!-- Memory Section -->
   <Pane class="sidebar-section">
-    <Box class="section-header">
+    <Box border="none" class="section-header">
       <Text>🧠 Memories</Text>
     </Box>
     <List class="memory-list">
@@ -105,8 +105,8 @@
         {#each memories as m (m.id)}
           <ListItem>
             {#snippet children()}
-              <Box class="memory-item">
-                <Box class="memory-meta-row">
+              <Box border="none" class="memory-item">
+                <Box border="none" class="memory-meta-row">
                   <Text class="memory-category">{m.category}</Text>
                   {#if m.created_at}
                     <Text class="memory-time">
@@ -127,7 +127,7 @@
 
   <!-- Praxis Guidance Section -->
   <Pane class="sidebar-section">
-    <Box class="section-header">
+    <Box border="none" class="section-header">
       <Text>🎯 Praxis Guidance</Text>
       <Button variant="ghost" size="sm" onclick={triggerAnalysis} disabled={isAnalyzing}>
         {isAnalyzing ? '⏳' : '🔄'}
@@ -136,14 +136,14 @@
 
     <Tabs tabs={guidanceTabs} activeTab={selectedGuidanceCategory} ontabchange={(key) => selectedGuidanceCategory = key}>
       {#snippet children({ activeTab: currentTab })}
-        <Box class="guidance-content">
+        <Box border="none" class="guidance-content">
           {#if guidanceData[currentTab]?.length > 0}
             <List>
               {#each guidanceData[currentTab] as guidance (guidance.id)}
                 <ListItem>
                   {#snippet children()}
-                    <Box class="guidance-item">
-                      <Box class="guidance-header-row">
+                    <Box border="none" class="guidance-item">
+                      <Box border="none" class="guidance-header-row">
                         <Text class="confidence">{(guidance.confidence * 100).toFixed(0)}%</Text>
                         <Text class="priority">P{guidance.priority}</Text>
                       </Box>
@@ -159,7 +159,7 @@
               {/each}
             </List>
           {:else}
-            <Box class="guidance-empty">
+            <Box border="none" class="guidance-empty">
               <Text>💭</Text>
               <Text class="text-muted">No {GUIDANCE_CATEGORIES.find(c => c.id === currentTab)?.name.toLowerCase()} yet</Text>
               <Text class="text-hint">Chat more to generate guidance</Text>
@@ -173,14 +173,14 @@
   <!-- Analysis Activity -->
   {#if analysisEvents.length > 0}
     <Pane class="sidebar-section">
-      <Box class="section-header">
+      <Box border="none" class="section-header">
         <Text>⚡ Analysis Activity</Text>
       </Box>
       <List>
         {#each analysisEvents as event (event.id)}
           <ListItem>
             {#snippet children()}
-              <Box class="activity-row">
+              <Box border="none" class="activity-row">
                 <Text class="activity-time">
                   {new Date(event.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </Text>

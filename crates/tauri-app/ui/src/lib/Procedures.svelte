@@ -122,10 +122,10 @@
 
 {#if open}
 <Dialog onclose={() => open = false} title="⚡ Procedures">
-  <Box class="procedures-body">
+  <Box border="none" class="procedures-body">
     <!-- Left: procedure list -->
-    <Box class="proc-list-panel">
-      <Box class="proc-list-toolbar">
+    <Box border="none" class="proc-list-panel">
+      <Box border="none" class="proc-list-toolbar">
         <Select
           bind:value={templateValue}
           options={templateOptions}
@@ -143,7 +143,7 @@
           {#each procedures as proc (proc.name)}
             <ListItem onclick={() => selectProcedure(proc.name)}>
               {#snippet children()}
-                <Box class="proc-row">
+                <Box border="none" class="proc-row">
                   <Text class="proc-dot {proc.enabled ? 'enabled' : 'disabled'}">●</Text>
                   <Text>{proc.name}</Text>
                   <Text class="proc-type">{proc.eventType}</Text>
@@ -156,16 +156,16 @@
     </Box>
 
     <!-- Right: editor + log -->
-    <Box class="proc-editor-panel">
+    <Box border="none" class="proc-editor-panel">
       {#if !selected}
         <Text>Select a procedure to view or edit it.</Text>
       {:else}
-        <Box class="proc-editor-toolbar">
-          <Box class="proc-meta">
+        <Box border="none" class="proc-editor-toolbar">
+          <Box border="none" class="proc-meta">
             <Text>{selected.name}</Text>
             <Text class="proc-badge">{selected.eventType}</Text>
           </Box>
-          <Box class="proc-editor-actions">
+          <Box border="none" class="proc-editor-actions">
             <Toggle checked={selected.enabled} onchange={toggleEnabled} />
             <Button variant="outline" size="sm"
               onclick={() => { editMode = !editMode; if (!editMode) editBody = selected.body; }}>
@@ -184,7 +184,7 @@
           disabled={!editMode}
         />
 
-        <Box class="proc-log-section">
+        <Box border="none" class="proc-log-section">
           <Text>Execution Log</Text>
           <Table columns={logTableColumns} rows={logTableRows} />
         </Box>

@@ -137,12 +137,12 @@
   });
 </script>
 
-<Box class="chat-panel">
-  <Box class="chat-header">
-    <Box class="header-left">
+<Box border="none" class="chat-panel">
+  <Box border="none" class="chat-header">
+    <Box border="none" class="header-left">
       <Text class="agent-name">{agentName}</Text>
     </Box>
-    <Box class="header-nav">
+    <Box border="none" class="header-nav">
       <Button variant="ghost" size="sm" onclick={clearChat}>🗑</Button>
       <Button variant="ghost" size="sm" onclick={() => { proceduresOpen = true; }}>⚡</Button>
       <Button variant="ghost" size="sm" onclick={() => { settingsOpen = true; }}>⚙</Button>

@@ -111,9 +111,9 @@
   }
 </script>
 
-<Box class="marketplace-root">
+<Box border="none" class="marketplace-root">
   <!-- Section toggle -->
-  <Box class="mkt-sections" role="tablist" aria-label="Marketplace sections">
+  <Box border="none" class="mkt-sections" role="tablist" aria-label="Marketplace sections">
     <Button
       variant={activeSection === 'search' ? 'solid' : 'ghost'}
       size="sm"
@@ -134,7 +134,7 @@
   <!-- Discover panel -->
   {#if activeSection === 'search'}
     <Box role="tabpanel" class="mkt-panel">
-      <Box class="mkt-search-row">
+      <Box border="none" class="mkt-search-row">
         <Input
           bind:value={searchQuery}
           placeholder="Search procedures…"
@@ -157,13 +157,13 @@
         <List aria-label="Search results">
           {#each searchResults as entry (entry.id)}
             <ListItem class="mkt-card">
-              <Box class="mkt-card-header">
+              <Box border="none" class="mkt-card-header">
                 <Text inline bold>{entry.name}</Text>
                 <Text inline dim>v{entry.version}</Text>
                 <Text inline color="accent" aria-label="Rating">{formatScore(entry.mean_score)}</Text>
               </Box>
               <Text dim>{entry.description}</Text>
-              <Box class="mkt-card-footer">
+              <Box border="none" class="mkt-card-footer">
                 <Text inline dim>by {entry.author}</Text>
                 {#if entry.review_count > 0}
                   <Text inline dim>{entry.review_count} review{entry.review_count === 1 ? '' : 's'}</Text>
@@ -193,7 +193,7 @@
   {#if activeSection === 'installed'}
     <Box role="tabpanel" class="mkt-panel">
       {#if availableUpdates.length > 0}
-        <Box class="mkt-update-banner" role="status">
+        <Box border="none" class="mkt-update-banner" role="status">
           <Text inline>{availableUpdates.length} update{availableUpdates.length === 1 ? '' : 's'} available</Text>
           <Button variant="solid" size="sm"
             onclick={updateAll}
@@ -210,7 +210,7 @@
           {#each installed as skill (skill.id)}
             {@const hasUpdate = availableUpdates.some(u => u.skill_id === skill.id)}
             <ListItem class="mkt-card {hasUpdate ? 'mkt-has-update' : ''}">
-              <Box class="mkt-card-header">
+              <Box border="none" class="mkt-card-header">
                 <Text inline bold>{skill.name}</Text>
                 <Text inline dim>v{skill.version}</Text>
                 {#if hasUpdate}
@@ -218,7 +218,7 @@
                 {/if}
               </Box>
               <Text dim>{skill.description}</Text>
-              <Box class="mkt-card-footer">
+              <Box border="none" class="mkt-card-footer">
                 <Text inline dim>
                   Installed {skill.installed_at}
                   {#if skill.last_used}

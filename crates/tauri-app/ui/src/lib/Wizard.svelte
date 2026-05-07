@@ -271,17 +271,17 @@
   aria-modal="true"
   aria-label="Setup Wizard"
 >
-  <Box class="wizard-card">
+  <Box border="none" class="wizard-card">
     <!-- Progress bar -->
-    <Box class="wizard-progress" role="progressbar" aria-valuenow={step + 1} aria-valuemin="1" aria-valuemax="5">
+    <Box border="none" class="wizard-progress" role="progressbar" aria-valuenow={step + 1} aria-valuemin="1" aria-valuemax="5">
       {#each [0, 1, 2, 3, 4] as i}
-        <Box class="wizard-progress-step {i <= step ? 'active' : ''}"></Box>
+        <Box border="none" class="wizard-progress-step {i <= step ? 'active' : ''}"></Box>
       {/each}
     </Box>
 
     <!-- ── Step 0 — Agent Name ─────────────────────────────────────────── -->
     {#if step === 0}
-      <Box class="wizard-step" aria-live="polite">
+      <Box border="none" class="wizard-step" aria-live="polite">
         <Text size="lg" class="wizard-title">Welcome to Pares Agens</Text>
         <Text class="wizard-desc">Let's get you set up. First, what should your agent be called?</Text>
         <Input
@@ -290,7 +290,7 @@
           bind:value={agentName}
           onsubmit={() => { saveState(); goNext(); }}
         />
-        <Box class="wizard-footer">
+        <Box border="none" class="wizard-footer">
           <Text inline></Text>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }}>
             Next →
@@ -301,11 +301,11 @@
 
     <!-- ── Step 1 — Model ─────────────────────────────────────────────── -->
     {#if step === 1}
-      <Box class="wizard-step" aria-live="polite">
+      <Box border="none" class="wizard-step" aria-live="polite">
         <Text size="lg" class="wizard-title">Choose your model</Text>
         <Text class="wizard-desc">How do you want to run your AI models?</Text>
 
-        <Box class="model-cards">
+        <Box border="none" class="model-cards">
           <!-- Local / Docker -->
           <label class="model-card {modelSource === 'local' ? 'selected' : ''}">
             <input type="radio" name="model-source" value="local" bind:group={modelSource} class="sr-only" />
@@ -337,14 +337,14 @@
 
         <!-- Cloud sub-form -->
         {#if modelSource === 'cloud'}
-          <Box class="cloud-config">
+          <Box border="none" class="cloud-config">
             <Select
               label="Provider"
               options={[{value: 'openai', label: 'OpenAI'}, {value: 'anthropic', label: 'Anthropic'}, {value: 'google', label: 'Google'}]}
               bind:value={cloudProvider} />
             <label class="wizard-label">
               API Key
-              <Box class="api-key-row">
+              <Box border="none" class="api-key-row">
                 <Input
                   password
                   placeholder="sk-…"
@@ -365,7 +365,7 @@
           </Box>
         {/if}
 
-        <Box class="wizard-footer">
+        <Box border="none" class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }} disabled={!modelSource}>
             Next →
@@ -376,7 +376,7 @@
 
     <!-- ── Step 2 — Personality ────────────────────────────────────────── -->
     {#if step === 2}
-      <Box class="wizard-step" aria-live="polite">
+      <Box border="none" class="wizard-step" aria-live="polite">
         <Text size="lg" class="wizard-title">Personality</Text>
         <Text class="wizard-desc">Optionally customise your agent's system prompt. Leave blank for the default.</Text>
         <label class="wizard-label">
@@ -388,7 +388,7 @@
             bind:value={systemPrompt}
           ></textarea>
         </label>
-        <Box class="wizard-footer">
+        <Box border="none" class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={() => { saveState(); goNext(); }}>Next →</Button>
         </Box>
@@ -397,11 +397,11 @@
 
     <!-- ── Step 3 — Hyperswarm ─────────────────────────────────────────── -->
     {#if step === 3}
-      <Box class="wizard-step" aria-live="polite">
+      <Box border="none" class="wizard-step" aria-live="polite">
         <Text size="lg" class="wizard-title">Sync across hosts (optional)</Text>
         <Text class="wizard-desc">Set up Hyperswarm now or skip and configure later.</Text>
 
-        <Box class="model-cards">
+        <Box border="none" class="model-cards">
           <label class="model-card {swarmMode === 'new' ? 'selected' : ''}">
             <input type="radio" name="swarm-mode" value="new" bind:group={swarmMode} class="sr-only" />
             <Text inline class="model-card-title">✨ New swarm</Text>
@@ -420,7 +420,7 @@
         </Box>
 
         {#if swarmMode === 'new'}
-          <Box class="cloud-config">
+          <Box border="none" class="cloud-config">
             <Button variant="outline" onclick={createSwarmInvite}>
               {swarmTopic && swarmSharedKey ? 'Regenerate topic + key' : 'Generate topic + key'}
             </Button>
@@ -435,7 +435,7 @@
             {/if}
           </Box>
         {:else if swarmMode === 'join'}
-          <Box class="cloud-config">
+          <Box border="none" class="cloud-config">
             <Input label="Topic (64 hex chars)" placeholder="a7f3..." bind:value={swarmTopic} />
             <Input label="Shared key" password placeholder="b92c..." bind:value={swarmSharedKey} />
             <Button variant="outline" onclick={verifyJoinSwarm} disabled={!swarmTopic.trim() || !swarmSharedKey.trim() || swarmVerifyStatus === 'checking'}>
@@ -449,7 +449,7 @@
           </Box>
         {/if}
 
-        <Box class="wizard-footer">
+        <Box border="none" class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid"
             onclick={() => { saveState(); goNext(); }}
@@ -463,20 +463,20 @@
 
     <!-- ── Step 4 — Done / Summary ─────────────────────────────────────── -->
     {#if step === 4}
-      <Box class="wizard-step" aria-live="polite">
+      <Box border="none" class="wizard-step" aria-live="polite">
         <Text size="lg" class="wizard-title">You're all set!</Text>
         <Text class="wizard-desc" id="wizard-done-summary">
           {agentName.trim() || 'Pares Agens'} is ready.
         </Text>
-        <Box class="wizard-summary-list">
+        <Box border="none" class="wizard-summary-list">
           {#each summaryItems as item}
-            <Box class="wizard-summary-item">
+            <Box border="none" class="wizard-summary-item">
               <Text inline class="wizard-summary-label">{item.label}:</Text>
               {item.value}
             </Box>
           {/each}
         </Box>
-        <Box class="wizard-footer">
+        <Box border="none" class="wizard-footer">
           <Button variant="outline" onclick={goBack}>← Back</Button>
           <Button variant="solid" onclick={finishWizard}>Launch →</Button>
         </Box>

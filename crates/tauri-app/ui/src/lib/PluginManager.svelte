@@ -12,9 +12,9 @@
     {#each $pluginRegistry as plugin (plugin.id)}
       <ListItem>
         {#snippet children()}
-          <Box class="plugin-row">
+          <Box border="none" class="plugin-row">
             <Text class="plugin-icon">{plugin.icon}</Text>
-            <Box class="plugin-info">
+            <Box border="none" class="plugin-info">
               <Text>{plugin.name}</Text>
               <Text class="plugin-desc">{plugin.description}</Text>
             </Box>

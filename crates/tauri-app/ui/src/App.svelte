@@ -114,18 +114,18 @@
 
 <Wizard onComplete={handleWizardComplete} />
 
-<Box class="shell" height="100vh">
+<Box border="none" class="shell" height="100vh">
   <TitleBar title="pares-radix" onminimize={handleMinimize} onmaximize={handleMaximize} onclose={handleClose} />
 
-  <Box class="workspace">
+  <Box border="none" class="workspace">
     <ActivityBar
       items={activityItems}
       activeKey={$activeView}
       onselect={(key) => $activeView = key}
     />
 
-    <Box class="editor-area">
-      <Box class="editor-content">
+    <Box border="none" class="editor-area">
+      <Box border="none" class="editor-content">
         {#each $activePlugins as plugin (plugin.id)}
           {#if $activeView === plugin.id && plugin.component}
             {#if plugin.id === 'chat'}
@@ -140,7 +140,7 @@
         {/if}
       </Box>
       {#if $panelOpen}
-        <Box class="bottom-panel" height="{$panelHeight}px">
+        <Box border="none" class="bottom-panel" height="{$panelHeight}px">
           <TerminalPanel />
         </Box>
       {/if}
