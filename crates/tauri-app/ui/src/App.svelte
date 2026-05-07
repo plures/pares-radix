@@ -1,204 +1,140 @@
 <script>
   import '@plures/design-dojo/tokens.css';
-  import { StatusBar, StatusBarItem, TitleBar, Sidebar, Box, ActivityBar, Button, CommandPalette, MenuBar, Icon } from '@plures/design-dojo';
-
   import { onMount } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
-  import { activePlugins } from './lib/plugins/registry.js';
-  import PluginManager from './lib/PluginManager.svelte';
-  import MemorySidebar from './lib/MemorySidebar.svelte';
-  import Wizard from './lib/Wizard.svelte';
-  import { activeView, sidebarOpen, commandPaletteOpen, panelOpen, panelHeight } from './lib/store.js';
-  import { praxisViolationCount } from './lib/praxis.js';
-  import TerminalPanel from './lib/TerminalPanel.svelte';
-  import { listen, handleNotificationAction, minimizeWindow, maximizeWindow, closeWindow } from './api.js';
-  // PraxisDevOverlay requires @plures/praxis peer dep — install when needed
-  // import { PraxisDevOverlay } from '@plures/design-dojo/praxis';
+  import { activePlugins, pluginRegistry } from './lib/plugins/registry.js';
+  import { activeView, commandPaletteOpen } from './lib/store.js';
+  import CommandPalette from './lib/CommandPalette.svelte';
 
   onMount(() => { initBuiltinPlugins(); });
 
-  let agentName = $state('Pares Agens');
+  let currentPlugin = $derived($activePlugins.find(p => p.id === $activeView));
 
-  /** @type {{ id: string, title: string, body: string, actions: { id: string, label: string }[] }[]} */
-  let actionableNotifications = $state([]);
-
-  function handleWizardComplete(/** @type {string} */ name) {
-    agentName = name;
-  }
-
-  function dismissNotification(id) {
-    actionableNotifications = actionableNotifications.filter((n) => n.id !== id);
-  }
-
-  async function triggerNotificationAction(notificationId, action) {
-    try {
-      await handleNotificationAction({ notificationId, action });
-    } catch (err) {
-      console.warn('Failed to handle notification action:', err);
-    }
-    dismissNotification(notificationId);
-  }
-
-  // Activity bar items derived from active plugins
-  let activityItems = $derived([
-    ...$activePlugins.map(p => ({ key: p.id, label: p.name, icon: p.icon })),
-    { key: 'extensions', label: 'Extensions', icon: 'puzzle' },
-  ]);
-
-  // Command palette commands
-  let paletteCommands = $derived([
-    { id: 'view.chat', label: 'View: Chat', category: 'View' },
-    { id: 'view.procedures', label: 'View: Procedures', category: 'View' },
-    { id: 'view.settings', label: 'View: Settings', category: 'View' },
-    { id: 'view.extensions', label: 'View: Extensions', category: 'View' },
-    { id: 'view.config', label: 'View: Config Browser', category: 'View' },
-    { id: 'view.timeline', label: 'View: Timeline (Chronos)', category: 'View' },
-    { id: 'sidebar.toggle', label: 'Toggle Sidebar', category: 'General', shortcut: 'Ctrl+B' },
-    { id: 'panel.toggle', label: 'Toggle Terminal Panel', category: 'General', shortcut: 'Ctrl+`' },
-    { id: 'theme.toggle', label: 'Toggle Theme', category: 'General' },
-    { id: 'model.switch', label: 'Switch Model...', category: 'Model' },
-    { id: 'memory.search', label: 'Search Memory...', category: 'Memory' },
-  ]);
-
-  function handleCommandSelect(id) {
-    const actions = {
-      'view.chat': () => $activeView = 'chat',
-      'view.procedures': () => $activeView = 'procedures',
-      'view.settings': () => $activeView = 'settings',
-      'view.extensions': () => $activeView = 'extensions',
-      'view.config': () => $activeView = 'config-browser',
-      'view.timeline': () => $activeView = 'chronicle',
-      'sidebar.toggle': () => $sidebarOpen = !$sidebarOpen,
-      'panel.toggle': () => $panelOpen = !$panelOpen,
-    };
-    actions[id]?.();
-    $commandPaletteOpen = false;
-  }
-
-  // Global keyboard shortcuts
-  function handleGlobalKeydown(e) {
+  function handleKeydown(e) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
       e.preventDefault();
       $commandPaletteOpen = !$commandPaletteOpen;
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === '`') {
-      e.preventDefault();
-      $panelOpen = !$panelOpen;
-    }
   }
-
-  $effect(() => {
-    const unlisten = listen('actionable-notification', (event) => {
-      const payload = event.payload;
-      if (!payload || !payload.id) return;
-      actionableNotifications = [
-        payload,
-        ...actionableNotifications.filter((n) => n.id !== payload.id)
-      ].slice(0, 3);
-    });
-    return () => { unlisten.then((fn) => fn?.()); };
-  });
-
-  function handleMinimize() { minimizeWindow(); }
-  function handleMaximize() { maximizeWindow(); }
-  function handleClose() { closeWindow(); }
 </script>
 
-<svelte:window onkeydown={handleGlobalKeydown} />
+<svelte:window onkeydown={handleKeydown} />
 
-<CommandPalette
-  commands={paletteCommands}
-  bind:open={$commandPaletteOpen}
-  onselect={handleCommandSelect}
-  onclose={() => $commandPaletteOpen = false}
-  placeholder="Type a command..."
-/>
+<div class="radix-host">
+  <!-- Activity Bar -->
+  <nav class="radix-activity-bar">
+    {#each $activePlugins as plugin}
+      <button
+        class="radix-activity-item"
+        class:active={$activeView === plugin.id}
+        onclick={() => $activeView = plugin.id}
+        title={plugin.name}
+      >
+        <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d={plugin.iconPath || ''} />
+        </svg>
+      </button>
+    {/each}
+  </nav>
 
-{#if false}<Wizard onComplete={handleWizardComplete} />{/if}
-
-<Box border="none" class="shell" height="100vh">
-  <MenuBar />
-
-  <Box border="none" class="workspace">
-    <ActivityBar
-      items={activityItems}
-      activeKey={$activeView}
-      onselect={(key) => $activeView = key}
-    />
-
-    <Box border="none" class="editor-area">
-      <Box border="none" class="editor-content">
-        {#each $activePlugins as plugin (plugin.id)}
-          {#if $activeView === plugin.id && plugin.component}
-            {#if plugin.id === 'chat'}
-              <plugin.component agentName={agentName} settingsOpen={false} proceduresOpen={false} />
-            {:else}
-              <plugin.component open={true} />
-            {/if}
-          {/if}
-        {/each}
-        {#if $activeView === 'extensions'}
-          <PluginManager />
-        {/if}
-      </Box>
-      {#if $panelOpen}
-        <Box border="none" class="bottom-panel" height="{$panelHeight}px">
-          <TerminalPanel />
-        </Box>
-      {/if}
-    </Box>
-
-    {#if $sidebarOpen}
-      <Sidebar>
-        <MemorySidebar />
-      </Sidebar>
-    {/if}
-  </Box>
-
-  <StatusBar>
-    <StatusBarItem value="claude-opus-4" />
-    <StatusBarItem value="ready" color="success" />
-    {#if $praxisViolationCount > 0}
-      <StatusBarItem value="{$praxisViolationCount} error{$praxisViolationCount > 1 ? 's' : ''}" color="error" />
+  <!-- Canvas -->
+  <main class="radix-canvas">
+    {#if currentPlugin?.component}
+      {@const Comp = currentPlugin.component}
+      <Comp />
     {:else}
-      <StatusBarItem value="0 errors" />
+      <div class="radix-welcome">
+        <p class="radix-welcome-title">pares-radix</p>
+        <p class="radix-welcome-hint">Select a plugin or press <kbd>Ctrl+Shift+P</kbd></p>
+      </div>
     {/if}
-    <StatusBarItem value="PluresDB: connected" color="success" />
-  </StatusBar>
-</Box>
+  </main>
 
-<!-- PraxisDevOverlay (enable after installing @plures/praxis) -->
+  <!-- Status Bar -->
+  <footer class="radix-status-bar">
+    <span class="radix-status-item">radix v1.40</span>
+  </footer>
+</div>
+
+<CommandPalette />
 
 <style>
-  :global(.shell) {
+  :global(body) {
+    margin: 0;
+    background: #1e1e2e;
+    color: #ccd;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+  }
+
+  .radix-host {
+    display: grid;
+    grid-template-columns: 48px 1fr;
+    grid-template-rows: 1fr 22px;
+    height: 100vh;
+  }
+
+  .radix-activity-bar {
+    grid-row: 1 / 3;
+    background: #16161e;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    align-items: center;
+    padding-top: 8px;
+    gap: 2px;
   }
 
-  :global(.workspace) {
+  .radix-activity-item {
+    width: 40px;
+    height: 40px;
     display: flex;
-    flex: 1;
-    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-left: 2px solid transparent;
+    color: #666;
+    cursor: pointer;
+    border-radius: 0;
+  }
+  .radix-activity-item:hover { color: #aaa; }
+  .radix-activity-item.active {
+    color: #ccd;
+    border-left-color: #569cd6;
   }
 
-  :global(.editor-area) {
-    flex: 1;
-    overflow: hidden;
+  .radix-canvas {
+    background: #1e1e2e;
+    overflow: auto;
+  }
+
+  .radix-welcome {
     display: flex;
     flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 8px;
+    opacity: 0.4;
+  }
+  .radix-welcome-title { font-size: 24px; font-weight: 300; }
+  .radix-welcome-hint { font-size: 12px; }
+  .radix-welcome-hint kbd {
+    background: #333;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: inherit;
   }
 
-  :global(.editor-content) {
-    flex: 1;
-    overflow: hidden;
+  .radix-status-bar {
+    grid-column: 1 / -1;
+    background: #16161e;
     display: flex;
-    flex-direction: column;
-    min-height: 0;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 11px;
+    color: #888;
   }
-
-  :global(.bottom-panel) {
-    flex-shrink: 0;
-    overflow: hidden;
-  }
+  .radix-status-item { padding: 0 8px; }
 </style>

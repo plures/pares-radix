@@ -3,7 +3,7 @@ import Chat from '../Chat.svelte';
 export default {
   id: 'chat',
   name: 'Chat',
-  icon: 'chat',
+  iconPath: 'M2 2h12v8H6l-4 4V2z',
   description: 'AI assistant chat interface',
   enabled: true,
   component: Chat,

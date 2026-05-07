@@ -3,8 +3,8 @@ import Settings from '../Settings.svelte';
 export default {
   id: 'settings',
   name: 'Settings',
-  icon: 'settings',
-  description: 'Application configuration',
+  iconPath: 'M8 5a3 3 0 100 6 3 3 0 000-6z',
+  description: 'Application settings',
   enabled: true,
   component: Settings,
   sidebarComponent: null,

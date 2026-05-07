@@ -3,14 +3,11 @@ import ConfigBrowser from '../ConfigBrowser.svelte';
 export default {
   id: 'config-browser',
   name: 'Config Browser',
-  icon: 'terminal',
-  description: 'Browse and validate datacenter configuration',
+  iconPath: 'M1 1h6v6H1zm8 0h6v6H9zM1 9h6v6H1zm8 0h6v6H9z',
+  description: 'Browse PluresDB configuration',
   enabled: true,
   component: ConfigBrowser,
   sidebarComponent: null,
-  commands: [
-    { id: 'config.validate', label: 'Validate Configuration', action: 'validate' },
-    { id: 'config.import', label: 'Import Config Directory', action: 'import' },
-  ],
+  commands: [],
   settings: {},
 };

@@ -1,198 +1,120 @@
 <script>
-  import '@plures/design-dojo/tokens.css';
-  import { ChatView, ChatInput, Button, Text, Box } from '@plures/design-dojo';
-  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, readClipboardText, isTauri, recordChronos } from './api.js';
+  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, isTauri, recordChronos } from './api.js';
 
-  let { settingsOpen = $bindable(false), proceduresOpen = $bindable(false), agentName = 'Pares Agens' } = $props();
-
-  /**
-   * @typedef {import('@plures/design-dojo/dist/app/ChatView.types.js').ChatViewMessage} ChatViewMessage
-   */
-
-  /** @type {ChatViewMessage[]} */
+  /** @type {{ role: string, content: string }[]} */
   let messages = $state([]);
-  let inputValue = $state('');
-  let busy = $state(false);
-  let connectionState = $state('connected');
-  let historyLoaded = $state(false);
+  let input = $state('');
+  let loading = $state(false);
+  let messagesEnd;
 
-  /** Generate unique message ID */
-  function msgId() {
-    return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  /** Format an ISO timestamp as Date */
-  function parseTime(iso) {
-    try { return new Date(iso); } catch { return new Date(); }
-  }
-
-  // ── Load conversation history from PluresDB on mount ──────────────────
   $effect(() => {
-    if (historyLoaded) return;
-    getConversationHistory({ channel: 'desktop', limit: 30 })
-      .then((history) => {
-        if (history && history.length > 0) {
-          messages = history.map((m, i) => ({
-            id: `hist-${i}`,
-            author: m.role === 'user' ? 'You' : m.role === 'system' ? 'System' : agentName,
-            content: m.content,
-            timestamp: parseTime(m.time),
-            type: m.role,
-          }));
-        }
-        historyLoaded = true;
-      })
-      .catch(() => { historyLoaded = true; });
+    if (messagesEnd) messagesEnd.scrollIntoView({ behavior: 'smooth' });
   });
 
-  // ── Streaming listener ────────────────────────────────────────────────
-  $effect(() => {
-    const unlistenChunk = listenEvent('model-chunk', ({ request_id, content, done }) => {
-      const idx = messages.findLastIndex(m => m.id === request_id);
-      if (idx >= 0) {
-        if (done) {
-          messages[idx] = { ...messages[idx], streaming: false };
-        } else {
-          messages[idx] = { ...messages[idx], content: messages[idx].content + content };
-        }
-        messages = [...messages];
-      }
-    });
-
-    const unlistenResponse = listenEvent('model-response', ({ request_id, content }) => {
-      const idx = messages.findLastIndex(m => m.id === request_id);
-      if (idx >= 0) {
-        messages[idx] = { ...messages[idx], content, streaming: false };
-        messages = [...messages];
-      } else {
-        messages = [...messages, { id: request_id, author: agentName, content, timestamp: new Date(), type: 'agent' }];
-      }
-      busy = false;
-    });
-
-    const unlistenError = listenEvent('model-error', ({ request_id, error }) => {
-      const idx = messages.findLastIndex(m => m.id === request_id);
-      if (idx >= 0) {
-        messages[idx] = { ...messages[idx], content: `⚠️ ${error}`, streaming: false };
-        messages = [...messages];
-      } else {
-        messages = [...messages, { id: msgId(), author: 'System', content: `⚠️ ${error}`, timestamp: new Date(), type: 'system' }];
-      }
-      busy = false;
-    });
-
-    return () => {
-      unlistenChunk.then(fn => fn?.());
-      unlistenResponse.then(fn => fn?.());
-      unlistenError.then(fn => fn?.());
-    };
-  });
-
-  async function handleSend(content) {
-    if (busy || !content?.trim()) return;
-    recordChronos('MessageSent', 'chat', { length: content.length });
-
-    const id = msgId();
-    busy = true;
-
-    messages = [...messages, { id, author: 'You', content, timestamp: new Date(), type: 'user' }];
-
-    const responseId = `${id}-response`;
-    messages = [...messages, { id: responseId, author: agentName, content: '', timestamp: new Date(), type: 'agent', streaming: true }];
-
+  async function send() {
+    const text = input.trim();
+    if (!text || loading) return;
+    input = '';
+    messages = [...messages, { role: 'user', content: text }];
+    loading = true;
+    recordChronos('ChatSend', 'chat', { length: text.length });
     try {
-      const response = await apiSendMessage(content, responseId);
-      if (response) {
-        const idx = messages.findLastIndex(m => m.id === responseId);
-        if (idx >= 0 && messages[idx].streaming) {
-          messages[idx] = { ...messages[idx], content: response, streaming: false };
-          messages = [...messages];
-        }
-      }
-    } catch (err) {
-      const idx = messages.findLastIndex(m => m.id === responseId);
-      if (idx >= 0) {
-        messages[idx] = { ...messages[idx], content: `⚠️ ${err}`, streaming: false };
-        messages = [...messages];
-      }
-    } finally {
-      busy = false;
+      const reply = await apiSendMessage(text);
+      messages = [...messages, { role: 'assistant', content: reply }];
+    } catch (e) {
+      messages = [...messages, { role: 'assistant', content: `Error: ${e.message}` }];
+    }
+    loading = false;
+  }
+
+  function handleKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      send();
     }
   }
-
-  function clearChat() {
-    messages = [];
-  }
-
-  $effect(() => {
-    const unlisten = listenEvent('show-settings', () => { settingsOpen = true; });
-    const unlistenNotificationAction = listenEvent('notification-action', (payload) => {
-      const prompt = payload?.prompt;
-      if (prompt) { inputValue = prompt; }
-    });
-    return () => {
-      unlisten.then(fn => fn?.());
-      unlistenNotificationAction.then(fn => fn?.());
-    };
-  });
 </script>
 
-<Box border="none" class="chat-panel">
-  <Box border="none" class="chat-header">
-    <Box border="none" class="header-left">
-      <Text class="agent-name">{agentName}</Text>
-    </Box>
-    <Box border="none" class="header-nav">
-      <Button variant="ghost" size="sm" onclick={clearChat}>🗑</Button>
-      <Button variant="ghost" size="sm" onclick={() => { proceduresOpen = true; }}>⚡</Button>
-      <Button variant="ghost" size="sm" onclick={() => { settingsOpen = true; }}>⚙</Button>
-    </Box>
-  </Box>
+<div class="chat-plugin">
+  <div class="chat-messages">
+    {#each messages as msg}
+      <div class="chat-msg" class:user={msg.role === 'user'}>
+        <p>{msg.content}</p>
+      </div>
+    {/each}
+    {#if loading}
+      <div class="chat-msg"><p class="typing">…</p></div>
+    {/if}
+    <div bind:this={messagesEnd}></div>
+  </div>
 
-  <ChatView
-    {messages}
-    mode="bubble"
-    showTimestamps={true}
-  />
-
-  <ChatInput
-    bind:value={inputValue}
-    placeholder="Type a message… (Enter to send)"
-    disabled={busy}
-    onsend={handleSend}
-  />
-</Box>
+  <div class="chat-input-row">
+    <textarea
+      bind:value={input}
+      onkeydown={handleKeydown}
+      placeholder="Send a message…"
+      rows="1"
+    ></textarea>
+    <button onclick={send} disabled={loading || !input.trim()}>↑</button>
+  </div>
+</div>
 
 <style>
-  :global(.chat-panel) {
+  .chat-plugin {
     display: flex;
     flex-direction: column;
     height: 100%;
   }
-
-  :global(.chat-header) {
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .chat-msg {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: #2a2a3e;
+    color: #ccd;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .chat-msg.user {
+    align-self: flex-end;
+    background: #364a6b;
+  }
+  .typing { opacity: 0.5; }
+  .chat-input-row {
+    display: flex;
+    gap: 8px;
     padding: 12px 16px;
-    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.06));
+    background: #16161e;
   }
-
-  :global(.header-left) {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  .chat-input-row textarea {
+    flex: 1;
+    resize: none;
+    background: #2a2a3e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: #ccd;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
   }
-
-  :global(.header-nav) {
-    display: flex;
-    gap: 4px;
+  .chat-input-row textarea:focus { border-color: #569cd6; }
+  .chat-input-row button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: #569cd6;
+    color: #fff;
+    font-size: 16px;
+    cursor: pointer;
   }
-
-  :global(.agent-name) {
-    font-size: 15px;
-    font-weight: 600;
-  }
+  .chat-input-row button:disabled { opacity: 0.3; cursor: default; }
 </style>
-
-

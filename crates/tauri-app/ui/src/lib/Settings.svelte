@@ -9,7 +9,7 @@
   import { Dialog } from '@plures/design-dojo/overlays';
   import { List, ListItem, Table } from '@plures/design-dojo/data';
 
-  import MarketplaceTab from './MarketplaceTab.svelte';
+  
 
   let { open = $bindable(false) } = $props();
 
@@ -969,7 +969,7 @@
       id="panel-marketplace"
       aria-labelledby="tab-marketplace"
       hidden={activeTab !== 'marketplace'}>
-      <MarketplaceTab />
+      <p>Marketplace coming soon</p>
     </Box>
 
     <footer class="dialog-footer">
