@@ -3607,16 +3607,10 @@ async fn main() {
                                 }
                             }
                             KeyCode::Up => {
-                                app.scroll_offset = app.scroll_offset.saturating_add(1);
-                                app.user_scrolled = true;
+                                // Reserved for future: input history recall
                             }
                             KeyCode::Down => {
-                                if app.scroll_offset > 0 {
-                                    app.scroll_offset -= 1;
-                                    if app.scroll_offset == 0 {
-                                        app.user_scrolled = false;
-                                    }
-                                }
+                                // Reserved for future: input history recall
                             }
                             KeyCode::Esc => {
                                 break 'main_loop Ok(());
