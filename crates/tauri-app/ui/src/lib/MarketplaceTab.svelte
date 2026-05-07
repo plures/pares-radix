@@ -1,5 +1,8 @@
 <script>
-  const { invoke } = window.__TAURI__.core;
+  import {
+    marketplaceSearch, marketplaceListInstalled, marketplaceCheckUpdates,
+    marketplaceInstall, marketplaceRemove, marketplaceUpdateAll
+  } from '../api.js';
 
   /**
    * @typedef {{ id: string, name: string, version: string, description: string, author: string, mean_score: number, review_count: number }} CatalogEntry
@@ -31,12 +34,12 @@
 
   async function refreshInstalled() {
     try {
-      installed = await invoke('marketplace_list_installed');
+      installed = await marketplaceListInstalled();
     } catch {
       installed = [];
     }
     try {
-      availableUpdates = await invoke('marketplace_check_updates');
+      availableUpdates = await marketplaceCheckUpdates();
     } catch {
       availableUpdates = [];
     }
@@ -48,7 +51,7 @@
     searching = true;
     searchError = '';
     try {
-      searchResults = await invoke('marketplace_search', { query: q });
+      searchResults = await marketplaceSearch(q);
     } catch (err) {
       searchError = String(err);
       searchResults = [];
@@ -60,7 +63,7 @@
   async function install(id) {
     installing = id;
     try {
-      await invoke('marketplace_install', { id });
+      await marketplaceInstall(id);
       await refreshInstalled();
     } catch (err) {
       searchError = `Install failed: ${err}`;
@@ -72,7 +75,7 @@
   async function remove(id) {
     removing = id;
     try {
-      await invoke('marketplace_remove', { id });
+      await marketplaceRemove(id);
       await refreshInstalled();
     } catch (err) {
       searchError = `Remove failed: ${err}`;
@@ -84,7 +87,7 @@
   async function updateAll() {
     updatingAll = true;
     try {
-      await invoke('marketplace_update_all');
+      await marketplaceUpdateAll();
       await refreshInstalled();
     } catch (err) {
       searchError = `Update failed: ${err}`;

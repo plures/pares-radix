@@ -1,6 +1,8 @@
 <script>
-  const invoke = window.__TAURI__?.core?.invoke
-    ?? (async () => { throw new Error('Tauri invoke unavailable'); });
+  import {
+    completeWizard, setSettings, detectDockerRunner, validateApiKey,
+    generateSwarmInvite, verifySwarmJoin
+  } from '../api.js';
 
   /** @type {{ onComplete: (name: string) => void }} */
   let { onComplete } = $props();
@@ -109,7 +111,7 @@
   async function runDockerDetect() {
     dockerStatus = 'checking';
     try {
-      const found = await invoke('detect_docker_runner');
+      const found = await detectDockerRunner();
       dockerStatus = found ? 'found' : 'absent';
     } catch {
       dockerStatus = 'absent';
@@ -121,7 +123,7 @@
     if (!apiKey.trim()) return;
     apiKeyStatus = 'checking';
     try {
-      const valid = await invoke('validate_api_key', { provider: cloudProvider, apiKey });
+      const valid = await validateApiKey(cloudProvider, apiKey);
       apiKeyStatus = valid ? 'valid' : 'invalid';
     } catch {
       apiKeyStatus = 'error';
@@ -133,7 +135,7 @@
     swarmVerifyStatus = 'idle';
     swarmVerifyError = '';
     try {
-      const invite = await invoke('generate_swarm_invite');
+      const invite = await generateSwarmInvite();
       swarmTopic = invite.topic || '';
       swarmSharedKey = invite.sharedKey || '';
     } catch (err) {
@@ -147,10 +149,7 @@
     swarmVerifyStatus = 'checking';
     swarmVerifyError = '';
     try {
-      await invoke('verify_swarm_join', {
-        topic: swarmTopic.trim(),
-        sharedKey: swarmSharedKey.trim(),
-      });
+      await verifySwarmJoin(swarmTopic.trim(), swarmSharedKey.trim());
       swarmVerifyStatus = 'success';
     } catch (err) {
       swarmVerifyStatus = 'error';
@@ -211,10 +210,10 @@
         };
 
     try {
-      await invoke('complete_wizard', { settings, swarm });
+      await completeWizard(settings, swarm);
     } catch (err) {
       console.error('complete_wizard failed, falling back to set_settings:', err);
-      try { await invoke('set_settings', { settings }); } catch (e) {
+      try { await setSettings(settings); } catch (e) {
         console.error('set_settings fallback also failed:', e);
       }
     }

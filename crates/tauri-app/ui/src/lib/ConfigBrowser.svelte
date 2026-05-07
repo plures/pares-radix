@@ -1,5 +1,5 @@
 <script>
-  const invoke = window.__TAURI__?.core?.invoke ?? (async () => ({}));
+  import { getConfigTree } from '../api.js';
 
   let tree = $state(null);
   let loading = $state(true);
@@ -10,7 +10,7 @@
   async function loadConfig() {
     loading = true;
     try {
-      const result = await invoke('config_tree', {});
+      const result = await getConfigTree();
       tree = result;
     } catch {
       tree = {

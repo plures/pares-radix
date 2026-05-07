@@ -1,5 +1,9 @@
 <script>
-  const { invoke } = window.__TAURI__.core;
+  import {
+    getSettings, setSettings, listProviders, addProvider, updateProvider, removeProvider,
+    listMcpTools, restartMcpServers, getLicenseStatus, activateLicense as activateLicenseApi,
+    getTelemetrySnapshot, uploadTelemetrySnapshot as uploadTelemetrySnapshotApi
+  } from '../api.js';
 
   import MarketplaceTab from './MarketplaceTab.svelte';
 
@@ -118,14 +122,14 @@
   async function loadAll() {
     let s;
     try {
-      s = await invoke('get_settings');
+      s = await getSettings();
     } catch {
       open = false;
       return;
     }
 
     try {
-      providers = await invoke('list_providers');
+      providers = await listProviders();
     } catch {
       providers = [];
     }
@@ -162,14 +166,14 @@
     // MCP servers
     mcpServers = (s.mcpServers ?? []).map(m => ({ ...m }));
     try {
-      mcpTools = await invoke('list_mcp_tools');
+      mcpTools = await listMcpTools();
     } catch {
       mcpTools = [];
     }
 
     // License
     try {
-      licenseStatus = await invoke('get_license_status');
+      licenseStatus = await getLicenseStatus();
     } catch {
       licenseStatus = { tier: 'free', valid: true };
     }
@@ -180,7 +184,7 @@
     telemetryUploadEnabled = t.uploadEnabled ?? false;
     telemetryUploadEndpoint = t.uploadEndpoint ?? '';
     try {
-      telemetrySnapshot = await invoke('get_telemetry_snapshot');
+      telemetrySnapshot = await getTelemetrySnapshot();
     } catch {
       telemetrySnapshot = {};
     }
@@ -237,11 +241,11 @@
     };
     try {
       if (editProviderName === null) {
-        await invoke('add_provider', { provider: entry });
+        await addProvider(entry);
       } else {
-        await invoke('update_provider', { name: editProviderName, provider: entry });
+        await updateProvider(editProviderName, entry);
       }
-      providers = await invoke('list_providers');
+      providers = await listProviders();
       showProviderForm = false;
     } catch (err) {
       alert(`Failed to save provider: ${err}`);
@@ -251,8 +255,8 @@
   async function deleteProvider(/** @type {string} */ name) {
     if (!confirm(`Remove provider "${name}"?`)) return;
     try {
-      await invoke('remove_provider', { name });
-      providers = await invoke('list_providers');
+      await removeProvider(name);
+      providers = await listProviders();
     } catch (err) {
       alert(`Failed to remove provider: ${err}`);
     }
@@ -291,7 +295,7 @@
     try {
       // Reload fresh settings to carry over provider list (mutated via separate
       // CRUD commands) and any other fields the UI doesn't manage.
-      const fresh = await invoke('get_settings');
+      const fresh = await getSettings();
 
       // ── Persist Ollama quick-config ────────────────────────────────────
       // Update (or add) the "ollama" provider entry with the URL the user
@@ -301,27 +305,22 @@
       const existingOllama  = providers.find(p => p.name === 'ollama');
       try {
         if (existingOllama) {
-          await invoke('update_provider', {
-            name: 'ollama',
-            provider: {
+          await updateProvider('ollama', {
               name:    'ollama',
               baseUrl: ollamaBaseUrl,
               apiKey:  null,
               models:  existingOllama.models ?? [ollamaModelVal],
-            },
           });
         } else {
-          await invoke('add_provider', {
-            provider: {
+          await addProvider({
               name:    'ollama',
               baseUrl: ollamaBaseUrl,
               apiKey:  null,
               models:  [ollamaModelVal],
-            },
           });
         }
         // Refresh local provider list after mutation.
-        providers = await invoke('list_providers');
+        providers = await listProviders();
       } catch (err) {
         console.warn('Failed to update ollama provider entry:', err);
         /* non-fatal — proceed to set_settings */
@@ -350,8 +349,7 @@
       // startup/system-prompt are all written atomically.  Provider CRUD was
       // already applied to the backend state; `fresh` carries those changes.
       // `model` and `endpoint` are also updated for legacy / wizard compat.
-      await invoke('set_settings', {
-        settings: {
+      await setSettings({
           ...fresh,
           model:           ollamaModelVal,
           endpoint:        ollamaBaseUrl,
@@ -373,7 +371,6 @@
             uploadEnabled: telemetryUploadEnabled,
             uploadEndpoint: telemetryUploadEndpoint.trim() || null,
           },
-        },
       });
 
       open = false;
@@ -434,8 +431,8 @@
   async function restartMcp() {
     mcpRestarting = true;
     try {
-      await invoke('restart_mcp_servers');
-      mcpTools = await invoke('list_mcp_tools');
+      await restartMcpServers();
+      mcpTools = await listMcpTools();
     } catch (err) {
       alert(`MCP restart failed: ${err}`);
     } finally {
@@ -453,7 +450,7 @@
     licenseActivating = true;
     licenseError = '';
     try {
-      licenseStatus = await invoke('activate_license', { key });
+      licenseStatus = await activateLicenseApi(key);
       licenseKey = '';
     } catch (err) {
       licenseError = `Activation failed: ${err}`;
@@ -479,8 +476,8 @@
     telemetryUploading = true;
     telemetryUploadError = '';
     try {
-      await invoke('upload_telemetry_snapshot');
-      telemetrySnapshot = await invoke('get_telemetry_snapshot');
+      await uploadTelemetrySnapshotApi();
+      telemetrySnapshot = await getTelemetrySnapshot();
     } catch (err) {
       telemetryUploadError = `Upload failed: ${err}`;
     } finally {

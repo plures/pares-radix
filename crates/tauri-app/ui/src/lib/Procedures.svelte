@@ -1,5 +1,5 @@
 <script>
-  const { invoke } = window.__TAURI__.core;
+  import { listProcedures, getProcedure, getProcedureLog, toggleProcedure, saveProcedure as saveProcedureApi, createFromTemplate as createFromTemplateApi } from '../api.js';
 
   let { open = $bindable(false) } = $props();
 
@@ -37,7 +37,7 @@
 
   async function refreshProcedures() {
     try {
-      procedures = await invoke('list_procedures');
+      procedures = await listProcedures();
     } catch {
       procedures = [];
     }
@@ -45,7 +45,7 @@
 
   async function selectProcedure(name) {
     try {
-      const rec = await invoke('get_procedure', { name });
+      const rec = await getProcedure(name);
       if (!rec) return;
       selected = rec;
       editBody = rec.body;
@@ -58,7 +58,7 @@
 
   async function refreshLog(name) {
     try {
-      logEntries = await invoke('get_procedure_log', { name, limit: 50 });
+      logEntries = await getProcedureLog(name, 50);
     } catch {
       logEntries = [];
     }
@@ -68,7 +68,7 @@
     if (!selected) return;
     const enabled = e.target.checked;
     try {
-      await invoke('toggle_procedure', { name: selected.name, enabled });
+      await toggleProcedure(selected.name, enabled);
       selected = { ...selected, enabled };
       await refreshProcedures();
     } catch (err) {
@@ -81,7 +81,7 @@
     if (!selected) return;
     try {
       const record = { ...selected, body: editBody };
-      await invoke('save_procedure', { record });
+      await saveProcedureApi(record);
       selected = record;
       editMode = false;
       await refreshProcedures();
@@ -96,7 +96,7 @@
       return;
     }
     try {
-      const rec = await invoke('create_from_template', { template: templateValue });
+      const rec = await createFromTemplateApi(templateValue);
       templateValue = '';
       await refreshProcedures();
       await selectProcedure(rec.name);

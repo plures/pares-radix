@@ -11,13 +11,9 @@
   import CommandPalette from './lib/CommandPalette.svelte';
   import { activeView, sidebarOpen, commandPaletteOpen, panelOpen, panelHeight } from './lib/store.js';
   import TerminalPanel from './lib/TerminalPanel.svelte';
+  import { listen, handleNotificationAction, minimizeWindow, maximizeWindow, closeWindow } from './api.js';
 
   onMount(() => { initBuiltinPlugins(); });
-
-  const tauriCore = typeof window !== 'undefined' ? window.__TAURI__?.core : undefined;
-  const tauriEvent = typeof window !== 'undefined' ? window.__TAURI__?.event : undefined;
-  const invoke = tauriCore?.invoke;
-  const listen = tauriEvent?.listen;
 
   let agentName = $state('Pares Agens');
 
@@ -35,12 +31,10 @@
   }
 
   async function triggerNotificationAction(notificationId, action) {
-    if (invoke) {
-      try {
-        await invoke('handle_notification_action', { notificationId, action });
-      } catch (err) {
-        console.warn('Failed to handle notification action:', err);
-      }
+    try {
+      await handleNotificationAction({ notificationId, action });
+    } catch (err) {
+      console.warn('Failed to handle notification action:', err);
     }
     dismissNotification(notificationId);
   }
@@ -58,7 +52,6 @@
   }
 
   $effect(() => {
-    if (!listen) return;
     const unlisten = listen('actionable-notification', (event) => {
       const payload = event.payload;
       if (!payload || !payload.id) return;
@@ -70,21 +63,9 @@
     return () => { unlisten.then((fn) => fn?.()); };
   });
 
-  function handleMinimize() {
-    if (typeof window !== 'undefined' && window.__TAURI__) {
-      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().minimize());
-    }
-  }
-  function handleMaximize() {
-    if (typeof window !== 'undefined' && window.__TAURI__) {
-      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().toggleMaximize());
-    }
-  }
-  function handleClose() {
-    if (typeof window !== 'undefined' && window.__TAURI__) {
-      import('@tauri-apps/api/window').then(m => m.getCurrentWindow().close());
-    }
-  }
+  function handleMinimize() { minimizeWindow(); }
+  function handleMaximize() { maximizeWindow(); }
+  function handleClose() { closeWindow(); }
 </script>
 
 {#if actionableNotifications.length > 0}
