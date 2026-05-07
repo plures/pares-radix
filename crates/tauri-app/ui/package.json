@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "postinstall": "sed -i \"12d\" node_modules/@plures/design-dojo/dist/index.js 2>/dev/null || true",
+    "postinstall": "cp -r /home/kbristol/.openclaw/workspace/repos/plures/design-dojo/dist/* node_modules/@plures/design-dojo/dist/ 2>/dev/null || true",
     "screenshot": "node tests/screenshot.mjs",
     "inspect": "node tests/screenshot.mjs && cat /tmp/radix-screenshots/visible-text.txt && cat /tmp/radix-screenshots/layout-boxes.json"
   },
