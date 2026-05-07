@@ -142,6 +142,20 @@ export async function getSourceSpans(spanIds) {
   return [];
 }
 
+// ── Chronos Recording ───────────────────────────────────────────────────────
+
+/**
+ * Record a Chronos event.
+ * @param {string} action
+ * @param {string} key
+ * @param {object} data
+ */
+export async function recordChronos(action, key, data = {}) {
+  if (isTauri) {
+    try { await invoke('chronos_record', { action, key, data: JSON.stringify(data) }); } catch {}
+  }
+}
+
 // ── Settings ────────────────────────────────────────────────────────────────
 
 /**

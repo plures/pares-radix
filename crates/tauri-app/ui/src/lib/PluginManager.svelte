@@ -3,6 +3,7 @@
   import { Button, Toggle, Text } from '@plures/design-dojo/primitives';
   import { Box } from '@plures/design-dojo/layout';
   import { pluginRegistry, togglePlugin } from './plugins/registry.js';
+  import { recordChronos } from './api.js';
 </script>
 
 <Box padding={4} class="plugin-manager">
@@ -20,7 +21,7 @@
             <Button
               variant={plugin.enabled ? 'outline' : 'ghost'}
               size="sm"
-              onclick={() => togglePlugin(plugin.id)}
+              onclick={() => { recordChronos('Update', 'plugin:' + plugin.id, { enabled: !plugin.enabled }); togglePlugin(plugin.id); }}
             >
               {plugin.enabled ? 'Disable' : 'Enable'}
             </Button>

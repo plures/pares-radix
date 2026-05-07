@@ -499,26 +499,19 @@
   <form method="dialog" onsubmit={(e) => e.preventDefault()}>
     <header class="dialog-header">
       <h2>Settings</h2>
-      <button class="icon-btn close-btn" type="button"
-        onclick={() => { open = false; }} aria-label="Close settings">✕</button>
+      <Button variant="ghost" size="sm"
+        onclick={() => { open = false; }}>✕</Button>
     </header>
 
     <!-- Tab bar -->
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       {#each TABS as tab, i}
-        <button
-          bind:this={tabButtons[i]}
-          role="tab"
-          type="button"
-          id="tab-{tab}"
-          aria-controls="panel-{tab}"
-          aria-selected={activeTab === tab}
-          tabindex={activeTab === tab ? 0 : -1}
-          class="settings-tab"
-          onclick={() => { activeTab = tab; }}
-          onkeydown={(e) => handleTabKeydown(e, i)}>
+        <Button
+          variant={activeTab === tab ? 'solid' : 'ghost'}
+          size="sm"
+          onclick={() => { activeTab = tab; }}>
           {tab.charAt(0).toUpperCase() + tab.slice(1)}
-        </button>
+        </Button>
       {/each}
     </div>
 
@@ -533,22 +526,14 @@
       <!-- Ollama quick configure — visible immediately when Settings opens -->
       <div class="pref-section ollama-section">
         <p class="pref-section-title">Ollama</p>
-        <label>
-          Endpoint URL
-          <input
-            type="url"
-            bind:value={ollamaUrl}
-            placeholder="http://localhost:11434"
-            aria-label="Ollama endpoint URL" />
-        </label>
-        <label>
-          Model
-          <input
-            type="text"
-            bind:value={ollamaModel}
-            placeholder="llama3"
-            aria-label="Ollama model name" />
-        </label>
+        <Input
+          label="Endpoint URL"
+          bind:value={ollamaUrl}
+          placeholder="http://localhost:11434" />
+        <Input
+          label="Model"
+          bind:value={ollamaModel}
+          placeholder="llama3" />
         <p class="pref-hint">
           Changes are applied on Save. Run <code>ollama pull {ollamaModel || 'llama3'}</code> to
           ensure the model is available locally.
@@ -560,37 +545,32 @@
       {#if showProviderForm}
         <div class="provider-form">
           <h3 class="pref-section-title">{editProviderName === null ? 'Add Provider' : 'Edit Provider'}</h3>
-          <label>
-            Name
-            <input type="text" bind:value={providerFormName}
-              placeholder="ollama" readonly={editProviderName !== null} />
-          </label>
-          <label>
-            Base URL
-            <input type="url" bind:value={providerFormUrl}
-              placeholder="http://localhost:11434" />
-          </label>
-          <label>
-            API Key <span class="pref-hint">{editProviderName !== null ? '(leave blank to keep existing)' : '(leave blank for local models)'}</span>
-            <input type="password" bind:value={providerFormKey}
-              placeholder={editProviderName !== null ? 'unchanged' : 'sk-…'} autocomplete="off" />
-          </label>
-          <label>
-            Models <span class="pref-hint">(comma-separated)</span>
-            <input type="text" bind:value={providerFormModels}
-              placeholder="llama3, llama3.1:8b" />
-          </label>
+          <Input
+            label="Name"
+            bind:value={providerFormName}
+            placeholder="ollama"
+            disabled={editProviderName !== null} />
+          <Input
+            label="Base URL"
+            bind:value={providerFormUrl}
+            placeholder="http://localhost:11434" />
+          <Input
+            label="API Key"
+            bind:value={providerFormKey}
+            placeholder={editProviderName !== null ? 'unchanged' : 'sk-…'}
+            password />
+          <Input
+            label="Models (comma-separated)"
+            bind:value={providerFormModels}
+            placeholder="llama3, llama3.1:8b" />
           <div class="provider-form-actions">
-            <button type="button" class="btn-secondary"
-              onclick={() => { showProviderForm = false; }}>Cancel</button>
-            <button type="button" class="btn-primary-sm"
-              onclick={saveProvider}>Save</button>
+            <Button variant="outline" onclick={() => { showProviderForm = false; }}>Cancel</Button>
+            <Button variant="solid" size="sm" onclick={saveProvider}>Save</Button>
           </div>
         </div>
       {:else}
         <div class="panel-toolbar">
-          <button type="button" class="btn-primary-sm"
-            onclick={openAddProvider}>+ Add Provider</button>
+          <Button variant="solid" size="sm" onclick={openAddProvider}>+ Add Provider</Button>
         </div>
         {#if providers.length === 0}
           <p class="panel-empty">No providers configured.</p>
@@ -613,12 +593,10 @@
                   <td class="provider-key">{p.apiKey ? '••••••••' : '—'}</td>
                   <td class="provider-models">{(p.models ?? []).join(', ') || '—'}</td>
                   <td class="provider-actions">
-                    <button type="button" class="btn-icon-sm"
-                      aria-label="Edit {p.name}"
-                      onclick={() => openEditProvider(p)}>✎</button>
-                    <button type="button" class="btn-icon-sm btn-danger"
-                      aria-label="Remove {p.name}"
-                      onclick={() => deleteProvider(p.name)}>✕</button>
+                    <Button variant="ghost" size="sm"
+                      onclick={() => openEditProvider(p)}>✎</Button>
+                    <Button variant="ghost" size="sm"
+                      onclick={() => deleteProvider(p.name)}>✕</Button>
                   </td>
                 </tr>
               {/each}
@@ -649,20 +627,14 @@
         ] as row}
           <div class="routing-row">
             <span class="routing-label">{row.label}</span>
-            <select
-              aria-label="{row.label} provider"
+            <Select
+              options={[{value: '', label: '— provider —'}, ...providers.map(p => ({value: p.name, label: p.name}))]}
               value={row.providerVal}
-              onchange={(e) => row.setProvider(e.currentTarget.value)}>
-              <option value="">— provider —</option>
-              {#each providers as p}
-                <option value={p.name}>{p.name}</option>
-              {/each}
-            </select>
-            <input type="text"
-              aria-label="{row.label} model"
+              onchange={(v) => row.setProvider(v)} />
+            <Input
               placeholder="model ID"
               value={row.modelVal}
-              oninput={(e) => row.setModel(e.currentTarget.value)} />
+              onchange={(v) => row.setModel(v)} />
           </div>
         {/each}
       </div>
@@ -682,36 +654,28 @@
           <div class="channel-card" class:channel-card-active={enabled}>
             <div class="channel-card-header">
               <span class="channel-name">{adapter.kind}</span>
-              <label class="toggle" aria-label="Enable {adapter.kind} channel">
-                <input
-                  class="toggle-input"
-                  type="checkbox"
-                  checked={enabled}
-                  onchange={() => toggleAdapter(adapter.kind)} />
-                <span class="toggle-slider" aria-hidden="true"></span>
-              </label>
+              <Toggle
+                checked={enabled}
+                label="Enable {adapter.kind} channel"
+                onchange={() => toggleAdapter(adapter.kind)} />
             </div>
 
             {#if enabled}
               <div class="channel-fields">
                 {#if adapter.kind === 'telegram'}
-                  <label>
-                    Bot Token
-                    <input type="password"
-                      placeholder="123456:ABC-DEF…"
-                      value={adapter.botToken ?? ''}
-                      oninput={(e) => setAdapterField(adapter.kind, 'botToken', e.currentTarget.value)}
-                      autocomplete="off" />
-                  </label>
+                  <Input
+                    label="Bot Token"
+                    password
+                    placeholder="123456:ABC-DEF…"
+                    value={adapter.botToken ?? ''}
+                    onchange={(v) => setAdapterField(adapter.kind, 'botToken', v)} />
                 {/if}
                 {#if adapter.kind === 'signal'}
-                  <label>
-                    Phone Number
-                    <input type="tel"
-                      placeholder="+1 555 000 0000"
-                      value={adapter.phoneNumber ?? ''}
-                      oninput={(e) => setAdapterField(adapter.kind, 'phoneNumber', e.currentTarget.value)} />
-                  </label>
+                  <Input
+                    label="Phone Number"
+                    placeholder="+1 555 000 0000"
+                    value={adapter.phoneNumber ?? ''}
+                    onchange={(v) => setAdapterField(adapter.kind, 'phoneNumber', v)} />
                 {/if}
               </div>
             {/if}
@@ -730,10 +694,7 @@
 
       <div class="pref-section">
         <p class="pref-section-title">Identity</p>
-        <label>
-          Agent Name
-          <input type="text" bind:value={prefAgentName} placeholder="Pares Agens" />
-        </label>
+        <Input label="Agent Name" bind:value={prefAgentName} placeholder="Pares Agens" />
         <label>
           Personality Notes
           <textarea bind:value={prefPersonalityNotes} rows="3"
@@ -752,10 +713,7 @@
             <span class="pref-label">Auto-recall</span>
             <span class="pref-hint">Retrieve relevant memories each turn</span>
           </div>
-          <label class="toggle" aria-label="Enable auto-recall">
-            <input class="toggle-input" type="checkbox" bind:checked={prefAutoRecall} />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
+          <Toggle label="Enable auto-recall" bind:checked={prefAutoRecall} />
         </div>
         <div class="pref-checkbox-group">
           <span class="pref-hint">Capture categories</span>
@@ -779,25 +737,16 @@
             <span class="pref-label">Desktop notifications</span>
             <span class="pref-hint">Alert when the agent responds</span>
           </div>
-          <label class="toggle" aria-label="Enable desktop notifications">
-            <input class="toggle-input" type="checkbox" bind:checked={prefNotificationsEnabled} />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
+          <Toggle label="Enable desktop notifications" bind:checked={prefNotificationsEnabled} />
         </div>
         <div class="pref-toggle-row">
           <div class="pref-toggle-text">
             <span class="pref-label">Launch at login</span>
             <span class="pref-hint">Start minimised to the system tray</span>
           </div>
-          <label class="toggle" aria-label="Launch at login">
-            <input class="toggle-input" type="checkbox" bind:checked={prefAutoStart} />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
+          <Toggle label="Launch at login" bind:checked={prefAutoStart} />
         </div>
-        <label>
-          Activation hotkey
-          <input type="text" bind:value={prefActivationHotkey} placeholder="Ctrl+Space" />
-        </label>
+        <Input label="Activation hotkey" bind:value={prefActivationHotkey} placeholder="Ctrl+Space" />
       </div>
     </div>
 
@@ -812,48 +761,28 @@
       <div class="mcp-header">
         <h3 class="panel-title">MCP Servers</h3>
         <div class="mcp-header-actions">
-          <button type="button" class="btn-sm" onclick={() => openMcpForm(null)}>
+          <Button variant="solid" size="sm" onclick={() => openMcpForm(null)}>
             + Add Server
-          </button>
-          <button type="button" class="btn-sm btn-secondary" onclick={restartMcp} disabled={mcpRestarting}>
+          </Button>
+          <Button variant="outline" size="sm" onclick={restartMcp} disabled={mcpRestarting}>
             {mcpRestarting ? '↻ Restarting…' : '↻ Restart All'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {#if showMcpForm}
         <div class="mcp-form">
-          <div class="form-row">
-            <label class="form-label">
-              Name
-              <input type="text" bind:value={mcpFormName} placeholder="e.g. filesystem" class="form-input" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="form-label">
-              Command
-              <input type="text" bind:value={mcpFormCommand} placeholder="e.g. uvx, npx, node" class="form-input" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="form-label">
-              Arguments
-              <input type="text" bind:value={mcpFormArgs} placeholder="e.g. mcp-server-filesystem /tmp" class="form-input" />
-            </label>
-          </div>
-          <div class="form-row">
-            <label class="checkbox-item">
-              <input type="checkbox" bind:checked={mcpFormEnabled} />
-              Enabled
-            </label>
-          </div>
+          <Input label="Name" bind:value={mcpFormName} placeholder="e.g. filesystem" />
+          <Input label="Command" bind:value={mcpFormCommand} placeholder="e.g. uvx, npx, node" />
+          <Input label="Arguments" bind:value={mcpFormArgs} placeholder="e.g. mcp-server-filesystem /tmp" />
+          <Toggle label="Enabled" bind:checked={mcpFormEnabled} />
           <div class="form-actions">
-            <button type="button" class="btn-sm" onclick={saveMcpServer}>
+            <Button variant="solid" size="sm" onclick={saveMcpServer}>
               {editMcpName ? 'Update' : 'Add'}
-            </button>
-            <button type="button" class="btn-sm btn-secondary" onclick={() => { showMcpForm = false; }}>
+            </Button>
+            <Button variant="outline" size="sm" onclick={() => { showMcpForm = false; }}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       {/if}
@@ -869,16 +798,15 @@
                 <code class="mcp-server-cmd">{server.command} {server.args.join(' ')}</code>
               </div>
               <div class="mcp-server-actions">
-                <button type="button" class="btn-icon" onclick={() => toggleMcpServer(server.name)}
-                  title={server.enabled ? 'Disable' : 'Enable'}>
+                <Button variant="ghost" size="sm" onclick={() => toggleMcpServer(server.name)}>
                   {server.enabled ? '🟢' : '⚪'}
-                </button>
-                <button type="button" class="btn-icon" onclick={() => openMcpForm(server)} title="Edit">
+                </Button>
+                <Button variant="ghost" size="sm" onclick={() => openMcpForm(server)}>
                   ✏️
-                </button>
-                <button type="button" class="btn-icon btn-danger" onclick={() => removeMcpServer(server.name)} title="Remove">
+                </Button>
+                <Button variant="ghost" size="sm" onclick={() => removeMcpServer(server.name)}>
                   🗑
-                </button>
+                </Button>
               </div>
             </div>
           {/each}
@@ -920,10 +848,7 @@
             <span class="pref-label">Enable telemetry (opt-in)</span>
             <span class="pref-hint">Off by default</span>
           </div>
-          <label class="toggle" aria-label="Enable anonymous telemetry">
-            <input class="toggle-input" type="checkbox" bind:checked={telemetryEnabled} />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
+          <Toggle label="Enable anonymous telemetry" bind:checked={telemetryEnabled} />
         </div>
 
         <div class="pref-toggle-row">
@@ -931,28 +856,19 @@
             <span class="pref-label">Enable upload</span>
             <span class="pref-hint">Manual upload of local aggregate metrics</span>
           </div>
-          <label class="toggle" aria-label="Enable telemetry upload">
-            <input class="toggle-input" type="checkbox" bind:checked={telemetryUploadEnabled} disabled={!telemetryEnabled} />
-            <span class="toggle-slider" aria-hidden="true"></span>
-          </label>
+          <Toggle label="Enable telemetry upload" bind:checked={telemetryUploadEnabled} disabled={!telemetryEnabled} />
         </div>
 
-        <label>
-          Upload endpoint
-          <input
-            type="url"
-            bind:value={telemetryUploadEndpoint}
-            placeholder="https://example.com/telemetry"
-            disabled={!telemetryEnabled || !telemetryUploadEnabled}
-            aria-label="Telemetry upload endpoint" />
-        </label>
-        <button
-          type="button"
-          class="btn-secondary"
+        <Input
+          label="Upload endpoint"
+          bind:value={telemetryUploadEndpoint}
+          placeholder="https://example.com/telemetry"
+          disabled={!telemetryEnabled || !telemetryUploadEnabled} />
+        <Button variant="outline"
           onclick={uploadTelemetryNow}
           disabled={!telemetryEnabled || !telemetryUploadEnabled || !telemetryUploadEndpoint.trim() || telemetryUploading}>
           {telemetryUploading ? 'Uploading…' : 'Upload now'}
-        </button>
+        </Button>
         {#if telemetryUploadError}
           <p class="upgrade-error" role="alert">{telemetryUploadError}</p>
         {/if}
@@ -1040,27 +956,19 @@
         </div>
 
         <div class="upgrade-activate">
-          <label for="license-key-input">License Key</label>
-          <input
-            id="license-key-input"
-            type="text"
-            class="license-key-input"
+          <Input
+            label="License Key"
             bind:value={licenseKey}
             placeholder="XXXX-XXXX-XXXX-XXXX"
-            autocomplete="off"
-            aria-label="License key"
-            onkeydown={(e) => { if (e.key === 'Enter') activateLicense(); }}
-          />
+            onsubmit={activateLicense} />
           {#if licenseError}
             <p class="upgrade-error" role="alert">{licenseError}</p>
           {/if}
-          <button
-            type="button"
-            class="btn-primary"
+          <Button variant="solid"
             onclick={activateLicense}
             disabled={licenseActivating}>
             {licenseActivating ? 'Activating…' : 'Activate'}
-          </button>
+          </Button>
         </div>
       {:else}
         <p class="pref-hint" style="margin-top: 12px;">Pro features are active. Thank you for your support!</p>
@@ -1078,8 +986,8 @@
     </div>
 
     <footer class="dialog-footer">
-      <button type="button" onclick={() => { open = false; }}>Cancel</button>
-      <button type="button" class="btn-primary" onclick={saveAll}>Save</button>
+      <Button variant="outline" onclick={() => { open = false; }}>Cancel</Button>
+      <Button variant="solid" onclick={saveAll}>Save</Button>
     </footer>
   </form>
 </dialog>

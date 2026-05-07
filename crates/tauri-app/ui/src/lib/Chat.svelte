@@ -1,7 +1,7 @@
 <script>
   import '@plures/design-dojo/tokens.css';
   import { ChatView, ChatInput, Button, Text, Box } from '@plures/design-dojo';
-  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, readClipboardText, isTauri } from './api.js';
+  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, readClipboardText, isTauri, recordChronos } from './api.js';
 
   let { settingsOpen = $bindable(false), proceduresOpen = $bindable(false), agentName = 'Pares Agens' } = $props();
 
@@ -90,6 +90,7 @@
 
   async function handleSend(content) {
     if (busy || !content?.trim()) return;
+    recordChronos('MessageSent', 'chat', { length: content.length });
 
     const id = msgId();
     busy = true;

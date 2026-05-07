@@ -113,51 +113,37 @@
 <div class="marketplace-root">
   <!-- Section toggle -->
   <div class="mkt-sections" role="tablist" aria-label="Marketplace sections">
-    <button
-      type="button"
-      role="tab"
-      aria-selected={activeSection === 'search'}
-      tabindex={activeSection === 'search' ? 0 : -1}
-      class="mkt-section-btn"
-      class:active={activeSection === 'search'}
+    <Button
+      variant={activeSection === 'search' ? 'solid' : 'ghost'}
+      size="sm"
       onclick={() => { activeSection = 'search'; }}>
       Discover
-    </button>
-    <button
-      type="button"
-      role="tab"
-      aria-selected={activeSection === 'installed'}
-      tabindex={activeSection === 'installed' ? 0 : -1}
-      class="mkt-section-btn"
-      class:active={activeSection === 'installed'}
+    </Button>
+    <Button
+      variant={activeSection === 'installed' ? 'solid' : 'ghost'}
+      size="sm"
       onclick={() => { activeSection = 'installed'; }}>
       Installed
       {#if installed.length > 0}
         <span class="mkt-badge">{installed.length}</span>
       {/if}
-    </button>
+    </Button>
   </div>
 
   <!-- Discover panel -->
   {#if activeSection === 'search'}
     <div role="tabpanel" class="mkt-panel">
       <div class="mkt-search-row">
-        <input
-          type="search"
-          class="mkt-search-input"
+        <Input
           bind:value={searchQuery}
           placeholder="Search procedures…"
-          aria-label="Search marketplace procedures"
-          onkeydown={(e) => { if (e.key === 'Enter') search(); }}
+          onsubmit={search}
         />
-        <button
-          type="button"
-          class="btn-primary mkt-search-btn"
+        <Button variant="solid" size="sm"
           onclick={search}
-          disabled={searching || !searchQuery.trim()}
-          aria-busy={searching}>
+          disabled={searching || !searchQuery.trim()}>
           {searching ? 'Searching…' : 'Search'}
-        </button>
+        </Button>
       </div>
 
       {#if searchError}
@@ -182,23 +168,17 @@
                   <span class="mkt-card-reviews">{entry.review_count} review{entry.review_count === 1 ? '' : 's'}</span>
                 {/if}
                 {#if isInstalled(entry.id)}
-                  <button
-                    type="button"
-                    class="mkt-btn-remove"
+                  <Button variant="outline" size="sm"
                     onclick={() => remove(entry.id)}
-                    disabled={removing === entry.id}
-                    aria-label="Remove {entry.name}">
+                    disabled={removing === entry.id}>
                     {removing === entry.id ? 'Removing…' : 'Remove'}
-                  </button>
+                  </Button>
                 {:else}
-                  <button
-                    type="button"
-                    class="btn-primary mkt-btn-install"
+                  <Button variant="solid" size="sm"
                     onclick={() => install(entry.id)}
-                    disabled={installing === entry.id}
-                    aria-label="Install {entry.name}">
+                    disabled={installing === entry.id}>
                     {installing === entry.id ? 'Installing…' : 'Install'}
-                  </button>
+                  </Button>
                 {/if}
               </div>
             </li>
@@ -214,14 +194,11 @@
       {#if availableUpdates.length > 0}
         <div class="mkt-update-banner" role="status">
           <span>{availableUpdates.length} update{availableUpdates.length === 1 ? '' : 's'} available</span>
-          <button
-            type="button"
-            class="btn-primary"
+          <Button variant="solid" size="sm"
             onclick={updateAll}
-            disabled={updatingAll}
-            aria-busy={updatingAll}>
+            disabled={updatingAll}>
             {updatingAll ? 'Updating…' : 'Update All'}
-          </button>
+          </Button>
         </div>
       {/if}
 
@@ -249,14 +226,11 @@
                     · Never used
                   {/if}
                 </span>
-                <button
-                  type="button"
-                  class="mkt-btn-remove"
+                <Button variant="outline" size="sm"
                   onclick={() => remove(skill.id)}
-                  disabled={removing === skill.id}
-                  aria-label="Remove {skill.name}">
+                  disabled={removing === skill.id}>
                   {removing === skill.id ? 'Removing…' : 'Remove'}
-                </button>
+                </Button>
               </div>
             </li>
           {/each}

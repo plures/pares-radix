@@ -284,22 +284,17 @@
       <div class="wizard-step" aria-live="polite">
         <h2 class="wizard-title">Welcome to Pares Agens</h2>
         <p class="wizard-desc">Let's get you set up. First, what should your agent be called?</p>
-        <label class="wizard-label">
-          Agent name
-          <input
-            class="wizard-input"
-            type="text"
-            placeholder="Pares Agens"
-            maxlength="64"
-            bind:value={agentName}
-            onkeydown={(e) => { if (e.key === 'Enter') { saveState(); goNext(); } }}
-          />
-        </label>
+        <Input
+          placeholder="Pares Agens"
+          maxLength={64}
+          bind:value={agentName}
+          onsubmit={() => { saveState(); goNext(); }}
+        />
         <div class="wizard-footer">
           <span></span>
-          <button class="btn-primary" onclick={() => { saveState(); goNext(); }}>
+          <Button variant="solid" onclick={() => { saveState(); goNext(); }}>
             Next →
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -343,26 +338,21 @@
         <!-- Cloud sub-form -->
         {#if modelSource === 'cloud'}
           <div class="cloud-config">
-            <label class="wizard-label">
-              Provider
-              <select class="wizard-select" bind:value={cloudProvider}>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="google">Google</option>
-              </select>
-            </label>
+            <Select
+              label="Provider"
+              options={[{value: 'openai', label: 'OpenAI'}, {value: 'anthropic', label: 'Anthropic'}, {value: 'google', label: 'Google'}]}
+              bind:value={cloudProvider} />
             <label class="wizard-label">
               API Key
               <div class="api-key-row">
-                <input
-                  class="wizard-input"
-                  type="password"
+                <Input
+                  password
                   placeholder="sk-…"
                   bind:value={apiKey}
                 />
-                <button class="btn-secondary" onclick={validateKey} disabled={!apiKey.trim() || apiKeyStatus === 'checking'}>
+                <Button variant="outline" onclick={validateKey} disabled={!apiKey.trim() || apiKeyStatus === 'checking'}>
                   {apiKeyStatus === 'checking' ? '⌛' : 'Verify'}
-                </button>
+                </Button>
               </div>
               {#if apiKeyStatus === 'valid'}
                 <span class="key-status ok">✓ Key valid</span>
@@ -376,10 +366,10 @@
         {/if}
 
         <div class="wizard-footer">
-          <button class="btn-secondary" onclick={goBack}>← Back</button>
-          <button class="btn-primary" onclick={() => { saveState(); goNext(); }} disabled={!modelSource}>
+          <Button variant="outline" onclick={goBack}>← Back</Button>
+          <Button variant="solid" onclick={() => { saveState(); goNext(); }} disabled={!modelSource}>
             Next →
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -399,8 +389,8 @@
           ></textarea>
         </label>
         <div class="wizard-footer">
-          <button class="btn-secondary" onclick={goBack}>← Back</button>
-          <button class="btn-primary" onclick={() => { saveState(); goNext(); }}>Next →</button>
+          <Button variant="outline" onclick={goBack}>← Back</Button>
+          <Button variant="solid" onclick={() => { saveState(); goNext(); }}>Next →</Button>
         </div>
       </div>
     {/if}
@@ -431,9 +421,9 @@
 
         {#if swarmMode === 'new'}
           <div class="cloud-config">
-            <button class="btn-secondary" onclick={createSwarmInvite}>
+            <Button variant="outline" onclick={createSwarmInvite}>
               {swarmTopic && swarmSharedKey ? 'Regenerate topic + key' : 'Generate topic + key'}
-            </button>
+            </Button>
             {#if swarmTopic && swarmSharedKey}
               <p class="wizard-desc">
                 Share this with other hosts:
@@ -446,17 +436,11 @@
           </div>
         {:else if swarmMode === 'join'}
           <div class="cloud-config">
-            <label class="wizard-label">
-              Topic (64 hex chars)
-              <input class="wizard-input" type="text" placeholder="a7f3..." bind:value={swarmTopic} />
-            </label>
-            <label class="wizard-label">
-              Shared key
-              <input class="wizard-input" type="password" placeholder="b92c..." bind:value={swarmSharedKey} />
-            </label>
-            <button class="btn-secondary" onclick={verifyJoinSwarm} disabled={!swarmTopic.trim() || !swarmSharedKey.trim() || swarmVerifyStatus === 'checking'}>
+            <Input label="Topic (64 hex chars)" placeholder="a7f3..." bind:value={swarmTopic} />
+            <Input label="Shared key" password placeholder="b92c..." bind:value={swarmSharedKey} />
+            <Button variant="outline" onclick={verifyJoinSwarm} disabled={!swarmTopic.trim() || !swarmSharedKey.trim() || swarmVerifyStatus === 'checking'}>
               {swarmVerifyStatus === 'checking' ? 'Verifying…' : 'Verify join'}
-            </button>
+            </Button>
             {#if swarmVerifyStatus === 'success'}
               <span class="key-status ok">✓ Verified — topic + key are valid</span>
             {:else if swarmVerifyStatus === 'error' && swarmVerifyError}
@@ -466,14 +450,13 @@
         {/if}
 
         <div class="wizard-footer">
-          <button class="btn-secondary" onclick={goBack}>← Back</button>
-          <button
-            class="btn-primary"
+          <Button variant="outline" onclick={goBack}>← Back</Button>
+          <Button variant="solid"
             onclick={() => { saveState(); goNext(); }}
             disabled={swarmMode === 'new' ? (!swarmTopic || !swarmSharedKey) : (swarmMode === 'join' ? swarmVerifyStatus !== 'success' : false)}
           >
             Next →
-          </button>
+          </Button>
         </div>
       </div>
     {/if}
@@ -494,8 +477,8 @@
           {/each}
         </ul>
         <div class="wizard-footer">
-          <button class="btn-secondary" onclick={goBack}>← Back</button>
-          <button class="btn-primary" onclick={finishWizard}>Launch →</button>
+          <Button variant="outline" onclick={goBack}>← Back</Button>
+          <Button variant="solid" onclick={finishWizard}>Launch →</Button>
         </div>
       </div>
     {/if}

@@ -5,7 +5,7 @@
 <script>
   import { Tabs, Box } from '@plures/design-dojo/layout';
   import { Input, Text } from '@plures/design-dojo/primitives';
-  import { runCommand } from './api.js';
+  import { runCommand, recordChronos } from './api.js';
 
   let activeTab = $state('terminal');
   let terminalOutput = $state('$ pares-radix ready\n');
@@ -22,6 +22,7 @@
   async function executeCommand() {
     if (!terminalInput.trim()) return;
     const cmd = terminalInput.trim();
+    recordChronos('ToolInvoked', 'terminal', { command: cmd });
     terminalOutput += `$ ${cmd}\n`;
     terminalInput = '';
     try {
