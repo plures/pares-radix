@@ -1,6 +1,6 @@
 <script>
   import '@plures/design-dojo/tokens.css';
-  import { StatusBar, StatusBarItem, TitleBar, Sidebar, Box, ActivityBar, Button, CommandPalette } from '@plures/design-dojo';
+  import { StatusBar, StatusBarItem, TitleBar, Sidebar, Box, ActivityBar, Button, CommandPalette, MenuBar, Icon } from '@plures/design-dojo';
 
   import { onMount } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
@@ -40,7 +40,7 @@
   // Activity bar items derived from active plugins
   let activityItems = $derived([
     ...$activePlugins.map(p => ({ key: p.id, label: p.name, icon: p.icon })),
-    { key: 'extensions', label: 'Extensions', icon: '🧩' },
+    { key: 'extensions', label: 'Extensions', icon: 'puzzle' },
   ]);
 
   // Command palette commands
@@ -115,7 +115,7 @@
 {#if false}<Wizard onComplete={handleWizardComplete} />{/if}
 
 <Box border="none" class="shell" height="100vh">
-  <TitleBar title="pares-radix" onminimize={handleMinimize} onmaximize={handleMaximize} onclose={handleClose} />
+  <MenuBar />
 
   <Box border="none" class="workspace">
     <ActivityBar
@@ -154,16 +154,14 @@
   </Box>
 
   <StatusBar>
-    <StatusBarItem>pares-radix</StatusBarItem>
-    <StatusBarItem>PluresDB: connected</StatusBarItem>
+    <StatusBarItem value="claude-opus-4" />
+    <StatusBarItem value="ready" color="success" />
     {#if $praxisViolationCount > 0}
-      <StatusBarItem>⚠️ {$praxisViolationCount} violation{$praxisViolationCount > 1 ? 's' : ''}</StatusBarItem>
+      <StatusBarItem value="{$praxisViolationCount} error{$praxisViolationCount > 1 ? 's' : ''}" color="error" />
+    {:else}
+      <StatusBarItem value="0 errors" />
     {/if}
-    <StatusBarItem>
-      <Button variant="ghost" size="sm" onclick={() => $panelOpen = !$panelOpen}>
-        {$panelOpen ? '▼' : '▲'} Terminal
-      </Button>
-    </StatusBarItem>
+    <StatusBarItem value="PluresDB: connected" color="success" />
   </StatusBar>
 </Box>
 

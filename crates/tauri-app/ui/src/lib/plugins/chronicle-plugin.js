@@ -3,7 +3,7 @@ import Chronicle from '../Chronicle.svelte';
 export default {
   id: 'chronicle',
   name: 'Timeline',
-  icon: '📜',
+  icon: 'clock',
   description: 'Chronos event timeline — view all agent decisions and actions',
   enabled: true,
   component: Chronicle,

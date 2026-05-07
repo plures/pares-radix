@@ -3,7 +3,7 @@ import Settings from '../Settings.svelte';
 export default {
   id: 'settings',
   name: 'Settings',
-  icon: '⚙️',
+  icon: 'settings',
   description: 'Application configuration',
   enabled: true,
   component: Settings,

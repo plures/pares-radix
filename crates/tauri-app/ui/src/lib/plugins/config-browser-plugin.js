@@ -3,7 +3,7 @@ import ConfigBrowser from '../ConfigBrowser.svelte';
 export default {
   id: 'config-browser',
   name: 'Config Browser',
-  icon: '🖥️',
+  icon: 'terminal',
   description: 'Browse and validate datacenter configuration',
   enabled: true,
   component: ConfigBrowser,
