@@ -3,8 +3,8 @@
   Uses design-dojo components for TUI compatibility.
 -->
 <script>
-  import { Tabs } from '@plures/design-dojo/layout';
-  import { Input } from '@plures/design-dojo/primitives';
+  import { Tabs, Box } from '@plures/design-dojo/layout';
+  import { Input, Text } from '@plures/design-dojo/primitives';
   import { runCommand } from './api.js';
 
   let activeTab = $state('terminal');
@@ -39,14 +39,14 @@
   }
 </script>
 
-<div class="terminal-panel">
+<Box class="terminal-panel">
   <Tabs {tabs} bind:activeTab ontabchange={(key) => activeTab = key}>
     {#snippet children({ activeTab: currentTab })}
-      <div class="panel-content">
+      <Box class="panel-content">
         {#if currentTab === 'terminal'}
-          <pre class="output">{terminalOutput}</pre>
-          <div class="input-row">
-            <span class="prompt">$</span>
+          <Text class="output" monospace>{terminalOutput}</Text>
+          <Box class="input-row">
+            <Text monospace class="prompt">$</Text>
             <Input
               bind:value={terminalInput}
               placeholder="Enter command..."
@@ -54,19 +54,19 @@
               onkeydown={handleKeydown}
               class="terminal-input"
             />
-          </div>
+          </Box>
         {:else if currentTab === 'chronos'}
-          <pre class="output">{chronosEntries.map(e => JSON.stringify(e)).join('\n') || 'No Chronos events yet. Interact with the agent to generate activity.'}</pre>
+          <Text class="output" monospace>{chronosEntries.map(e => JSON.stringify(e)).join('\n') || 'No Chronos events yet. Interact with the agent to generate activity.'}</Text>
         {:else}
-          <pre class="output">{logLines.join('\n') || 'Logs appear here when the agent processes messages.'}</pre>
+          <Text class="output" monospace>{logLines.join('\n') || 'Logs appear here when the agent processes messages.'}</Text>
         {/if}
-      </div>
+      </Box>
     {/snippet}
   </Tabs>
-</div>
+</Box>
 
 <style>
-  .terminal-panel {
+  :global(.terminal-panel) {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -74,7 +74,7 @@
     background: var(--bg-base, var(--surface-0, #0e0f11));
   }
 
-  .panel-content {
+  :global(.panel-content) {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -82,18 +82,17 @@
     min-height: 0;
   }
 
-  .output {
+  :global(.output) {
     flex: 1;
     overflow-y: auto;
     padding: 8px 12px;
-    font-family: var(--font-mono, monospace);
     font-size: 12px;
     color: var(--text-secondary, var(--fg-muted, #8b90a0));
     white-space: pre-wrap;
     margin: 0;
   }
 
-  .input-row {
+  :global(.input-row) {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -102,14 +101,13 @@
     flex-shrink: 0;
   }
 
-  .prompt {
+  :global(.prompt) {
     color: var(--accent, var(--accent-primary, #7c6af7));
-    font-family: var(--font-mono, monospace);
     font-size: 12px;
     flex-shrink: 0;
   }
 
-  .terminal-panel :global(.terminal-input) {
+  :global(.terminal-panel .terminal-input) {
     flex: 1;
     background: transparent;
     border: none;

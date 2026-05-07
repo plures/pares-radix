@@ -3,6 +3,9 @@
     completeWizard, setSettings, detectDockerRunner, validateApiKey,
     generateSwarmInvite, verifySwarmJoin
   } from '../api.js';
+  import { Button, Input, Text, Select } from '@plures/design-dojo/primitives';
+  import { Box } from '@plures/design-dojo/layout';
+  import { Dialog } from '@plures/design-dojo/overlays';
 
   /** @type {{ onComplete: (name: string) => void }} */
   let { onComplete } = $props();

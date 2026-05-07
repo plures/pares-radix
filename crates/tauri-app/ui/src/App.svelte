@@ -1,6 +1,6 @@
 <script>
   import '@plures/design-dojo/tokens.css';
-  import { StatusBar, StatusBarItem, TitleBar, Sidebar } from '@plures/design-dojo/layout';
+  import { StatusBar, StatusBarItem, TitleBar, Sidebar, Box, ActivityBar, Button, CommandPalette } from '@plures/design-dojo';
 
   import { onMount } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
@@ -8,7 +8,6 @@
   import PluginManager from './lib/PluginManager.svelte';
   import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
-  import CommandPalette from './lib/CommandPalette.svelte';
   import { activeView, sidebarOpen, commandPaletteOpen, panelOpen, panelHeight } from './lib/store.js';
   import TerminalPanel from './lib/TerminalPanel.svelte';
   import { listen, handleNotificationAction, minimizeWindow, maximizeWindow, closeWindow } from './api.js';
@@ -19,8 +18,6 @@
 
   /** @type {{ id: string, title: string, body: string, actions: { id: string, label: string }[] }[]} */
   let actionableNotifications = $state([]);
-
-  // Activities are now derived from active plugins + extensions button
 
   function handleWizardComplete(/** @type {string} */ name) {
     agentName = name;
@@ -37,6 +34,42 @@
       console.warn('Failed to handle notification action:', err);
     }
     dismissNotification(notificationId);
+  }
+
+  // Activity bar items derived from active plugins
+  let activityItems = $derived([
+    ...$activePlugins.map(p => ({ key: p.id, label: p.name, icon: p.icon })),
+    { key: 'extensions', label: 'Extensions', icon: '🧩' },
+  ]);
+
+  // Command palette commands
+  let paletteCommands = $derived([
+    { id: 'view.chat', label: 'View: Chat', category: 'View' },
+    { id: 'view.procedures', label: 'View: Procedures', category: 'View' },
+    { id: 'view.settings', label: 'View: Settings', category: 'View' },
+    { id: 'view.extensions', label: 'View: Extensions', category: 'View' },
+    { id: 'view.config', label: 'View: Config Browser', category: 'View' },
+    { id: 'view.timeline', label: 'View: Timeline (Chronos)', category: 'View' },
+    { id: 'sidebar.toggle', label: 'Toggle Sidebar', category: 'General', shortcut: 'Ctrl+B' },
+    { id: 'panel.toggle', label: 'Toggle Terminal Panel', category: 'General', shortcut: 'Ctrl+`' },
+    { id: 'theme.toggle', label: 'Toggle Theme', category: 'General' },
+    { id: 'model.switch', label: 'Switch Model...', category: 'Model' },
+    { id: 'memory.search', label: 'Search Memory...', category: 'Memory' },
+  ]);
+
+  function handleCommandSelect(id) {
+    const actions = {
+      'view.chat': () => $activeView = 'chat',
+      'view.procedures': () => $activeView = 'procedures',
+      'view.settings': () => $activeView = 'settings',
+      'view.extensions': () => $activeView = 'extensions',
+      'view.config': () => $activeView = 'config-browser',
+      'view.timeline': () => $activeView = 'chronicle',
+      'sidebar.toggle': () => $sidebarOpen = !$sidebarOpen,
+      'panel.toggle': () => $panelOpen = !$panelOpen,
+    };
+    actions[id]?.();
+    $commandPaletteOpen = false;
   }
 
   // Global keyboard shortcuts
@@ -68,61 +101,30 @@
   function handleClose() { closeWindow(); }
 </script>
 
-{#if actionableNotifications.length > 0}
-  <section class="actionable-notifications" aria-live="polite" aria-label="Actionable notifications">
-    {#each actionableNotifications as notification (notification.id)}
-      <article class="actionable-notification-card">
-        <h3>{notification.title}</h3>
-        <p>{notification.body}</p>
-        <div class="actionable-notification-actions">
-          {#each notification.actions as action (action.id)}
-            <button
-              type="button"
-              class={`actionable-btn ${action.id === 'view' ? 'secondary' : 'primary'}`}
-              onclick={() => triggerNotificationAction(notification.id, action.id)}>
-              {action.label}
-            </button>
-          {/each}
-          <button type="button" class="actionable-btn secondary" onclick={() => dismissNotification(notification.id)}>
-            Dismiss
-          </button>
-        </div>
-      </article>
-    {/each}
-  </section>
-{/if}
-
 <svelte:window onkeydown={handleGlobalKeydown} />
-<CommandPalette />
+
+<CommandPalette
+  commands={paletteCommands}
+  bind:open={$commandPaletteOpen}
+  onselect={handleCommandSelect}
+  onclose={() => $commandPaletteOpen = false}
+  placeholder="Type a command..."
+/>
+
 <Wizard onComplete={handleWizardComplete} />
 
-<div class="shell">
+<Box class="shell" height="100vh">
   <TitleBar title="pares-radix" onminimize={handleMinimize} onmaximize={handleMaximize} onclose={handleClose} />
 
-  <div class="workspace">
-    <nav class="activity-bar">
-      {#each $activePlugins as plugin (plugin.id)}
-        <button
-          class="activity-btn"
-          class:active={$activeView === plugin.id}
-          onclick={() => $activeView = plugin.id}
-          title={plugin.name}
-        >
-          {plugin.icon}
-        </button>
-      {/each}
-      <button
-        class="activity-btn"
-        class:active={$activeView === 'extensions'}
-        onclick={() => $activeView = 'extensions'}
-        title="Extensions"
-      >
-        🧩
-      </button>
-    </nav>
+  <Box class="workspace">
+    <ActivityBar
+      items={activityItems}
+      activeKey={$activeView}
+      onselect={(key) => $activeView = key}
+    />
 
-    <main class="editor-area">
-      <div class="editor-content">
+    <Box class="editor-area">
+      <Box class="editor-content">
         {#each $activePlugins as plugin (plugin.id)}
           {#if $activeView === plugin.id && plugin.component}
             {#if plugin.id === 'chat'}
@@ -135,54 +137,53 @@
         {#if $activeView === 'extensions'}
           <PluginManager />
         {/if}
-      </div>
+      </Box>
       {#if $panelOpen}
-        <div class="bottom-panel" style:height="{$panelHeight}px">
+        <Box class="bottom-panel" height="{$panelHeight}px">
           <TerminalPanel />
-        </div>
+        </Box>
       {/if}
-    </main>
+    </Box>
 
     {#if $sidebarOpen}
       <Sidebar>
         <MemorySidebar />
       </Sidebar>
     {/if}
-  </div>
+  </Box>
 
   <StatusBar>
     <StatusBarItem>pares-radix</StatusBarItem>
     <StatusBarItem>PluresDB: connected</StatusBarItem>
     <StatusBarItem>
-      <button class="panel-toggle-btn" onclick={() => $panelOpen = !$panelOpen} title="Toggle Terminal (Ctrl+`)">
+      <Button variant="ghost" size="sm" onclick={() => $panelOpen = !$panelOpen}>
         {$panelOpen ? '▼' : '▲'} Terminal
-      </button>
+      </Button>
     </StatusBarItem>
   </StatusBar>
-</div>
+</Box>
 
 <style>
-  .shell {
+  :global(.shell) {
     display: flex;
     flex-direction: column;
-    height: 100vh;
     overflow: hidden;
   }
 
-  .workspace {
+  :global(.workspace) {
     display: flex;
     flex: 1;
     overflow: hidden;
   }
 
-  .editor-area {
+  :global(.editor-area) {
     flex: 1;
     overflow: hidden;
     display: flex;
     flex-direction: column;
   }
 
-  .editor-content {
+  :global(.editor-content) {
     flex: 1;
     overflow: hidden;
     display: flex;
@@ -190,67 +191,8 @@
     min-height: 0;
   }
 
-  .bottom-panel {
+  :global(.bottom-panel) {
     flex-shrink: 0;
     overflow: hidden;
-  }
-
-  .panel-toggle-btn {
-    background: transparent;
-    border: none;
-    color: inherit;
-    cursor: pointer;
-    font-size: 11px;
-    padding: 0 4px;
-  }
-
-  .panel-toggle-btn:hover {
-    color: var(--accent);
-  }
-
-  .activity-bar {
-    width: 48px;
-    background: var(--bg-surface);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 8px 0;
-    gap: 4px;
-    flex-shrink: 0;
-  }
-
-  .activity-btn {
-    width: 40px;
-    height: 40px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    font-size: 18px;
-    cursor: pointer;
-    transition: background var(--transition);
-    position: relative;
-  }
-
-  .activity-btn:hover {
-    background: var(--bg-hover);
-  }
-
-  .activity-btn.active {
-    background: var(--bg-elevated);
-  }
-
-  .activity-btn.active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 8px;
-    bottom: 8px;
-    width: 2px;
-    background: var(--accent);
-    border-radius: 1px;
   }
 </style>

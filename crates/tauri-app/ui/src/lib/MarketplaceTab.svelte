@@ -3,6 +3,9 @@
     marketplaceSearch, marketplaceListInstalled, marketplaceCheckUpdates,
     marketplaceInstall, marketplaceRemove, marketplaceUpdateAll
   } from '../api.js';
+  import { Button, Input, Text } from '@plures/design-dojo/primitives';
+  import { Box, Tabs } from '@plures/design-dojo/layout';
+  import { List, ListItem } from '@plures/design-dojo/data';
 
   /**
    * @typedef {{ id: string, name: string, version: string, description: string, author: string, mean_score: number, review_count: number }} CatalogEntry

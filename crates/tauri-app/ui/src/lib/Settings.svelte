@@ -4,6 +4,10 @@
     listMcpTools, restartMcpServers, getLicenseStatus, activateLicense as activateLicenseApi,
     getTelemetrySnapshot, uploadTelemetrySnapshot as uploadTelemetrySnapshotApi
   } from '../api.js';
+  import { Button, Input, Text, Toggle, Select } from '@plures/design-dojo/primitives';
+  import { Box, Tabs } from '@plures/design-dojo/layout';
+  import { Dialog } from '@plures/design-dojo/overlays';
+  import { List, ListItem, Table } from '@plures/design-dojo/data';
 
   import MarketplaceTab from './MarketplaceTab.svelte';
 
