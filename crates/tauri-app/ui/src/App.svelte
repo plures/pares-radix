@@ -7,14 +7,14 @@
   import Procedures from './lib/Procedures.svelte';
   import MemorySidebar from './lib/MemorySidebar.svelte';
   import Wizard from './lib/Wizard.svelte';
+  import CommandPalette from './lib/CommandPalette.svelte';
+  import { activeView, sidebarOpen, commandPaletteOpen } from './lib/store.js';
 
   const tauriCore = typeof window !== 'undefined' ? window.__TAURI__?.core : undefined;
   const tauriEvent = typeof window !== 'undefined' ? window.__TAURI__?.event : undefined;
   const invoke = tauriCore?.invoke;
   const listen = tauriEvent?.listen;
 
-  let activeView = $state('chat');
-  let sidebarOpen = $state(true);
   let agentName = $state('Pares Agens');
 
   /** @type {{ id: string, title: string, body: string, actions: { id: string, label: string }[] }[]} */
@@ -43,6 +43,14 @@
       }
     }
     dismissNotification(notificationId);
+  }
+
+  // Global keyboard shortcuts
+  function handleGlobalKeydown(e) {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+      e.preventDefault();
+      $commandPaletteOpen = !$commandPaletteOpen;
+    }
   }
 
   $effect(() => {
@@ -99,6 +107,8 @@
   </section>
 {/if}
 
+<svelte:window onkeydown={handleGlobalKeydown} />
+<CommandPalette />
 <Wizard onComplete={handleWizardComplete} />
 
 <div class="shell">
@@ -109,8 +119,8 @@
       {#each activities as act}
         <button
           class="activity-btn"
-          class:active={activeView === act.id}
-          onclick={() => activeView = act.id}
+          class:active={$activeView === act.id}
+          onclick={() => $activeView = act.id}
           title={act.label}
         >
           {act.icon}
@@ -119,16 +129,16 @@
     </nav>
 
     <main class="editor-area">
-      {#if activeView === 'chat'}
+      {#if $activeView === 'chat'}
         <Chat {agentName} settingsOpen={false} proceduresOpen={false} />
-      {:else if activeView === 'procedures'}
+      {:else if $activeView === 'procedures'}
         <Procedures open={true} />
-      {:else if activeView === 'settings'}
+      {:else if $activeView === 'settings'}
         <Settings open={true} />
       {/if}
     </main>
 
-    {#if sidebarOpen}
+    {#if $sidebarOpen}
       <Sidebar>
         <MemorySidebar />
       </Sidebar>
