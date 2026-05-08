@@ -80,7 +80,7 @@
 
   <!-- Canvas -->
   <main class="radix-canvas">
-    {#each $canvasPanes as pane (pane.id)}
+    {#each $canvasPanes as pane (pane.id + ':' + pane.pluginId)}
       {@const plugin = $activePlugins.find(p => p.id === pane.pluginId)}
       <section
         class="radix-pane"
