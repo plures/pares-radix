@@ -33,11 +33,66 @@
 
   let { document, dbGet, dbSet, dbSubscribe, prefix = 'canvas:' }: Props = $props();
 
+  // ── Reactive State Layer ──────────────────────────────────────────────────
+  // Track subscribed values so Svelte re-renders when PluresDB changes.
+  // This is what makes the canvas LIVE — AI writes → UI updates instantly.
+
+  let subscribedValues = $state<Record<string, unknown>>({});
+  let subscriptions: Array<() => void> = [];
+  let renderVersion = $state(0); // bump to force re-render
+
+  // Collect all binding keys from the document tree
+  function collectBindingKeys(node: CanvasNode): string[] {
+    const keys: string[] = [];
+    if (node.bindings) {
+      for (const binding of Object.values(node.bindings)) {
+        const fullKey = binding.key.startsWith(prefix) ? binding.key : `${prefix}${binding.key}`;
+        keys.push(fullKey);
+      }
+    }
+    if (node.visible && typeof node.visible === 'object' && 'key' in node.visible) {
+      const vk = node.visible.key;
+      keys.push(vk.startsWith(prefix) ? vk : `${prefix}${vk}`);
+    } else if (typeof node.visible === 'string') {
+      keys.push(node.visible.startsWith(prefix) ? node.visible : `${prefix}${node.visible}`);
+    }
+    if (node.children) {
+      for (const child of node.children) {
+        keys.push(...collectBindingKeys(child));
+      }
+    }
+    return keys;
+  }
+
+  // Subscribe to all binding keys when document changes
+  $effect(() => {
+    // Clean up previous subscriptions
+    for (const unsub of subscriptions) unsub();
+    subscriptions = [];
+
+    if (!dbSubscribe) return;
+
+    const keys = [...new Set(collectBindingKeys(document.tree))];
+    for (const key of keys) {
+      const unsub = dbSubscribe(key, (value) => {
+        subscribedValues = { ...subscribedValues, [key]: value };
+        renderVersion++;
+      });
+      subscriptions.push(unsub);
+    }
+
+    return () => {
+      for (const unsub of subscriptions) unsub();
+      subscriptions = [];
+    };
+  });
+
   // ── Binding Resolution ──────────────────────────────────────────────────
 
   function resolveBinding(binding: CanvasBinding): unknown {
     const fullKey = binding.key.startsWith(prefix) ? binding.key : `${prefix}${binding.key}`;
-    let value = dbGet(fullKey);
+    // Use subscribed value if available (reactive), fall back to direct read
+    let value = fullKey in subscribedValues ? subscribedValues[fullKey] : dbGet(fullKey);
     if (binding.readTransform) {
       // Simple transforms — extend as needed
       try {

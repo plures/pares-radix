@@ -41,6 +41,10 @@
   function dbSet(key: string, value: unknown): void {
     graph.put(key, value);
   }
+
+  function dbSubscribe(key: string, callback: (value: unknown) => void): () => void {
+    return graph.subscribe(key, callback);
+  }
 </script>
 
 <PluginContentArea>
@@ -49,6 +53,7 @@
       document={activeCanvas}
       {dbGet}
       {dbSet}
+      {dbSubscribe}
       prefix="canvas:"
     />
   {:else}
