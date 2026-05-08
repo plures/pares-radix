@@ -3,12 +3,33 @@
   import { onMount } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
   import { activePlugins, pluginRegistry, allStatusBarItems } from './lib/plugins/registry.js';
-  import { activeView, commandPaletteOpen } from './lib/store.js';
+  import { activeView, canvasPanes, focusedPane, commandPaletteOpen } from './lib/store.js';
+  import { recordChronos } from './lib/api.js';
   import CommandPalette from './lib/CommandPalette.svelte';
 
   onMount(() => { initBuiltinPlugins(); });
 
-  let currentPlugin = $derived($activePlugins.find(p => p.id === $activeView));
+  function handleActivityClick(pluginId, event) {
+    if (event.ctrlKey || event.metaKey) {
+      const newId = String(Date.now());
+      $canvasPanes = [...$canvasPanes, { id: newId, pluginId }];
+      $focusedPane = newId;
+    } else {
+      $canvasPanes = $canvasPanes.map(p =>
+        p.id === $focusedPane ? { ...p, pluginId } : p
+      );
+    }
+    recordChronos('Update', 'canvas', { action: event.ctrlKey || event.metaKey ? 'split' : 'switch', pluginId });
+  }
+
+  function closePane(paneId) {
+    if ($canvasPanes.length <= 1) return;
+    $canvasPanes = $canvasPanes.filter(p => p.id !== paneId);
+    if ($focusedPane === paneId) {
+      $focusedPane = $canvasPanes[0].id;
+    }
+    recordChronos('Update', 'canvas', { action: 'closePane', paneId });
+  }
 
   function handleKeydown(e) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
@@ -23,11 +44,11 @@
 <div class="radix-host">
   <!-- Activity Bar -->
   <nav class="radix-activity-bar">
-    {#each $activePlugins as plugin}
+    {#each $activePlugins.filter(p => p.view || p.component) as plugin}
       <button
         class="radix-activity-item"
         class:active={$activeView === plugin.id}
-        onclick={() => $activeView = plugin.id}
+        onclick={(e) => handleActivityClick(plugin.id, e)}
         title={plugin.name}
       >
         <svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -39,15 +60,27 @@
 
   <!-- Canvas -->
   <main class="radix-canvas">
-    {#if currentPlugin?.component}
-      {@const Comp = currentPlugin.component}
-      <Comp />
-    {:else}
-      <div class="radix-welcome">
-        <p class="radix-welcome-title">pares-radix</p>
-        <p class="radix-welcome-hint">Select a plugin or press <kbd>Ctrl+Shift+P</kbd></p>
-      </div>
-    {/if}
+    {#each $canvasPanes as pane (pane.id)}
+      {@const plugin = $activePlugins.find(p => p.id === pane.pluginId)}
+      <section
+        class="radix-pane"
+        class:focused={$focusedPane === pane.id}
+        onclick={() => $focusedPane = pane.id}
+      >
+        {#if plugin?.component}
+          {@const Comp = plugin.component}
+          <Comp />
+        {:else}
+          <div class="radix-welcome">
+            <p class="radix-welcome-title">pares-radix</p>
+            <p class="radix-welcome-hint">Select a plugin or press <kbd>Ctrl+Shift+P</kbd></p>
+          </div>
+        {/if}
+        {#if $canvasPanes.length > 1}
+          <button class="pane-close" onclick={(e) => { e.stopPropagation(); closePane(pane.id); }}>✕</button>
+        {/if}
+      </section>
+    {/each}
   </main>
 
   <!-- Status Bar -->
@@ -112,9 +145,37 @@
   }
 
   .radix-canvas {
+    display: flex;
+    flex: 1;
     background: #1e1e2e;
-    overflow: auto;
+    overflow: hidden;
   }
+
+  .radix-pane {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+    border-left: 1px solid var(--border-subtle, #2d2d3d);
+  }
+  .radix-pane:first-child { border-left: none; }
+  .radix-pane.focused { border-left-color: #569cd6; }
+
+  .pane-close {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 3px;
+    display: none;
+  }
+  .radix-pane:hover .pane-close { display: block; }
+  .pane-close:hover { background: #333; color: #ccc; }
 
   .radix-welcome {
     display: flex;

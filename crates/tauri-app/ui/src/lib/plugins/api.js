@@ -79,7 +79,7 @@ export function validatePlugin(plugin) {
   if (!plugin.id || typeof plugin.id !== 'string') errors.push('id is required (string)');
   if (!plugin.name || typeof plugin.name !== 'string') errors.push('name is required (string)');
   if (!plugin.iconPath || typeof plugin.iconPath !== 'string') errors.push('iconPath is required (SVG path string)');
-  if (!plugin.view && !plugin.component) errors.push('view is required (Svelte component)');
+  if (!plugin.view && !plugin.component && !plugin.commands?.length) errors.push('view or commands required');
   if (plugin.commands && !Array.isArray(plugin.commands)) errors.push('commands must be an array');
   if (plugin.statusBarItems && !Array.isArray(plugin.statusBarItems)) errors.push('statusBarItems must be an array');
 
