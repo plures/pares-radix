@@ -1,0 +1,32 @@
+{
+  "name": "@plures/canvas-runtime",
+  "version": "0.1.0",
+  "description": "Runtime app creation engine — AI writes data, apps materialize. Component registry, layout engine, procedure bindings, export/share format.",
+  "type": "module",
+  "svelte": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "svelte": "./src/index.ts",
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./registry": {
+      "svelte": "./src/registry.ts",
+      "types": "./src/registry.ts"
+    },
+    "./renderer": {
+      "svelte": "./src/CanvasRenderer.svelte",
+      "types": "./src/CanvasRenderer.svelte"
+    },
+    "./format": {
+      "types": "./src/format.ts",
+      "default": "./src/format.ts"
+    }
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0",
+    "@plures/design-dojo": "workspace:*"
+  },
+  "license": "BSL-1.1"
+}
