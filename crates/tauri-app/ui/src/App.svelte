@@ -6,6 +6,7 @@
   import { activeView, canvasPanes, focusedPane, commandPaletteOpen } from './lib/store.js';
   import { recordChronos } from './lib/api.js';
   import CommandPalette from './lib/CommandPalette.svelte';
+  import Welcome from './lib/Welcome.svelte';
 
   onMount(() => { initBuiltinPlugins(); });
 
@@ -31,10 +32,29 @@
     recordChronos('Update', 'canvas', { action: 'closePane', paneId });
   }
 
+  function switchToPlugin(pluginId) {
+    $canvasPanes = $canvasPanes.map(p =>
+      p.id === $focusedPane ? { ...p, pluginId } : p
+    );
+    recordChronos('Update', 'canvas', { action: 'shortcut-open', pluginId });
+  }
+
   function handleKeydown(e) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
       e.preventDefault();
       $commandPaletteOpen = !$commandPaletteOpen;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '1') {
+      e.preventDefault();
+      switchToPlugin('chat');
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '2') {
+      e.preventDefault();
+      switchToPlugin('procedures');
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '3') {
+      e.preventDefault();
+      switchToPlugin('chronicle');
     }
   }
 </script>
@@ -71,10 +91,7 @@
           {@const Comp = plugin.component}
           <Comp />
         {:else}
-          <div class="radix-welcome">
-            <p class="radix-welcome-title">pares-radix</p>
-            <p class="radix-welcome-hint">Select a plugin or press <kbd>Ctrl+Shift+P</kbd></p>
-          </div>
+          <Welcome />
         {/if}
         {#if $canvasPanes.length > 1}
           <button class="pane-close" onclick={(e) => { e.stopPropagation(); closePane(pane.id); }}>✕</button>
@@ -177,23 +194,6 @@
   .radix-pane:hover .pane-close { display: block; }
   .pane-close:hover { background: #333; color: #ccc; }
 
-  .radix-welcome {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 8px;
-    opacity: 0.4;
-  }
-  .radix-welcome-title { font-size: 24px; font-weight: 300; }
-  .radix-welcome-hint { font-size: 12px; }
-  .radix-welcome-hint kbd {
-    background: #333;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-family: inherit;
-  }
 
   .radix-status-bar {
     grid-column: 1 / -1;
