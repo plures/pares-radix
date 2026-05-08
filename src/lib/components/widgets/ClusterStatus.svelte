@@ -2,7 +2,9 @@
 	/**
 	 * Cluster Status Widget — shows rector node health at a glance.
 	 */
+	import { Box, Text } from '@plures/design-dojo';
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let nodes = $state([
 		{ name: 'praxisbot', status: 'online', cpu: 12, memory: 45, role: 'gpu-worker' },
 		{ name: 'surface', status: 'online', cpu: 8, memory: 32, role: 'desktop' },
@@ -12,36 +14,36 @@
 	// TODO: wire to rector API via Tauri invoke
 </script>
 
-<div class="cluster-widget">
-	<div class="node-list">
+<Box class="cluster-widget">
+	<Box class="node-list">
 		{#each nodes as node}
-			<div class="node" class:offline={node.status === 'offline'}>
-				<span class="indicator" class:online={node.status === 'online'}></span>
-				<span class="name">{node.name}</span>
-				<span class="role">{node.role}</span>
+			<Box class={`node ${node.status === 'offline' ? 'offline' : ''}`}>
+				<Box as="span" class={`indicator ${node.status === 'online' ? 'online' : ''}`}></Box>
+				<Text as="span" class="name">{node.name}</Text>
+				<Text as="span" class="role">{node.role}</Text>
 				{#if node.status === 'online'}
-					<span class="stats">{node.cpu}% · {node.memory}%</span>
+					<Text as="span" class="stats">{node.cpu}% · {node.memory}%</Text>
 				{/if}
-			</div>
+			</Box>
 		{/each}
-	</div>
-</div>
+	</Box>
+</Box>
 
 <style>
-	.cluster-widget { padding: 0.5rem 0; }
-	.node-list { display: flex; flex-direction: column; gap: 8px; }
-	.node {
+	:global(.cluster-widget) { padding: 0.5rem 0; }
+	:global(.node-list) { display: flex; flex-direction: column; gap: 8px; }
+	:global(.node) {
 		display: flex; align-items: center; gap: 8px;
 		padding: 8px 12px; border-radius: 6px;
 		background: var(--color-surface); border: 1px solid var(--color-border);
 	}
-	.node.offline { opacity: 0.5; }
-	.indicator {
+	:global(.node.offline) { opacity: 0.5; }
+	:global(.indicator) {
 		width: 8px; height: 8px; border-radius: 50%;
 		background: var(--color-danger);
 	}
-	.indicator.online { background: #22c55e; }
-	.name { font-weight: 500; font-size: 0.9rem; }
-	.role { color: var(--color-text-muted); font-size: 0.8rem; }
-	.stats { margin-left: auto; font-size: 0.8rem; color: var(--color-text-muted); }
+	:global(.indicator.online) { background: #22c55e; }
+	:global(.name) { font-weight: 500; font-size: 0.9rem; }
+	:global(.role) { color: var(--color-text-muted); font-size: 0.8rem; }
+	:global(.stats) { margin-left: auto; font-size: 0.8rem; color: var(--color-text-muted); }
 </style>

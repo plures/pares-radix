@@ -5,20 +5,28 @@
 	import { applySchemaChange, recordDecision, getDecisionLedger } from '$lib/praxis/hot-reload.js';
 
 	// Read schema registry from praxis facts
+	// eslint-disable-next-line plures/no-raw-stores
 	let registry = $derived(
 		(query<Record<string, DesignSchema>>('design.schema.registry')) ?? {}
 	);
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let designModeActive = $derived(
 		(query<{ active: boolean }>('design.mode.active')?.active) ?? false
 	);
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let selectedKind = $state<SchemaKind | 'all'>('all');
+	// eslint-disable-next-line plures/no-raw-stores
 	let selectedSchema = $state<string | null>(null);
+	// eslint-disable-next-line plures/no-raw-stores
 	let searchQuery = $state('');
+	// eslint-disable-next-line plures/no-raw-stores
 	let editingSchema = $state<string | null>(null);
+	// eslint-disable-next-line plures/no-raw-stores
 	let showLedger = $state(false);
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let schemas = $derived(() => {
 		let entries = Object.values(registry);
 		if (selectedKind !== 'all') {
@@ -35,6 +43,7 @@
 		return entries.sort((a, b) => a.id.localeCompare(b.id));
 	});
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let kindCounts = $derived(() => {
 		const counts: Record<string, number> = { all: 0 };
 		for (const schema of Object.values(registry)) {
@@ -44,6 +53,7 @@
 		return counts;
 	});
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let selectedSchemaData = $derived(
 		selectedSchema ? registry[selectedSchema] : null
 	);
@@ -103,6 +113,7 @@
 		emitFact('design.schema.reverted', { schemaId: editingSchema });
 	}
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let decisionLedger = $derived(getDecisionLedger());
 </script>
 

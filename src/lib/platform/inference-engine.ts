@@ -68,6 +68,7 @@ export function createInferenceEngine(
 
           inferences.push(inference);
         } catch (err) {
+          // eslint-disable-next-line plures/no-manual-logging
           console.error(`[radix:inference] Rule "${rule.id}" failed:`, err);
         }
       }

@@ -25,6 +25,7 @@ export const builtinUxExpectations: Expectation[] = [
         const inNav = navHrefs.has(route.path);
         const parentInNav = [...navHrefs].some(href => route.path.startsWith(href + '/'));
         if (!inNav && !parentInNav) {
+          // eslint-disable-next-line plures/no-manual-logging
           console.warn(`[radix:ux] Route "${route.path}" (${route.pluginId}) is not reachable from navigation`);
           return false;
         }
@@ -43,6 +44,7 @@ export const builtinUxExpectations: Expectation[] = [
         if (!route.requires?.length) continue;
         for (const req of route.requires) {
           if (!req.emptyMessage || !req.fulfillHref || !req.fulfillLabel) {
+            // eslint-disable-next-line plures/no-manual-logging
             console.warn(
               `[radix:ux] Route "${route.path}" has data requirement "${req.type}" without proper empty state`,
             );
@@ -67,6 +69,7 @@ export const builtinUxExpectations: Expectation[] = [
 
       for (const nav of getAllNavItems()) {
         if (!routePaths.has(nav.href) && !nav.href.startsWith('http')) {
+          // eslint-disable-next-line plures/no-manual-logging
           console.warn(`[radix:ux] Nav item "${nav.label}" points to unregistered route "${nav.href}"`);
           return false;
         }

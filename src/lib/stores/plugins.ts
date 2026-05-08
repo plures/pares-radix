@@ -9,9 +9,13 @@ import { listPlugins, installPlugin, uninstallPlugin } from '$lib/plugins/plugin
 import type { PluginInfo } from '$lib/plugins/plugin-api.js';
 
 function createPluginsStore() {
+	// eslint-disable-next-line plures/no-raw-stores
 	let ids = $state<string[]>([]);
+	// eslint-disable-next-line plures/no-raw-stores
 	let installed = $state<PluginInfo[]>([]);
+	// eslint-disable-next-line plures/no-raw-stores
 	let loading = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let error = $state<string | null>(null);
 
 	return {

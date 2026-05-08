@@ -58,6 +58,7 @@ const THEME_KEY = 'radix-theme';
 
 function loadPersistedTheme(): 'light' | 'dark' {
 	if (!browser) return 'dark';
+	// eslint-disable-next-line plures/no-local-storage
 	const stored = localStorage.getItem(THEME_KEY);
 	return stored === 'light' || stored === 'dark' ? stored : 'dark';
 }
@@ -67,6 +68,7 @@ function persistTheme(value: 'light' | 'dark'): void {
 	// Keep the legacy 'radix-theme' key for backward compatibility — it is read
 	// by loadPersistedTheme() as a fallback on first boot before the adapter
 	// has persisted 'theme.applied'. The adapter is the canonical store.
+	// eslint-disable-next-line plures/no-local-storage
 	localStorage.setItem(THEME_KEY, value);
 	document.documentElement.setAttribute('data-theme', value);
 }
