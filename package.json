@@ -38,7 +38,8 @@
     "svelte-eslint-parser": "^0.43.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.59.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "eslint-plugin-plures": "workspace:*"
   },
   "dependencies": {
     "@plures/design-dojo": "workspace:*",
