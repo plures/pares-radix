@@ -1,38 +1,58 @@
 /**
- * Canvas Runtime — the engine that turns PluresDB data into running apps.
+ * @plures/canvas-runtime — the engine that turns PluresDB data into running apps.
  *
- * Architecture:
+ * The AI writes data. Apps materialize. No code. No compile. No deploy.
  *
- * 1. COMPONENT REGISTRY — maps string names to Svelte components at runtime.
- *    All design-dojo components are pre-registered. Plugins can register more.
- *
- * 2. CANVAS DOCUMENT — a PluresDB-native format describing an app:
- *    - Component tree (what to render, props, bindings to PluresDB keys)
- *    - Praxis rules (validation, gates, constraints — stored as data)
- *    - Procedures (what happens on user actions — stored as data)
- *    - Data schema (what PluresDB keys the app uses)
- *
- * 3. DYNAMIC RENDERER — walks the component tree, resolves components from
- *    the registry, binds props to PluresDB via Unum, renders the result.
- *
- * 4. EXPORT FORMAT (.canvas) — serializable, shareable, replayable.
- *    A .canvas file is a self-contained app definition that can be:
- *    - Shared (send someone a file, they open it, app works)
- *    - Versioned (git-friendly JSON)
- *    - Replayed (Chronos timeline embedded)
- *    - Forked (modify someone else's canvas app)
- *
- * The key insight: if the app IS data, then creating an app is just
- * writing data. The AI doesn't generate code — it describes.
+ * @module @plures/canvas-runtime
  */
 
-export { ComponentRegistry, getRegistry, registerComponent } from './registry.js';
+// Component Registry
+export {
+  ComponentRegistry,
+  registerComponent,
+  resolveComponent,
+  listComponents,
+  listByCategory,
+  getRegistry,
+  generateCatalog,
+  registerDesignDojo,
+} from './registry.js';
+export type { ComponentMeta, PropSchema } from './registry.js';
+
+// Canvas Document Format
 export type {
   CanvasDocument,
   CanvasNode,
   CanvasBinding,
+  CanvasCondition,
   CanvasRule,
   CanvasProcedure,
+  CanvasTrigger,
+  CanvasStep,
+  CanvasMeta,
+  CanvasSchema,
   CanvasExport,
+  CanvasTimelineEntry,
 } from './format.js';
 export { createCanvas, exportCanvas, importCanvas, validateCanvas } from './format.js';
+
+// Reactive Graph Bridge
+export { createReactiveGraph, putWithActor } from './reactive-graph.js';
+export type { ReactiveGraph, WriteOptions } from './reactive-graph.js';
+
+// AI Canvas Plugin
+export {
+  initCanvasPlugin,
+  toolCanvasCreate,
+  toolCanvasSetTree,
+  toolCanvasAddNode,
+  toolCanvasRemoveNode,
+  toolCanvasSetData,
+  toolCanvasAddRule,
+  toolCanvasAddProcedure,
+  toolCanvasExport,
+  toolCanvasImport,
+  toolCanvasCatalog,
+  toolCanvasValidate,
+} from './canvas-plugin.js';
+export type { CanvasPluginState } from './canvas-plugin.js';
