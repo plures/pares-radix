@@ -1,0 +1,22 @@
+{
+  "name": "@plures/radix-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server exposing full pares-radix control — DEV BUILDS ONLY. Complete access to PluresDB, canvas, plugins, praxis, and all app state.",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "radix-mcp": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@plures/canvas-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.1",
+    "tsx": "^4.0.0"
+  },
+  "license": "BSL-1.1"
+}
