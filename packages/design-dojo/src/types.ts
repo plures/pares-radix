@@ -164,3 +164,169 @@ export interface PluginContentAreaProps {
 	/** Page content */
 	children: Snippet;
 }
+
+// ── New Primitives ──────────────────────────────────────────────────────────
+
+/** Props for Box — the universal layout container. Replaces div/section/article/aside/main/nav/header/footer. */
+export interface BoxProps {
+	/** HTML element to render (default: 'div') */
+	as?: string;
+	/** CSS padding value */
+	padding?: string;
+	/** CSS gap value */
+	gap?: string;
+	/** Flex direction: 'row' | 'column' (default: 'column') */
+	direction?: 'row' | 'column';
+	/** CSS align-items */
+	align?: string;
+	/** CSS justify-content */
+	justify?: string;
+	/** Flex wrap */
+	wrap?: boolean;
+	/** Additional CSS class */
+	class?: string;
+	/** Click handler (makes the box interactive) */
+	onclick?: (e: MouseEvent) => void;
+}
+
+/** Props for Text — replaces span/p. */
+export interface TextProps {
+	/** HTML element to render (default: 'span') */
+	as?: 'span' | 'p' | 'em' | 'strong' | 'small' | 'mark';
+	/** CSS font-size */
+	size?: string;
+	/** CSS font-weight */
+	weight?: string;
+	/** CSS color */
+	color?: string;
+	/** Truncate with ellipsis */
+	truncate?: boolean;
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for Heading — replaces h1-h6. */
+export interface HeadingProps {
+	/** Heading level 1-6 (default: 2) */
+	level?: 1 | 2 | 3 | 4 | 5 | 6;
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for Input — replaces input/label. */
+export interface InputProps {
+	/** Input type */
+	type?: 'text' | 'number' | 'password' | 'email' | 'url' | 'search' | 'tel' | 'date' | 'color';
+	/** Bound value */
+	value?: string;
+	/** Placeholder text */
+	placeholder?: string;
+	/** Disabled state */
+	disabled?: boolean;
+	/** Required field */
+	required?: boolean;
+	/** Input name/id */
+	name?: string;
+	/** Label text (renders above input) */
+	label?: string;
+	/** Error message (renders below input) */
+	error?: string;
+	/** Additional CSS class */
+	class?: string;
+	/** Input event handler */
+	oninput?: (e: Event) => void;
+	/** Change event handler */
+	onchange?: (e: Event) => void;
+}
+
+/** Props for TextArea — replaces textarea. */
+export interface TextAreaProps {
+	/** Bound value */
+	value?: string;
+	/** Placeholder */
+	placeholder?: string;
+	/** Disabled state */
+	disabled?: boolean;
+	/** Required */
+	required?: boolean;
+	/** Number of visible rows */
+	rows?: number;
+	/** Name/id */
+	name?: string;
+	/** Label */
+	label?: string;
+	/** Error message */
+	error?: string;
+	/** Additional CSS class */
+	class?: string;
+	/** Input handler */
+	oninput?: (e: Event) => void;
+}
+
+/** Option for Select component. */
+export interface SelectOption {
+	value: string;
+	label: string;
+}
+
+/** Props for Select — replaces select/option. */
+export interface SelectProps {
+	/** Bound value */
+	value?: string;
+	/** Available options */
+	options: SelectOption[];
+	/** Disabled state */
+	disabled?: boolean;
+	/** Required */
+	required?: boolean;
+	/** Name/id */
+	name?: string;
+	/** Label */
+	label?: string;
+	/** Placeholder (disabled first option) */
+	placeholder?: string;
+	/** Additional CSS class */
+	class?: string;
+	/** Change handler */
+	onchange?: (e: Event) => void;
+}
+
+/** Props for Link — replaces a. */
+export interface LinkProps {
+	/** URL */
+	href: string;
+	/** Open in new tab */
+	external?: boolean;
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for CodeBlock — replaces pre/code. */
+export interface CodeBlockProps {
+	/** Code content (alternative to children) */
+	code?: string;
+	/** Language hint */
+	language?: string;
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for List — replaces ul/ol. */
+export interface ListProps {
+	/** Ordered list (ol) vs unordered (ul) */
+	ordered?: boolean;
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for ListItem — replaces li. */
+export interface ListItemProps {
+	/** Additional CSS class */
+	class?: string;
+}
+
+/** Props for Table — replaces table/thead/tbody/tr/th/td. */
+export interface TableProps {
+	/** Additional CSS class */
+	class?: string;
+}
