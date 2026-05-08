@@ -10,6 +10,7 @@
 	 * Phase 4: LLM-assisted layout generation from natural language.
 	 */
 
+	import { Box, Text, Heading, Button, Input } from '@plures/design-dojo';
 	import SchemaRenderer from './SchemaRenderer.svelte';
 
 	interface SchemaNode {
@@ -45,167 +46,175 @@
 </script>
 
 {#if editable}
-<div
-	class="schema-node editable"
-	data-component={schema.component}
-	role="button"
-	tabindex="0"
-	onclick={() => handleClick(schema, [])}
-	onkeydown={(e) => { if (e.key === 'Enter') handleClick(schema, []); }}
->
-	<span class="node-label">{schema.component}</span>
+	<Box
+		class="schema-node editable"
+		data-component={schema.component}
+		role="button"
+		tabindex="0"
+		onclick={() => handleClick(schema, [])}
+		onkeydown={(e) => { if (e.key === 'Enter') handleClick(schema, []); }}
+	>
+		<Text as="span" class="node-label">{schema.component}</Text>
 
-	{#if schema.component === 'Box' || schema.component === 'Block'}
-		<div class="rendered-box" style:flex-direction={String(schema.props.direction ?? 'column')} style:gap={String(schema.props.gap ?? '0.5rem')}>
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{:else if schema.component === 'Card'}
-		<div class="rendered-card">
-			{#if schema.props.title}
-				<h3 class="card-title">{schema.props.title}</h3>
-			{/if}
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{:else if schema.component === 'Text'}
-		<p class="rendered-text" data-variant={schema.props.variant}>
-			{schema.props.content ?? ''}
-		</p>
-	{:else if schema.component === 'Button'}
-		<button class="rendered-button" disabled={Boolean(schema.props.disabled)}>
-			{schema.props.label ?? 'Button'}
-		</button>
-	{:else if schema.component === 'Input'}
-		<input
-			class="rendered-input"
-			type={String(schema.props.type ?? 'text')}
-			placeholder={String(schema.props.placeholder ?? '')}
-			value={String(schema.props.value ?? '')}
-		/>
-	{:else if schema.component === 'Badge'}
-		<span class="rendered-badge" data-variant={schema.props.variant}>
-			{schema.props.text ?? ''}
-		</span>
-	{:else if schema.component === 'ProgressBar'}
-		<div class="rendered-progress">
-			<div class="progress-fill" style:width="{Number(schema.props.value ?? 0)}%"></div>
-		</div>
-	{:else if schema.component === 'EmptyState'}
-		<div class="rendered-empty">
-			<span class="empty-icon">{schema.props.icon ?? '📭'}</span>
-			<p>{schema.props.message ?? 'Nothing here yet'}</p>
-		</div>
-	{:else}
-		<!-- Fallback: render children in a generic container -->
-		<div class="rendered-generic">
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{/if}
-</div>
+		{#if schema.component === 'Box' || schema.component === 'Block'}
+			<Box
+				class="rendered-box"
+				direction={schema.props.direction === 'row' ? 'row' : 'column'}
+				gap={String(schema.props.gap ?? '0.5rem')}
+			>
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{:else if schema.component === 'Card'}
+			<Box class="rendered-card">
+				{#if schema.props.title}
+					<Heading level={3} class="card-title">{schema.props.title}</Heading>
+				{/if}
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{:else if schema.component === 'Text'}
+			<Text as="p" class="rendered-text" data-variant={schema.props.variant}>
+				{schema.props.content ?? ''}
+			</Text>
+		{:else if schema.component === 'Button'}
+			<Button class="rendered-button" disabled={Boolean(schema.props.disabled)}>
+				{schema.props.label ?? 'Button'}
+			</Button>
+		{:else if schema.component === 'Input'}
+			<Input
+				class="rendered-input"
+				type={String(schema.props.type ?? 'text')}
+				placeholder={String(schema.props.placeholder ?? '')}
+				value={String(schema.props.value ?? '')}
+			/>
+		{:else if schema.component === 'Badge'}
+			<Text as="span" class="rendered-badge" data-variant={schema.props.variant}>
+				{schema.props.text ?? ''}
+			</Text>
+		{:else if schema.component === 'ProgressBar'}
+			<Text as="p" class="rendered-progress" data-value={schema.props.value}>
+				Progress: {Number(schema.props.value ?? 0)}%
+			</Text>
+		{:else if schema.component === 'EmptyState'}
+			<Box class="rendered-empty">
+				<Text as="span" class="empty-icon">{schema.props.icon ?? '📭'}</Text>
+				<Text as="p">{schema.props.message ?? 'Nothing here yet'}</Text>
+			</Box>
+		{:else}
+			<!-- Fallback: render children in a generic container -->
+			<Box class="rendered-generic">
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{/if}
+	</Box>
 {:else}
-<div
-	class="schema-node"
-	data-component={schema.component}
->
-	{#if schema.component === 'Box' || schema.component === 'Block'}
-		<div class="rendered-box" style:flex-direction={String(schema.props.direction ?? 'column')} style:gap={String(schema.props.gap ?? '0.5rem')}>
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{:else if schema.component === 'Card'}
-		<div class="rendered-card">
-			{#if schema.props.title}
-				<h3 class="card-title">{schema.props.title}</h3>
-			{/if}
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{:else if schema.component === 'Text'}
-		<p class="rendered-text" data-variant={schema.props.variant}>
-			{schema.props.content ?? ''}
-		</p>
-	{:else if schema.component === 'Button'}
-		<button class="rendered-button" disabled={Boolean(schema.props.disabled)}>
-			{schema.props.label ?? 'Button'}
-		</button>
-	{:else if schema.component === 'Input'}
-		<input
-			class="rendered-input"
-			type={String(schema.props.type ?? 'text')}
-			placeholder={String(schema.props.placeholder ?? '')}
-			value={String(schema.props.value ?? '')}
-		/>
-	{:else if schema.component === 'Badge'}
-		<span class="rendered-badge" data-variant={schema.props.variant}>
-			{schema.props.text ?? ''}
-		</span>
-	{:else if schema.component === 'ProgressBar'}
-		<div class="rendered-progress">
-			<div class="progress-fill" style:width="{Number(schema.props.value ?? 0)}%"></div>
-		</div>
-	{:else if schema.component === 'EmptyState'}
-		<div class="rendered-empty">
-			<span class="empty-icon">{schema.props.icon ?? '📭'}</span>
-			<p>{schema.props.message ?? 'Nothing here yet'}</p>
-		</div>
-	{:else}
-		<!-- Fallback: render children in a generic container -->
-		<div class="rendered-generic">
-			{#each schema.children as child, idx}
-				<SchemaRenderer
-					schema={child}
-					{editable}
-					onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
-				/>
-			{/each}
-		</div>
-	{/if}
-</div>
+	<Box
+		class="schema-node"
+		data-component={schema.component}
+	>
+		{#if schema.component === 'Box' || schema.component === 'Block'}
+			<Box
+				class="rendered-box"
+				direction={schema.props.direction === 'row' ? 'row' : 'column'}
+				gap={String(schema.props.gap ?? '0.5rem')}
+			>
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{:else if schema.component === 'Card'}
+			<Box class="rendered-card">
+				{#if schema.props.title}
+					<Heading level={3} class="card-title">{schema.props.title}</Heading>
+				{/if}
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{:else if schema.component === 'Text'}
+			<Text as="p" class="rendered-text" data-variant={schema.props.variant}>
+				{schema.props.content ?? ''}
+			</Text>
+		{:else if schema.component === 'Button'}
+			<Button class="rendered-button" disabled={Boolean(schema.props.disabled)}>
+				{schema.props.label ?? 'Button'}
+			</Button>
+		{:else if schema.component === 'Input'}
+			<Input
+				class="rendered-input"
+				type={String(schema.props.type ?? 'text')}
+				placeholder={String(schema.props.placeholder ?? '')}
+				value={String(schema.props.value ?? '')}
+			/>
+		{:else if schema.component === 'Badge'}
+			<Text as="span" class="rendered-badge" data-variant={schema.props.variant}>
+				{schema.props.text ?? ''}
+			</Text>
+		{:else if schema.component === 'ProgressBar'}
+			<Text as="p" class="rendered-progress" data-value={schema.props.value}>
+				Progress: {Number(schema.props.value ?? 0)}%
+			</Text>
+		{:else if schema.component === 'EmptyState'}
+			<Box class="rendered-empty">
+				<Text as="span" class="empty-icon">{schema.props.icon ?? '📭'}</Text>
+				<Text as="p">{schema.props.message ?? 'Nothing here yet'}</Text>
+			</Box>
+		{:else}
+			<!-- Fallback: render children in a generic container -->
+			<Box class="rendered-generic">
+				{#each schema.children as child, idx}
+					<SchemaRenderer
+						schema={child}
+						{editable}
+						onNodeSelect={(node: SchemaNode, path: number[]) => onNodeSelect?.(node, [idx, ...path])}
+					/>
+				{/each}
+			</Box>
+		{/if}
+	</Box>
 {/if}
 
 <style>
-	.schema-node {
+	:global(.schema-node) {
 		position: relative;
 	}
 
-	.schema-node.editable {
+	:global(.schema-node.editable) {
 		outline: 1px dashed transparent;
 		transition: outline-color 0.15s;
 		cursor: pointer;
 	}
 
-	.schema-node.editable:hover {
+	:global(.schema-node.editable:hover) {
 		outline-color: var(--color-accent);
 	}
 
-	.node-label {
+	:global(.node-label) {
 		position: absolute;
 		top: -0.75rem;
 		left: 0.25rem;
@@ -219,21 +228,21 @@
 		transition: opacity 0.15s;
 	}
 
-	.schema-node.editable:hover > .node-label { opacity: 1; }
+	:global(.schema-node.editable:hover > .node-label) { opacity: 1; }
 
-	.rendered-box { display: flex; }
-	.rendered-card {
+	:global(.rendered-box) { display: flex; }
+	:global(.rendered-card) {
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
 		padding: 1rem;
 	}
-	.card-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
-	.rendered-text { margin: 0; }
-	.rendered-text[data-variant="heading"] { font-size: 1.25rem; font-weight: 600; }
-	.rendered-text[data-variant="caption"] { font-size: 0.8rem; color: var(--color-text-muted); }
-	.rendered-text[data-variant="mono"] { font-family: monospace; }
+	:global(.card-title) { margin: 0 0 0.5rem; font-size: 0.95rem; }
+	:global(.rendered-text) { margin: 0; }
+	:global(.rendered-text[data-variant="heading"]) { font-size: 1.25rem; font-weight: 600; }
+	:global(.rendered-text[data-variant="caption"]) { font-size: 0.8rem; color: var(--color-text-muted); }
+	:global(.rendered-text[data-variant="mono"]) { font-family: monospace; }
 
-	.rendered-button {
+	:global(.rendered-button) {
 		padding: 0.4rem 0.75rem;
 		border: 1px solid var(--color-accent);
 		border-radius: 6px;
@@ -242,7 +251,7 @@
 		cursor: pointer;
 	}
 
-	.rendered-input {
+	:global(.rendered-input) {
 		padding: 0.4rem 0.75rem;
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -251,7 +260,7 @@
 		width: 100%;
 	}
 
-	.rendered-badge {
+	:global(.rendered-badge) {
 		display: inline-block;
 		padding: 0.15rem 0.4rem;
 		border-radius: 4px;
@@ -260,23 +269,16 @@
 		color: var(--color-accent);
 	}
 
-	.rendered-progress {
-		height: 6px;
-		background: var(--color-hover);
-		border-radius: 3px;
-		overflow: hidden;
-	}
-	.progress-fill {
-		height: 100%;
-		background: var(--color-accent);
-		border-radius: 3px;
-		transition: width 0.3s;
+	:global(.rendered-progress) {
+		margin: 0;
+		font-size: 0.8rem;
+		color: var(--color-text-muted);
 	}
 
-	.rendered-empty {
+	:global(.rendered-empty) {
 		text-align: center;
 		padding: 2rem;
 		color: var(--color-text-muted);
 	}
-	.empty-icon { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
+	:global(.empty-icon) { font-size: 2rem; display: block; margin-bottom: 0.5rem; }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { Box, List, ListItem, Link, Text } from '@plures/design-dojo';
 
 	interface Crumb {
 		label: string;
@@ -30,28 +31,28 @@
 	});
 </script>
 
-<nav class="breadcrumbs" aria-label="Breadcrumb">
-	<ol>
+<Box as="nav" class="breadcrumbs" aria-label="Breadcrumb">
+	<List ordered>
 		{#each autoCrumbs as crumb, i}
-			<li>
+			<ListItem>
 				{#if i < autoCrumbs.length - 1 && crumb.href}
-					<a href={crumb.href}>{crumb.label}</a>
-					<span class="separator" aria-hidden="true">/</span>
+					<Link href={crumb.href}>{crumb.label}</Link>
+					<Text as="span" class="separator" aria-hidden="true">/</Text>
 				{:else}
-					<span class="current" aria-current="page">{crumb.label}</span>
+					<Text as="span" class="current" aria-current="page">{crumb.label}</Text>
 				{/if}
-			</li>
+			</ListItem>
 		{/each}
-	</ol>
-</nav>
+	</List>
+</Box>
 
 <style>
-	.breadcrumbs {
+	:global(.breadcrumbs) {
 		padding: 0.5rem 0;
 		font-size: 0.82rem;
 	}
 
-	ol {
+	:global(ol) {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -60,12 +61,12 @@
 		gap: 0;
 	}
 
-	li {
+	:global(li) {
 		display: flex;
 		align-items: center;
 	}
 
-	a {
+	:global(a) {
 		color: var(--color-text-muted);
 		text-decoration: none;
 		padding: 2px 4px;
@@ -73,17 +74,17 @@
 		transition: color 0.15s, background 0.15s;
 	}
 
-	a:hover {
+	:global(a:hover) {
 		color: var(--color-accent);
 		background: var(--color-accent-bg);
 	}
 
-	.separator {
+	:global(.separator) {
 		margin: 0 6px;
 		color: var(--color-border);
 	}
 
-	.current {
+	:global(.current) {
 		color: var(--color-text);
 		font-weight: 500;
 	}
