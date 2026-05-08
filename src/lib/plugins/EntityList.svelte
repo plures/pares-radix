@@ -6,6 +6,7 @@
 		deleteEntity,
 	} from '$lib/plugins/plugin-api.js';
 	import type { FieldInfo } from '$lib/plugins/plugin-api.js';
+	import { Box, Button, Input, Table, Text } from '@plures/design-dojo';
 	import EntityForm from './EntityForm.svelte';
 	import EntityDetail from './EntityDetail.svelte';
 
@@ -17,11 +18,17 @@
 
 	let { pluginName, entityType, fields }: Props = $props();
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let items = $state<Record<string, unknown>[]>([]);
+	// eslint-disable-next-line plures/no-raw-stores
 	let searchQuery = $state('');
+	// eslint-disable-next-line plures/no-raw-stores
 	let showForm = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let editingId = $state<string | null>(null);
+	// eslint-disable-next-line plures/no-raw-stores
 	let viewingId = $state<string | null>(null);
+	// eslint-disable-next-line plures/no-raw-stores
 	let loading = $state(false);
 
 	async function load() {
@@ -33,6 +40,7 @@
 				items = await listEntities(pluginName, entityType);
 			}
 		} catch (e) {
+			// eslint-disable-next-line plures/no-manual-logging
 			console.error('Failed to load entities:', e);
 		} finally {
 			loading = false;
@@ -60,21 +68,22 @@
 	}
 
 	// Visible field columns (exclude internal _ fields)
+	// eslint-disable-next-line plures/no-raw-stores
 	let visibleFields = $derived(fields.filter((f) => !f.name.startsWith('_')));
 </script>
 
-<div class="entity-list">
-	<div class="toolbar">
-		<input
+<Box class="entity-list">
+	<Box class="toolbar" direction="row" gap="0.75rem">
+		<Input
 			type="search"
-			placeholder="Search {entityType}…"
+			placeholder={`Search ${entityType}…`}
 			bind:value={searchQuery}
-			oninput={() => load()}
+			on:input={() => load()}
 		/>
-		<button class="create-btn" onclick={() => { showForm = true; editingId = null; }}>
+		<Button variant="primary" onclick={() => { showForm = true; editingId = null; }}>
 			+ Create
-		</button>
-	</div>
+		</Button>
+	</Box>
 
 	{#if showForm}
 		<EntityForm
@@ -98,58 +107,56 @@
 			/>
 		{/if}
 	{:else if loading}
-		<p class="muted">Loading…</p>
+		<Text as="p" class="muted">Loading…</Text>
 	{:else if items.length === 0}
-		<p class="muted">No {entityType} records yet.</p>
+		<Text as="p" class="muted">No {entityType} records yet.</Text>
 	{:else}
-		<table>
-			<thead>
-				<tr>
+		<Table>
+			<svelte:element this={"thead"}>
+				<svelte:element this={"tr"}>
 					{#each visibleFields as field}
-						<th>{field.name}</th>
+						<svelte:element this={"th"}>{field.name}</svelte:element>
 					{/each}
-					<th>Actions</th>
-				</tr>
-			</thead>
-			<tbody>
+					<svelte:element this={"th"}>Actions</svelte:element>
+				</svelte:element>
+			</svelte:element>
+			<svelte:element this={"tbody"}>
 				{#each items as item}
-					<tr>
+					<svelte:element this={"tr"}>
 						{#each visibleFields as field}
-							<td>
-								<button class="cell-btn" onclick={() => (viewingId = item._id as string)}>
+							<svelte:element this={"td"}>
+								<Button variant="secondary" onclick={() => (viewingId = item._id as string)}>
 									{item[field.name] ?? '—'}
-								</button>
-							</td>
+								</Button>
+							</svelte:element>
 						{/each}
-						<td>
-							<button class="action-btn" onclick={() => { editingId = item._id as string; showForm = true; }}>✏️</button>
-							<button class="action-btn danger" onclick={() => handleDelete(item._id as string)}>🗑️</button>
-						</td>
-					</tr>
+						<svelte:element this={"td"}>
+							<Box class="action-buttons" direction="row" gap="0.25rem">
+								<Button variant="secondary" onclick={() => { editingId = item._id as string; showForm = true; }}>✏️</Button>
+								<Button variant="secondary" onclick={() => handleDelete(item._id as string)}>🗑️</Button>
+							</Box>
+						</svelte:element>
+					</svelte:element>
 				{/each}
-			</tbody>
-		</table>
+			</svelte:element>
+		</Table>
 	{/if}
-</div>
+</Box>
 
 <style>
-	.entity-list { margin-top: 1rem; }
-	.toolbar { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
-	.toolbar input {
-		flex: 1; padding: 0.5rem 0.75rem; border-radius: 6px;
-		border: 1px solid var(--color-border); background: var(--color-surface);
-		color: var(--color-text); font-size: 0.9rem;
+	:global(.entity-list) { margin-top: 1rem; }
+	:global(.toolbar) { display: flex; gap: 0.75rem; margin-bottom: 1rem; }
+	:global(.muted) { color: var(--color-text-muted); }
+	:global(.entity-list .btn.secondary) {
+		padding: 4px 8px;
+		font-weight: 400;
 	}
-	.create-btn {
-		padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; border: none;
-		background: var(--color-accent); color: #fff; font-weight: 500;
+	:global(.entity-list td .btn.secondary) {
+		width: 100%;
+		justify-content: flex-start;
 	}
-	.muted { color: var(--color-text-muted); }
-	table { width: 100%; border-collapse: collapse; }
-	th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--color-border); }
-	th { font-size: 0.8rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-	.cell-btn { all: unset; cursor: pointer; width: 100%; }
-	.cell-btn:hover { color: var(--color-accent); }
-	.action-btn { all: unset; cursor: pointer; padding: 0.25rem; }
-	.action-btn.danger:hover { color: var(--color-danger); }
+	:global(.action-buttons) {
+		display: flex;
+		gap: 0.25rem;
+	}
 </style>

@@ -2,7 +2,9 @@
 	/**
 	 * Omniscient Index Widget — shows filesystem index stats.
 	 */
+	import { Box, CodeBlock, Text } from '@plures/design-dojo';
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let stats = $state({
 		totalFiles: 0,
 		enriched: 0,
@@ -14,45 +16,46 @@
 	// TODO: wire to omniscient plugin API via Tauri invoke
 </script>
 
-<div class="omniscient-widget">
+<Box class="omniscient-widget">
 	{#if stats.totalFiles === 0}
-		<p class="empty">No files indexed yet.</p>
-		<p class="hint">Run <code>/index ~/projects</code> to start.</p>
+		<Text as="p" class="empty">No files indexed yet.</Text>
+		<Box class="hint">
+			<Text as="p">Run</Text>
+			<CodeBlock>/index ~/projects</CodeBlock>
+			<Text as="p">to start.</Text>
+		</Box>
 	{:else}
-		<div class="stat-grid">
-			<div class="stat">
-				<span class="value">{stats.totalFiles.toLocaleString()}</span>
-				<span class="label">Files</span>
-			</div>
-			<div class="stat">
-				<span class="value">{stats.enriched.toLocaleString()}</span>
-				<span class="label">Enriched</span>
-			</div>
-			<div class="stat">
-				<span class="value">{stats.pending.toLocaleString()}</span>
-				<span class="label">Pending</span>
-			</div>
+		<Box class="stat-grid">
+			<Box class="stat">
+				<Text as="span" class="value">{stats.totalFiles.toLocaleString()}</Text>
+				<Text as="span" class="label">Files</Text>
+			</Box>
+			<Box class="stat">
+				<Text as="span" class="value">{stats.enriched.toLocaleString()}</Text>
+				<Text as="span" class="label">Enriched</Text>
+			</Box>
+			<Box class="stat">
+				<Text as="span" class="value">{stats.pending.toLocaleString()}</Text>
+				<Text as="span" class="label">Pending</Text>
+			</Box>
 			{#if stats.securityAlerts > 0}
-				<div class="stat alert">
-					<span class="value">{stats.securityAlerts}</span>
-					<span class="label">⚠️ Alerts</span>
-				</div>
+				<Box class="stat alert">
+					<Text as="span" class="value">{stats.securityAlerts}</Text>
+					<Text as="span" class="label">⚠️ Alerts</Text>
+				</Box>
 			{/if}
-		</div>
+		</Box>
 	{/if}
-</div>
+</Box>
 
 <style>
-	.omniscient-widget { padding: 0.5rem 0; }
-	.empty { color: var(--color-text-muted); font-size: 0.9rem; margin: 0; }
-	.hint { color: var(--color-text-muted); font-size: 0.8rem; margin: 4px 0 0; }
-	.hint code {
-		background: var(--color-hover); padding: 2px 5px; border-radius: 3px;
-		font-size: 0.8rem;
-	}
-	.stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-	.stat { text-align: center; }
-	.stat .value { display: block; font-size: 1.5rem; font-weight: 600; color: var(--color-text); }
-	.stat .label { font-size: 0.75rem; color: var(--color-text-muted); }
-	.stat.alert .value { color: var(--color-danger); }
+	:global(.omniscient-widget) { padding: 0.5rem 0; }
+	:global(.empty) { color: var(--color-text-muted); font-size: 0.9rem; margin: 0; }
+	:global(.hint) { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: 0.8rem; margin: 4px 0 0; }
+	:global(.hint pre) { margin: 0; }
+	:global(.stat-grid) { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+	:global(.stat) { text-align: center; }
+	:global(.stat .value) { display: block; font-size: 1.5rem; font-weight: 600; color: var(--color-text); }
+	:global(.stat .label) { font-size: 0.75rem; color: var(--color-text-muted); }
+	:global(.stat.alert .value) { color: var(--color-danger); }
 </style>

@@ -3,10 +3,14 @@
 	import { renderMarkdown, isSafeUrl } from '$lib/utils/markdown.js';
 	import { browser } from '$app/environment';
 	import type { HelpSection } from '$lib/types/plugin.js';
+	import { Box, Heading, Input, Link, Text } from '@plures/design-dojo';
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let sections = $derived(getAllHelpSections());
+	// eslint-disable-next-line plures/no-raw-stores
 	let searchQuery = $state('');
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let filtered = $derived(
 		searchQuery
 			? sections.filter((s: HelpSection) =>
@@ -17,6 +21,7 @@
 	);
 
 	// Platform-aware modifier key (⌘ on macOS, Ctrl elsewhere)
+	// eslint-disable-next-line plures/no-raw-stores
 	let isMac = $derived(
 		browser &&
 			/Mac/.test(
@@ -25,8 +30,10 @@
 					navigator.userAgent
 			)
 	);
+	// eslint-disable-next-line plures/no-raw-stores
 	let mod = $derived(isMac ? '⌘' : 'Ctrl');
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let shortcuts = $derived([
 		{ key: `${mod} + K`, desc: 'Quick search' },
 		{ key: `${mod} + /`, desc: 'Toggle sidebar' },
@@ -39,143 +46,136 @@
 	<title>Radix — Help</title>
 </svelte:head>
 
-<h1>Help</h1>
+<Heading level={1}>Help</Heading>
 
-<div class="search-bar">
-	<input
+<Box class="search-bar">
+	<Input
 		type="search"
 		class="search-input"
 		placeholder="Search help…"
 		aria-label="Search help sections"
 		bind:value={searchQuery}
 	/>
-</div>
+</Box>
 
 {#if filtered.length > 0}
-	<div class="sections">
+	<Box class="sections">
 		{#each filtered as section}
-			<article class="section" aria-label={section.title}>
-				<h2><span class="section-icon" aria-hidden="true">{section.icon}</span> {section.title}</h2>
+			<Box as="article" class="section" aria-label={section.title}>
+				<Heading level={2}>
+					<Text as="span" class="section-icon" aria-hidden="true">{section.icon}</Text>
+					{section.title}
+				</Heading>
 				{#if typeof section.content === 'string'}
-					<div class="section-content markdown">{@html renderMarkdown(section.content)}</div>
+					<Box class="section-content markdown">{@html renderMarkdown(section.content)}</Box>
 				{:else}
 					{#await section.content() then mod}
-						<div class="section-content">
+						<Box class="section-content">
 							<mod.default />
-						</div>
+						</Box>
 					{:catch}
-						<p class="error">Failed to load section content.</p>
+						<Text as="p" class="error">Failed to load section content.</Text>
 					{/await}
 				{/if}
 				{#if section.links?.length}
-					<div class="section-links">
-						<span class="links-label">See also:</span>
+					<Box class="section-links">
+						<Text as="span" class="links-label">See also:</Text>
 						{#each section.links as link}
 							{#if isSafeUrl(link.href)}
-								<a href={link.href} class="section-link">{link.label}</a>
+								<Link href={link.href} class="section-link">{link.label}</Link>
 							{/if}
 						{/each}
-					</div>
+					</Box>
 				{/if}
-			</article>
+			</Box>
 		{/each}
-	</div>
+	</Box>
 {:else}
-	<p class="no-results">No help sections match your search.</p>
+	<Text as="p" class="no-results">No help sections match your search.</Text>
 {/if}
 
-<div class="shortcuts-section" aria-label="Keyboard shortcuts">
-	<h2>⌨️ Keyboard Shortcuts</h2>
-	<div class="shortcuts-grid">
+<Box class="shortcuts-section" aria-label="Keyboard shortcuts">
+	<Heading level={2}>⌨️ Keyboard Shortcuts</Heading>
+	<Box class="shortcuts-grid">
 		{#each shortcuts as shortcut}
-			<div class="shortcut">
-				<kbd>{shortcut.key}</kbd>
-				<span>{shortcut.desc}</span>
-			</div>
+			<Box class="shortcut" direction="row" align="center" gap="12px">
+				<Text as="span" class="kbd">{shortcut.key}</Text>
+				<Text as="span">{shortcut.desc}</Text>
+			</Box>
 		{/each}
-	</div>
-</div>
+	</Box>
+</Box>
 
 <style>
-	h1 {
+	:global(h1) {
 		margin: 0 0 16px;
 	}
 
-	.search-bar {
+	:global(.search-bar) {
 		margin-bottom: 24px;
 	}
 
-	.search-input {
+	:global(.search-input) {
 		width: 100%;
 		max-width: 400px;
-		padding: 10px 14px;
-		border: 1px solid var(--color-border);
-		border-radius: 8px;
-		background: var(--color-surface);
-		color: var(--color-text);
-		font-size: 0.9rem;
 	}
 
-	.search-input::placeholder {
-		color: var(--color-text-muted);
-	}
-
-	.sections {
+	:global(.sections) {
 		display: flex;
 		flex-direction: column;
 		gap: 20px;
 	}
 
-	.section {
+	:global(.section) {
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: 8px;
 		padding: 20px;
 	}
 
-	.section h2 {
+	:global(.section h2) {
 		margin: 0 0 12px;
 		font-size: 1.05rem;
 	}
 
-	.section-icon {
+	:global(.section-icon) {
 		margin-right: 4px;
 	}
 
-	.section-content {
+	:global(.section-content) {
 		color: var(--color-text-muted);
 		font-size: 0.9rem;
 		line-height: 1.6;
 	}
 
 	/* Markdown rendered content */
-	.section-content.markdown :global(h1),
-	.section-content.markdown :global(h2),
-	.section-content.markdown :global(h3) {
+	:global(.section-content.markdown :global(h1)),
+	:global(.section-content.markdown :global(h2)),
+	:global(.section-content.markdown :global(h3)) {
 		color: var(--color-text);
 		margin: 12px 0 6px;
 		font-size: 0.95rem;
 	}
 
-	.section-content.markdown :global(p) {
+	:global(.section-content.markdown :global(p)) {
 		margin: 0 0 8px;
 	}
 
-	.section-content.markdown :global(p:last-child) {
+	:global(.section-content.markdown :global(p:last-child)) {
 		margin-bottom: 0;
 	}
 
-	.section-content.markdown :global(ul),
-	.section-content.markdown :global(ol) {
+	:global(.section-content.markdown :global(ul)),
+	:global(.section-content.markdown :global(ol)) {
 		margin: 4px 0 8px;
 		padding-left: 20px;
 	}
 
-	.section-content.markdown :global(li) {
+	:global(.section-content.markdown :global(li)) {
 		margin-bottom: 2px;
 	}
 
-	.section-content.markdown :global(code) {
+	:global(.section-content.markdown :global(code)) {
 		background: var(--color-bg);
 		border: 1px solid var(--color-border);
 		border-radius: 3px;
@@ -184,28 +184,28 @@
 		font-family: ui-monospace, 'SFMono-Regular', monospace;
 	}
 
-	.section-content.markdown :global(strong) {
+	:global(.section-content.markdown :global(strong)) {
 		color: var(--color-text);
 		font-weight: 600;
 	}
 
-	.section-content.markdown :global(a) {
+	:global(.section-content.markdown :global(a)) {
 		color: var(--color-accent);
 		text-decoration: none;
 	}
 
-	.section-content.markdown :global(a:hover) {
+	:global(.section-content.markdown :global(a:hover)) {
 		text-decoration: underline;
 	}
 
-	.section-content.markdown :global(hr) {
+	:global(.section-content.markdown :global(hr)) {
 		border: none;
 		border-top: 1px solid var(--color-border);
 		margin: 12px 0;
 	}
 
 	/* Section "See also" links */
-	.section-links {
+	:global(.section-links) {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -215,12 +215,12 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	.links-label {
+	:global(.links-label) {
 		font-size: 0.8rem;
 		color: var(--color-text-muted);
 	}
 
-	.section-link {
+	:global(.section-link) {
 		font-size: 0.82rem;
 		color: var(--color-accent);
 		text-decoration: none;
@@ -230,21 +230,21 @@
 		transition: background 0.12s;
 	}
 
-	.section-link:hover {
+	:global(.section-link:hover) {
 		background: var(--color-accent-bg);
 	}
 
-	.no-results {
+	:global(.no-results) {
 		color: var(--color-text-muted);
 		text-align: center;
 		padding: 32px;
 	}
 
-	.error {
+	:global(.error) {
 		color: var(--color-danger);
 	}
 
-	.shortcuts-section {
+	:global(.shortcuts-section) {
 		margin-top: 32px;
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
@@ -252,24 +252,24 @@
 		padding: 20px;
 	}
 
-	.shortcuts-section h2 {
+	:global(.shortcuts-section h2) {
 		margin: 0 0 16px;
 		font-size: 1.05rem;
 	}
 
-	.shortcuts-grid {
+	:global(.shortcuts-grid) {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
 		gap: 12px;
 	}
 
-	.shortcut {
+	:global(.shortcut) {
 		display: flex;
 		align-items: center;
 		gap: 12px;
 	}
 
-	kbd {
+	:global(.kbd) {
 		background: var(--color-bg);
 		border: 1px solid var(--color-border);
 		border-radius: 4px;
@@ -279,7 +279,7 @@
 		white-space: nowrap;
 	}
 
-	.shortcut span {
+	:global(.shortcut span) {
 		font-size: 0.85rem;
 		color: var(--color-text-muted);
 	}
