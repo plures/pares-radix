@@ -4708,6 +4708,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
+ "tauri-plugin-tui",
  "tauri-plugin-window-state",
  "tokio",
  "tracing",
@@ -7003,6 +7004,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "svelte-ratatui-adapter"
+version = "0.10.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "svelte-ratatui-compiler",
+]
+
+[[package]]
+name = "svelte-ratatui-compiler"
+version = "0.10.0"
+dependencies = [
+ "ratatui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "swift-rs"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7384,6 +7405,19 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "tauri-plugin-tui"
+version = "0.10.0"
+dependencies = [
+ "crossterm",
+ "log",
+ "ratatui",
+ "serde_json",
+ "svelte-ratatui-adapter",
+ "svelte-ratatui-compiler",
+ "tauri",
 ]
 
 [[package]]

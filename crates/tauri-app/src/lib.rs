@@ -310,14 +310,25 @@ impl ToolDispatcher for McpToolDispatcher {
 /// - Shared [`AppState`] exposed to every Tauri command
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    // Activate TUI mode when --tui flag is passed
+    #[cfg(feature = "tui")]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.contains(&"--tui".to_string()) {
+            builder = builder.plugin(tauri_plugin_tui::init());
+        }
+    }
+
+    builder
         .setup(|app| {
             // ── Memory store ──────────────────────────────────────────────
             // Open a persistent PluresDB-backed memory store under the app data
