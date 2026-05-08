@@ -32,15 +32,18 @@
   });
 
   // Track view changes
-  $: if ($activeView !== previousView) {
-    if (previousView !== null) {
-      navigationEvent(previousView || 'welcome', $activeView || 'welcome');
+  $effect(() => {
+    const current = $activeView;
+    if (current !== previousView && previousView !== null) {
+      navigationEvent(previousView || 'welcome', current || 'welcome');
     }
-    previousView = $activeView;
-  }
+    previousView = current;
+  });
 
   // Track canvas state changes
-  $: storeChanged('canvasPanes', null, $canvasPanes.map(p => ({ id: p.id, pluginId: p.pluginId })));
+  $effect(() => {
+    storeChanged('canvasPanes', null, $canvasPanes.map(p => ({ id: p.id, pluginId: p.pluginId })));
+  });
 
   function handleActivityClick(pluginId, event) {
     const action = event.ctrlKey || event.metaKey ? 'split' : 'switch';
