@@ -2,7 +2,7 @@
   import '@plures/design-dojo/tokens.css';
   import { onMount } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
-  import { activePlugins, pluginRegistry } from './lib/plugins/registry.js';
+  import { activePlugins, pluginRegistry, allStatusBarItems } from './lib/plugins/registry.js';
   import { activeView, commandPaletteOpen } from './lib/store.js';
   import CommandPalette from './lib/CommandPalette.svelte';
 
@@ -53,6 +53,13 @@
   <!-- Status Bar -->
   <footer class="radix-status-bar">
     <span class="radix-status-item">radix v1.40</span>
+    {#each $allStatusBarItems.filter(i => i.position !== 'right') as item}
+      <button class="radix-status-item radix-status-btn" onclick={item.onclick}>{item.text}</button>
+    {/each}
+    <span class="radix-status-spacer"></span>
+    {#each $allStatusBarItems.filter(i => i.position === 'right').sort((a, b) => (b.priority || 0) - (a.priority || 0)) as item}
+      <button class="radix-status-item radix-status-btn" onclick={item.onclick}>{item.text}</button>
+    {/each}
   </footer>
 </div>
 
@@ -137,4 +144,13 @@
     color: #888;
   }
   .radix-status-item { padding: 0 8px; }
+  .radix-status-spacer { flex: 1; }
+  .radix-status-btn {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+  .radix-status-btn:hover { color: #ccd; }
 </style>

@@ -5,9 +5,11 @@ export default {
   name: 'Procedures',
   iconPath: 'M8 1l-5 8h4l-1 6 5-8H7l1-6z',
   description: 'PluresDB stored procedures',
-  enabled: true,
-  component: Procedures,
-  sidebarComponent: null,
-  commands: [],
-  settings: {},
+  version: '1.0.0',
+  view: Procedures,
+  commands: [
+    { id: 'procedures.run', label: 'Run Procedure', action: () => {} },
+    { id: 'procedures.create', label: 'Create Procedure', action: () => {} },
+  ],
+  statusBarItems: [],
 };

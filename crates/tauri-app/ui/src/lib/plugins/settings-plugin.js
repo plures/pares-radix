@@ -5,9 +5,10 @@ export default {
   name: 'Settings',
   iconPath: 'M8 5a3 3 0 100 6 3 3 0 000-6z',
   description: 'Application settings',
-  enabled: true,
-  component: Settings,
-  sidebarComponent: null,
-  commands: [],
-  settings: {},
+  version: '1.0.0',
+  view: Settings,
+  commands: [
+    { id: 'settings.open', label: 'Open Settings', action: () => {} },
+  ],
+  statusBarItems: [],
 };

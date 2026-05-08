@@ -5,12 +5,13 @@ export default {
   name: 'Chat',
   iconPath: 'M2 2h12v8H6l-4 4V2z',
   description: 'AI assistant chat interface',
-  enabled: true,
-  component: Chat,
-  sidebarComponent: null,
+  version: '1.0.0',
+  view: Chat,
   commands: [
-    { id: 'chat.clear', label: 'Clear Conversation', action: 'clear' },
-    { id: 'chat.model', label: 'Switch Model', action: 'model' },
+    { id: 'chat.clear', label: 'Clear Chat', action: () => {} },
+    { id: 'chat.newSession', label: 'New Chat Session', action: () => {} },
   ],
-  settings: {},
+  statusBarItems: [
+    { id: 'chat.model', text: 'claude-sonnet-4.5', position: 'right', priority: 100 },
+  ],
 };
