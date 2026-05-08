@@ -12,7 +12,9 @@
 		wrap = false,
 		class: className = '',
 		children,
-		onclick
+		onclick,
+		onkeydown,
+		onsubmit
 	}: BoxProps & { children?: Snippet } = $props();
 </script>
 
@@ -24,6 +26,8 @@
 	style:align-items={align}
 	style:justify-content={justify}
 	{onclick}
+	{onkeydown}
+	{onsubmit}
 	role={onclick ? 'button' : undefined}
 	tabindex={onclick ? 0 : undefined}
 >

@@ -11,6 +11,7 @@
 		label,
 		error,
 		class: className = '',
+		accept,
 		oninput,
 		onchange
 	}: InputProps = $props();
@@ -30,6 +31,7 @@
 		{required}
 		{name}
 		id={name}
+		{accept}
 		{oninput}
 		{onchange}
 	/>

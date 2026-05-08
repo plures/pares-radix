@@ -4,14 +4,14 @@
 	import { plugins } from '$lib/stores/plugins.js';
 	import { goto } from '$app/navigation';
 
-	let fileInput: HTMLInputElement;
+	let selectedFile: File | null = null;
 
 	onMount(() => {
 		plugins.refresh();
 	});
 
 	async function handleInstall() {
-		const file = fileInput?.files?.[0];
+		const file = selectedFile;
 		if (!file) return;
 		try {
 			// Tauri needs a file path, not a File object.
@@ -36,10 +36,13 @@
 		<Input
 			class="install-input"
 			label="Install Plugin"
-			bind:this={fileInput}
 			type="file"
 			accept=".toml"
-			onchange={handleInstall}
+			onchange={(e) => {
+				const target = e.target as HTMLInputElement;
+				selectedFile = target.files?.[0] ?? null;
+				void handleInstall();
+			}}
 		/>
 	</Box>
 
@@ -56,7 +59,7 @@
 				<Box
 					class="plugin-card"
 					role="button"
-					tabindex="0"
+					tabindex={0}
 					onclick={() => goto(`/plugins/${plugin.name}`)}
 					onkeydown={(e) => { if (e.key === 'Enter') goto(`/plugins/${plugin.name}`); }}
 				>

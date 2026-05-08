@@ -78,7 +78,7 @@
 			type="search"
 			placeholder={`Search ${entityType}…`}
 			bind:value={searchQuery}
-			on:input={() => load()}
+			oninput={() => load()}
 		/>
 		<Button variant="primary" onclick={() => { showForm = true; editingId = null; }}>
 			+ Create

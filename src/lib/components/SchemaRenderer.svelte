@@ -50,7 +50,7 @@
 		class="schema-node editable"
 		data-component={schema.component}
 		role="button"
-		tabindex="0"
+		tabindex={0}
 		onclick={() => handleClick(schema, [])}
 		onkeydown={(e) => { if (e.key === 'Enter') handleClick(schema, []); }}
 	>
@@ -84,7 +84,7 @@
 				{/each}
 			</Box>
 		{:else if schema.component === 'Text'}
-			<Text as="p" class="rendered-text" data-variant={schema.props.variant}>
+			<Text as="p" class="rendered-text" data-variant={schema.props.variant ? String(schema.props.variant) : undefined}>
 				{schema.props.content ?? ''}
 			</Text>
 		{:else if schema.component === 'Button'}
@@ -99,11 +99,11 @@
 				value={String(schema.props.value ?? '')}
 			/>
 		{:else if schema.component === 'Badge'}
-			<Text as="span" class="rendered-badge" data-variant={schema.props.variant}>
+			<Text as="span" class="rendered-badge" data-variant={schema.props.variant ? String(schema.props.variant) : undefined}>
 				{schema.props.text ?? ''}
 			</Text>
 		{:else if schema.component === 'ProgressBar'}
-			<Text as="p" class="rendered-progress" data-value={schema.props.value}>
+			<Text as="p" class="rendered-progress" data-value={schema.props.value !== undefined ? String(schema.props.value) : undefined}>
 				Progress: {Number(schema.props.value ?? 0)}%
 			</Text>
 		{:else if schema.component === 'EmptyState'}
@@ -157,7 +157,7 @@
 				{/each}
 			</Box>
 		{:else if schema.component === 'Text'}
-			<Text as="p" class="rendered-text" data-variant={schema.props.variant}>
+			<Text as="p" class="rendered-text" data-variant={schema.props.variant ? String(schema.props.variant) : undefined}>
 				{schema.props.content ?? ''}
 			</Text>
 		{:else if schema.component === 'Button'}
@@ -172,11 +172,11 @@
 				value={String(schema.props.value ?? '')}
 			/>
 		{:else if schema.component === 'Badge'}
-			<Text as="span" class="rendered-badge" data-variant={schema.props.variant}>
+			<Text as="span" class="rendered-badge" data-variant={schema.props.variant ? String(schema.props.variant) : undefined}>
 				{schema.props.text ?? ''}
 			</Text>
 		{:else if schema.component === 'ProgressBar'}
-			<Text as="p" class="rendered-progress" data-value={schema.props.value}>
+			<Text as="p" class="rendered-progress" data-value={schema.props.value !== undefined ? String(schema.props.value) : undefined}>
 				Progress: {Number(schema.props.value ?? 0)}%
 			</Text>
 		{:else if schema.component === 'EmptyState'}

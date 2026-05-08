@@ -199,6 +199,10 @@ export interface BoxProps {
 	style?: string;
 	/** Click handler (makes the box interactive) */
 	onclick?: (e: MouseEvent) => void;
+	/** Keydown handler (for interactive boxes) */
+	onkeydown?: (e: KeyboardEvent) => void;
+	/** Submit handler (when used as a form) */
+	onsubmit?: (e: SubmitEvent) => void;
 	/** Passthrough HTML attributes (aria-*, data-*, role, etc.) */
 	[key: `aria-${string}`]: string | undefined;
 	[key: `data-${string}`]: string | undefined;
@@ -265,6 +269,8 @@ export interface InputProps {
 	onchange?: (e: Event) => void;
 	/** Submit event handler */
 	onsubmit?: (e: Event) => void;
+	/** Accepted file types (for file inputs) */
+	accept?: string;
 	/** Passthrough */
 	[key: `data-${string}`]: string | undefined;
 	[key: `aria-${string}`]: string | undefined;

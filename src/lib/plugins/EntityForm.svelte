@@ -17,13 +17,17 @@
 
 	// Form values — seed from initialValues if editing
 	// eslint-disable-next-line plures/no-raw-stores
-	let values = $state<Record<string, unknown>>({});
+	let values = $state<Record<string, string | boolean>>({});
 
 	$effect(() => {
-		const v: Record<string, unknown> = {};
+		const v: Record<string, string | boolean> = {};
 		for (const field of fields) {
 			if (field.name.startsWith('_')) continue;
-			v[field.name] = initialValues?.[field.name] ?? '';
+			if (field.field_type === 'Boolean') {
+				v[field.name] = Boolean(initialValues?.[field.name]);
+			} else {
+				v[field.name] = String(initialValues?.[field.name] ?? '');
+			}
 		}
 		values = v;
 	});
@@ -66,7 +70,7 @@
 	let editableFields = $derived(fields.filter((f) => !f.name.startsWith('_')));
 </script>
 
-<Box as="form" class="entity-form" on:submit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<Box as="form" class="entity-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
 	<Heading level={3}>{entityId ? 'Edit' : 'Create'} {entityType}</Heading>
 
 	{#each editableFields as field}
@@ -80,19 +84,20 @@
 				<Input
 					type="checkbox"
 					checked={Boolean(values[field.name])}
-					on:change={(e) => { values[field.name] = (e.target as HTMLInputElement).checked; }}
+					onchange={(e) => { values[field.name] = (e.target as HTMLInputElement).checked; }}
 				/>
 			{:else if isEnum(field.field_type)}
 				<Select
-					bind:value={values[field.name]}
+					value={String(values[field.name] ?? '')}
 					required={field.required}
 					placeholder="— Select —"
 					options={isEnum(field.field_type)!.map((opt) => ({ label: opt, value: opt }))}
+					onchange={(e) => { values[field.name] = (e.target as HTMLSelectElement).value; }}
 				/>
 			{:else if field.field_type === 'Currency'}
 				<Box class="currency-input" direction="row" align="center" gap="0.25rem">
 					<Text as="span" class="prefix">$</Text>
-					<Input type="number" value={String(values[field.name] ?? '')} required={field.required} on:input={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }} />
+					<Input type="number" value={String(values[field.name] ?? '')} required={field.required} oninput={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }} />
 				</Box>
 			{:else}
 				<Input
@@ -100,7 +105,7 @@
 					value={String(values[field.name] ?? '')}
 					required={field.required}
 					placeholder={field.description ?? ''}
-					on:input={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }}
+					oninput={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }}
 				/>
 			{/if}
 		</Box>
