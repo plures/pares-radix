@@ -7,7 +7,7 @@
   import { Pane } from '@plures/design-dojo/surfaces';
   import { EmptyState } from '@plures/design-dojo';
 
-  let { open = $bindable(true) } = $props();
+  // Always visible as a plugin view
 
   /**
    * @typedef {{ name: string, eventType: string, priority: number, enabled: boolean, body: string }} ProcRecord
@@ -25,7 +25,7 @@
   let templateValue = $state('');
 
   $effect(() => {
-    if (open) {
+    if (true) {
       selected = null;
       editMode = false;
       editBody = '';
@@ -120,8 +120,8 @@
   })));
 </script>
 
-{#if open}
-<Dialog onclose={() => open = false} title="⚡ Procedures">
+
+<div class="procedures-plugin">
   <Box border="none" class="procedures-body">
     <!-- Left: procedure list -->
     <Box border="none" class="proc-list-panel">
@@ -191,8 +191,7 @@
       {/if}
     </Box>
   </Box>
-</Dialog>
-{/if}
+</div>
 
 <style>
   :global(.procedures-body) {
