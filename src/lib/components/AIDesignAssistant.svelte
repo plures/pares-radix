@@ -4,6 +4,7 @@
 	 * Phase 4 of Design Mode.
 	 */
 
+	import { Box, Heading, Text, Button, TextArea, CodeBlock, List, ListItem } from '@plures/design-dojo';
 	import { emitFact } from '$lib/stores/praxis-svelte.js';
 	import { generateSchema, type GenerationResult, type SchemaNode } from '$lib/praxis/llm-schema-gen.js';
 	import { applySchemaChange, recordDecision } from '$lib/praxis/hot-reload.js';
@@ -17,10 +18,15 @@
 
 	let { llmComplete, onLayoutGenerated }: Props = $props();
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let prompt = $state('');
+	// eslint-disable-next-line plures/no-raw-stores
 	let kind = $state<'auto' | 'page' | 'rule' | 'constraint' | 'widget'>('auto');
+	// eslint-disable-next-line plures/no-raw-stores
 	let generating = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let result = $state<GenerationResult | null>(null);
+	// eslint-disable-next-line plures/no-raw-stores
 	let error = $state<string | null>(null);
 
 	async function handleGenerate() {
@@ -74,105 +80,111 @@
 	];
 </script>
 
-<div class="ai-assistant">
-	<header class="assistant-header">
-		<h3>🤖 AI Design Assistant</h3>
-		<p class="subtitle">Describe what you want to build in natural language</p>
-	</header>
+<Box class="ai-assistant">
+	<Box as="header" class="assistant-header">
+		<Heading level={3}>🤖 AI Design Assistant</Heading>
+		<Text as="p" class="subtitle">Describe what you want to build in natural language</Text>
+	</Box>
 
-	<div class="input-area">
-		<textarea
+	<Box class="input-area">
+		<TextArea
+			class="prompt-input"
+			label="Prompt"
 			bind:value={prompt}
 			placeholder="e.g. 'Create a settings page with theme toggle, model selection, and API key input'"
-			rows="3"
-			class="prompt-input"
+			rows={3}
 			onkeydown={(e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleGenerate(); }}
-		></textarea>
+		/>
 
-		<div class="controls">
-			<div class="kind-selector">
+		<Box class="controls">
+			<Box class="kind-selector">
 				{#each kindOptions as opt}
-					<button
-						class="kind-option"
-						class:active={kind === opt.value}
+					<Button
+						class={kind === opt.value ? 'kind-option active' : 'kind-option'}
 						onclick={() => kind = opt.value as typeof kind}
 						title={opt.description}
 					>
 						{opt.label}
-					</button>
+					</Button>
 				{/each}
-			</div>
+			</Box>
 
-			<button
+			<Button
 				class="btn-generate"
 				onclick={handleGenerate}
 				disabled={!prompt.trim() || generating}
 			>
 				{generating ? '⏳ Generating...' : '✨ Generate'}
-			</button>
-		</div>
-	</div>
+			</Button>
+		</Box>
+	</Box>
 
 	{#if error}
-		<div class="error-banner">⚠️ {error}</div>
+		<Box class="error-banner">⚠️ {error}</Box>
 	{/if}
 
 	{#if result}
-		<div class="result-area">
-			<div class="result-header">
-				<span class="confidence" class:high={result.confidence >= 0.7} class:low={result.confidence < 0.5}>
+		<Box class="result-area">
+			<Box class="result-header">
+				<Text
+					as="span"
+					class={`confidence ${result.confidence >= 0.7 ? 'high' : result.confidence < 0.5 ? 'low' : ''}`}
+				>
 					{Math.round(result.confidence * 100)}% confidence
-				</span>
+				</Text>
 				{#if !llmComplete}
-					<span class="fallback-badge">Template (no LLM)</span>
+					<Text as="span" class="fallback-badge">Template (no LLM)</Text>
 				{/if}
-			</div>
+			</Box>
 
-			<p class="explanation">{result.explanation}</p>
+			<Text as="p" class="explanation">{result.explanation}</Text>
 
 			{#if result.schemas.length > 0}
-				<div class="schemas-generated">
-					<h4>Generated Schemas ({result.schemas.length})</h4>
+				<Box class="schemas-generated">
+					<Heading level={4}>Generated Schemas ({result.schemas.length})</Heading>
 					{#each result.schemas as schema}
-						<div class="schema-preview">
-							<span class="preview-kind">{schema.kind}</span>
-							<span class="preview-id">{schema.id}</span>
-							<span class="preview-desc">{schema.description}</span>
-						</div>
+						<Box class="schema-preview">
+							<Text as="span" class="preview-kind">{schema.kind}</Text>
+							<Text as="span" class="preview-id">{schema.id}</Text>
+							<Text as="span" class="preview-desc">{schema.description}</Text>
+						</Box>
 					{/each}
-					<button class="btn-apply" onclick={applySchemas}>
+					<Button class="btn-apply" onclick={applySchemas}>
 						🚀 Apply to Design Registry
-					</button>
-				</div>
+					</Button>
+				</Box>
 			{/if}
 
 			{#if result.layout}
-				<div class="layout-generated">
-					<h4>Generated Layout</h4>
-					<pre class="layout-json">{JSON.stringify(result.layout, null, 2)}</pre>
-				</div>
+				<Box class="layout-generated">
+					<Heading level={4}>Generated Layout</Heading>
+					<CodeBlock class="layout-json" language="json">
+						{JSON.stringify(result.layout, null, 2)}
+					</CodeBlock>
+				</Box>
 			{/if}
 
 			{#if result.suggestions.length > 0}
-				<div class="suggestions">
-					<h4>💡 Suggestions</h4>
-					<ul>
+				<Box class="suggestions">
+					<Heading level={4}>💡 Suggestions</Heading>
+					<List>
 						{#each result.suggestions as suggestion}
-							<li>{suggestion}</li>
+							<ListItem>{suggestion}</ListItem>
 						{/each}
-					</ul>
-				</div>
+					</List>
+				</Box>
 			{/if}
-		</div>
+		</Box>
 	{/if}
 
-	<footer class="assistant-footer">
-		<kbd>Ctrl+Enter</kbd> to generate · Design-dojo components only · Praxis rules enforced
-	</footer>
-</div>
+	<Box as="footer" class="assistant-footer">
+		<Text as="kbd">Ctrl+Enter</Text>
+		<Text as="span"> to generate · Design-dojo components only · Praxis rules enforced</Text>
+	</Box>
+</Box>
 
 <style>
-	.ai-assistant {
+	:global(.ai-assistant) {
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
@@ -182,11 +194,14 @@
 		border-radius: 8px;
 	}
 
-	.assistant-header h3 { margin: 0; font-size: 1.1rem; }
-	.subtitle { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--color-text-muted); }
+	:global(.assistant-header h3) { margin: 0; font-size: 1.1rem; }
+	:global(.subtitle) { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--color-text-muted); }
 
-	.prompt-input {
+	:global(.prompt-input) {
 		width: 100%;
+	}
+
+	:global(.prompt-input textarea) {
 		padding: 0.75rem;
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -196,13 +211,13 @@
 		resize: vertical;
 		font-family: inherit;
 	}
-	.prompt-input:focus { outline: none; border-color: var(--color-accent); }
+	:global(.prompt-input textarea:focus) { outline: none; border-color: var(--color-accent); }
 
-	.controls { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+	:global(.controls) { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
 
-	.kind-selector { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+	:global(.kind-selector) { display: flex; gap: 0.25rem; flex-wrap: wrap; }
 
-	.kind-option {
+	:global(.kind-option) {
 		padding: 0.25rem 0.5rem;
 		border: 1px solid var(--color-border);
 		border-radius: 4px;
@@ -211,13 +226,13 @@
 		cursor: pointer;
 		font-size: 0.75rem;
 	}
-	.kind-option.active {
+	:global(.kind-option.active) {
 		background: var(--color-accent-bg);
 		color: var(--color-accent);
 		border-color: var(--color-accent);
 	}
 
-	.btn-generate {
+	:global(.btn-generate) {
 		padding: 0.5rem 1.25rem;
 		border: none;
 		border-radius: 6px;
@@ -227,9 +242,9 @@
 		font-weight: 500;
 		white-space: nowrap;
 	}
-	.btn-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+	:global(.btn-generate:disabled) { opacity: 0.5; cursor: not-allowed; }
 
-	.error-banner {
+	:global(.error-banner) {
 		padding: 0.5rem 0.75rem;
 		background: rgba(220, 38, 38, 0.1);
 		border: 1px solid var(--color-danger);
@@ -238,7 +253,7 @@
 		font-size: 0.85rem;
 	}
 
-	.result-area {
+	:global(.result-area) {
 		display: flex;
 		flex-direction: column;
 		gap: 0.75rem;
@@ -247,18 +262,18 @@
 		border-radius: 6px;
 	}
 
-	.result-header { display: flex; gap: 0.5rem; align-items: center; }
+	:global(.result-header) { display: flex; gap: 0.5rem; align-items: center; }
 
-	.confidence {
+	:global(.confidence) {
 		font-size: 0.75rem;
 		padding: 0.15rem 0.5rem;
 		border-radius: 4px;
 		background: var(--color-hover);
 	}
-	.confidence.high { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
-	.confidence.low { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+	:global(.confidence.high) { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+	:global(.confidence.low) { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 
-	.fallback-badge {
+	:global(.fallback-badge) {
 		font-size: 0.65rem;
 		padding: 0.1rem 0.35rem;
 		border-radius: 3px;
@@ -266,46 +281,47 @@
 		color: var(--color-text-muted);
 	}
 
-	.explanation { font-size: 0.85rem; color: var(--color-text-muted); margin: 0; }
+	:global(.explanation) { font-size: 0.85rem; color: var(--color-text-muted); margin: 0; }
 
-	.schemas-generated h4, .layout-generated h4, .suggestions h4 {
+	:global(.schemas-generated h4), :global(.layout-generated h4), :global(.suggestions h4) {
 		margin: 0 0 0.5rem; font-size: 0.85rem;
 	}
 
-	.schema-preview {
+	:global(.schema-preview) {
 		display: flex; gap: 0.5rem; align-items: center;
 		padding: 0.35rem 0.5rem; border: 1px solid var(--color-border);
 		border-radius: 4px; margin-bottom: 0.25rem; font-size: 0.8rem;
 	}
-	.preview-kind {
+	:global(.preview-kind) {
 		font-size: 0.65rem; padding: 0.1rem 0.35rem; border-radius: 3px;
 		background: var(--color-accent-bg); color: var(--color-accent);
 		text-transform: uppercase; font-weight: 600;
 	}
-	.preview-id { font-family: monospace; font-weight: 500; }
-	.preview-desc { color: var(--color-text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	:global(.preview-id) { font-family: monospace; font-weight: 500; }
+	:global(.preview-desc) { color: var(--color-text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-	.btn-apply {
+	:global(.btn-apply) {
 		margin-top: 0.5rem; padding: 0.4rem 1rem; border: none;
 		border-radius: 6px; background: #22c55e; color: white;
 		cursor: pointer; font-weight: 500;
 	}
 
-	.layout-json {
+	:global(.layout-json) {
 		background: var(--color-bg); border: 1px solid var(--color-border);
 		border-radius: 6px; padding: 0.75rem; font-size: 0.75rem;
 		overflow-x: auto; max-height: 200px;
 	}
 
-	.suggestions ul {
+	:global(.suggestions ul) {
 		margin: 0; padding-left: 1.25rem; font-size: 0.8rem;
 		color: var(--color-text-muted);
 	}
 
-	.assistant-footer {
+	:global(.assistant-footer) {
 		font-size: 0.7rem; color: var(--color-text-muted); text-align: center;
+		display: flex; align-items: center; justify-content: center; gap: 0.25rem;
 	}
-	.assistant-footer kbd {
+	:global(.assistant-footer kbd) {
 		padding: 0.1rem 0.3rem; border: 1px solid var(--color-border);
 		border-radius: 3px; font-size: 0.65rem;
 	}

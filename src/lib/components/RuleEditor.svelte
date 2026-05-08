@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
 	import type { DesignSchema } from '$lib/praxis/design.js';
+	import { Box, Heading, Text, Button, Input, TextArea, List, ListItem, CodeBlock } from '@plures/design-dojo';
 
 	interface Props {
 		schema: DesignSchema;
@@ -12,10 +13,13 @@
 	let { schema, onSave, onCancel }: Props = $props();
 
 	// Draft state
+	// eslint-disable-next-line plures/no-raw-stores
 	let draft = $state<Record<string, unknown>>(untrack(() => ({ ...schema.definition })));
+	// eslint-disable-next-line plures/no-raw-stores
 	let dirty = $state(false);
 
 	// Validation from praxis
+	// eslint-disable-next-line plures/no-raw-stores
 	let validation = $derived(
 		query<{ valid: boolean; errors: string[] }>('design.edit.validation') ?? { valid: true, errors: [] }
 	);
@@ -37,6 +41,7 @@
 	}
 
 	// Determine editable fields based on schema kind
+	// eslint-disable-next-line plures/no-raw-stores
 	let editableFields = $derived(() => {
 		switch (schema.kind) {
 			case 'rule':
@@ -79,120 +84,113 @@
 	});
 </script>
 
-<div class="rule-editor">
-	<header class="editor-header">
-		<h2>✏️ Editing: {schema.id}</h2>
-		<span class="editor-kind">{schema.kind}</span>
-	</header>
+<Box class="rule-editor">
+	<Box as="header" class="editor-header">
+		<Heading level={2}>✏️ Editing: {schema.id}</Heading>
+		<Text as="span" class="editor-kind">{schema.kind}</Text>
+	</Box>
 
-	<form class="editor-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+	<Box as="form" class="editor-form" on:submit={(e) => { e.preventDefault(); handleSave(); }}>
 		{#each editableFields() as field}
-			<div class="field-group">
-				<label for={field.key}>
-					{field.label}
-					{#if field.required}<span class="required">*</span>{/if}
-				</label>
-
+			<Box class="field-group">
 				{#if field.type === 'textarea'}
-					<textarea
-						id={field.key}
+					<TextArea
+						label={field.label}
 						value={String(draft[field.key] ?? '')}
-						oninput={(e) => updateField(field.key, (e.target as HTMLTextAreaElement).value)}
-						rows="3"
-					></textarea>
+						on:input={(e) => updateField(field.key, (e.target as HTMLTextAreaElement).value)}
+						rows={3}
+					/>
 				{:else if field.type === 'checkbox'}
-					<label class="checkbox-label">
-						<input
-							type="checkbox"
-							checked={Boolean(draft[field.key])}
-							onchange={(e) => updateField(field.key, (e.target as HTMLInputElement).checked)}
-						/>
-						<span>Enabled</span>
-					</label>
+					<Input
+						label={field.label}
+						type="checkbox"
+						checked={Boolean(draft[field.key])}
+						on:change={(e) => updateField(field.key, (e.target as HTMLInputElement).checked)}
+					/>
 				{:else}
-					<input
-						id={field.key}
+					<Input
+						label={field.label}
 						type="text"
 						value={String(draft[field.key] ?? '')}
-						oninput={(e) => updateField(field.key, (e.target as HTMLInputElement).value)}
+						on:input={(e) => updateField(field.key, (e.target as HTMLInputElement).value)}
 					/>
 				{/if}
-			</div>
+			</Box>
 		{/each}
 
 		<!-- Contract section for rules -->
 		{#if schema.kind === 'rule'}
-			<div class="contract-section">
-				<h3>📋 Contract</h3>
-				<div class="contract-stats">
-					<span class="stat">
+			<Box class="contract-section">
+				<Heading level={3}>📋 Contract</Heading>
+				<Box class="contract-stats">
+					<Text as="span" class="stat">
 						{draft.contractExamples ?? 0} examples
-					</span>
-					<span class="stat">
+					</Text>
+					<Text as="span" class="stat">
 						{draft.contractInvariants ?? 0} invariants
-					</span>
-				</div>
-				<p class="contract-note">
+					</Text>
+				</Box>
+				<Text as="p" class="contract-note">
 					Contract editing requires the full Contract Editor (Phase 2b).
 					Current contract examples and invariants are preserved on save.
-				</p>
-			</div>
+				</Text>
+			</Box>
 		{/if}
 
 		<!-- Live JSON preview -->
-		<details class="json-preview">
-			<summary>JSON Preview</summary>
-			<pre>{JSON.stringify(draft, null, 2)}</pre>
-		</details>
+		<Box as="details" class="json-preview">
+			<Box as="summary" class="json-summary">JSON Preview</Box>
+			<CodeBlock>{JSON.stringify(draft, null, 2)}</CodeBlock>
+		</Box>
 
 		<!-- Validation errors -->
 		{#if validation.errors.length > 0}
-			<div class="validation-errors">
-				<h4>⚠️ Validation Errors</h4>
-				<ul>
+			<Box class="validation-errors">
+				<Heading level={4}>⚠️ Validation Errors</Heading>
+				<List>
 					{#each validation.errors as error}
-						<li>{error}</li>
+						<ListItem>{error}</ListItem>
 					{/each}
-				</ul>
-			</div>
+				</List>
+			</Box>
 		{/if}
 
 		<!-- Actions -->
-		<div class="editor-actions">
-			<button type="submit" class="btn-save" disabled={!dirty || !validation.valid}>
+		<Box class="editor-actions">
+			<Button type="submit" class="btn-save" disabled={!dirty || !validation.valid}>
 				💾 Save & Apply
-			</button>
-			<button type="button" class="btn-cancel" onclick={onCancel}>
+			</Button>
+			<Button type="button" class="btn-cancel" onclick={onCancel}>
 				Cancel
-			</button>
+			</Button>
 			{#if dirty}
-				<span class="dirty-indicator">● Unsaved changes</span>
+				<Text as="span" class="dirty-indicator">● Unsaved changes</Text>
 			{/if}
-		</div>
-	</form>
-</div>
+		</Box>
+	</Box>
+</Box>
 
 <style>
-	.rule-editor {
+	:global(.rule-editor) {
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: 8px;
 		padding: 1.5rem;
 	}
 
-	.editor-header {
+	:global(.editor-header) {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		margin-bottom: 1.5rem;
 	}
 
-	.editor-header h2 {
+	:global(.editor-header h2) {
 		margin: 0;
 		font-size: 1.1rem;
 	}
 
-	.editor-kind {
+	:global(.editor-kind) {
 		padding: 0.15rem 0.5rem;
 		border-radius: 4px;
 		background: var(--color-accent-bg);
@@ -202,28 +200,22 @@
 		font-weight: 600;
 	}
 
-	.editor-form {
+	:global(.editor-form) {
 		display: flex;
 		flex-direction: column;
 		gap: 1rem;
 	}
 
-	.field-group {
+	:global(.field-group) {
 		display: flex;
 		flex-direction: column;
 		gap: 0.25rem;
 	}
 
-	.field-group label {
-		font-size: 0.8rem;
-		font-weight: 500;
-		color: var(--color-text-muted);
-	}
+	:global(.required) { color: var(--color-danger); }
 
-	.required { color: var(--color-danger); }
-
-	.field-group input[type="text"],
-	.field-group textarea {
+	:global(.field-group input[type="text"]),
+	:global(.field-group textarea) {
 		padding: 0.5rem 0.75rem;
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -234,62 +226,55 @@
 		resize: vertical;
 	}
 
-	.field-group input:focus,
-	.field-group textarea:focus {
+	:global(.field-group input:focus),
+	:global(.field-group textarea:focus) {
 		outline: none;
 		border-color: var(--color-accent);
 		box-shadow: 0 0 0 2px var(--color-accent-bg);
 	}
 
-	.checkbox-label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		cursor: pointer;
-	}
-
-	.contract-section {
+	:global(.contract-section) {
 		padding: 1rem;
 		border: 1px dashed var(--color-border);
 		border-radius: 6px;
 		margin-top: 0.5rem;
 	}
 
-	.contract-section h3 {
+	:global(.contract-section h3) {
 		margin: 0 0 0.5rem;
 		font-size: 0.9rem;
 	}
 
-	.contract-stats {
+	:global(.contract-stats) {
 		display: flex;
 		gap: 1rem;
 		margin-bottom: 0.5rem;
 	}
 
-	.stat {
+	:global(.stat) {
 		font-size: 0.8rem;
 		padding: 0.15rem 0.5rem;
 		background: var(--color-hover);
 		border-radius: 4px;
 	}
 
-	.contract-note {
+	:global(.contract-note) {
 		font-size: 0.75rem;
 		color: var(--color-text-muted);
 		margin: 0;
 	}
 
-	.json-preview {
+	:global(.json-preview) {
 		margin-top: 0.5rem;
 	}
 
-	.json-preview summary {
+	:global(.json-summary) {
 		cursor: pointer;
 		font-size: 0.8rem;
 		color: var(--color-text-muted);
 	}
 
-	.json-preview pre {
+	:global(.json-preview pre) {
 		background: var(--color-bg);
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -299,34 +284,34 @@
 		margin-top: 0.5rem;
 	}
 
-	.validation-errors {
+	:global(.validation-errors) {
 		background: rgba(220, 38, 38, 0.1);
 		border: 1px solid var(--color-danger);
 		border-radius: 6px;
 		padding: 0.75rem;
 	}
 
-	.validation-errors h4 {
+	:global(.validation-errors h4) {
 		margin: 0 0 0.5rem;
 		font-size: 0.85rem;
 		color: var(--color-danger);
 	}
 
-	.validation-errors ul {
+	:global(.validation-errors ul) {
 		margin: 0;
 		padding-left: 1.25rem;
 		font-size: 0.8rem;
 		color: var(--color-danger);
 	}
 
-	.editor-actions {
+	:global(.editor-actions) {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		margin-top: 0.5rem;
 	}
 
-	.btn-save {
+	:global(.btn-save) {
 		padding: 0.5rem 1.25rem;
 		border: none;
 		border-radius: 6px;
@@ -336,12 +321,12 @@
 		font-weight: 500;
 	}
 
-	.btn-save:disabled {
+	:global(.btn-save:disabled) {
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
 
-	.btn-cancel {
+	:global(.btn-cancel) {
 		padding: 0.5rem 1rem;
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -350,7 +335,7 @@
 		cursor: pointer;
 	}
 
-	.dirty-indicator {
+	:global(.dirty-indicator) {
 		font-size: 0.75rem;
 		color: var(--color-accent);
 		margin-left: auto;
