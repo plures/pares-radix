@@ -1,24 +1,46 @@
-// Onboarding completion tracking — persisted to localStorage
-import { browser } from '$app/environment';
+// Onboarding completion tracking — persisted to PluresDB
+import { getSharedGraph } from './plures-db-adapter.js';
+
+type Subscriber<T> = (value: T) => void;
+
+const ONBOARDING_KEY = 'radix-onboarding';
 
 function createOnboardingStore() {
-	const stored = browser ? localStorage.getItem('radix-onboarding') : null;
-	let completed = $state<Set<string>>(new Set(stored ? JSON.parse(stored) : []));
+	const graph = getSharedGraph();
+	const stored = graph.get(ONBOARDING_KEY);
+	let completed = new Set<string>(Array.isArray(stored) ? stored : []);
+	const subscribers = new Set<Subscriber<Set<string>>>();
 
-	$effect(() => {
-		if (browser) {
-			localStorage.setItem('radix-onboarding', JSON.stringify([...completed]));
-		}
-	});
+	function notify() {
+		for (const sub of subscribers) sub(completed);
+	}
+
+	function persist() {
+		graph.put(ONBOARDING_KEY, [...completed]);
+	}
+
+	const completedStore = {
+		subscribe(run: Subscriber<Set<string>>) {
+			run(completed);
+			subscribers.add(run);
+			return () => subscribers.delete(run);
+		},
+	};
+
+	function setCompleted(next: Set<string>) {
+		completed = next;
+		persist();
+		notify();
+	}
 
 	return {
-		get completed() { return completed; },
+		completed: completedStore,
 		isComplete(stepTitle: string) { return completed.has(stepTitle); },
 		markComplete(stepTitle: string) {
-			completed = new Set([...completed, stepTitle]);
+			setCompleted(new Set([...completed, stepTitle]));
 		},
 		get allDone() { return false; }, // overridden by consumer with step count
-		reset() { completed = new Set(); }
+		reset() { setCompleted(new Set()); },
 	};
 }
 
