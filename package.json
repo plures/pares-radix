@@ -42,7 +42,6 @@
     "eslint-plugin-plures": "workspace:*"
   },
   "dependencies": {
-    "@plures/design-dojo": "workspace:*",
     "@tauri-apps/api": "^2.10.1",
     "@plures/canvas-runtime": "workspace:*"
   }

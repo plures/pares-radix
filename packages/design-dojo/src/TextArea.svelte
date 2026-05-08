@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { TextAreaProps } from './types.js';
+	interface TextAreaProps { value?: string; placeholder?: string; disabled?: boolean; required?: boolean; rows?: number; name?: string; label?: string; error?: string; class?: string; oninput?: (e: Event) => void; onkeydown?: (e: KeyboardEvent) => void; }
 
 	let {
 		value = $bindable(''),

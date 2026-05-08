@@ -26,7 +26,7 @@
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
-    "@plures/design-dojo": "workspace:*"
+    "@plures/design-dojo": "*"
   },
   "license": "BSL-1.1",
   "scripts": {

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { LinkProps } from './types.js';
+	interface LinkProps { href: string; external?: boolean; class?: string; }
 
 	let {
 		href,

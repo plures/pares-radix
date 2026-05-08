@@ -11,9 +11,6 @@ importers:
       '@plures/canvas-runtime':
         specifier: workspace:*
         version: link:packages/canvas-runtime
-      '@plures/design-dojo':
-        specifier: workspace:*
-        version: link:packages/design-dojo
       '@tauri-apps/api':
         specifier: ^2.10.1
         version: 2.11.0
@@ -58,8 +55,8 @@ importers:
   packages/canvas-runtime:
     dependencies:
       '@plures/design-dojo':
-        specifier: workspace:*
-        version: link:../design-dojo
+        specifier: '*'
+        version: 0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -70,6 +67,9 @@ importers:
 
   packages/design-dojo:
     dependencies:
+      '@plures/design-dojo-npm':
+        specifier: npm:@plures/design-dojo@^0.12.0
+        version: '@plures/design-dojo@0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -476,6 +476,19 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@plures/design-dojo@0.12.0':
+    resolution: {integrity: sha512-yaY43sZDL5Zh/fBPkh4TsXZ5JJu8XnzmniqbgcgMFIVYp87U46cBExMC9LKJ2ghBfSpkdQus8tVhEpGt9WsH+w==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      '@opentelemetry/api': ^1.9.0
+      '@plures/praxis': ^1.4.0
+      svelte: ^5.0.0
+    peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
+      '@plures/praxis':
+        optional: true
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -1782,6 +1795,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@plures/design-dojo@0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
+    dependencies:
+      svelte: 5.55.5(@typescript-eslint/types@8.59.2)
 
   '@polka/url@1.0.0-next.29': {}
 

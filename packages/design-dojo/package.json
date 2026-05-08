@@ -1,7 +1,8 @@
 {
   "name": "@plures/design-dojo",
-  "version": "1.40.0",
-  "description": "Design system UI primitives for Plures applications",
+  "private": true,
+  "version": "0.13.0-shim",
+  "description": "Local shim — re-exports npm @plures/design-dojo + adds missing components. Remove when npm is updated to v0.13+",
   "type": "module",
   "svelte": "./src/index.ts",
   "types": "./src/index.ts",
@@ -11,6 +12,9 @@
       "types": "./src/index.ts",
       "default": "./src/index.ts"
     }
+  },
+  "dependencies": {
+    "@plures/design-dojo-npm": "npm:@plures/design-dojo@^0.12.0"
   },
   "peerDependencies": {
     "svelte": "^5.0.0"

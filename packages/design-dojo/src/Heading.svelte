@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { HeadingProps } from './types.js';
+	interface HeadingProps { level?: 1 | 2 | 3 | 4 | 5 | 6; class?: string; }
 
 	let {
 		level = 2,

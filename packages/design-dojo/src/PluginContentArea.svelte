@@ -1,6 +1,10 @@
 <script lang="ts">
-	import type { PluginContentAreaProps } from './types.js';
-	import StatusBar from './StatusBar.svelte';
+	interface StatusItem { label: string; value: string; }
+interface PluginContentAreaProps {
+  theme?: string; onThemeToggle?: () => void; onSidebarToggle?: () => void;
+  onCommandPaletteOpen?: () => void; statusItems?: StatusItem[]; children: import("svelte").Snippet;
+}
+	import { StatusBar } from '@plures/design-dojo-npm';
 
 	let {
 		theme = 'dark',

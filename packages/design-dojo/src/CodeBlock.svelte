@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import type { CodeBlockProps } from './types.js';
+	interface CodeBlockProps { code?: string; language?: string; class?: string; }
 
 	let {
 		code = '',

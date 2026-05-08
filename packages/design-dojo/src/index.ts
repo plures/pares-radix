@@ -1,54 +1,48 @@
-export { default as Dialog } from './Dialog.svelte';
-export { default as DashboardGrid } from './DashboardGrid.svelte';
-export { default as FirstRunWizard } from './FirstRunWizard.svelte';
-export { default as SettingsPanel } from './SettingsPanel.svelte';
-export { default as Button } from './Button.svelte';
-export { default as Sidebar } from './Sidebar.svelte';
-export { default as CommandPalette } from './CommandPalette.svelte';
-export { default as PluginContentArea } from './PluginContentArea.svelte';
-export { default as StatusBar } from './StatusBar.svelte';
+/**
+ * @plures/design-dojo — Local compatibility shim
+ *
+ * Re-exports everything from the npm package (@plures/design-dojo@0.12.0)
+ * and adds 6 components that haven't been published to npm yet.
+ *
+ * REMOVE THIS SHIM when npm @plures/design-dojo is updated to v0.13.0+
+ * with Heading, TextArea, Link, CodeBlock, Canvas2D, PluginContentArea.
+ */
 
-// New primitives
-export { default as Box } from './Box.svelte';
-export { default as Text } from './Text.svelte';
+// Re-export everything from npm
+export {
+  // Primitives
+  Button, Input, Select, Text, Toggle, SearchInput, MarkdownEditor,
+  // Layout
+  Box, SplitPane, StatusBar, StatusBarItem, StatusBarSpacer,
+  Tabs, Sidebar, TitleBar, ActivityBar, MenuBar, EditorTabs,
+  DashboardGrid, DashboardGridItem,
+  // Overlays
+  Tooltip, Popover, Dialog, Toast, Menu, ContextMenu, CommandPalette,
+  Wizard, ConfirmDialog,
+  // Data
+  Table, List, ListItem, TreeView,
+  // Surfaces
+  Card, GlassPanel, Pane, ChatPane,
+  // Feedback
+  ProgressBar, Badge, Callout, EmptyState, NotificationStack,
+  // Forms
+  RadioGroup, FileUpload, SettingsForm,
+  // Disclosure
+  Accordion,
+  // Icons
+  NerdFont,
+  // Security
+  PasswordCard, VaultList, MasterPasswordPrompt,
+  // App
+  FirstRunWizard, SettingsPanel,
+  // Widgets
+  StatCard,
+} from '@plures/design-dojo-npm';
+
+// Missing components — local until npm is updated
 export { default as Heading } from './Heading.svelte';
-export { default as Input } from './Input.svelte';
 export { default as TextArea } from './TextArea.svelte';
-export { default as Select } from './Select.svelte';
 export { default as Link } from './Link.svelte';
 export { default as CodeBlock } from './CodeBlock.svelte';
-export { default as List } from './List.svelte';
-export { default as ListItem } from './ListItem.svelte';
-export { default as Table } from './Table.svelte';
-
-export type {
-	DialogProps,
-	DashboardGridProps,
-	DashboardWidgetItem,
-	FirstRunWizardProps,
-	WizardStep,
-	SettingsPanelProps,
-	SettingDefinition,
-	SettingInputType,
-	ButtonProps,
-	SidebarProps,
-	SidebarNavItem,
-	CommandPaletteProps,
-	CommandItem,
-	PluginContentAreaProps,
-	StatusBarProps,
-	StatusItem,
-	// New primitive types
-	BoxProps,
-	TextProps,
-	HeadingProps,
-	InputProps,
-	TextAreaProps,
-	SelectProps,
-	SelectOption,
-	LinkProps,
-	CodeBlockProps,
-	ListProps,
-	ListItemProps,
-	TableProps,
-} from './types.js';
+export { default as Canvas2D } from './Canvas2D.svelte';
+export { default as PluginContentArea } from './PluginContentArea.svelte';
