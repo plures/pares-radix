@@ -150,7 +150,17 @@ export async function getSourceSpans(spanIds) {
  * @param {string} key
  * @param {object} data
  */
+/** @type {Array<{timestamp: string, action: string, key: string, data: object}>} */
+const chronosLog = [];
+
+/** Get the in-memory Chronos log (browser dev mode) */
+export function getChronosLog() { return chronosLog; }
+
 export async function recordChronos(action, key, data = {}) {
+  const entry = { timestamp: new Date().toISOString(), action, key, data };
+  chronosLog.push(entry);
+  if (chronosLog.length > 1000) chronosLog.shift(); // cap at 1000 entries
+  console.debug('[chronos]', action, key, JSON.stringify(data));
   if (isTauri) {
     try { await invoke('chronos_record', { action, key, data: JSON.stringify(data) }); } catch {}
   }

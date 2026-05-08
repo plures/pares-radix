@@ -16,10 +16,13 @@ export const activePlugins = derived(pluginRegistry, $plugins =>
 );
 
 /** Register a plugin — validates against RadixPlugin contract */
+import { recordChronos } from '../api.js';
+
 export function registerPlugin(plugin) {
   const { valid, errors } = validatePlugin(plugin);
   if (!valid) {
     console.error(`[radix] Plugin '${plugin.id || 'unknown'}' failed validation:`, errors);
+    recordChronos('ConstraintViolation', 'plugin:register', { pluginId: plugin.id, errors });
     return false;
   }
 
@@ -32,6 +35,8 @@ export function registerPlugin(plugin) {
     if (plugins.find(p => p.id === plugin.id)) return plugins;
     return [...plugins, plugin];
   });
+
+  recordChronos('Create', 'plugin:' + plugin.id, { name: plugin.name, version: plugin.version, hasView: !!plugin.view });
 
   // Call onActivate with context if provided
   if (plugin.onActivate) {
