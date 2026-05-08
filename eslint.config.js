@@ -60,7 +60,8 @@ export default tseslint.config(
       // design-dojo only — no raw HTML in Svelte templates
       'plures/no-raw-html': ['error', {
         allowInPackages: ['design-dojo'],
-        allowElements: ['slot'],  // Svelte slot is structural, not visual
+        allowFiles: ['design/+page'],  // design system demo page uses raw HTML intentionally
+        allowElements: ['slot'],
       }],
       // Unum/PluresDB only — no raw Svelte stores
       'plures/no-raw-stores': ['error', {
