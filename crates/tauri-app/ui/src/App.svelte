@@ -87,8 +87,8 @@
         class:focused={$focusedPane === pane.id}
         onclick={() => $focusedPane = pane.id}
       >
-        {#if plugin?.component}
-          {@const Comp = plugin.component}
+        {#if plugin?.view}
+          {@const Comp = plugin.view}
           <Comp />
         {:else}
           <Welcome />

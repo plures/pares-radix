@@ -46,12 +46,13 @@ export function governedStore(path, initialValue, getState) {
 // ── UI state (governed) ──────────────────────────────────────────────────────
 
 // Canvas panes — array of { id, pluginId } objects
-// Single pane = [{ id: '1', pluginId: 'chat' }]
-// Split = [{ id: '1', pluginId: 'chat' }, { id: '2', pluginId: 'chronicle' }]
-export const canvasPanes = persistentStore('radix/ui/canvas', [{ id: '1', pluginId: 'chat' }]);
+// Canvas state — plain writable for reliable Svelte reactivity
+// (Unum persistentStore doesn't reliably trigger Svelte subscriptions yet)
+import { writable } from 'svelte/store';
+export const canvasPanes = writable([{ id: '1', pluginId: null }]);
 
 // Which pane is focused (receives keyboard input)
-export const focusedPane = persistentStore('radix/ui/focusedPane', '1');
+export const focusedPane = writable('1');
 
 // Backward-compatible derived store: the focused pane's pluginId
 export const activeView = derived([canvasPanes, focusedPane], ([$panes, $focused]) => {
