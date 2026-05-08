@@ -117,9 +117,9 @@
     if (!dialog) return;
     if (open) {
       activeTab = 'providers';
-      loadAll().then(() => dialog.showModal()).catch(() => dialog.showModal());
+      loadAll();
     } else {
-      dialog.close();
+      // close disabled
     }
   });
 
@@ -490,7 +490,7 @@
   }
 </script>
 
-<dialog
+<div
   bind:this={dialog}
   class="settings-dialog"
   aria-label="Settings"
@@ -977,4 +977,4 @@
       <Button variant="solid" onclick={saveAll}>Save</Button>
     </footer>
   </form>
-</dialog>
+</div>

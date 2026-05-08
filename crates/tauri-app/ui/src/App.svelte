@@ -1,17 +1,53 @@
 <script>
   import '@plures/design-dojo/tokens.css';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { initBuiltinPlugins } from './lib/plugins/index.js';
   import { activePlugins, pluginRegistry, allStatusBarItems } from './lib/plugins/registry.js';
   import { activeView, canvasPanes, focusedPane, commandPaletteOpen } from './lib/store.js';
   import { recordChronos } from './lib/api.js';
+  import { componentEvent, navigationEvent, storeChanged, userAction, errorCaught, diagnosticSnapshot } from './lib/telemetry.js';
   import CommandPalette from './lib/CommandPalette.svelte';
   import Welcome from './lib/Welcome.svelte';
 
-  onMount(() => { initBuiltinPlugins(); });
+  const appStartTime = performance.now();
+  let previousView = null;
+
+  onMount(() => {
+    const bootMs = Math.round(performance.now() - appStartTime);
+    componentEvent('App', 'mount', { bootMs });
+    initBuiltinPlugins();
+    componentEvent('App', 'plugins-initialized', { count: 0 }); // updated by subscription
+
+    // Expose diagnostic snapshot on window for debugging
+    window.__radixDiag = diagnosticSnapshot;
+    window.__radixChronosLog = () => {
+      const snap = diagnosticSnapshot(100);
+      console.log(snap);
+      return snap;
+    };
+  });
+
+  onDestroy(() => {
+    componentEvent('App', 'destroy');
+  });
+
+  // Track view changes
+  $: if ($activeView !== previousView) {
+    if (previousView !== null) {
+      navigationEvent(previousView || 'welcome', $activeView || 'welcome');
+    }
+    previousView = $activeView;
+  }
+
+  // Track canvas state changes
+  $: storeChanged('canvasPanes', null, $canvasPanes.map(p => ({ id: p.id, pluginId: p.pluginId })));
 
   function handleActivityClick(pluginId, event) {
-    if (event.ctrlKey || event.metaKey) {
+    const action = event.ctrlKey || event.metaKey ? 'split' : 'switch';
+    userAction('activity-bar', 'click', { pluginId, action });
+
+    const oldPanes = [...$canvasPanes];
+    if (action === 'split') {
       const newId = String(Date.now());
       $canvasPanes = [...$canvasPanes, { id: newId, pluginId }];
       $focusedPane = newId;
@@ -20,19 +56,27 @@
         p.id === $focusedPane ? { ...p, pluginId } : p
       );
     }
-    recordChronos('Update', 'canvas', { action: event.ctrlKey || event.metaKey ? 'split' : 'switch', pluginId });
+    recordChronos('Update', 'canvas', {
+      action,
+      pluginId,
+      paneCount: $canvasPanes.length,
+      focusedPane: $focusedPane,
+      resolvedPlugin: $activePlugins.find(p => p.id === pluginId)?.name || 'NOT_FOUND',
+    });
   }
 
   function closePane(paneId) {
     if ($canvasPanes.length <= 1) return;
+    userAction('pane', 'close', { paneId });
     $canvasPanes = $canvasPanes.filter(p => p.id !== paneId);
     if ($focusedPane === paneId) {
       $focusedPane = $canvasPanes[0].id;
     }
-    recordChronos('Update', 'canvas', { action: 'closePane', paneId });
+    recordChronos('Update', 'canvas', { action: 'closePane', paneId, remaining: $canvasPanes.length });
   }
 
   function switchToPlugin(pluginId) {
+    userAction('keyboard', 'shortcut', { pluginId });
     $canvasPanes = $canvasPanes.map(p =>
       p.id === $focusedPane ? { ...p, pluginId } : p
     );
@@ -42,6 +86,7 @@
   function handleKeydown(e) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
       e.preventDefault();
+      userAction('keyboard', 'command-palette-toggle');
       $commandPaletteOpen = !$commandPaletteOpen;
     }
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === '1') {

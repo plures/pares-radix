@@ -3,9 +3,10 @@
   Wired to the real Rust agent backend via Tauri commands with mock fallback.
 -->
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { ChatView, ChatInput } from '@plures/design-dojo';
   import { sendMessage, getConversationHistory, listenEvent, recordChronos } from './api.js';
+  import { componentEvent, errorCaught } from './telemetry.js';
 
   /** @type {any.ChatViewMessage[]} */
   let messages = $state([]);
@@ -18,18 +19,24 @@
   }
 
   onMount(async () => {
-    const history = await getConversationHistory();
-    messages = history.map((m, i) => ({
-      id: `hist-${i}`,
-      author: m.role === 'user' ? 'You' : 'Agent',
-      content: m.content,
-      timestamp: m.time ? new Date(m.time) : new Date(),
-      type: m.role === 'user' ? 'user' : 'agent',
-    }));
+    componentEvent('Chat', 'mount');
+    try {
+      const history = await getConversationHistory();
+      messages = history.map((m, i) => ({
+        id: `hist-${i}`,
+        author: m.role === 'user' ? 'You' : 'Agent',
+        content: m.content,
+        timestamp: m.time ? new Date(m.time) : new Date(),
+        type: m.role === 'user' ? 'user' : 'agent',
+      }));
+      componentEvent('Chat', 'history-loaded', { count: messages.length });
+    } catch (e) {
+      errorCaught('Chat:mount', e);
+    }
 
     listenEvent('chat-response', (payload) => {
       const { content } = payload;
-      // If we have a streaming placeholder, replace it
+      recordChronos('MessageReceived', 'chat', { contentLength: content?.length || 0 });
       const last = messages[messages.length - 1];
       if (last && last.type === 'agent' && last.streaming) {
         messages[messages.length - 1] = { ...last, content, streaming: false };
@@ -45,6 +52,10 @@
       }
       loading = false;
     });
+  });
+
+  onDestroy(() => {
+    componentEvent('Chat', 'destroy', { messageCount: messages.length });
   });
 
   /**
@@ -63,7 +74,7 @@
     messages = [...messages, userMsg];
     loading = true;
 
-    recordChronos('MessageSent', 'chat', { length: value.length });
+    recordChronos('MessageSent', 'chat', { length: value.length, messageId: userMsg.id });
 
     // Add streaming placeholder
     const streamId = nextId();
@@ -77,7 +88,10 @@
     }];
 
     try {
+      const start = performance.now();
       const response = await sendMessage(value);
+      const durationMs = Math.round(performance.now() - start);
+      recordChronos('ResponseReceived', 'chat', { durationMs, responseLength: response?.length || 0 });
       // If listenEvent already handled it, skip
       const last = messages[messages.length - 1];
       if (last && last.id === streamId && last.streaming) {
@@ -85,6 +99,7 @@
         messages = messages;
       }
     } catch (e) {
+      errorCaught('Chat:send', e);
       const last = messages[messages.length - 1];
       if (last && last.id === streamId) {
         messages[messages.length - 1] = { ...last, content: `Error: ${e.message}`, streaming: false, type: 'system' };
