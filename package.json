@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
-    "@plures/canvas-runtime": "workspace:*"
+    "@plures/canvas-runtime": "workspace:*",
+    "@plures/design-dojo": "workspace:*"
   }
 }

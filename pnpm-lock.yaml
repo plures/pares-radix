@@ -11,6 +11,9 @@ importers:
       '@plures/canvas-runtime':
         specifier: workspace:*
         version: link:packages/canvas-runtime
+      '@plures/design-dojo':
+        specifier: workspace:*
+        version: link:packages/design-dojo
       '@tauri-apps/api':
         specifier: ^2.10.1
         version: 2.11.0
@@ -56,7 +59,7 @@ importers:
     dependencies:
       '@plures/design-dojo':
         specifier: '*'
-        version: 0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
+        version: 0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -68,8 +71,8 @@ importers:
   packages/design-dojo:
     dependencies:
       '@plures/design-dojo-npm':
-        specifier: npm:@plures/design-dojo@^0.12.0
-        version: '@plures/design-dojo@0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
+        specifier: npm:@plures/design-dojo@^0.14.0
+        version: '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -477,8 +480,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@plures/design-dojo@0.12.0':
-    resolution: {integrity: sha512-yaY43sZDL5Zh/fBPkh4TsXZ5JJu8XnzmniqbgcgMFIVYp87U46cBExMC9LKJ2ghBfSpkdQus8tVhEpGt9WsH+w==}
+  '@plures/design-dojo@0.14.0':
+    resolution: {integrity: sha512-RCa2bzLyc6+GOoIIh51X8hlHtKcSvBKc6OqM11m6RPjan0JHHSuv0lUtb613I1TdftHtdciw1FZ845nn1PT4Og==}
     engines: {node: '>=24'}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
@@ -1796,7 +1799,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@plures/design-dojo@0.12.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
+  '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
     dependencies:
       svelte: 5.55.5(@typescript-eslint/types@8.59.2)
 
