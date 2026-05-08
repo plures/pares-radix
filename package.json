@@ -1,7 +1,7 @@
 {
   "name": "@plures/pares-radix",
   "version": "1.40.0",
-  "description": "Praxis base application — plugin-driven platform with inference engine, UX contracts, and LLM integration",
+  "description": "Praxis base application \u2014 plugin-driven platform with inference engine, UX contracts, and LLM integration",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -43,6 +43,7 @@
   },
   "dependencies": {
     "@plures/design-dojo": "workspace:*",
-    "@tauri-apps/api": "^2.10.1"
+    "@tauri-apps/api": "^2.10.1",
+    "@plures/canvas-runtime": "workspace:*"
   }
 }

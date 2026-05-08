@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@plures/canvas-runtime':
+        specifier: workspace:*
+        version: link:packages/canvas-runtime
       '@plures/design-dojo':
         specifier: workspace:*
         version: link:packages/design-dojo
