@@ -7,7 +7,7 @@
   import { Pane } from '@plures/design-dojo/surfaces';
   import { EmptyState } from '@plures/design-dojo';
 
-  let { open = $bindable(false) } = $props();
+  let { open = $bindable(true) } = $props();
 
   /**
    * @typedef {{ name: string, eventType: string, priority: number, enabled: boolean, body: string }} ProcRecord
