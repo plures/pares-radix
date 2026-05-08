@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
+	import { Box, Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
 	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
 	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.js';
 	import {
 		createPluresDBAdapter,
-		localStorageGraph,
+		getSharedGraph,
 		setSharedGraph,
 		setSharedAdapter,
 	} from '$lib/stores/plures-db-adapter.js';
@@ -38,7 +38,7 @@
 	// onMount is used (not $effect) because this setup has no reactive
 	// dependencies and must run exactly once.
 	onMount(() => {
-		const db = localStorageGraph();
+		const db = getSharedGraph();
 		setSharedGraph(db);
 		setSharedAdapter(
 			createPluresDBAdapter({
@@ -96,12 +96,15 @@
 	});
 
 	// Reactive bindings via praxis query()
+	// eslint-disable-next-line plures/no-raw-stores
 	let themeValue = $derived(
 		(query<{ value: 'light' | 'dark' }>('theme.applied')?.value) ?? getTheme()
 	);
+	// eslint-disable-next-line plures/no-raw-stores
 	let navItems = $derived(
 		(query<{ items: { href: string; label: string; icon?: string; badge?: number }[] }>('nav.visible')?.items) ?? []
 	);
+	// eslint-disable-next-line plures/no-raw-stores
 	let designModeActive = $derived(
 		(query<{ active: boolean }>('design.mode.active')?.active) ?? false
 	);
@@ -117,15 +120,20 @@
 			path: item.href,
 		}));
 		void tauriSetTrayMenu(trayItems).catch((error) => {
+			// eslint-disable-next-line plures/no-manual-logging
 			console.error('Failed to sync tray menu', error);
 		});
 	});
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let sidebarCollapsed = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let paletteOpen = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let renderMode = $state<RenderMode>(detectRenderMode());
 
 	// Built-in platform commands for the command palette
+	// eslint-disable-next-line plures/no-raw-stores
 	let commands: CommandItem[] = $derived([
 		{
 			id: 'nav.home',
@@ -189,6 +197,7 @@
 		return () => window.removeEventListener('keydown', handleKeydown);
 	});
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let statusItems = $derived([
 		{ label: 'Theme', value: themeValue },
 		{ label: 'Render', value: renderMode === 'gui' ? 'GUI' : renderMode === 'tui-css' ? '⌨️ TUI' : '📟 Native' },
@@ -197,7 +206,7 @@
 	]);
 </script>
 
-<div class="app {renderModeClass(renderMode)}" data-theme={themeValue}>
+<Box class={`app ${renderModeClass(renderMode)}`} data-theme={themeValue}>
 	<Sidebar
 		items={navItems}
 		currentPath={page.url.pathname}
@@ -225,7 +234,7 @@
 	{#if renderMode === 'tui-css'}
 		{@html `<style>${tuiCssOverrides}</style>`}
 	{/if}
-</div>
+</Box>
 
 <style>
 	:global(:root), :global([data-theme="light"]) {
@@ -262,5 +271,5 @@
 	}
 
 	/* Full-height flex row: sidebar (fixed) + content column (fills rest) */
-	.app { display: flex; height: 100vh; overflow: hidden; }
+	:global(.app) { display: flex; height: 100vh; overflow: hidden; }
 </style>

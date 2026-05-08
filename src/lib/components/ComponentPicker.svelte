@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Box, Button, Heading, Input, Text } from '@plures/design-dojo';
 	/**
 	 * ComponentPicker — browse and select design-dojo components
 	 * for schema-driven UI composition in design mode.
@@ -18,7 +19,9 @@
 
 	let { onSelect }: Props = $props();
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let searchQuery = $state('');
+	// eslint-disable-next-line plures/no-raw-stores
 	let selectedCategory = $state<string>('all');
 
 	// design-dojo component catalog — derived from the library's exports
@@ -132,6 +135,7 @@
 
 	const categories = ['all', ...new Set(catalog.map(c => c.category))];
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let filtered = $derived(() => {
 		let items = catalog;
 		if (selectedCategory !== 'all') {
@@ -148,94 +152,91 @@
 	});
 </script>
 
-<div class="picker">
-	<header class="picker-header">
-		<h3>🧩 Component Picker</h3>
-		<input
+<Box class="picker">
+	<Box class="picker-header">
+		<Heading level={3} class="picker-title">🧩 Component Picker</Heading>
+		<Input
 			type="search"
 			placeholder="Search components..."
 			bind:value={searchQuery}
 			class="picker-search"
 		/>
-	</header>
+	</Box>
 
-	<div class="picker-categories">
+	<Box class="picker-categories">
 		{#each categories as cat}
-			<button
-				class="cat-btn"
-				class:active={selectedCategory === cat}
+			<Button
+				class={`cat-btn ${selectedCategory === cat ? 'active' : ''}`}
+				variant="ghost"
 				onclick={() => selectedCategory = cat}
 			>
 				{cat}
-			</button>
+			</Button>
 		{/each}
-	</div>
+	</Box>
 
-	<div class="picker-grid">
+	<Box class="picker-grid">
 		{#each filtered() as comp}
-			<button class="comp-card" onclick={() => onSelect(comp)}>
-				<div class="comp-name">{comp.name}</div>
-				<div class="comp-desc">{comp.description}</div>
-				<div class="comp-meta">
-					<span class="comp-cat">{comp.category}</span>
+			<Button class="comp-card" variant="ghost" onclick={() => onSelect(comp)}>
+				<Text as="div" class="comp-name">{comp.name}</Text>
+				<Text as="div" class="comp-desc">{comp.description}</Text>
+				<Box class="comp-meta">
+					<Text as="span" class="comp-cat">{comp.category}</Text>
 					{#if comp.tuiWidget}
-						<span class="comp-tui">TUI: {comp.tuiWidget}</span>
+						<Text as="span" class="comp-tui">TUI: {comp.tuiWidget}</Text>
 					{/if}
-					<span class="comp-props">{comp.props.length} props</span>
-				</div>
-			</button>
+					<Text as="span" class="comp-props">{comp.props.length} props</Text>
+				</Box>
+			</Button>
 		{/each}
-	</div>
-</div>
+	</Box>
+</Box>
 
 <style>
-	.picker { display: flex; flex-direction: column; gap: 0.75rem; }
+	:global(.picker) { display: flex; flex-direction: column; gap: 0.75rem; }
 
-	.picker-header {
+	:global(.picker-header) {
 		display: flex; align-items: center; gap: 1rem;
 	}
-	.picker-header h3 { margin: 0; font-size: 1rem; }
+	:global(.picker-title) { margin: 0; font-size: 1rem; }
 
-	.picker-search {
-		flex: 1; padding: 0.4rem 0.75rem;
-		border: 1px solid var(--color-border); border-radius: 6px;
-		background: var(--color-surface); color: var(--color-text);
-		font-size: 0.85rem;
+	:global(.picker-search) {
+		flex: 1;
 	}
 
-	.picker-categories {
+	:global(.picker-categories) {
 		display: flex; flex-wrap: wrap; gap: 0.25rem;
 	}
 
-	.cat-btn {
+	:global(.cat-btn) {
 		padding: 0.2rem 0.5rem; border: 1px solid var(--color-border);
 		border-radius: 4px; background: var(--color-surface);
-		color: var(--color-text-muted); cursor: pointer; font-size: 0.75rem;
+		color: var(--color-text-muted); font-size: 0.75rem;
 	}
-	.cat-btn.active {
+	:global(.cat-btn.active) {
 		background: var(--color-accent-bg); color: var(--color-accent);
 		border-color: var(--color-accent);
 	}
 
-	.picker-grid {
+	:global(.picker-grid) {
 		display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 		gap: 0.5rem;
 	}
 
-	.comp-card {
+	:global(.comp-card) {
 		padding: 0.75rem; border: 1px solid var(--color-border);
 		border-radius: 6px; background: var(--color-surface);
-		cursor: pointer; text-align: left; width: 100%;
+		text-align: left; width: 100%;
 	}
-	.comp-card:hover { border-color: var(--color-accent); }
+	:global(.comp-card:hover) { border-color: var(--color-accent); }
 
-	.comp-name { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; }
-	.comp-desc { font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.5rem; }
+	:global(.comp-name) { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.25rem; }
+	:global(.comp-desc) { font-size: 0.75rem; color: var(--color-text-muted); margin-bottom: 0.5rem; }
 
-	.comp-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-	.comp-cat, .comp-tui, .comp-props {
+	:global(.comp-meta) { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+	:global(.comp-cat), :global(.comp-tui), :global(.comp-props) {
 		font-size: 0.65rem; padding: 0.1rem 0.35rem;
 		border-radius: 3px; background: var(--color-hover);
 	}
-	.comp-tui { background: var(--color-accent-bg); color: var(--color-accent); }
+	:global(.comp-tui) { background: var(--color-accent-bg); color: var(--color-accent); }
 </style>

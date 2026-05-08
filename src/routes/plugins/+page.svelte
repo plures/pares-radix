@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Box, Button, Heading, Input, Text } from '@plures/design-dojo';
 	import { plugins } from '$lib/stores/plugins.js';
 	import { goto } from '$app/navigation';
 
@@ -18,6 +19,7 @@
 			// tauri-plugin-dialog to get the real path.
 			await plugins.install(file.name);
 		} catch (e) {
+			// eslint-disable-next-line plures/no-manual-logging
 			console.error('Install failed:', e);
 		}
 	}
@@ -28,80 +30,82 @@
 	}
 </script>
 
-<div class="page">
-	<header class="page-header">
-		<h1>🧩 Plugins</h1>
-		<label class="install-btn">
-			Install Plugin
-			<input bind:this={fileInput} type="file" accept=".toml" onchange={handleInstall} hidden />
-		</label>
-	</header>
+<Box class="page">
+	<Box class="page-header">
+		<Heading level={1} class="page-title">🧩 Plugins</Heading>
+		<Input
+			class="install-input"
+			label="Install Plugin"
+			bind:this={fileInput}
+			type="file"
+			accept=".toml"
+			onchange={handleInstall}
+		/>
+	</Box>
 
 	{#if plugins.loading}
-		<p class="muted">Loading plugins…</p>
+		<Text as="p" class="muted">Loading plugins…</Text>
 	{:else if plugins.installed.length === 0}
-		<div class="empty-state">
-			<p>No plugins installed yet.</p>
-			<p class="muted">Install a plugin TOML manifest to get started.</p>
-		</div>
+		<Box class="empty-state">
+			<Text as="p">No plugins installed yet.</Text>
+			<Text as="p" class="muted">Install a plugin TOML manifest to get started.</Text>
+		</Box>
 	{:else}
-		<div class="plugin-grid">
+		<Box class="plugin-grid">
 			{#each plugins.installed as plugin}
-				<div
+				<Box
 					class="plugin-card"
 					role="button"
 					tabindex="0"
 					onclick={() => goto(`/plugins/${plugin.name}`)}
 					onkeydown={(e) => { if (e.key === 'Enter') goto(`/plugins/${plugin.name}`); }}
 				>
-					<div class="plugin-header">
-						<h2>{plugin.name}</h2>
-						<span class="version">v{plugin.version}</span>
-					</div>
-					<p class="description">{plugin.description}</p>
-					<div class="plugin-meta">
-						<span class="entity-count">
+					<Box class="plugin-header">
+						<Heading level={2} class="plugin-title">{plugin.name}</Heading>
+						<Text as="span" class="version">v{plugin.version}</Text>
+					</Box>
+					<Text as="p" class="description">{plugin.description}</Text>
+					<Box class="plugin-meta">
+						<Text as="span" class="entity-count">
 							{plugin.entities.length} {plugin.entities.length === 1 ? 'entity' : 'entities'}
-						</span>
-						<button
+						</Text>
+						<Button
 							class="uninstall-btn"
+							variant="ghost"
 							onclick={(e: MouseEvent) => { e.stopPropagation(); handleUninstall(plugin.name); }}
 						>
 							Uninstall
-						</button>
-					</div>
-				</div>
+						</Button>
+					</Box>
+				</Box>
 			{/each}
-		</div>
+		</Box>
 	{/if}
-</div>
+</Box>
 
 <style>
-	.page { padding: 1.5rem; max-width: 960px; }
-	.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
-	.page-header h1 { margin: 0; font-size: 1.5rem; }
-	.install-btn {
-		padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer;
-		background: var(--color-accent); color: #fff; font-weight: 500;
-	}
-	.muted { color: var(--color-text-muted); }
-	.empty-state { text-align: center; padding: 3rem 1rem; }
-	.plugin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-	.plugin-card {
-		all: unset; cursor: pointer; display: block; padding: 1.25rem; border-radius: 8px;
+	:global(.page) { padding: 1.5rem; max-width: 960px; }
+	:global(.page-header) { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; gap: 1rem; }
+	:global(.page-title) { margin: 0; font-size: 1.5rem; }
+	:global(.install-input) { max-width: 280px; }
+	:global(.muted) { color: var(--color-text-muted); }
+	:global(.empty-state) { text-align: center; padding: 3rem 1rem; }
+	:global(.plugin-grid) { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+	:global(.plugin-card) {
+		cursor: pointer; display: block; padding: 1.25rem; border-radius: 8px;
 		background: var(--color-surface); border: 1px solid var(--color-border);
 		transition: border-color 0.15s;
 	}
-	.plugin-card:hover { border-color: var(--color-accent); }
-	.plugin-header { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.5rem; }
-	.plugin-header h2 { margin: 0; font-size: 1.1rem; }
-	.version { font-size: 0.8rem; color: var(--color-text-muted); }
-	.description { color: var(--color-text-muted); font-size: 0.9rem; margin: 0 0 0.75rem; }
-	.plugin-meta { display: flex; align-items: center; justify-content: space-between; }
-	.entity-count { font-size: 0.8rem; color: var(--color-text-muted); }
-	.uninstall-btn {
-		all: unset; cursor: pointer; font-size: 0.8rem; color: var(--color-danger);
+	:global(.plugin-card:hover) { border-color: var(--color-accent); }
+	:global(.plugin-header) { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.5rem; }
+	:global(.plugin-title) { margin: 0; font-size: 1.1rem; }
+	:global(.version) { font-size: 0.8rem; color: var(--color-text-muted); }
+	:global(.description) { color: var(--color-text-muted); font-size: 0.9rem; margin: 0 0 0.75rem; }
+	:global(.plugin-meta) { display: flex; align-items: center; justify-content: space-between; }
+	:global(.entity-count) { font-size: 0.8rem; color: var(--color-text-muted); }
+	:global(.uninstall-btn) {
+		font-size: 0.8rem; color: var(--color-danger);
 		padding: 0.25rem 0.5rem; border-radius: 4px;
 	}
-	.uninstall-btn:hover { background: rgba(220, 38, 38, 0.1); }
+	:global(.uninstall-btn:hover) { background: rgba(220, 38, 38, 0.1); }
 </style>

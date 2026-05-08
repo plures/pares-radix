@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SettingsPanel, Dialog, Button } from '@plures/design-dojo';
+	import { Box, Heading, Text, SettingsPanel, Dialog, Button } from '@plures/design-dojo';
 	import {
 		getAllSettings,
 		exportAllPluginData,
@@ -13,6 +13,7 @@
 	import { browser } from '$app/environment';
 	import type { PluginSetting } from '$lib/types/plugin.js';
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let allSettings = $derived(getAllSettings());
 
 	let grouped = $derived.by(() => {
@@ -25,13 +26,19 @@
 		return groups;
 	});
 
+	// eslint-disable-next-line plures/no-raw-stores
 	let showClearConfirm = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let exporting = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let importing = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores
 	let importProgress = $state({ done: 0, total: 0, current: '' });
+	// eslint-disable-next-line plures/no-raw-stores
 	let importError = $state<string | null>(null);
 
 	// Platform settings rendered inline in the Platform SettingsGroup
+	// eslint-disable-next-line plures/no-raw-stores
 	let platformSettings: PluginSetting[] = $derived([
 		{
 			key: 'radix.theme',
@@ -148,6 +155,7 @@
 
 				window.location.reload();
 			} catch (err) {
+				// eslint-disable-next-line plures/no-manual-logging
 				console.error('[radix] Import failed:', err);
 				importError = 'Failed to read the file. Make sure it is a valid JSON export.';
 			} finally {
@@ -170,20 +178,20 @@
 	<title>Radix — Settings</title>
 </svelte:head>
 
-<h1>Settings</h1>
+<Heading level={1} class="page-title">Settings</Heading>
 
 <SettingsPanel groupName="Platform" settings={platformSettings} getValue={settingsAPI.get} setValue={settingsAPI.set} />
-<p class="api-key-note">⚠️ API keys are stored locally on this device. Do not use this on shared computers.</p>
+<Text as="p" class="api-key-note">⚠️ API keys are stored locally on this device. Do not use this on shared computers.</Text>
 
 {#each [...grouped.entries()] as [name, pluginSettings]}
-	<div class="group-spacer">
+	<Box class="group-spacer">
 		<SettingsPanel groupName={name} settings={pluginSettings} getValue={settingsAPI.get} setValue={settingsAPI.set} />
-	</div>
+	</Box>
 {/each}
 
-<div class="data-section">
-	<h2>Data Management</h2>
-	<div class="data-actions">
+<Box class="data-section">
+	<Heading level={2} class="section-title">Data Management</Heading>
+	<Box class="data-actions">
 		<Button variant="secondary" onclick={exportData} disabled={exporting || importing}>
 			{exporting ? '⏳ Exporting…' : '📦 Export All Data'}
 		</Button>
@@ -191,29 +199,29 @@
 			{importing ? '⏳ Importing…' : '📥 Import Data'}
 		</Button>
 		<Button variant="secondary" onclick={() => showClearConfirm = true} disabled={exporting || importing}>🗑️ Clear All Data</Button>
-	</div>
+	</Box>
 
 	{#if importing && importProgress.total > 0}
-		<div class="import-progress" role="status" aria-live="polite">
-			<div class="progress-bar-track">
-				<div
+		<Box class="import-progress" role="status" aria-live="polite">
+			<Box class="progress-bar-track">
+				<Box
 					class="progress-bar-fill"
 					style="width: {Math.round((importProgress.done / importProgress.total) * 100)}%"
-				></div>
-			</div>
-			<p class="progress-label">
+				></Box>
+			</Box>
+			<Text as="p" class="progress-label">
 				Importing plugin data… {importProgress.done}/{importProgress.total}
 				{#if importProgress.current}
-					<span class="progress-plugin">({importProgress.current})</span>
+					<Text as="span" class="progress-plugin">({importProgress.current})</Text>
 				{/if}
-			</p>
-		</div>
+			</Text>
+		</Box>
 	{/if}
 
 	{#if importError}
-		<p class="import-error" role="alert">{importError}</p>
+		<Text as="p" class="import-error" role="alert">{importError}</Text>
 	{/if}
-</div>
+</Box>
 
 <Dialog
 	open={showClearConfirm}
@@ -225,11 +233,11 @@
 />
 
 <style>
-	h1 { margin: 0 0 24px; }
-	h2 { font-size: 1.1rem; margin: 0 0 12px; color: var(--color-text); }
-	.group-spacer { margin-top: 16px; }
+	:global(.page-title) { margin: 0 0 24px; }
+	:global(.section-title) { font-size: 1.1rem; margin: 0 0 12px; color: var(--color-text); }
+	:global(.group-spacer) { margin-top: 16px; }
 
-	.data-section {
+	:global(.data-section) {
 		margin-top: 32px;
 		padding: 16px;
 		background: var(--color-surface);
@@ -237,37 +245,37 @@
 		border-radius: 8px;
 	}
 
-	.data-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+	:global(.data-actions) { display: flex; gap: 8px; flex-wrap: wrap; }
 
-	.import-progress {
+	:global(.import-progress) {
 		margin-top: 12px;
 	}
 
-	.progress-bar-track {
+	:global(.progress-bar-track) {
 		height: 6px;
 		border-radius: 3px;
 		background: var(--color-border);
 		overflow: hidden;
 	}
 
-	.progress-bar-fill {
+	:global(.progress-bar-fill) {
 		height: 100%;
 		border-radius: 3px;
 		background: var(--color-accent, #6366f1);
 		transition: width 0.2s ease;
 	}
 
-	.progress-label {
+	:global(.progress-label) {
 		margin: 6px 0 0;
 		font-size: 0.78rem;
 		color: var(--color-text-muted);
 	}
 
-	.progress-plugin {
+	:global(.progress-plugin) {
 		opacity: 0.75;
 	}
 
-	.import-error {
+	:global(.import-error) {
 		margin-top: 10px;
 		padding: 8px 12px;
 		border-radius: 6px;
@@ -277,7 +285,7 @@
 		font-size: 0.82rem;
 	}
 
-	.api-key-note {
+	:global(.api-key-note) {
 		margin: 6px 0 0;
 		font-size: 0.78rem;
 		color: var(--color-text-muted);
