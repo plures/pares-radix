@@ -245,6 +245,154 @@ export async function registerDesignDojo(): Promise<void> {
       { name: 'title', type: 'string', required: false, bindable: true },
     ],
   });
+
+  // ── New Primitives ────────────────────────────────────────────────────────
+
+  registerComponent('Box', {
+    component: dojo.Box as unknown as Component<any>,
+    name: 'Box',
+    category: 'layout',
+    hasChildren: true,
+    description: 'Universal layout container. Replaces div, section, article, aside, main, nav, header, footer. Use "as" prop for semantic HTML element.',
+    props: [
+      { name: 'as', type: 'string', required: false, default: 'div', description: 'HTML element to render' },
+      { name: 'padding', type: 'string', required: false, description: 'CSS padding value' },
+      { name: 'gap', type: 'string', required: false, description: 'CSS gap value' },
+      { name: 'direction', type: "'row' | 'column'", required: false, default: 'column' },
+      { name: 'align', type: 'string', required: false, description: 'CSS align-items' },
+      { name: 'justify', type: 'string', required: false, description: 'CSS justify-content' },
+      { name: 'wrap', type: 'boolean', required: false, default: false },
+      { name: 'onclick', type: '() => void', required: false },
+    ],
+  });
+
+  registerComponent('Text', {
+    component: dojo.Text as unknown as Component<any>,
+    name: 'Text',
+    category: 'display',
+    hasChildren: true,
+    description: 'Inline or block text. Replaces span, p, em, strong, small, mark. Use "as" prop for element type.',
+    props: [
+      { name: 'as', type: "'span' | 'p' | 'em' | 'strong' | 'small' | 'mark'", required: false, default: 'span' },
+      { name: 'size', type: 'string', required: false, description: 'CSS font-size' },
+      { name: 'weight', type: 'string', required: false, description: 'CSS font-weight' },
+      { name: 'color', type: 'string', required: false, description: 'CSS color' },
+      { name: 'truncate', type: 'boolean', required: false, default: false },
+    ],
+  });
+
+  registerComponent('Heading', {
+    component: dojo.Heading as unknown as Component<any>,
+    name: 'Heading',
+    category: 'display',
+    hasChildren: true,
+    description: 'Heading element (h1-h6). Use "level" prop instead of separate h1/h2/h3 elements.',
+    props: [
+      { name: 'level', type: '1 | 2 | 3 | 4 | 5 | 6', required: false, default: 2, bindable: true },
+    ],
+  });
+
+  registerComponent('Input', {
+    component: dojo.Input as unknown as Component<any>,
+    name: 'Input',
+    category: 'input',
+    hasChildren: false,
+    description: 'Text input with label and error display. Replaces input + label elements.',
+    props: [
+      { name: 'type', type: "'text' | 'number' | 'password' | 'email' | 'url' | 'search'", required: false, default: 'text' },
+      { name: 'value', type: 'string', required: false, bindable: true },
+      { name: 'placeholder', type: 'string', required: false },
+      { name: 'disabled', type: 'boolean', required: false, default: false, bindable: true },
+      { name: 'required', type: 'boolean', required: false, default: false },
+      { name: 'label', type: 'string', required: false, description: 'Label text above input' },
+      { name: 'error', type: 'string', required: false, description: 'Error message below input', bindable: true },
+      { name: 'name', type: 'string', required: false },
+    ],
+  });
+
+  registerComponent('TextArea', {
+    component: dojo.TextArea as unknown as Component<any>,
+    name: 'TextArea',
+    category: 'input',
+    hasChildren: false,
+    description: 'Multi-line text input with label and error display.',
+    props: [
+      { name: 'value', type: 'string', required: false, bindable: true },
+      { name: 'placeholder', type: 'string', required: false },
+      { name: 'rows', type: 'number', required: false, default: 4 },
+      { name: 'disabled', type: 'boolean', required: false, default: false, bindable: true },
+      { name: 'label', type: 'string', required: false },
+      { name: 'error', type: 'string', required: false, bindable: true },
+    ],
+  });
+
+  registerComponent('Select', {
+    component: dojo.Select as unknown as Component<any>,
+    name: 'Select',
+    category: 'input',
+    hasChildren: false,
+    description: 'Dropdown select with label. Options provided as array.',
+    props: [
+      { name: 'value', type: 'string', required: false, bindable: true },
+      { name: 'options', type: 'Array<{ value: string, label: string }>', required: true, bindable: true },
+      { name: 'placeholder', type: 'string', required: false },
+      { name: 'disabled', type: 'boolean', required: false, default: false, bindable: true },
+      { name: 'label', type: 'string', required: false },
+    ],
+  });
+
+  registerComponent('Link', {
+    component: dojo.Link as unknown as Component<any>,
+    name: 'Link',
+    category: 'navigation',
+    hasChildren: true,
+    description: 'Styled anchor link. Set external=true for new-tab links.',
+    props: [
+      { name: 'href', type: 'string', required: true, bindable: true },
+      { name: 'external', type: 'boolean', required: false, default: false },
+    ],
+  });
+
+  registerComponent('CodeBlock', {
+    component: dojo.CodeBlock as unknown as Component<any>,
+    name: 'CodeBlock',
+    category: 'display',
+    hasChildren: true,
+    description: 'Code display block with syntax theme. Replaces pre/code elements.',
+    props: [
+      { name: 'code', type: 'string', required: false, description: 'Code content (alternative to children)' },
+      { name: 'language', type: 'string', required: false, description: 'Language hint for syntax' },
+    ],
+  });
+
+  registerComponent('List', {
+    component: dojo.List as unknown as Component<any>,
+    name: 'List',
+    category: 'display',
+    hasChildren: true,
+    description: 'Ordered or unordered list. Wrap ListItem children.',
+    props: [
+      { name: 'ordered', type: 'boolean', required: false, default: false },
+    ],
+  });
+
+  registerComponent('ListItem', {
+    component: dojo.ListItem as unknown as Component<any>,
+    name: 'ListItem',
+    category: 'display',
+    hasChildren: true,
+    description: 'List item. Must be inside a List component.',
+    props: [],
+  });
+
+  registerComponent('Table', {
+    component: dojo.Table as unknown as Component<any>,
+    name: 'Table',
+    category: 'data',
+    hasChildren: true,
+    description: 'Styled data table with header row highlighting and hover.',
+    props: [],
+  });
 }
 
 export class ComponentRegistry {
