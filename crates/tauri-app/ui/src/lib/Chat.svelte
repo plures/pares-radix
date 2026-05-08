@@ -4,10 +4,10 @@
 -->
 <script>
   import { onMount } from 'svelte';
-  import { ChatView, ChatInput } from '@plures/design-dojo/app';
+  import { ChatView, ChatInput } from '@plures/design-dojo';
   import { sendMessage, getConversationHistory, listenEvent, recordChronos } from './api.js';
 
-  /** @type {import('@plures/design-dojo/app/ChatView.types.js').ChatViewMessage[]} */
+  /** @type {any.ChatViewMessage[]} */
   let messages = $state([]);
   let loading = $state(false);
   let msgCounter = $state(0);
