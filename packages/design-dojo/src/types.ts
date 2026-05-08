@@ -84,9 +84,19 @@ export interface DashboardGridProps {
 
 /** Props accepted by the Button component. */
 export interface ButtonProps {
-	variant?: 'primary' | 'secondary';
+	variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
 	disabled?: boolean;
 	onclick?: (e: MouseEvent) => void;
+	/** Button type */
+	type?: 'button' | 'submit' | 'reset';
+	/** Additional CSS class */
+	class?: string;
+	/** Inline style string */
+	style?: string;
+	/** Passthrough data/aria attributes */
+	[key: `data-${string}`]: string | undefined;
+	[key: `aria-${string}`]: string | undefined;
+	title?: string;
 }
 
 /** A navigation item for the Sidebar. */
@@ -185,24 +195,38 @@ export interface BoxProps {
 	wrap?: boolean;
 	/** Additional CSS class */
 	class?: string;
+	/** Inline style string */
+	style?: string;
 	/** Click handler (makes the box interactive) */
 	onclick?: (e: MouseEvent) => void;
+	/** Passthrough HTML attributes (aria-*, data-*, role, etc.) */
+	[key: `aria-${string}`]: string | undefined;
+	[key: `data-${string}`]: string | undefined;
+	role?: string;
+	tabindex?: number;
 }
 
 /** Props for Text — replaces span/p. */
 export interface TextProps {
 	/** HTML element to render (default: 'span') */
-	as?: 'span' | 'p' | 'em' | 'strong' | 'small' | 'mark';
+	as?: 'span' | 'p' | 'em' | 'strong' | 'small' | 'mark' | 'kbd' | 'code' | 'div' | 'label';
 	/** CSS font-size */
 	size?: string;
 	/** CSS font-weight */
 	weight?: string;
 	/** CSS color */
 	color?: string;
+	/** Inline style string */
+	style?: string;
 	/** Truncate with ellipsis */
 	truncate?: boolean;
 	/** Additional CSS class */
 	class?: string;
+	/** Passthrough HTML attributes */
+	[key: `aria-${string}`]: string | boolean | undefined;
+	[key: `data-${string}`]: string | undefined;
+	title?: string;
+	role?: string;
 }
 
 /** Props for Heading — replaces h1-h6. */
@@ -216,15 +240,17 @@ export interface HeadingProps {
 /** Props for Input — replaces input/label. */
 export interface InputProps {
 	/** Input type */
-	type?: 'text' | 'number' | 'password' | 'email' | 'url' | 'search' | 'tel' | 'date' | 'color';
+	type?: 'text' | 'number' | 'password' | 'email' | 'url' | 'search' | 'tel' | 'date' | 'color' | 'checkbox' | 'range' | 'file' | (string & {});
 	/** Bound value */
-	value?: string;
+	value?: string | number;
 	/** Placeholder text */
 	placeholder?: string;
 	/** Disabled state */
 	disabled?: boolean;
 	/** Required field */
 	required?: boolean;
+	/** Checked state (for checkbox) */
+	checked?: boolean;
 	/** Input name/id */
 	name?: string;
 	/** Label text (renders above input) */
@@ -237,6 +263,15 @@ export interface InputProps {
 	oninput?: (e: Event) => void;
 	/** Change event handler */
 	onchange?: (e: Event) => void;
+	/** Submit event handler */
+	onsubmit?: (e: Event) => void;
+	/** Passthrough */
+	[key: `data-${string}`]: string | undefined;
+	[key: `aria-${string}`]: string | undefined;
+	min?: number | string;
+	max?: number | string;
+	step?: number | string;
+	autocomplete?: string;
 }
 
 /** Props for TextArea — replaces textarea. */
@@ -261,6 +296,8 @@ export interface TextAreaProps {
 	class?: string;
 	/** Input handler */
 	oninput?: (e: Event) => void;
+	/** Keydown handler */
+	onkeydown?: (e: KeyboardEvent) => void;
 }
 
 /** Option for Select component. */

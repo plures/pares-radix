@@ -11,7 +11,8 @@
 		label,
 		error,
 		class: className = '',
-		oninput
+		oninput,
+		onkeydown
 	}: TextAreaProps = $props();
 </script>
 
@@ -30,6 +31,7 @@
 		{name}
 		id={name}
 		{oninput}
+		{onkeydown}
 	></textarea>
 	{#if error}
 		<span class="textarea-error">{error}</span>
