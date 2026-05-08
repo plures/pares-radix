@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Box, Button, Heading, Input, Text } from '@plures/design-dojo';
-	import { plugins } from '$lib/stores/plugins.js';
+	import { plugins } from '$lib/stores/plugins.svelte.js';
 	import { goto } from '$app/navigation';
 
 	let selectedFile: File | null = null;

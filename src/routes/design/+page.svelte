@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
+	import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import type { DesignSchema, SchemaKind } from '$lib/praxis/design.js';
 	import RuleEditor from '$lib/components/RuleEditor.svelte';
 	import { applySchemaChange, recordDecision, getDecisionLedger } from '$lib/praxis/hot-reload.js';

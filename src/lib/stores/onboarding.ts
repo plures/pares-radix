@@ -6,21 +6,37 @@ type Subscriber<T> = (value: T) => void;
 const ONBOARDING_KEY = 'radix-onboarding';
 
 function createOnboardingStore() {
-	const graph = getSharedGraph();
-	const stored = graph.get(ONBOARDING_KEY);
-	let completed = new Set<string>(Array.isArray(stored) ? stored : []);
+	// Defer graph access to avoid SSR localStorage issues
+	let completed = new Set<string>();
+	let initialized = false;
 	const subscribers = new Set<Subscriber<Set<string>>>();
+
+	function init() {
+		if (initialized) return;
+		if (typeof window === 'undefined') return;
+		initialized = true;
+		try {
+			const graph = getSharedGraph();
+			const stored = graph.get(ONBOARDING_KEY);
+			if (Array.isArray(stored)) completed = new Set(stored);
+		} catch { /* SSR — no localStorage */ }
+	}
 
 	function notify() {
 		for (const sub of subscribers) sub(completed);
 	}
 
 	function persist() {
-		graph.put(ONBOARDING_KEY, [...completed]);
+		if (typeof window === 'undefined') return;
+		try {
+			const graph = getSharedGraph();
+			graph.put(ONBOARDING_KEY, [...completed]);
+		} catch { /* SSR */ }
 	}
 
 	const completedStore = {
 		subscribe(run: Subscriber<Set<string>>) {
+			init();
 			run(completed);
 			subscribers.add(run);
 			return () => subscribers.delete(run);

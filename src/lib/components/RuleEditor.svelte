@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { query, emitFact } from '$lib/stores/praxis-svelte.js';
+	import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import type { DesignSchema } from '$lib/praxis/design.js';
 	import { Box, Heading, Text, Button, Input, TextArea, List, ListItem, CodeBlock } from '@plures/design-dojo';
 

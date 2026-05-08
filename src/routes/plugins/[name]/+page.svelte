@@ -5,7 +5,7 @@
 	import { pluginSchema as _pluginSchema } from '$lib/plugins/plugin-api.js';
 	import EntityList from '$lib/plugins/EntityList.svelte';
 	import type { PluginInfo } from '$lib/plugins/plugin-api.js';
-	import { plugins } from '$lib/stores/plugins.js';
+	import { plugins } from '$lib/stores/plugins.svelte.js';
 
 	// eslint-disable-next-line plures/no-raw-stores
 	let schema = $state<PluginInfo['entities']>([]);

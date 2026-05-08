@@ -160,20 +160,21 @@ export function createPluresDBAdapter({ db, registry }: PluresDBAdapterOptions):
  * Safe to call in SSR (all operations are guarded by typeof check).
  */
 export function localStorageGraph(): PluresDBGraph {
+	const isBrowser = typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
 	return {
 		put(key: string, value: unknown): void {
-			if (typeof localStorage === 'undefined') return;
+			if (!isBrowser) return;
 			localStorage.setItem(key, JSON.stringify(value));
 		},
 
 		get(key: string): unknown {
-			if (typeof localStorage === 'undefined') return undefined;
+			if (!isBrowser) return undefined;
 			const raw = localStorage.getItem(key);
 			return raw !== null ? JSON.parse(raw) : undefined;
 		},
 
 		keys(prefix = ''): string[] {
-			if (typeof localStorage === 'undefined') return [];
+			if (!isBrowser) return [];
 			const result: string[] = [];
 			for (let i = 0; i < localStorage.length; i++) {
 				const k = localStorage.key(i);
@@ -183,7 +184,7 @@ export function localStorageGraph(): PluresDBGraph {
 		},
 
 		delete(key: string): void {
-			if (typeof localStorage === 'undefined') return;
+			if (!isBrowser) return;
 			localStorage.removeItem(key);
 		},
 	};

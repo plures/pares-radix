@@ -4,7 +4,7 @@
 	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
-	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.js';
+	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import {
 		createPluresDBAdapter,
 		getSharedGraph,

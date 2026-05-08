@@ -5,7 +5,7 @@
  * UI components can reactively bind to domain state without imperative logic.
  *
  * Usage:
- *   import { query, emitFact } from '$lib/stores/praxis-svelte.js';
+ *   import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
  *
  *   // Read a fact reactively (returns a getter — use inside $derived or template)
  *   const themeValue = $derived(query('theme.applied'));

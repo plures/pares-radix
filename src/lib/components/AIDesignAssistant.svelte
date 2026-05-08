@@ -5,7 +5,7 @@
 	 */
 
 	import { Box, Heading, Text, Button, TextArea, CodeBlock, List, ListItem } from '@plures/design-dojo';
-	import { emitFact } from '$lib/stores/praxis-svelte.js';
+	import { emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import { generateSchema, type GenerationResult, type SchemaNode } from '$lib/praxis/llm-schema-gen.js';
 	import { applySchemaChange, recordDecision } from '$lib/praxis/hot-reload.js';
 

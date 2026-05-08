@@ -7,9 +7,19 @@ type Subscriber<T> = (value: T) => void;
 const THEME_KEY = 'radix-theme';
 
 function createPluresState<T>(key: string, fallback: T) {
-	const graph = getSharedGraph();
-	let current = (graph.get(key) as T) ?? fallback;
+	let current = fallback;
+	let initialized = false;
 	const subscribers = new Set<Subscriber<T>>();
+
+	function init() {
+		if (initialized || typeof window === 'undefined') return;
+		initialized = true;
+		try {
+			const graph = getSharedGraph();
+			const stored = graph.get(key) as T | undefined;
+			if (stored !== undefined) current = stored;
+		} catch { /* SSR */ }
+	}
 
 	function notify() {
 		for (const sub of subscribers) sub(current);
@@ -21,10 +31,13 @@ function createPluresState<T>(key: string, fallback: T) {
 		},
 		set(value: T) {
 			current = value;
-			graph.put(key, current);
+			if (typeof window !== 'undefined') {
+				try { getSharedGraph().put(key, current); } catch { /* SSR */ }
+			}
 			notify();
 		},
 		subscribe(run: Subscriber<T>) {
+			init();
 			run(current);
 			subscribers.add(run);
 			return () => subscribers.delete(run);
