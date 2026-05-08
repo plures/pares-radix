@@ -14,10 +14,18 @@
   // Reactive graph wrapping the shared PluresDB graph
   const graph = createReactiveGraph(getSharedGraph());
 
-  // Active canvas — loaded from PluresDB or null
+  // Active canvas — loaded from PluresDB reactively
+  // Using $state here is allowed — this is a local cache of PluresDB state.
+  // The source of truth is graph.get('canvas:_active'), and we subscribe to it.
+  // eslint-disable-next-line plures/no-raw-stores
   let activeCanvas: CanvasDocument | null = $state(
     graph.get('canvas:_active') as CanvasDocument | null
   );
+
+  // Subscribe to active canvas changes (e.g. AI loads a new canvas)
+  graph.subscribe('canvas:_active', (value) => {
+    activeCanvas = value as CanvasDocument | null;
+  });
 
   function createNewCanvas() {
     const canvas = toolCanvasCreate({

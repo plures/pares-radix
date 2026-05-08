@@ -68,7 +68,7 @@ export const canvasPlugin: RadixPlugin = {
   expectations: [],
   constraints: [],
 
-  async onActivate(ctx) {
+  async onActivate(_ctx) {
     // Register design-dojo components in the canvas runtime registry
     const { registerDesignDojo } = await import('@plures/canvas-runtime');
     await registerDesignDojo();
