@@ -1,61 +1,117 @@
+<!--
+  Chat plugin — Polished chat interface using design-dojo components.
+  Wired to the real Rust agent backend via Tauri commands with mock fallback.
+-->
 <script>
-  import { sendMessage as apiSendMessage, getConversationHistory, listenEvent, isTauri, recordChronos } from './api.js';
+  import { onMount } from 'svelte';
+  import { ChatView, ChatInput } from '@plures/design-dojo/app';
+  import { sendMessage, getConversationHistory, listenEvent, recordChronos } from './api.js';
 
-  /** @type {{ role: string, content: string }[]} */
+  /** @type {import('@plures/design-dojo/app/ChatView.types.js').ChatViewMessage[]} */
   let messages = $state([]);
-  let input = $state('');
   let loading = $state(false);
-  let messagesEnd;
+  let msgCounter = $state(0);
 
-  $effect(() => {
-    if (messagesEnd) messagesEnd.scrollIntoView({ behavior: 'smooth' });
-  });
-
-  async function send() {
-    const text = input.trim();
-    if (!text || loading) return;
-    input = '';
-    messages = [...messages, { role: 'user', content: text }];
-    loading = true;
-    recordChronos('ChatSend', 'chat', { length: text.length });
-    try {
-      const reply = await apiSendMessage(text);
-      messages = [...messages, { role: 'assistant', content: reply }];
-    } catch (e) {
-      messages = [...messages, { role: 'assistant', content: `Error: ${e.message}` }];
-    }
-    loading = false;
+  function nextId() {
+    msgCounter += 1;
+    return `msg-${msgCounter}`;
   }
 
-  function handleKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
+  onMount(async () => {
+    const history = await getConversationHistory();
+    messages = history.map((m, i) => ({
+      id: `hist-${i}`,
+      author: m.role === 'user' ? 'You' : 'Agent',
+      content: m.content,
+      timestamp: m.time ? new Date(m.time) : new Date(),
+      type: m.role === 'user' ? 'user' : 'agent',
+    }));
+
+    listenEvent('chat-response', (payload) => {
+      const { content } = payload;
+      // If we have a streaming placeholder, replace it
+      const last = messages[messages.length - 1];
+      if (last && last.type === 'agent' && last.streaming) {
+        messages[messages.length - 1] = { ...last, content, streaming: false };
+        messages = messages;
+      } else {
+        messages = [...messages, {
+          id: nextId(),
+          author: 'Agent',
+          content,
+          timestamp: new Date(),
+          type: 'agent',
+        }];
+      }
+      loading = false;
+    });
+  });
+
+  /**
+   * @param {string} value
+   */
+  async function handleSend(value) {
+    if (!value.trim() || loading) return;
+
+    const userMsg = {
+      id: nextId(),
+      author: 'You',
+      content: value,
+      timestamp: new Date(),
+      type: /** @type {const} */ ('user'),
+    };
+    messages = [...messages, userMsg];
+    loading = true;
+
+    recordChronos('MessageSent', 'chat', { length: value.length });
+
+    // Add streaming placeholder
+    const streamId = nextId();
+    messages = [...messages, {
+      id: streamId,
+      author: 'Agent',
+      content: '',
+      timestamp: new Date(),
+      type: /** @type {const} */ ('agent'),
+      streaming: true,
+    }];
+
+    try {
+      const response = await sendMessage(value);
+      // If listenEvent already handled it, skip
+      const last = messages[messages.length - 1];
+      if (last && last.id === streamId && last.streaming) {
+        messages[messages.length - 1] = { ...last, content: response, streaming: false };
+        messages = messages;
+      }
+    } catch (e) {
+      const last = messages[messages.length - 1];
+      if (last && last.id === streamId) {
+        messages[messages.length - 1] = { ...last, content: `Error: ${e.message}`, streaming: false, type: 'system' };
+        messages = messages;
+      }
     }
+    loading = false;
   }
 </script>
 
 <div class="chat-plugin">
-  <div class="chat-messages">
-    {#each messages as msg}
-      <div class="chat-msg" class:user={msg.role === 'user'}>
-        <p>{msg.content}</p>
-      </div>
-    {/each}
-    {#if loading}
-      <div class="chat-msg"><p class="typing">…</p></div>
-    {/if}
-    <div bind:this={messagesEnd}></div>
-  </div>
+  {#if messages.length === 0 && !loading}
+    <div class="chat-empty">
+      <span class="chat-empty__text">Start a conversation…</span>
+    </div>
+  {:else}
+    <div class="chat-plugin__messages">
+      <ChatView messages={messages} mode="bubble" showTimestamps={false} />
+    </div>
+  {/if}
 
-  <div class="chat-input-row">
-    <textarea
-      bind:value={input}
-      onkeydown={handleKeydown}
+  <div class="chat-plugin__input">
+    <ChatInput
       placeholder="Send a message…"
-      rows="1"
-    ></textarea>
-    <button onclick={send} disabled={loading || !input.trim()}>↑</button>
+      disabled={loading}
+      onsend={handleSend}
+    />
   </div>
 </div>
 
@@ -64,57 +120,29 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    background: var(--surface-0, #1e1e2e);
   }
-  .chat-messages {
+
+  .chat-plugin__messages {
     flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
   }
-  .chat-msg {
-    max-width: 80%;
-    padding: 8px 12px;
-    border-radius: 8px;
-    background: #2a2a3e;
-    color: #ccd;
-    font-size: 13px;
-    line-height: 1.5;
+
+  .chat-plugin__input {
+    flex-shrink: 0;
   }
-  .chat-msg.user {
-    align-self: flex-end;
-    background: #364a6b;
-  }
-  .typing { opacity: 0.5; }
-  .chat-input-row {
-    display: flex;
-    gap: 8px;
-    padding: 12px 16px;
-    background: #16161e;
-  }
-  .chat-input-row textarea {
+
+  .chat-empty {
     flex: 1;
-    resize: none;
-    background: #2a2a3e;
-    border: 1px solid #333;
-    border-radius: 6px;
-    padding: 8px 12px;
-    color: #ccd;
-    font-size: 13px;
-    font-family: inherit;
-    outline: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .chat-input-row textarea:focus { border-color: #569cd6; }
-  .chat-input-row button {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    border: none;
-    background: #569cd6;
-    color: #fff;
-    font-size: 16px;
-    cursor: pointer;
+
+  .chat-empty__text {
+    color: var(--color-text-muted, #666);
+    font-size: var(--text-base, 14px);
+    font-style: italic;
   }
-  .chat-input-row button:disabled { opacity: 0.3; cursor: default; }
 </style>
