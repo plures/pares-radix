@@ -240,8 +240,8 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            model: "gpt-4.1".to_string(),
-            endpoint: "https://api.enterprise.githubcopilot.com".to_string(),
+            model: "claude-opus-4.6".to_string(),
+            endpoint: "https://api.githubcopilot.com".to_string(),
             channel: "tauri".to_string(),
             system_prompt: "You are Pares Agens, a helpful desktop AI assistant.".to_string(),
             api_key: None,
@@ -264,8 +264,8 @@ impl Default for Settings {
             ],
             routing: RoutingPrefs {
                 interactive: Some(ModelRef {
-                    provider: "anthropic".to_string(),
-                    model: "claude-sonnet-4-20250514".to_string(),
+                    provider: "copilot".to_string(),
+                    model: "claude-opus-4.6".to_string(),
                 }),
                 background: None,
                 coding: None,
