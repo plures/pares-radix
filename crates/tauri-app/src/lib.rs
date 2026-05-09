@@ -19,7 +19,7 @@ use pares_agens_core::model::{
 use pares_agens_core::optimization::OptimizationSafetyGate;
 use pares_agens_core::plugins::PluginRuntime;
 use pares_agens_core::praxis::GuidanceService;
-use pares_agens_core::secrets::InMemorySecretStore;
+use pares_agens_core::secrets::{provider_api_key, InMemorySecretStore, SecretStore};
 use pares_agens_core::Event;
 use pares_agens_core::{PluresDbStateStore, StateStore};
 use pares_models::types::{ChatCompletionRequest, Role, Tool};
@@ -523,6 +523,21 @@ pub fn run() {
             // used for the default build so that no external dependencies or
             // vault unlocking are required on startup.
             let secret_store = Arc::new(InMemorySecretStore::new());
+
+            // Pre-seed Copilot provider API key from `gh auth token` if available.
+            // This lets the app work immediately without manual configuration.
+            if let Ok(output) = std::process::Command::new("gh")
+                .args(["auth", "token"])
+                .output()
+            {
+                if output.status.success() {
+                    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !token.is_empty() {
+                        let _ = secret_store.set(&provider_api_key("copilot"), &token);
+                        info!("Pre-seeded copilot provider from gh auth token");
+                    }
+                }
+            }
             let plugin_runtime = Arc::new(PluginRuntime::new());
             app.manage(AppState {
                 ipc_handle: handle,
