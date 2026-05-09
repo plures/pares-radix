@@ -121,6 +121,8 @@ export function initPraxisFacts(): void {
 	// Platform nav items (always present)
 	navItems.unshift(
 		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
+		{ href: '/chat', label: 'Chat', icon: '💬', badge: undefined },
+		{ href: '/canvas', label: 'Canvas', icon: '🎨', badge: undefined },
 	);
 	navItems.push(
 		{ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined },
