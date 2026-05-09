@@ -375,6 +375,7 @@ mod tests {
         let custom = HeartbeatConfig {
             enabled: false,
             interval_secs: 15,
+            quiet_hours_enabled: true,
             quiet_hours_start: 22,
             quiet_hours_end: 7,
             max_proactive_per_day: 4,
