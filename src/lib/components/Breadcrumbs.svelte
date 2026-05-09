@@ -32,7 +32,7 @@
 </script>
 
 <Box as="nav" class="breadcrumbs" aria-label="Breadcrumb">
-	<List ordered>
+	<List>
 		{#each autoCrumbs as crumb, i}
 			<ListItem>
 				{#if i < autoCrumbs.length - 1 && crumb.href}
@@ -52,7 +52,7 @@
 		font-size: 0.82rem;
 	}
 
-	:global(ol) {
+	:global(.breadcrumbs ul) {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -61,7 +61,7 @@
 		gap: 0;
 	}
 
-	:global(li) {
+	:global(.breadcrumbs li) {
 		display: flex;
 		align-items: center;
 	}

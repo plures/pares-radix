@@ -156,7 +156,6 @@
 	<Box class="picker-header">
 		<Heading level={3} class="picker-title">🧩 Component Picker</Heading>
 		<Input
-			type="search"
 			placeholder="Search components..."
 			bind:value={searchQuery}
 			class="picker-search"

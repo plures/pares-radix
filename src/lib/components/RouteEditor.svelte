@@ -91,12 +91,11 @@
 			{#each editRoutes as route, idx}
 				<Box class="entry-card">
 					<Box class="entry-row">
-						<Input class="field-input" label="Path" type="text" bind:value={route.path} />
-						<Input class="field-input" label="Title" type="text" bind:value={route.title} />
+						<Input class="field-input" label="Path" bind:value={route.path} />
+						<Input class="field-input" label="Title" bind:value={route.title} />
 						<Input
 							class="field-input"
 							label="Component"
-							type="text"
 							bind:value={route.component}
 							placeholder="design-dojo component"
 						/>
@@ -108,11 +107,17 @@
 							<Text as="span" class="req-label">Data Requirements:</Text>
 							{#each route.requires as req}
 								<Box class="req-row">
-									<Input class="req-input" type="text" bind:value={req.type} placeholder="data type" />
-									<Input class="req-input" type="number" bind:value={req.minCount} min="0" />
+									<Input class="req-input" bind:value={req.type} placeholder="data type" />
 									<Input
 										class="req-input"
-										type="text"
+										value={String(req.minCount)}
+										onchange={(value) => {
+											const parsed = Number(value);
+											req.minCount = Number.isFinite(parsed) ? parsed : 0;
+										}}
+									/>
+									<Input
+										class="req-input"
 										bind:value={req.emptyMessage}
 										placeholder="empty message"
 									/>
@@ -134,9 +139,9 @@
 			{#each editNav as item, idx}
 				<Box class="entry-card">
 					<Box class="entry-row">
-						<Input class="field-input" label="Icon" type="text" bind:value={item.icon} />
-						<Input class="field-input" label="Label" type="text" bind:value={item.label} />
-						<Input class="field-input" label="Href" type="text" bind:value={item.href} />
+						<Input class="field-input" label="Icon" bind:value={item.icon} />
+						<Input class="field-input" label="Label" bind:value={item.label} />
+						<Input class="field-input" label="Href" bind:value={item.href} />
 						<Button class="btn-remove" onclick={() => removeNavItem(idx)}>✕</Button>
 					</Box>
 				</Box>

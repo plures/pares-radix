@@ -18,7 +18,7 @@
 	<Box class="node-list">
 		{#each nodes as node}
 			<Box class={`node ${node.status === 'offline' ? 'offline' : ''}`}>
-				<Box as="span" class={`indicator ${node.status === 'online' ? 'online' : ''}`}></Box>
+				<Text as="span" class={`indicator ${node.status === 'online' ? 'online' : ''}`}>●</Text>
 				<Text as="span" class="name">{node.name}</Text>
 				<Text as="span" class="role">{node.role}</Text>
 				{#if node.status === 'online'}

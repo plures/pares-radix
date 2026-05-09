@@ -4,7 +4,7 @@ interface PluginContentAreaProps {
   theme?: string; onThemeToggle?: () => void; onSidebarToggle?: () => void;
   onCommandPaletteOpen?: () => void; statusItems?: StatusItem[]; children: import("svelte").Snippet;
 }
-	import { StatusBar } from '@plures/design-dojo-npm';
+	import { StatusBar, StatusBarItem } from '@plures/design-dojo-npm';
 
 	let {
 		theme = 'dark',
@@ -56,7 +56,11 @@ interface PluginContentAreaProps {
 		{@render children()}
 	</main>
 
-	<StatusBar items={statusItems} />
+	<StatusBar>
+		{#each statusItems as item}
+			<StatusBarItem label={item.label} value={item.value} />
+		{/each}
+	</StatusBar>
 </div>
 
 <style>
