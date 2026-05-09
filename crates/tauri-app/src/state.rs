@@ -240,7 +240,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            model: "claude-opus-4.6".to_string(),
+            model: std::env::var("PARES_MODEL").unwrap_or_else(|_| "claude-opus-4.6".to_string()),
             endpoint: "https://api.githubcopilot.com".to_string(),
             channel: "tauri".to_string(),
             system_prompt: "You are Pares Agens, a helpful desktop AI assistant.".to_string(),
@@ -265,7 +265,7 @@ impl Default for Settings {
             routing: RoutingPrefs {
                 interactive: Some(ModelRef {
                     provider: "copilot".to_string(),
-                    model: "claude-opus-4.6".to_string(),
+                    model: std::env::var("PARES_MODEL").unwrap_or_else(|_| "claude-opus-4.6".to_string()),
                 }),
                 background: None,
                 coding: None,

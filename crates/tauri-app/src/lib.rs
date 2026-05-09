@@ -545,6 +545,14 @@ pub fn run() {
                     info!("Pre-seeded anthropic provider from ANTHROPIC_API_KEY");
                 }
             }
+
+            // Pre-seed OpenAI API key from OPENAI_API_KEY env var.
+            if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                if !key.is_empty() {
+                    let _ = secret_store.set(&provider_api_key("openai"), &key);
+                    info!("Pre-seeded openai provider from OPENAI_API_KEY");
+                }
+            }
             let plugin_runtime = Arc::new(PluginRuntime::new());
             app.manage(AppState {
                 ipc_handle: handle,
