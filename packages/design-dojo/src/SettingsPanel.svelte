@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { Box, Text, Input, Select, Button } from '@plures/design-dojo-npm';
+	import { Box, Text, Button } from '@plures/design-dojo-npm';
+import Input from './Input.svelte';
+import Select from './Select.svelte';
 
 	type SettingInputType = 'toggle' | 'select' | 'text' | 'number' | 'password' | 'color';
 
@@ -34,7 +36,7 @@
 	}
 </script>
 
-<Box gap="12px" padding="16px" class="settings-group">
+<Box gap="12px" padding={4} class="settings-group">
 	<Text as="p" weight="600" size="0.95rem">{groupName}</Text>
 
 	{#each settings as setting}
@@ -44,7 +46,7 @@
 					<input
 						type="checkbox"
 						checked={getVal(setting.key, setting.default) === 'true'}
-						onchange={(e) => handleChange(setting.key, String((e.target as HTMLInputElement).checked), 'toggle')}
+						onchange={(e: Event) => handleChange(setting.key, String((e.target as HTMLInputElement).checked), 'toggle')}
 					/>
 					<Text size="0.85rem">{setting.label}</Text>
 				</Box>
@@ -52,15 +54,15 @@
 				<Select
 					label={setting.label}
 					options={setting.options}
-					value={getVal(setting.key, setting.default)}
-					onchange={(e) => handleChange(setting.key, (e.target as HTMLSelectElement).value, 'select')}
+					value={String(getVal(setting.key, setting.default))}
+					onchange={(e: Event) => handleChange(setting.key, (e.target as HTMLSelectElement).value, 'select')}
 				/>
 			{:else}
 				<Input
 					type={setting.type === 'password' ? 'password' : setting.type === 'number' ? 'number' : 'text'}
 					label={setting.label}
-					value={getVal(setting.key, setting.default)}
-					onchange={(e) => handleChange(setting.key, (e.target as HTMLInputElement).value, setting.type)}
+					value={String(getVal(setting.key, setting.default))}
+					onchange={(e: Event) => handleChange(setting.key, (e.target as HTMLInputElement).value, setting.type)}
 				/>
 			{/if}
 			{#if setting.description}

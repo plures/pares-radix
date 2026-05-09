@@ -38,7 +38,7 @@
 			label="Install Plugin"
 			type="file"
 			accept=".toml"
-			onchange={(e) => {
+			onchange={(e: Event) => {
 				const target = e.target as HTMLInputElement;
 				selectedFile = target.files?.[0] ?? null;
 				void handleInstall();
@@ -61,7 +61,6 @@
 					role="button"
 					tabindex={0}
 					onclick={() => goto(`/plugins/${plugin.name}`)}
-					onkeydown={(e) => { if (e.key === 'Enter') goto(`/plugins/${plugin.name}`); }}
 				>
 					<Box class="plugin-header">
 						<Heading level={2} class="plugin-title">{plugin.name}</Heading>

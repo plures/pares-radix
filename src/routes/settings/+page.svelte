@@ -204,10 +204,8 @@
 	{#if importing && importProgress.total > 0}
 		<Box class="import-progress" role="status" aria-live="polite">
 			<Box class="progress-bar-track">
-				<Box
-					class="progress-bar-fill"
-					style="width: {Math.round((importProgress.done / importProgress.total) * 100)}%"
-				></Box>
+				<!-- eslint-disable-next-line plures/no-raw-html -->
+				<div class="progress-bar-fill" style="width: {Math.round((importProgress.done / importProgress.total) * 100)}%"></div>
 			</Box>
 			<Text as="p" class="progress-label">
 				Importing plugin data… {importProgress.done}/{importProgress.total}

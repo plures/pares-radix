@@ -70,7 +70,7 @@
 	let editableFields = $derived(fields.filter((f) => !f.name.startsWith('_')));
 </script>
 
-<Box as="form" class="entity-form" onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+<Box as="form" class="entity-form" onclick={(e: MouseEvent) => { e.preventDefault(); handleSubmit(); }}>
 	<Heading level={3}>{entityId ? 'Edit' : 'Create'} {entityType}</Heading>
 
 	{#each editableFields as field}
@@ -84,7 +84,7 @@
 				<Input
 					type="checkbox"
 					checked={Boolean(values[field.name])}
-					onchange={(e) => { values[field.name] = (e.target as HTMLInputElement).checked; }}
+					onchange={(e: Event) => { values[field.name] = (e.target as HTMLInputElement).checked; }}
 				/>
 			{:else if isEnum(field.field_type)}
 				<Select
@@ -92,12 +92,12 @@
 					required={field.required}
 					placeholder="— Select —"
 					options={isEnum(field.field_type)!.map((opt) => ({ label: opt, value: opt }))}
-					onchange={(e) => { values[field.name] = (e.target as HTMLSelectElement).value; }}
+					onchange={(e: Event) => { values[field.name] = (e.target as HTMLSelectElement).value; }}
 				/>
 			{:else if field.field_type === 'Currency'}
 				<Box class="currency-input" direction="row" align="center" gap="0.25rem">
 					<Text as="span" class="prefix">$</Text>
-					<Input type="number" value={String(values[field.name] ?? '')} required={field.required} oninput={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }} />
+					<Input type="number" value={String(values[field.name] ?? '')} required={field.required} oninput={(e: Event) => { values[field.name] = (e.target as HTMLInputElement).value; }} />
 				</Box>
 			{:else}
 				<Input
@@ -105,7 +105,7 @@
 					value={String(values[field.name] ?? '')}
 					required={field.required}
 					placeholder={field.description ?? ''}
-					oninput={(e) => { values[field.name] = (e.target as HTMLInputElement).value; }}
+					oninput={(e: Event) => { values[field.name] = (e.target as HTMLInputElement).value; }}
 				/>
 			{/if}
 		</Box>
@@ -118,12 +118,12 @@
 	<Box class="form-actions" direction="row" justify="flex-end" gap="0.75rem">
 		<Button
 			variant="secondary"
-			onclick={(e) => { e.preventDefault(); onCancel(); }}
+			onclick={(e: Event) => { e.preventDefault(); onCancel(); }}
 		>Cancel</Button>
 		<Button
 			variant="primary"
 			disabled={saving}
-			onclick={(e) => { e.preventDefault(); handleSubmit(); }}
+			onclick={(e: Event) => { e.preventDefault(); handleSubmit(); }}
 		>
 			{saving ? 'Saving…' : entityId ? 'Update' : 'Create'}
 		</Button>

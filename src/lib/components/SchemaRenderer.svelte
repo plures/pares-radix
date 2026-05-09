@@ -52,7 +52,7 @@
 		role="button"
 		tabindex={0}
 		onclick={() => handleClick(schema, [])}
-		onkeydown={(e) => { if (e.key === 'Enter') handleClick(schema, []); }}
+		
 	>
 		<Text as="span" class="node-label">{schema.component}</Text>
 

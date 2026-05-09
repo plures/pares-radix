@@ -90,14 +90,14 @@
 		<Text as="span" class="editor-kind">{schema.kind}</Text>
 	</Box>
 
-	<Box as="form" class="editor-form" onsubmit={(e) => { e.preventDefault(); handleSave(); }}>
+	<Box as="form" class="editor-form" onclick={(e: MouseEvent) => { e.preventDefault(); handleSave(); }}>
 		{#each editableFields() as field}
 			<Box class="field-group">
 				{#if field.type === 'textarea'}
 					<TextArea
 						label={field.label}
 						value={String(draft[field.key] ?? '')}
-						oninput={(e) => updateField(field.key, (e.target as HTMLTextAreaElement).value)}
+						oninput={(e: Event) => updateField(field.key, (e.target as HTMLTextAreaElement).value)}
 						rows={3}
 					/>
 				{:else if field.type === 'checkbox'}
@@ -105,14 +105,14 @@
 						label={field.label}
 						type="checkbox"
 						checked={Boolean(draft[field.key])}
-						onchange={(e) => updateField(field.key, (e.target as HTMLInputElement).checked)}
+						onchange={(e: Event) => updateField(field.key, (e.target as HTMLInputElement).checked)}
 					/>
 				{:else}
 					<Input
 						label={field.label}
 						type="text"
 						value={String(draft[field.key] ?? '')}
-						oninput={(e) => updateField(field.key, (e.target as HTMLInputElement).value)}
+						oninput={(e: Event) => updateField(field.key, (e.target as HTMLInputElement).value)}
 					/>
 				{/if}
 			</Box>

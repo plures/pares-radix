@@ -228,7 +228,7 @@
 	<CommandPalette
 		bind:open={paletteOpen}
 		{commands}
-		onClose={() => (paletteOpen = false)}
+		onclose={() => (paletteOpen = false)}
 	/>
 
 	{#if renderMode === 'tui-css'}
