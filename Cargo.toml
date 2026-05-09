@@ -13,14 +13,13 @@ members = [
     "crates/praxis",
     "crates/sync",
     "crates/audit",
+    "crates/tauri-app",
     "crates/tui",
     "crates/bitnet-sys",
     "crates/bitnet",
     "crates/rector",
     "crates/omniscient",
 ]
-# tauri-app excluded — depends on private repo (svelte-ratatui) via git dep,
-# breaks nix offline builds. Build separately with `cargo build -p pares-agens-tauri`.
 
 [workspace.package]
 version = "1.40.0"
