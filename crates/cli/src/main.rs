@@ -2305,8 +2305,8 @@ enum Commands {
 
     /// Run the agent as a headless daemon with a channel adapter.
     Serve {
-        /// Telegram bot token (from BotFather).
-        #[arg(long, env = "PARES_TELEGRAM_TOKEN")]
+        /// Telegram bot token (from BotFather). Optional — omit for desktop-only mode.
+        #[arg(long, env = "PARES_TELEGRAM_TOKEN", default_value = "")]
         telegram_token: String,
 
         /// OpenAI-compatible API URL (GitHub Models or OpenAI compatible endpoint).
@@ -3139,6 +3139,34 @@ async fn main() {
                     agent.set_plugin_context(Some(schema_ctx));
                     tracing::info!("Plugin schema context injected into system prompt");
                 }
+            }
+
+            // Skip Telegram adapter when no token provided (desktop-only mode)
+            if telegram_token.is_empty() {
+                tracing::info!("No Telegram token — running in headless/desktop mode");
+
+                if !no_event_spine {
+                    let crdt = store.crdt_store();
+                    let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-agens");
+                    spine.seed_contracts();
+                    spine.register_core_procedures();
+                    tracing::info!("Event spine initialized");
+                }
+
+                if let Err(e) = systemd_notify("READY=1") {
+                    tracing::warn!("systemd notify: {e}");
+                }
+
+                let memory_monitor = spawn_memory_monitor();
+                let watchdog = spawn_systemd_watchdog();
+                tokio::signal::ctrl_c().await.ok();
+                tracing::info!("Shutdown signal received");
+                let _ = systemd_notify("STOPPING=1");
+                let hostname = current_hostname();
+                let _ = flush_pluresdb_on_shutdown(&store, &hostname, "").await;
+                memory_monitor.abort();
+                if let Some(h) = watchdog { h.abort(); }
+                return;
             }
 
             // Set up Telegram adapter
