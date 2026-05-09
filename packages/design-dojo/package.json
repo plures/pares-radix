@@ -14,7 +14,7 @@
     }
   },
   "dependencies": {
-    "@plures/design-dojo-npm": "npm:@plures/design-dojo@0.14.0"
+    "@plures/design-dojo-npm": "npm:@plures/design-dojo@^0.17.0"
   },
   "peerDependencies": {
     "svelte": "^5.0.0"

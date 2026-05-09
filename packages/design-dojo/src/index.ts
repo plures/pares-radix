@@ -40,8 +40,8 @@ export {
 } from '@plures/design-dojo-npm';
 
 // Missing components — local until npm is updated
-export { default as Sidebar } from './Sidebar.svelte';
 export { default as SettingsPanel } from './SettingsPanel.svelte';
+export { default as Sidebar } from './Sidebar.svelte';
 export { default as Heading } from './Heading.svelte';
 export { default as TextArea } from './TextArea.svelte';
 export { default as Link } from './Link.svelte';
