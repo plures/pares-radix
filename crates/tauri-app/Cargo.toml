@@ -30,7 +30,8 @@ pares-models = { path = "../models" }
 mcp-client = { path = "../mcp-client" }
 
 [dependencies.tauri-plugin-tui]
-path = "/home/kbristol/.openclaw/workspace/repos/plures/svelte-ratatui/crates/tauri-plugin-tui"
+git = "https://github.com/plures/svelte-ratatui.git"
+branch = "main"
 optional = true
 
 [features]
