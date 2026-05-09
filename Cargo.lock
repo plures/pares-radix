@@ -4682,9 +4682,11 @@ name = "pares-agens-sync"
 version = "1.40.0"
 dependencies = [
  "chrono",
+ "hostname",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tracing",
  "uuid",
 ]
 
@@ -7006,6 +7008,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "svelte-ratatui-adapter"
 version = "0.10.0"
+source = "git+https://github.com/plures/svelte-ratatui.git?branch=main#480e286ad12ba106e9826e1f769826c45bfadf1a"
 dependencies = [
  "crossterm",
  "ratatui",
@@ -7017,6 +7020,7 @@ dependencies = [
 [[package]]
 name = "svelte-ratatui-compiler"
 version = "0.10.0"
+source = "git+https://github.com/plures/svelte-ratatui.git?branch=main#480e286ad12ba106e9826e1f769826c45bfadf1a"
 dependencies = [
  "ratatui",
  "serde",
@@ -7410,6 +7414,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-tui"
 version = "0.10.0"
+source = "git+https://github.com/plures/svelte-ratatui.git?branch=main#480e286ad12ba106e9826e1f769826c45bfadf1a"
 dependencies = [
  "crossterm",
  "log",
