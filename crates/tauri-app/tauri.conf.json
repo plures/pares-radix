@@ -4,10 +4,10 @@
   "version": "1.40.0",
   "identifier": "com.plures.pares-agens",
   "build": {
-    "frontendDist": "ui/dist",
+    "frontendDist": "../../build",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "cd /home/kbristol/.openclaw/workspace/repos/plures/pares-radix/crates/tauri-app/ui && npm ci && npm run build",
-    "beforeDevCommand": "cd ui && npm run dev"
+    "beforeBuildCommand": "cd ../.. && pnpm install && pnpm run build",
+    "beforeDevCommand": "cd ../.. && pnpm run dev -- --port 5173"
   },
   "app": {
     "windows": [
