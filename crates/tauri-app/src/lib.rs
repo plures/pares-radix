@@ -525,7 +525,6 @@ pub fn run() {
             let secret_store = Arc::new(InMemorySecretStore::new());
 
             // Pre-seed Copilot provider API key from `gh auth token` if available.
-            // This lets the app work immediately without manual configuration.
             if let Ok(output) = std::process::Command::new("gh")
                 .args(["auth", "token"])
                 .output()
@@ -536,6 +535,14 @@ pub fn run() {
                         let _ = secret_store.set(&provider_api_key("copilot"), &token);
                         info!("Pre-seeded copilot provider from gh auth token");
                     }
+                }
+            }
+
+            // Pre-seed Anthropic API key from ANTHROPIC_API_KEY env var.
+            if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                if !key.is_empty() {
+                    let _ = secret_store.set(&provider_api_key("anthropic"), &key);
+                    info!("Pre-seeded anthropic provider from ANTHROPIC_API_KEY");
                 }
             }
             let plugin_runtime = Arc::new(PluginRuntime::new());

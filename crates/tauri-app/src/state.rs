@@ -248,16 +248,24 @@ impl Default for Settings {
             telegram_token: None,
             auto_start: false,
             activation_hotkey: default_activation_hotkey(),
-            providers: vec![ProviderEntry {
-                name: "copilot".to_string(),
-                base_url: "https://api.enterprise.githubcopilot.com".to_string(),
-                api_key: None,
-                models: vec!["gpt-4.1".to_string(), "claude-opus-4.6".to_string()],
-            }],
+            providers: vec![
+                ProviderEntry {
+                    name: "anthropic".to_string(),
+                    base_url: "https://api.anthropic.com/v1".to_string(),
+                    api_key: None,
+                    models: vec!["claude-sonnet-4-20250514".to_string(), "claude-opus-4-20250514".to_string()],
+                },
+                ProviderEntry {
+                    name: "copilot".to_string(),
+                    base_url: "https://api.enterprise.githubcopilot.com".to_string(),
+                    api_key: None,
+                    models: vec!["gpt-4.1".to_string(), "claude-opus-4.6".to_string()],
+                },
+            ],
             routing: RoutingPrefs {
                 interactive: Some(ModelRef {
-                    provider: "copilot".to_string(),
-                    model: "gpt-4.1".to_string(),
+                    provider: "anthropic".to_string(),
+                    model: "claude-sonnet-4-20250514".to_string(),
                 }),
                 background: None,
                 coding: None,
