@@ -14,7 +14,7 @@ export {
   Button, Input, Select, Text, Toggle, SearchInput, MarkdownEditor,
   // Layout
   Box, SplitPane, StatusBar, StatusBarItem, StatusBarSpacer,
-  Tabs, Sidebar, TitleBar, ActivityBar, MenuBar, EditorTabs,
+  Tabs, TitleBar, ActivityBar, MenuBar, EditorTabs,
   DashboardGrid, DashboardGridItem,
   // Overlays
   Tooltip, Popover, Dialog, Toast, Menu, ContextMenu, CommandPalette,
@@ -34,12 +34,14 @@ export {
   // Security
   PasswordCard, VaultList, MasterPasswordPrompt,
   // App
-  FirstRunWizard, SettingsPanel,
+  FirstRunWizard, 
   // Widgets
   StatCard,
 } from '@plures/design-dojo-npm';
 
 // Missing components — local until npm is updated
+export { default as Sidebar } from './Sidebar.svelte';
+export { default as SettingsPanel } from './SettingsPanel.svelte';
 export { default as Heading } from './Heading.svelte';
 export { default as TextArea } from './TextArea.svelte';
 export { default as Link } from './Link.svelte';

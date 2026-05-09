@@ -71,8 +71,8 @@ importers:
   packages/design-dojo:
     dependencies:
       '@plures/design-dojo-npm':
-        specifier: npm:@plures/design-dojo@^0.17.0
-        version: '@plures/design-dojo@0.17.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
+        specifier: npm:@plures/design-dojo@0.14.0
+        version: '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -479,6 +479,19 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@plures/design-dojo@0.14.0':
+    resolution: {integrity: sha512-RCa2bzLyc6+GOoIIh51X8hlHtKcSvBKc6OqM11m6RPjan0JHHSuv0lUtb613I1TdftHtdciw1FZ845nn1PT4Og==}
+    engines: {node: '>=24'}
+    peerDependencies:
+      '@opentelemetry/api': ^1.9.0
+      '@plures/praxis': ^1.4.0
+      svelte: ^5.0.0
+    peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
+      '@plures/praxis':
+        optional: true
 
   '@plures/design-dojo@0.17.0':
     resolution: {integrity: sha512-WT+mBBMRRxaBfkrI6clpwsY5I6FdSNszP6K9tRtavvERrXeFlXLrVGrR6IQ6A5n3xCUHOxuFNUH1hgq66euLWw==}
@@ -1798,6 +1811,10 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
+    dependencies:
+      svelte: 5.55.5(@typescript-eslint/types@8.59.2)
 
   '@plures/design-dojo@0.17.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
     dependencies:
