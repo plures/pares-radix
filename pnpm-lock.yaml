@@ -59,7 +59,7 @@ importers:
     dependencies:
       '@plures/design-dojo':
         specifier: '*'
-        version: 0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
+        version: 0.17.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -71,8 +71,8 @@ importers:
   packages/design-dojo:
     dependencies:
       '@plures/design-dojo-npm':
-        specifier: npm:@plures/design-dojo@^0.14.0
-        version: '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
+        specifier: npm:@plures/design-dojo@^0.17.0
+        version: '@plures/design-dojo@0.17.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))'
       svelte:
         specifier: ^5.0.0
         version: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -480,8 +480,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@plures/design-dojo@0.14.0':
-    resolution: {integrity: sha512-RCa2bzLyc6+GOoIIh51X8hlHtKcSvBKc6OqM11m6RPjan0JHHSuv0lUtb613I1TdftHtdciw1FZ845nn1PT4Og==}
+  '@plures/design-dojo@0.17.0':
+    resolution: {integrity: sha512-WT+mBBMRRxaBfkrI6clpwsY5I6FdSNszP6K9tRtavvERrXeFlXLrVGrR6IQ6A5n3xCUHOxuFNUH1hgq66euLWw==}
     engines: {node: '>=24'}
     peerDependencies:
       '@opentelemetry/api': ^1.9.0
@@ -1332,8 +1332,8 @@ packages:
     resolution: {integrity: sha512-xal3CZX1Xlo/k4ApwCFrHVACi9fBqJ7V+mwhBsuf/1IOKbBy098Fex+Wa/5QMubw09pSZ/u8EY8PWgevJsXp1A==}
     engines: {node: '>=6'}
 
-  semver@7.7.4:
-    resolution: {integrity: sha512-vFKC2IEtQnVhpT78h1Yp8wzwrf8CM+MzKMHGJZfBtzhZNycRFnXsHk6E5TxIkkMsgNS7mdX3AGB7x2QM2di4lA==}
+  semver@7.8.0:
+    resolution: {integrity: sha512-AcM7dV/5ul4EekoQ29Agm5vri8JNqRyj39o0qpX6vDF2GZrtutZl5RwgD1XnZjiTAfncsJhMI48QQH3sN87YNA==}
     engines: {node: '>=10'}
     hasBin: true
 
@@ -1799,7 +1799,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@plures/design-dojo@0.14.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
+  '@plures/design-dojo@0.17.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))':
     dependencies:
       svelte: 5.55.5(@typescript-eslint/types@8.59.2)
 
@@ -2066,7 +2066,7 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.59.2
       debug: 4.4.3
       minimatch: 10.2.5
-      semver: 7.7.4
+      semver: 7.8.0
       tinyglobby: 0.2.16
       ts-api-utils: 2.5.0(typescript@5.9.3)
       typescript: 5.9.3
@@ -2278,7 +2278,7 @@ snapshots:
   eslint-compat-utils@0.5.1(eslint@9.39.4):
     dependencies:
       eslint: 9.39.4
-      semver: 7.7.4
+      semver: 7.8.0
 
   eslint-plugin-svelte@2.46.1(eslint@9.39.4)(svelte@5.55.5(@typescript-eslint/types@8.59.2)):
     dependencies:
@@ -2292,7 +2292,7 @@ snapshots:
       postcss-load-config: 3.1.4(postcss@8.5.14)
       postcss-safe-parser: 6.0.0(postcss@8.5.14)
       postcss-selector-parser: 6.1.2
-      semver: 7.7.4
+      semver: 7.8.0
       svelte-eslint-parser: 0.43.0(svelte@5.55.5(@typescript-eslint/types@8.59.2))
     optionalDependencies:
       svelte: 5.55.5(@typescript-eslint/types@8.59.2)
@@ -2615,7 +2615,7 @@ snapshots:
     dependencies:
       mri: 1.2.0
 
-  semver@7.7.4: {}
+  semver@7.8.0: {}
 
   set-cookie-parser@3.1.0: {}
 
