@@ -3417,14 +3417,16 @@ async fn main() {
             };
 
             // Build memory + agent
-            let memory_path = PathBuf::from(&home).join(".pares-agens/memory");
+                        let memory_path = PathBuf::from(&home).join(".pares-agens/memory");
             let store: Arc<PluresDbStore> = match PluresDbStore::open_with_embeddings(&memory_path) {
                 Ok(store) => Arc::new(store),
                 Err(_) => match PluresDbStore::open(&memory_path) {
                     Ok(store) => Arc::new(store),
                     Err(e) => {
-                        eprintln!("Failed to open memory store: {e}");
-                        std::process::exit(1);
+                        // DB locked by serve process — fall back to in-memory store
+                        // so the TUI can still function for chat without persistent memory.
+                        tracing::warn!("Memory DB locked (serve running?), using ephemeral memory: {e}");
+                        Arc::new(PluresDbStore::in_memory())
                     }
                 },
             };
