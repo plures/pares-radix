@@ -3444,8 +3444,70 @@ async fn main() {
                 })
             };
 
+            // Set up terminal FIRST to show loading screens
+            enable_raw_mode().expect("failed to enable raw mode");
+            let mut stdout = std::io::stdout();
+            execute!(stdout, EnterAlternateScreen).expect("failed to enter alternate screen");
+            let backend = CrosstermBackend::new(stdout);
+            let mut terminal = Terminal::new(backend).expect("failed to create terminal");
+            terminal.clear().expect("failed to clear terminal");
+
+            // Show initial loading screen
+            let _ = terminal.draw(|f| {
+                use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+                use ratatui::style::{Color, Style};
+                use ratatui::widgets::{Block, Borders, Paragraph};
+                
+                let area = f.area();
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(40),
+                        Constraint::Length(5),
+                        Constraint::Percentage(40),
+                    ])
+                    .split(area);
+                
+                let block = Block::default()
+                    .title(" pares-radix ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(Color::Cyan));
+                let text = Paragraph::new("Initializing...\n\n(First launch downloads 127MB embedding model)")
+                    .block(block)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::White));
+                f.render_widget(text, chunks[1]);
+            });
+
             // Build memory + agent
-                        let memory_path = PathBuf::from(&home).join(".pares-agens/memory");
+            let memory_path = PathBuf::from(&home).join(".pares-agens/memory");
+            // Update loading screen: opening memory store
+            let _ = terminal.draw(|f| {
+                use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+                use ratatui::style::{Color, Style};
+                use ratatui::widgets::{Block, Borders, Paragraph};
+                
+                let area = f.area();
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(40),
+                        Constraint::Length(5),
+                        Constraint::Percentage(40),
+                    ])
+                    .split(area);
+                
+                let block = Block::default()
+                    .title(" pares-radix ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(Color::Cyan));
+                let text = Paragraph::new("Loading memory store...\n\nBuilding vector index (this may take a moment)")
+                    .block(block)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::White));
+                f.render_widget(text, chunks[1]);
+            });
+
             let store: Arc<PluresDbStore> = match PluresDbStore::open_with_embeddings(&memory_path) {
                 Ok(store) => Arc::new(store),
                 Err(_) => match PluresDbStore::open(&memory_path) {
@@ -3483,6 +3545,33 @@ async fn main() {
                 trace_store: ToolTraceStore::default(),
                 governor: Arc::clone(&governor),
                 plugin_runtime: None,
+            });
+
+            // Update loading screen: building agent
+            let _ = terminal.draw(|f| {
+                use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+                use ratatui::style::{Color, Style};
+                use ratatui::widgets::{Block, Borders, Paragraph};
+                
+                let area = f.area();
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Percentage(40),
+                        Constraint::Length(5),
+                        Constraint::Percentage(40),
+                    ])
+                    .split(area);
+                
+                let block = Block::default()
+                    .title(" pares-radix ")
+                    .borders(Borders::ALL)
+                    .style(Style::default().fg(Color::Cyan));
+                let text = Paragraph::new("Building agent...\n\nInitializing tools and cerebellum")
+                    .block(block)
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::White));
+                f.render_widget(text, chunks[1]);
             });
 
             // Auto-download BitNet for cerebellum if not explicitly provided
@@ -3547,14 +3636,6 @@ async fn main() {
                         Arc::new(chronos)
                     }),
             );
-
-            // Set up terminal
-            enable_raw_mode().expect("failed to enable raw mode");
-            let mut stdout = std::io::stdout();
-            execute!(stdout, EnterAlternateScreen).expect("failed to enter alternate screen");
-            let backend = CrosstermBackend::new(stdout);
-            let mut terminal = Terminal::new(backend).expect("failed to create terminal");
-            terminal.clear().expect("failed to clear terminal");
 
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             let mut app = App::new(agent, model.clone(), event_tx);
