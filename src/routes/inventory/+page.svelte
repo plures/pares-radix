@@ -205,7 +205,7 @@
 	<Heading level={1}>📦 Equipment Inventory</Heading>
 
 	<!-- Add Item Form -->
-	<Card style="margin-top: 1.5rem;">
+	<Card class="mt-1-5">
 		<Heading level={2}>Add Equipment</Heading>
 		<div class="form-grid">
 			<Input label="Equipment Name *" bind:value={name} placeholder="e.g., John Deere Tractor" />
@@ -223,7 +223,7 @@
 	</Card>
 
 	<!-- Inventory List -->
-	<Card style="margin-top: 1.5rem;">
+	<Card class="mt-1-5">
 		<div class="list-header">
 			<Heading level={2}>Inventory ({filteredItems.length} items)</Heading>
 			<div class="list-actions">
@@ -285,6 +285,10 @@
 </Box>
 
 <style>
+	.mt-1-5 {
+		margin-top: 1.5rem;
+	}
+
 	.form-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

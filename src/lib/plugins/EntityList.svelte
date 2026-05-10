@@ -111,35 +111,30 @@
 	{:else if items.length === 0}
 		<Text as="p" class="muted">No {entityType} records yet.</Text>
 	{:else}
-		<Table>
-			<svelte:element this={"thead"}>
-				<svelte:element this={"tr"}>
-					{#each visibleFields as field}
-						<svelte:element this={"th"}>{field.name}</svelte:element>
-					{/each}
-					<svelte:element this={"th"}>Actions</svelte:element>
-				</svelte:element>
-			</svelte:element>
-			<svelte:element this={"tbody"}>
-				{#each items as item}
-					<svelte:element this={"tr"}>
-						{#each visibleFields as field}
-							<svelte:element this={"td"}>
-								<Button variant="secondary" onclick={() => (viewingId = item._id as string)}>
-									{item[field.name] ?? '—'}
-								</Button>
-							</svelte:element>
-						{/each}
-						<svelte:element this={"td"}>
-							<Box class="action-buttons" direction="row" gap="0.25rem">
-								<Button variant="secondary" onclick={() => { editingId = item._id as string; showForm = true; }}>✏️</Button>
-								<Button variant="secondary" onclick={() => handleDelete(item._id as string)}>🗑️</Button>
-							</Box>
-						</svelte:element>
-					</svelte:element>
-				{/each}
-			</svelte:element>
-		</Table>
+		<Table
+			columns={[
+				...visibleFields.map(f => ({ key: f.name, label: f.name })),
+				{ key: 'actions', label: 'Actions' }
+			]}
+			rows={items.map(item => ({
+				...Object.fromEntries(
+					visibleFields.map(f => [f.name, String(item[f.name] ?? '—')])
+				),
+				actions: String(item._id)
+			}))}
+			onselect={(index) => {
+				const item = items[index];
+				if (item) viewingId = item._id as string;
+			}}
+		/>
+		<Box class="action-buttons-wrapper" direction="column" gap="0.5rem">
+			{#each items as item}
+				<Box class="action-buttons" direction="row" gap="0.25rem">
+					<Button variant="secondary" onclick={() => { editingId = item._id as string; showForm = true; }}>✏️ Edit</Button>
+					<Button variant="secondary" onclick={() => handleDelete(item._id as string)}>🗑️ Delete</Button>
+				</Box>
+			{/each}
+		</Box>
 	{/if}
 </Box>
 
