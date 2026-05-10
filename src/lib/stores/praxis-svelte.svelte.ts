@@ -123,6 +123,7 @@ export function initPraxisFacts(): void {
 		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
 		{ href: '/chat', label: 'Chat', icon: '💬', badge: undefined },
 		{ href: '/canvas', label: 'Canvas', icon: '🎨', badge: undefined },
+		{ href: '/inventory', label: 'Inventory', icon: '📦', badge: undefined },
 	);
 	navItems.push(
 		{ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined },
