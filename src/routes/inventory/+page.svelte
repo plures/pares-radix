@@ -3,7 +3,7 @@ import { Box, Card, Heading, Text } from '@plures/design-dojo';
 </script>
 
 <svelte:head>
-<title>Radix — Inventory</title>
+	<title>Inventory — Radix</title>
 </svelte:head>
 
 <Heading level={1}>Inventory</Heading>
