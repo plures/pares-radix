@@ -285,10 +285,6 @@
 </Box>
 
 <style>
-	.mt-1-5 {
-		margin-top: 1.5rem;
-	}
-
 	.form-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));

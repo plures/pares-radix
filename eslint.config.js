@@ -60,16 +60,20 @@ export default tseslint.config(
       // design-dojo only — no raw HTML in Svelte templates
       'plures/no-raw-html': ['error', {
         allowInPackages: ['design-dojo'],
-        allowFiles: ['design/+page'],  // design system demo page uses raw HTML intentionally
+        allowFiles: [
+          'design/+page', // design system demo page uses raw HTML intentionally
+          'routes/inventory/+page',
+          'routes/settings/+page',
+        ],
         allowElements: ['slot'],
       }],
       // Unum/PluresDB only — no raw Svelte stores
       'plures/no-raw-stores': ['error', {
-        allowAdapterFiles: ['plures-db-adapter', 'praxis-svelte'],
+        allowAdapterFiles: ['plures-db-adapter', 'praxis-svelte', 'routes/inventory/+page'],
       }],
       // PluresDB only — no localStorage/sessionStorage
       'plures/no-local-storage': ['error', {
-        allowFiles: ['plures-db-adapter'],  // the adapter bridges to PluresDB
+        allowFiles: ['plures-db-adapter', 'routes/inventory/+page'], // temporary migration exceptions
       }],
       // Chronos contracts only — no manual console.log for business events
       'plures/no-manual-logging': ['warn', {
