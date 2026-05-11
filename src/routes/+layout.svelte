@@ -240,8 +240,13 @@
 	:global(:root), :global([data-theme="light"]) {
 		--color-bg: #f8f9fa;
 		--color-surface: #ffffff;
+		--surface-1: #ffffff;
+		--surface-2: #f3f4f6;
+		--surface-3: #e5e7eb;
 		--color-border: #e2e5e9;
 		--color-text: #1a1d21;
+		--text-primary: #1a1d21;
+		--text-secondary: #6b7280;
 		--color-text-muted: #6b7280;
 		--color-accent: #4f46e5;
 		--color-accent-bg: rgba(79, 70, 229, 0.1);
@@ -252,8 +257,13 @@
 	:global([data-theme="dark"]) {
 		--color-bg: #0f1117;
 		--color-surface: #1a1d27;
+		--surface-1: #1a1d27;
+		--surface-2: #242836;
+		--surface-3: #2d3140;
 		--color-border: #2d3140;
 		--color-text: #e2e5eb;
+		--text-primary: #e2e5eb;
+		--text-secondary: #8b92a5;
 		--color-text-muted: #8b92a5;
 		--color-accent: #6366f1;
 		--color-accent-bg: rgba(99, 102, 241, 0.15);
