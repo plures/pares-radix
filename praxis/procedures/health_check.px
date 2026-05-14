@@ -1,0 +1,10 @@
+# health_check.px — System health check procedure
+#
+# Callable as the "health_check" tool by the model.
+# Runs a series of diagnostic checks and returns aggregated status.
+
+procedure system_health:
+  trigger: health_check
+  read_file {path: "/proc/loadavg"} -> $load
+  run_command {command: "df -h / | tail -1"} -> $disk
+  run_command {command: "free -m | grep Mem"} -> $memory
