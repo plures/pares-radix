@@ -68,11 +68,23 @@ function dbGet(key: string): unknown {
 }
 
 function dbPut(key: string, value: unknown): void {
-  db.set(key, value);
+  // Fix double-serialization: if value is a JSON string, parse it before storing.
+  // This handles MCP clients that pre-serialize their values.
+  let resolved = value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      // Only use parsed value if it's actually structured (object/array)
+      if (typeof parsed === 'object' && parsed !== null) {
+        resolved = parsed;
+      }
+    } catch { /* not JSON, store as-is */ }
+  }
+  db.set(key, resolved);
   const subs = subscribers.get(key);
   if (subs) {
     for (const cb of subs) {
-      try { cb(value); } catch { /* */ }
+      try { cb(resolved); } catch { /* */ }
     }
   }
 }
@@ -352,7 +364,292 @@ const tools: ToolDef[] = [
       return { ok: true, message: 'All state cleared' };
     },
   },
+
+  // ── Praxis ────────────────────────────────────────────────────────────────
+
+  {
+    name: 'praxis.evaluate',
+    description: 'Evaluate Praxis constraints against a given context/state. Returns violations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        context: { type: 'object', description: 'State to evaluate constraints against' },
+        phase: { type: 'string', description: 'Optional phase filter (e.g. pre-commit, pre-push)' },
+      },
+      required: ['context'],
+    },
+    handler: ({ context, phase }) => {
+      const constraints = dbKeys('px:constraint/').map((k) => db.get(k) as any).filter(Boolean);
+      const violations: Array<{ constraint: string; severity: string; message: string }> = [];
+
+      for (const c of constraints) {
+        // Skip if phase filter is set and constraint doesn't match
+        if (phase && c.phases?.length > 0 && !c.phases.includes(phase)) continue;
+
+        // Evaluate `when` guard — if set, constraint only applies when condition holds
+        if (c.when) {
+          const whenResult = simpleEval(c.when, context as Record<string, unknown>);
+          if (!whenResult) continue;
+        }
+
+        // Evaluate `require` — if set, this must be true or it's a violation
+        if (c.require) {
+          const requireResult = simpleEval(c.require, context as Record<string, unknown>);
+          if (!requireResult) {
+            violations.push({
+              constraint: c.name,
+              severity: c.severity || 'error',
+              message: c.message || `Constraint '${c.name}' violated: require(${c.require}) failed`,
+            });
+          }
+        }
+      }
+
+      return { evaluated: constraints.length, violations, passed: violations.length === 0 };
+    },
+  },
+  {
+    name: 'praxis.addRule',
+    description: 'Add a Praxis rule to the database',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        priority: { type: 'number' },
+        conditions: { type: 'array', items: { type: 'string' } },
+        actions: { type: 'array' },
+      },
+      required: ['name'],
+    },
+    handler: ({ name, priority, conditions, actions }) => {
+      const record = { type: 'rule', name, priority: priority ?? 50, conditions: conditions ?? [], actions: actions ?? [] };
+      dbPut(`px:rule/${name}`, record);
+      return { ok: true, key: `px:rule/${name}` };
+    },
+  },
+  {
+    name: 'praxis.addConstraint',
+    description: 'Add a Praxis constraint',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        when: { type: 'string' },
+        require: { type: 'string' },
+        severity: { type: 'string' },
+        message: { type: 'string' },
+        phases: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['name', 'severity'],
+    },
+    handler: ({ name, when, require: req, severity, message, phases }) => {
+      const record = { type: 'constraint', name, when, require: req, severity, message, phases: phases ?? [] };
+      dbPut(`px:constraint/${name}`, record);
+      return { ok: true, key: `px:constraint/${name}` };
+    },
+  },
+  {
+    name: 'praxis.listRules',
+    description: 'List all Praxis rules and constraints',
+    inputSchema: { type: 'object', properties: {} },
+    handler: () => {
+      const rules = dbKeys('px:rule/').map((k) => ({ key: k, ...(db.get(k) as any) }));
+      const constraints = dbKeys('px:constraint/').map((k) => ({ key: k, ...(db.get(k) as any) }));
+      return { rules, constraints };
+    },
+  },
+
+  // ── Chronos ───────────────────────────────────────────────────────────────
+
+  {
+    name: 'chronos.timeline',
+    description: 'Get the event timeline (last N events)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max events to return (default 50)' },
+        since: { type: 'string', description: 'ISO timestamp — only events after this time' },
+      },
+    },
+    handler: ({ limit, since }) => {
+      const allEvents = (db.get('chronos:timeline') as any[]) ?? [];
+      let filtered = allEvents;
+      if (since) {
+        const sinceTime = new Date(since as string).getTime();
+        filtered = filtered.filter((e) => new Date(e.timestamp).getTime() > sinceTime);
+      }
+      const maxLimit = Math.min((limit as number) || 50, 500);
+      return { events: filtered.slice(-maxLimit), total: allEvents.length };
+    },
+  },
+  {
+    name: 'chronos.record',
+    description: 'Record an event to the Chronos timeline',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        event: { type: 'string', description: 'Event name/type' },
+        data: { type: 'object', description: 'Event payload' },
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] },
+      },
+      required: ['event'],
+    },
+    handler: ({ event, data, level }) => {
+      const timeline = (db.get('chronos:timeline') as any[]) ?? [];
+      const entry = {
+        id: `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        event,
+        data: data ?? {},
+        level: level ?? 'info',
+        timestamp: new Date().toISOString(),
+      };
+      timeline.push(entry);
+      db.set('chronos:timeline', timeline);
+      return { ok: true, id: entry.id };
+    },
+  },
+  {
+    name: 'chronos.replay',
+    description: 'Replay timeline events through the Praxis engine (dry-run evaluation)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        fromId: { type: 'string', description: 'Start replay from this event id' },
+        toId: { type: 'string', description: 'End replay at this event id' },
+      },
+    },
+    handler: ({ fromId, toId }) => {
+      const timeline = (db.get('chronos:timeline') as any[]) ?? [];
+      let startIdx = fromId ? timeline.findIndex((e) => e.id === fromId) : 0;
+      let endIdx = toId ? timeline.findIndex((e) => e.id === toId) + 1 : timeline.length;
+      if (startIdx < 0) startIdx = 0;
+      if (endIdx <= 0) endIdx = timeline.length;
+      const segment = timeline.slice(startIdx, endIdx);
+      // In standalone mode, replay just returns the segment for analysis
+      return { replayed: segment.length, events: segment };
+    },
+  },
+  {
+    name: 'chronos.setLevel',
+    description: 'Set the minimum recording level for Chronos',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'string', enum: ['debug', 'info', 'warn', 'error'] },
+      },
+      required: ['level'],
+    },
+    handler: ({ level }) => {
+      db.set('chronos:config:level', level);
+      return { ok: true, level };
+    },
+  },
+
+  // ── Plugin Management ─────────────────────────────────────────────────────
+
+  {
+    name: 'plugin.list',
+    description: 'List all registered plugins and their status',
+    inputSchema: { type: 'object', properties: {} },
+    handler: () => {
+      const plugins = dbKeys('plugin:').map((k) => ({ key: k, ...(db.get(k) as any) }));
+      return { plugins };
+    },
+  },
+  {
+    name: 'plugin.register',
+    description: 'Register a plugin manifest',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        version: { type: 'string' },
+        description: { type: 'string' },
+        capabilities: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['name', 'version'],
+    },
+    handler: ({ name, version, description, capabilities }) => {
+      const record = { name, version, description, capabilities: capabilities ?? [], active: false, registeredAt: new Date().toISOString() };
+      dbPut(`plugin:${name}`, record);
+      return { ok: true, key: `plugin:${name}` };
+    },
+  },
+  {
+    name: 'plugin.activate',
+    description: 'Activate a registered plugin',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    handler: ({ name }) => {
+      const record = db.get(`plugin:${name}`) as any;
+      if (!record) return { error: `Plugin '${name}' not found` };
+      record.active = true;
+      record.activatedAt = new Date().toISOString();
+      db.set(`plugin:${name}`, record);
+      return { ok: true, plugin: record };
+    },
+  },
+  {
+    name: 'plugin.deactivate',
+    description: 'Deactivate a plugin',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    handler: ({ name }) => {
+      const record = db.get(`plugin:${name}`) as any;
+      if (!record) return { error: `Plugin '${name}' not found` };
+      record.active = false;
+      record.deactivatedAt = new Date().toISOString();
+      db.set(`plugin:${name}`, record);
+      return { ok: true, plugin: record };
+    },
+  },
+  {
+    name: 'plugin.info',
+    description: 'Get detailed info about a specific plugin',
+    inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    handler: ({ name }) => {
+      const record = db.get(`plugin:${name}`) as any;
+      if (!record) return { error: `Plugin '${name}' not found` };
+      return record;
+    },
+  },
 ];
+
+// ── Simple Expression Evaluator (for Praxis evaluate) ─────────────────────────
+
+function simpleEval(expr: string, context: Record<string, unknown>): boolean {
+  const trimmed = expr.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+
+  // Handle == comparison
+  if (trimmed.includes('==')) {
+    const [lhs, rhs] = trimmed.split('==').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsClean = rhs.replace(/^["']|["']$/g, '');
+    return String(lhsVal) === rhsClean;
+  }
+
+  // Handle != comparison
+  if (trimmed.includes('!=')) {
+    const [lhs, rhs] = trimmed.split('!=').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsClean = rhs.replace(/^["']|["']$/g, '');
+    return String(lhsVal) !== rhsClean;
+  }
+
+  // Bare value — truthy check
+  const val = resolvePath(trimmed, context);
+  return !!val;
+}
+
+function resolvePath(path: string, obj: Record<string, unknown>): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
 
 // ── MCP JSON-RPC Server (stdio) ───────────────────────────────────────────────
 
