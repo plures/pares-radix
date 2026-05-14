@@ -496,9 +496,10 @@ mod tests {
         let settings = Settings::default();
         let config = build_router_config(&settings);
 
-        // Default settings have one provider: "copilot".
-        assert_eq!(config.providers.len(), 1);
+        // Default settings have two providers: "anthropic" and "copilot".
+        assert_eq!(config.providers.len(), 2);
         assert!(config.providers.contains_key("copilot"));
+        assert!(config.providers.contains_key("anthropic"));
         assert_eq!(config.default_provider, "copilot");
     }
 
@@ -519,7 +520,7 @@ mod tests {
         let config = build_router_config(&settings);
 
         assert_eq!(config.default_provider, "openai");
-        assert_eq!(config.providers.len(), 2);
+        assert_eq!(config.providers.len(), 3);
     }
 
     #[test]
