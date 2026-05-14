@@ -18,6 +18,8 @@ struct Signals {
     research: bool,
     /// Whether the request should be decomposed into sub-tasks.
     decomposable: bool,
+    /// Whether the message is pure noise (bare ack with no actionable content).
+    noise: bool,
 }
 
 /// Decide routing for an event.
@@ -36,6 +38,11 @@ pub fn decide(event: &Event, learned_context: &str, config: &CerebellumConfig) -
 
 fn decide_message(content: &str, learned_context: &str, config: &CerebellumConfig) -> Route {
     let signals = analyze(content);
+
+    // Pure noise gets dropped
+    if signals.noise {
+        return Route::Drop;
+    }
 
     // Short commands go to conscious
     if signals.simple && !signals.analytical {
@@ -121,6 +128,21 @@ fn analyze(content: &str) -> Signals {
     ];
     let research = research_keywords.iter().any(|kw| lower.contains(kw));
 
+    let noise_patterns = [
+        "ok",
+        "sure",
+        "thanks",
+        "got it",
+        "k",
+        "cool",
+        "np",
+        "ty",
+        "thx",
+        "okay",
+        "alright",
+    ];
+    let noise = noise_patterns.iter().any(|p| lower.trim() == *p);
+
     let simple_patterns = [
         "yes",
         "no",
@@ -167,6 +189,7 @@ fn analyze(content: &str) -> Signals {
         code,
         research,
         decomposable,
+        noise,
     }
 }
 
