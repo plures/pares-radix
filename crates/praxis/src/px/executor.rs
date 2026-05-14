@@ -321,12 +321,15 @@ fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
 
 // ── Default Condition Evaluator ───────────────────────────────────────────────
 
-/// Simple condition evaluator supporting:
-/// - `"true"` / `"false"` literals
-/// - `"var == value"` equality checks against bound variables
-/// - `"var != value"` inequality checks
-/// - `"_"` / `"default"` / `"else"` — always true (for match catch-all arms)
-fn default_evaluate_condition(expr: &str, vars: &HashMap<String, Value>) -> bool {
+/// Evaluate a condition expression against variable bindings.
+///
+/// Supports:
+/// - `true`, `false`, `_`, `default`, `else` — literals
+/// - `var == value` — equality checks against bound variables
+/// - `var != value` — inequality checks
+/// - Dotted access (`result.status == ok`)
+/// - Bare truthiness checks
+pub fn default_evaluate_condition(expr: &str, vars: &HashMap<String, Value>) -> bool {
     let expr = expr.trim();
 
     match expr {

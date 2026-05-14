@@ -114,3 +114,5 @@ pub mod task_loop;
 pub mod health;
 pub mod error_display;
 pub mod pii_guard;
+/// Bridge between compiled `.px` procedures and the core [`Procedure`] trait.
+pub mod px_adapter;

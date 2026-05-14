@@ -391,9 +391,14 @@ fn build_procedure(pair: Pair<'_, Rule>) -> PxProcedure {
         match child.as_rule() {
             Rule::procedure_trigger_clause => {
                 if let Some(kind_pair) = child.into_inner().find(|p| p.as_rule() == Rule::procedure_trigger_kind) {
+                    let kind_text = kind_pair.as_str().to_string();
                     let mut ki = kind_pair.into_inner();
-                    let kind_str = ki.next().map(|p| p.as_str().to_string()).unwrap_or_default();
-                    let params = ki.next().map(parse_value);
+                    // For compound triggers like `on_write {...}` or `cron {...}`,
+                    // the map_val is an inner pair. For bare keywords like `manual`,
+                    // inner pairs are empty.
+                    let params = ki.find(|p| p.as_rule() == Rule::map_val).map(parse_value);
+                    // Extract just the keyword part (before any params)
+                    let kind_str = kind_text.split_whitespace().next().unwrap_or(&kind_text).to_string();
                     trigger = Some(PxProcedureTrigger { kind: kind_str, params });
                 }
             }
