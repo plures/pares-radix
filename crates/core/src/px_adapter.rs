@@ -202,6 +202,83 @@ impl PxProcedureAdapter {
         &self.compiled
     }
 
+    /// Generate a [`ToolDefinition`] so the model can discover and call this
+    /// procedure as a tool.
+    ///
+    /// The tool name is the procedure's trigger kind (which becomes the tool
+    /// name in the dispatch path). The description is extracted from the
+    /// compiled record's `description` field if present, otherwise generated
+    /// from the procedure name.
+    ///
+    /// Parameters are derived from the procedure's first `call` step params
+    /// (if any have `$`-prefixed values indicating expected inputs), or
+    /// default to accepting a free-form JSON object.
+    pub fn tool_definition(&self) -> crate::model::ToolDefinition {
+        let description = self
+            .compiled
+            .get("description")
+            .and_then(|d| d.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("Execute the {} procedure", self.name));
+
+        // Extract parameter hints from steps that reference $variables
+        let params = self.infer_parameters();
+
+        crate::model::ToolDefinition {
+            name: self.trigger_kind.clone(),
+            description,
+            parameters: params,
+        }
+    }
+
+    /// Infer a JSON Schema for the procedure's input parameters by scanning
+    /// steps for `$variable` references that aren't produced by earlier steps.
+    fn infer_parameters(&self) -> Value {
+        use serde_json::json;
+
+        let steps = match self.compiled.get("steps").and_then(|s| s.as_array()) {
+            Some(s) => s,
+            None => return json!({"type": "object", "properties": {}}),
+        };
+
+        // Collect all $var references in params and all output_var bindings
+        let mut inputs: Vec<String> = Vec::new();
+        let mut outputs: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for step in steps {
+            // Track outputs
+            if let Some(out) = step.get("output_var").and_then(|v| v.as_str()) {
+                outputs.insert(out.to_string());
+            }
+            // Track $var references in params
+            if let Some(params) = step.get("params") {
+                collect_var_refs(params, &mut inputs);
+            }
+        }
+
+        // Input parameters are $vars that aren't produced by earlier steps
+        // (and aren't built-in event vars)
+        let builtin_vars: std::collections::HashSet<&str> = [
+            "event_kind", "channel", "sender", "content", "message_id",
+            "timer_id", "timer_name", "recurring", "key", "old_value", "new_value",
+        ].into_iter().collect();
+
+        let mut properties = serde_json::Map::new();
+        for var in &inputs {
+            if !outputs.contains(var) && !builtin_vars.contains(var.as_str()) {
+                properties.insert(
+                    var.clone(),
+                    json!({"type": "string", "description": format!("Input: {}", var)}),
+                );
+            }
+        }
+
+        json!({
+            "type": "object",
+            "properties": properties
+        })
+    }
+
     /// Execute the procedure with explicit initial variables.
     ///
     /// This is useful for testing or when the caller wants to provide
@@ -282,6 +359,29 @@ impl Procedure for PxProcedureAdapter {
 ///
 /// Events are expected as a JSON array of objects with a `"type"` field
 /// matching the [`Event`] enum variants.
+/// Recursively collect `$variable` references from a JSON value.
+fn collect_var_refs(value: &Value, refs: &mut Vec<String>) {
+    match value {
+        Value::String(s) if s.starts_with('$') => {
+            let var_name = s[1..].to_string();
+            if !refs.contains(&var_name) {
+                refs.push(var_name);
+            }
+        }
+        Value::Object(map) => {
+            for v in map.values() {
+                collect_var_refs(v, refs);
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                collect_var_refs(v, refs);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn parse_emitted_events(value: &Value) -> Option<Vec<Event>> {
     let arr = value.as_array()?;
     let mut events = Vec::new();
@@ -291,6 +391,141 @@ fn parse_emitted_events(value: &Value) -> Option<Vec<Event>> {
         }
     }
     Some(events)
+}
+
+// ── Runtime Action Handler ────────────────────────────────────────────────────
+
+/// An [`AsyncActionHandler`] that bridges `.px` procedure step calls to the
+/// core [`ToolDispatcher`] interface.
+///
+/// This is the production integration point: when a `.px` procedure step calls
+/// an action like `classify_intent {...}`, the `ToolDispatchActionHandler`
+/// routes it through the same tool dispatch pipeline that model-initiated tool
+/// calls use (governance, tracing, procedure lookup).
+///
+/// # Lazy Initialization
+///
+/// Due to circular dependencies (procedures need the dispatcher, dispatcher
+/// needs the registry, registry holds the procedures), this handler supports
+/// lazy initialization. Create it with [`new_lazy`], register `.px` procedures,
+/// then call [`set_dispatcher`] once the tool dispatcher is available.
+///
+/// # Usage
+///
+/// ```no_run
+/// use pares_agens_core::px_adapter::ToolDispatchActionHandler;
+/// use pares_agens_core::model::ToolDispatcher;
+///
+/// // Phase 1: create lazy handler, load procedures
+/// let handler = Arc::new(ToolDispatchActionHandler::new_lazy());
+/// let procedures = load_px_procedures(source, handler.clone())?;
+/// // ... register procedures in registry ...
+///
+/// // Phase 2: set dispatcher after registry is finalized
+/// handler.set_dispatcher(tool_dispatcher);
+/// ```
+pub struct ToolDispatchActionHandler {
+    dispatcher: std::sync::RwLock<Option<Arc<dyn crate::model::ToolDispatcher>>>,
+}
+
+impl ToolDispatchActionHandler {
+    /// Create a handler backed by the given tool dispatcher.
+    pub fn new(dispatcher: Arc<dyn crate::model::ToolDispatcher>) -> Self {
+        Self {
+            dispatcher: std::sync::RwLock::new(Some(dispatcher)),
+        }
+    }
+
+    /// Create a handler without a dispatcher (for two-phase initialization).
+    pub fn new_lazy() -> Self {
+        Self {
+            dispatcher: std::sync::RwLock::new(None),
+        }
+    }
+
+    /// Set the dispatcher after construction. Call this once the tool
+    /// dispatcher is available.
+    pub fn set_dispatcher(&self, dispatcher: Arc<dyn crate::model::ToolDispatcher>) {
+        let mut guard = self.dispatcher.write().unwrap();
+        *guard = Some(dispatcher);
+    }
+}
+
+#[async_trait]
+impl AsyncActionHandler for ToolDispatchActionHandler {
+    async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
+        let dispatcher = {
+            let guard = self.dispatcher.read().unwrap();
+            guard.clone()
+        };
+
+        let dispatcher = dispatcher.ok_or_else(|| ExecutionError::ActionFailed {
+            action: name.to_string(),
+            message: "tool dispatcher not yet initialized".to_string(),
+        })?;
+
+        let result_str = dispatcher.call_tool(name, params.clone()).await;
+
+        // Try to parse the result as JSON; if it fails, wrap as a string value.
+        match serde_json::from_str::<Value>(&result_str) {
+            Ok(val) => Ok(val),
+            Err(_) => Ok(Value::String(result_str)),
+        }
+    }
+}
+
+// ── Directory Loader ─────────────────────────────────────────────────────────
+
+/// Load all `.px` files from a directory and return procedure adapters.
+///
+/// Walks the directory recursively, parses each `.px` file, and wraps
+/// procedure records in [`PxProcedureAdapter`]s. Non-procedure records
+/// (facts, rules) are silently skipped.
+///
+/// Returns the successfully loaded adapters and logs warnings for any
+/// files that fail to parse.
+pub fn load_px_directory(
+    dir: &std::path::Path,
+    handler: Arc<dyn AsyncActionHandler>,
+) -> Vec<PxProcedureAdapter> {
+    let mut adapters = Vec::new();
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(dir = %dir.display(), error = %e, "failed to read .px directory");
+            return adapters;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            // Recurse into subdirectories
+            adapters.extend(load_px_directory(&path, handler.clone()));
+        } else if path.extension().is_some_and(|ext| ext == "px") {
+            match std::fs::read_to_string(&path) {
+                Ok(source) => match load_px_procedures(&source, handler.clone()) {
+                    Ok(loaded) => {
+                        tracing::info!(
+                            path = %path.display(),
+                            count = loaded.len(),
+                            "loaded .px procedures"
+                        );
+                        adapters.extend(loaded);
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "failed to compile .px file");
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to read .px file");
+                }
+            }
+        }
+    }
+
+    adapters
 }
 
 // ── Loader Utility ───────────────────────────────────────────────────────────
@@ -471,5 +706,112 @@ mod tests {
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].name(), "health_check");
         assert_eq!(adapters[0].handles(), "manual");
+    }
+
+    #[test]
+    fn tool_definition_generates_from_procedure() {
+        let data = json!({
+            "type": "procedure",
+            "name": "summarize",
+            "trigger": { "kind": "summarize" },
+            "description": "Summarize the given text",
+            "steps": [
+                { "kind": "call", "name": "llm_complete", "params": { "text": "$input_text" }, "output_var": "summary" }
+            ]
+        });
+
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
+            TestHandler::new().with_result("llm_complete", json!("done")),
+        );
+        let adapter = PxProcedureAdapter::from_compiled(data, handler).unwrap();
+        let tool_def = adapter.tool_definition();
+
+        assert_eq!(tool_def.name, "summarize");
+        assert_eq!(tool_def.description, "Summarize the given text");
+        // input_text should be inferred as a parameter (not an output var)
+        assert!(tool_def.parameters["properties"]["input_text"].is_object());
+    }
+
+    #[test]
+    fn tool_definition_excludes_output_vars_and_builtins() {
+        let data = json!({
+            "type": "procedure",
+            "name": "process_msg",
+            "trigger": { "kind": "process_msg" },
+            "steps": [
+                { "kind": "call", "name": "classify", "params": { "msg": "$content" }, "output_var": "intent" },
+                { "kind": "call", "name": "route", "params": { "intent": "$intent", "custom": "$user_pref" } }
+            ]
+        });
+
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
+            TestHandler::new()
+                .with_result("classify", json!("greeting"))
+                .with_result("route", json!("routed")),
+        );
+        let adapter = PxProcedureAdapter::from_compiled(data, handler).unwrap();
+        let tool_def = adapter.tool_definition();
+
+        // $content is a builtin (from event), $intent is an output var — neither should appear
+        assert!(tool_def.parameters["properties"].get("content").is_none());
+        assert!(tool_def.parameters["properties"].get("intent").is_none());
+        // $user_pref is a genuine input parameter
+        assert!(tool_def.parameters["properties"]["user_pref"].is_object());
+    }
+
+    #[test]
+    fn collect_var_refs_finds_nested_refs() {
+        let value = json!({
+            "top": "$alpha",
+            "nested": { "deep": "$beta" },
+            "arr": ["$gamma", "literal"],
+            "plain": "no ref here"
+        });
+
+        let mut refs = Vec::new();
+        collect_var_refs(&value, &mut refs);
+        assert!(refs.contains(&"alpha".to_string()));
+        assert!(refs.contains(&"beta".to_string()));
+        assert!(refs.contains(&"gamma".to_string()));
+        assert_eq!(refs.len(), 3);
+    }
+
+    #[test]
+    fn load_px_directory_handles_missing_dir() {
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
+            TestHandler::new(),
+        );
+        let adapters = load_px_directory(std::path::Path::new("/nonexistent/path"), handler);
+        assert!(adapters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tool_dispatch_handler_lazy_init() {
+        use crate::model::{ToolDefinition, ToolDispatcher};
+
+        /// Mock dispatcher for testing.
+        struct MockDispatcher;
+
+        #[async_trait]
+        impl ToolDispatcher for MockDispatcher {
+            async fn available_tools(&self) -> Vec<ToolDefinition> {
+                vec![]
+            }
+            async fn call_tool(&self, _name: &str, _args: Value) -> String {
+                r#"{"status": "ok"}"#.to_string()
+            }
+        }
+
+        let handler = Arc::new(ToolDispatchActionHandler::new_lazy());
+
+        // Before setting dispatcher, calls should fail
+        let result = handler.call("test", &json!({})).await;
+        assert!(result.is_err());
+
+        // After setting dispatcher, calls should succeed
+        handler.set_dispatcher(Arc::new(MockDispatcher));
+        let result = handler.call("test", &json!({})).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), json!({"status": "ok"}));
     }
 }

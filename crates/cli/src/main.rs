@@ -3077,6 +3077,26 @@ async fn main() {
                 )));
             }
 
+            // Load .px procedures from praxis/ directory
+            let px_action_handler = Arc::new(
+                pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy(),
+            );
+            {
+                let praxis_dir = std::path::Path::new("praxis");
+                if praxis_dir.is_dir() {
+                    let adapters = pares_agens_core::px_adapter::load_px_directory(
+                        praxis_dir,
+                        px_action_handler.clone() as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
+                    );
+                    if !adapters.is_empty() {
+                        tracing::info!(count = adapters.len(), "loaded .px procedures from praxis/");
+                        for adapter in adapters {
+                            procedure_registry.register(Box::new(adapter));
+                        }
+                    }
+                }
+            }
+
             let procedure_registry = Arc::new(procedure_registry);
 
             let tool_trace_store = ToolTraceStore::default();
@@ -3087,6 +3107,9 @@ async fn main() {
                 governor: Arc::clone(&governor),
                 plugin_runtime: Some(Arc::clone(&plugin_runtime)),
             });
+
+            // Complete the lazy initialization of the .px action handler
+            px_action_handler.set_dispatcher(Arc::clone(&tool_dispatcher));
 
             let mut registry = AgentRegistry::new();
             registry.register_builtins();
@@ -3538,6 +3561,27 @@ async fn main() {
             procedure_registry.register(Box::new(ListDirectoryProcedure));
             procedure_registry.register(Box::new(RunCommandProcedure));
             procedure_registry.register(Box::new(WebFetchProcedure));
+
+            // Load .px procedures from praxis/ directory (TUI mode)
+            let px_action_handler = Arc::new(
+                pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy(),
+            );
+            {
+                let praxis_dir = std::path::Path::new("praxis");
+                if praxis_dir.is_dir() {
+                    let adapters = pares_agens_core::px_adapter::load_px_directory(
+                        praxis_dir,
+                        px_action_handler.clone() as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
+                    );
+                    if !adapters.is_empty() {
+                        tracing::info!(count = adapters.len(), "loaded .px procedures from praxis/");
+                        for adapter in adapters {
+                            procedure_registry.register(Box::new(adapter));
+                        }
+                    }
+                }
+            }
+
             let procedure_registry = Arc::new(procedure_registry);
             let governor = Arc::new(ToolGovernor::with_defaults());
             let tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(ProcedureToolDispatcher {
@@ -3546,6 +3590,9 @@ async fn main() {
                 governor: Arc::clone(&governor),
                 plugin_runtime: None,
             });
+
+            // Complete lazy initialization of .px action handler (TUI mode)
+            px_action_handler.set_dispatcher(Arc::clone(&tool_dispatcher));
 
             // Update loading screen: building agent
             let _ = terminal.draw(|f| {
