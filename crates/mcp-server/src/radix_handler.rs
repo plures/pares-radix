@@ -1200,6 +1200,232 @@ impl RadixToolHandler {
         ToolResult::error("music generation provider not configured. Configure a provider via config_set to enable.")
     }
 
+    // ── Remote Node tools ──────────────────────────────────────────────────────
+
+    /// Simple shell quoting: wrap in single quotes, escaping existing single quotes.
+    fn shell_quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "'\\''" ))
+    }
+
+    /// Resolve a node identifier (name/id/IP) to an SSH target.
+    /// If the identifier looks like an IP or hostname, use it directly.
+    /// Otherwise, look up in state store under "nodes:<name>".
+    async fn resolve_node(&self, node_id: &str) -> Result<String, String> {
+        // Direct IP/hostname detection
+        if node_id.contains('.') || node_id.contains(':') {
+            return Ok(node_id.to_string());
+        }
+        // Look up from state store
+        let store = self.state_store.as_ref()
+            .ok_or_else(|| "state store not configured".to_string())?;
+        let key = format!("nodes:{node_id}");
+        match store.get(&key).await {
+            Some(val) => {
+                // Expect {"host": "...", ...}
+                if let Some(host) = val.get("host").and_then(|h| h.as_str()) {
+                    Ok(host.to_string())
+                } else {
+                    Err(format!("node '{node_id}' has no 'host' field"))
+                }
+            }
+            None => Err(format!("node '{node_id}' not found")),
+        }
+    }
+
+    async fn node_file_read(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("node operations require state store (not configured)"),
+        };
+        let node_id = match args.get("node").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: node"),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: path"),
+        };
+        let host = match self.resolve_node(node_id).await {
+            Ok(h) => h,
+            Err(e) => return ToolResult::error(e),
+        };
+        // Use SSH to read the file
+        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} cat {}",
+            Self::shell_quote(&host),
+            Self::shell_quote(path));
+        use pares_agens_core::shell_executor::ExecRequest;
+        let req = ExecRequest {
+            command: cmd,
+            workdir: None,
+            background: false,
+            pty: false,
+            timeout_secs: Some(30),
+            env: std::collections::HashMap::new(),
+            yield_ms: None,
+        };
+        {
+            let output = self.shell.exec(req).await;
+            if output.exit_code == Some(0) {
+                ToolResult::ok(output.stdout)
+            } else {
+                ToolResult::error(format!("SSH read failed: {}", output.stderr))
+            }
+        }
+    }
+
+    async fn node_file_write(&self, args: &Value) -> ToolResult {
+        let _store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("node operations require state store (not configured)"),
+        };
+        let node_id = match args.get("node").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: node"),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: path"),
+        };
+        let content = match args.get("content").and_then(|v| v.as_str()) {
+            Some(c) => c,
+            None => return ToolResult::error("missing required parameter: content"),
+        };
+        let host = match self.resolve_node(node_id).await {
+            Ok(h) => h,
+            Err(e) => return ToolResult::error(e),
+        };
+        // Pipe content via SSH
+        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} 'cat > {}'",
+            Self::shell_quote(&host),
+            Self::shell_quote(path));
+        use pares_agens_core::shell_executor::ExecRequest;
+        let req = ExecRequest {
+            command: format!("echo {} | {}", Self::shell_quote(content), cmd),
+            workdir: None,
+            background: false,
+            pty: false,
+            timeout_secs: Some(30),
+            env: std::collections::HashMap::new(),
+            yield_ms: None,
+        };
+        {
+            let output = self.shell.exec(req).await;
+            if output.exit_code == Some(0) {
+                ToolResult::ok(format!("wrote {} bytes to {path} on node", content.len()))
+            } else {
+                ToolResult::error(format!("SSH write failed: {}", output.stderr))
+            }
+        }
+    }
+
+    async fn node_dir_list(&self, args: &Value) -> ToolResult {
+        let _store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("node operations require state store (not configured)"),
+        };
+        let node_id = match args.get("node").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: node"),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: path"),
+        };
+        let host = match self.resolve_node(node_id).await {
+            Ok(h) => h,
+            Err(e) => return ToolResult::error(e),
+        };
+        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} ls -la {}",
+            Self::shell_quote(&host),
+            Self::shell_quote(path));
+        use pares_agens_core::shell_executor::ExecRequest;
+        let req = ExecRequest {
+            command: cmd,
+            workdir: None,
+            background: false,
+            pty: false,
+            timeout_secs: Some(30),
+            env: std::collections::HashMap::new(),
+            yield_ms: None,
+        };
+        {
+            let output = self.shell.exec(req).await;
+            if output.exit_code == Some(0) {
+                ToolResult::ok(output.stdout)
+            } else {
+                ToolResult::error(format!("SSH dir list failed: {}", output.stderr))
+            }
+        }
+    }
+
+    async fn node_dir_fetch(&self, args: &Value) -> ToolResult {
+        let _store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("node operations require state store (not configured)"),
+        };
+        let node_id = match args.get("node").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: node"),
+        };
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: path"),
+        };
+        let local_path = args.get("local_path").and_then(|v| v.as_str())
+            .unwrap_or("/tmp/node-fetch");
+        let host = match self.resolve_node(node_id).await {
+            Ok(h) => h,
+            Err(e) => return ToolResult::error(e),
+        };
+        // tar + ssh to fetch directory
+        let cmd = format!(
+            "mkdir -p {} && ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} 'tar czf - -C {} .' | tar xzf - -C {}",
+            Self::shell_quote(local_path),
+            Self::shell_quote(&host),
+            Self::shell_quote(path),
+            Self::shell_quote(local_path),
+        );
+        use pares_agens_core::shell_executor::ExecRequest;
+        let req = ExecRequest {
+            command: cmd,
+            workdir: None,
+            background: false,
+            pty: false,
+            timeout_secs: Some(60),
+            env: std::collections::HashMap::new(),
+            yield_ms: None,
+        };
+        {
+            let output = self.shell.exec(req).await;
+            if output.exit_code == Some(0) {
+                ToolResult::ok(format!("fetched {path} to {local_path}"))
+            } else {
+                ToolResult::error(format!("SSH dir fetch failed: {}", output.stderr))
+            }
+        }
+    }
+
+    async fn node_status(&self, _args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("node operations require state store (not configured)"),
+        };
+        // List all keys starting with "nodes:"
+        let keys = store.keys_with_prefix("nodes:").await;
+        if keys.is_empty() {
+            return ToolResult::ok("no nodes configured".to_string());
+        }
+        let mut status_lines = Vec::new();
+        for key in &keys {
+            if let Some(val) = store.get(key).await {
+                let name = key.strip_prefix("nodes:").unwrap_or(key);
+                let host = val.get("host").and_then(|h| h.as_str()).unwrap_or("unknown");
+                status_lines.push(format!("• {name}: {host}"));
+            }
+        }
+        ToolResult::ok(format!("Configured nodes ({}):\n{}", keys.len(), status_lines.join("\n")))
+    }
+
     // ── Browser tools ─────────────────────────────────────────────────────────
 
     async fn browser_status(&self, _args: &Value) -> ToolResult {
@@ -1334,7 +1560,7 @@ impl ToolResult {
 #[async_trait]
 impl ToolHandler for RadixToolHandler {
     async fn list_tools(&self) -> Vec<Tool> {
-        vec![
+        let mut tools = vec![
             Tool {
                 name: "read_file".into(),
                 description: Some("Read a UTF-8 text file from disk".into()),
@@ -1826,7 +2052,74 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["prompt".into()]),
                 },
             },
-        ]
+        ];
+
+        // ── Remote Node tools (only available when state store is configured) ──
+        if self.state_store.is_some() {
+            tools.push(Tool {
+                name: "node_file_read".into(),
+                description: Some("Read a file from a remote node via SSH.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "node": {"type": "string", "description": "Node name, id, or IP address"},
+                        "path": {"type": "string", "description": "Absolute path to the file on the node"}
+                    })),
+                    required: Some(vec!["node".into(), "path".into()]),
+                },
+            });
+            tools.push(Tool {
+                name: "node_file_write".into(),
+                description: Some("Write a file to a remote node via SSH.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "node": {"type": "string", "description": "Node name, id, or IP address"},
+                        "path": {"type": "string", "description": "Absolute path on the node"},
+                        "content": {"type": "string", "description": "File content to write"}
+                    })),
+                    required: Some(vec!["node".into(), "path".into(), "content".into()]),
+                },
+            });
+            tools.push(Tool {
+                name: "node_dir_list".into(),
+                description: Some("List directory contents on a remote node via SSH.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "node": {"type": "string", "description": "Node name, id, or IP address"},
+                        "path": {"type": "string", "description": "Absolute path to directory on the node"}
+                    })),
+                    required: Some(vec!["node".into(), "path".into()]),
+                },
+            });
+            tools.push(Tool {
+                name: "node_dir_fetch".into(),
+                description: Some("Fetch a directory tree from a remote node as a tarball via SSH.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "node": {"type": "string", "description": "Node name, id, or IP address"},
+                        "path": {"type": "string", "description": "Absolute path to directory on the node"},
+                        "local_path": {"type": "string", "description": "Local path to save the fetched tree"}
+                    })),
+                    required: Some(vec!["node".into(), "path".into()]),
+                },
+            });
+            tools.push(Tool {
+                name: "node_status".into(),
+                description: Some("Show status of configured remote nodes.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "node": {"type": "string", "description": "Optional: specific node to check (omit for all)"}
+                    })),
+                    required: None,
+                },
+            });
+        }
+
+        tools
     }
 
     async fn call_tool(&self, name: &str, arguments: Value) -> ToolResult {
@@ -1871,6 +2164,11 @@ impl ToolHandler for RadixToolHandler {
             "pdf_analyze" => self.pdf_analyze(&arguments).await,
             "video_generate" => self.video_generate(&arguments).await,
             "music_generate" => self.music_generate(&arguments).await,
+            "node_file_read" => self.node_file_read(&arguments).await,
+            "node_file_write" => self.node_file_write(&arguments).await,
+            "node_dir_list" => self.node_dir_list(&arguments).await,
+            "node_dir_fetch" => self.node_dir_fetch(&arguments).await,
+            "node_status" => self.node_status(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
