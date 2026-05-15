@@ -889,6 +889,88 @@ impl RadixToolHandler {
         ToolResult::ok("config reload signaled")
     }
 
+    async fn runtime_restart(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let reason = args
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("manual restart requested");
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Record restart request in state store for the process supervisor to pick up
+        store.set("runtime:restart_requested", json!({
+            "timestamp": now,
+            "reason": reason
+        })).await;
+
+        // Also record in restart history
+        store.set(&format!("runtime:restart_history:{now}"), json!({
+            "reason": reason,
+            "requested_at": now
+        })).await;
+
+        ToolResult::ok(format!("restart signaled (reason: {reason}). Process supervisor will handle the restart."))
+    }
+
+    async fn config_schema(&self, args: &Value) -> ToolResult {
+        let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+
+        // Static schema registry for known config keys
+        let schema = match key {
+            "model" => json!({
+                "key": "model",
+                "type": "string",
+                "description": "Primary model for agent responses (e.g., gpt-4.1, claude-opus-4)",
+                "examples": ["gpt-4.1", "claude-opus-4", "gemini-2.5-pro"]
+            }),
+            "routing.interactive" => json!({
+                "key": "routing.interactive",
+                "type": "string",
+                "description": "Model used for interactive/fast responses",
+                "examples": ["gpt-4.1-mini", "claude-sonnet-4"]
+            }),
+            "routing.background" => json!({
+                "key": "routing.background",
+                "type": "string",
+                "description": "Model used for background/batch work",
+                "examples": ["gpt-4.1", "claude-opus-4"]
+            }),
+            "brave_api_key" => json!({
+                "key": "brave_api_key",
+                "type": "string",
+                "description": "Brave Search API key for web_search tool",
+                "sensitive": true
+            }),
+            "workdir" => json!({
+                "key": "workdir",
+                "type": "string",
+                "description": "Working directory for file and shell operations"
+            }),
+            "" => json!({
+                "keys": [
+                    "model", "routing.interactive", "routing.background",
+                    "brave_api_key", "workdir"
+                ],
+                "description": "Pass a specific key to get its full schema. These are the known config keys."
+            }),
+            other => json!({
+                "key": other,
+                "type": "unknown",
+                "description": format!("No schema registered for key: {other}. Custom keys accept any JSON value.")
+            }),
+        };
+
+        ToolResult::ok(serde_json::to_string_pretty(&schema).unwrap_or_default())
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// Resolve a potentially relative path against the workdir.
@@ -1250,6 +1332,32 @@ impl ToolHandler for RadixToolHandler {
                     required: None,
                 },
             },
+            Tool {
+                name: "runtime_restart".into(),
+                description: Some(
+                    "Signal a graceful restart. The process supervisor handles the actual restart.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "reason": {"type": "string", "description": "Reason for restart"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "config_schema".into(),
+                description: Some(
+                    "Look up the schema for a config key. Pass key='' to list all known keys.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "Config key to look up schema for (empty for full list)"}
+                    })),
+                    required: None,
+                },
+            },
         ]
     }
 
@@ -1281,6 +1389,8 @@ impl ToolHandler for RadixToolHandler {
             "config_delete" => self.config_delete(&arguments).await,
             "config_reload" => self.config_reload(&arguments).await,
             "runtime_status" => self.runtime_status(&arguments).await,
+            "runtime_restart" => self.runtime_restart(&arguments).await,
+            "config_schema" => self.config_schema(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -1744,5 +1854,67 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"heartbeat_status"));
         assert!(names.contains(&"heartbeat_configure"));
+    }
+
+    #[tokio::test]
+    async fn runtime_restart_signals() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("runtime_restart", json!({"reason": "config change"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("restart signaled"));
+        assert!(result.content.contains("config change"));
+    }
+
+    #[tokio::test]
+    async fn runtime_restart_default_reason() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("runtime_restart", json!({}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("manual restart requested"));
+    }
+
+    #[tokio::test]
+    async fn config_schema_known_key() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("config_schema", json!({"key": "model"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("model"));
+        assert!(result.content.contains("string"));
+    }
+
+    #[tokio::test]
+    async fn config_schema_list_all() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("config_schema", json!({"key": ""}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("keys"));
+        assert!(result.content.contains("model"));
+    }
+
+    #[tokio::test]
+    async fn config_schema_unknown_key() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("config_schema", json!({"key": "unknown.thing"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("unknown"));
+    }
+
+    #[tokio::test]
+    async fn new_tools_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"runtime_restart"));
+        assert!(names.contains(&"config_schema"));
     }
 }
