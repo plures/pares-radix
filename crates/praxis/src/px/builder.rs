@@ -460,10 +460,100 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
             let mut wi = inner.into_inner();
             let condition = wi.next().map(|p| p.as_str().to_string()).unwrap_or_default();
             let steps = wi
-                .find(|p| p.as_rule() == Rule::step_list)
+                .find(|p| p.as_rule() == Rule::block_step_list)
                 .map(|sl| sl.into_inner().filter(|p| p.as_rule() == Rule::step_decl).map(build_step).collect())
                 .unwrap_or_default();
             PxStep::When { condition, steps }
+        }
+        Rule::step_loop => {
+            let li = inner.into_inner();
+            let mut over = None;
+            let mut times = None;
+            let mut item_var = "item".to_string();
+            let mut output_var = None;
+            let mut steps = vec![];
+            let mut ident_index = 0;
+
+            for child in li {
+                match child.as_rule() {
+                    Rule::loop_source => {
+                        let src_text = child.as_str();
+                        let mut src_inner = child.into_inner();
+                        if src_text.starts_with("over") {
+                            over = src_inner.find(|p| p.as_rule() == Rule::ident)
+                                .map(|p| format!("${}", p.as_str()));
+                        } else if src_text.starts_with("times") {
+                            times = src_inner.find(|p| p.as_rule() == Rule::integer)
+                                .and_then(|p| p.as_str().parse().ok());
+                        }
+                    }
+                    Rule::ident => {
+                        if ident_index == 0 {
+                            item_var = child.as_str().to_string();
+                        } else {
+                            output_var = Some(child.as_str().to_string());
+                        }
+                        ident_index += 1;
+                    }
+                    Rule::block_step_list => {
+                        steps = child.into_inner()
+                            .filter(|p| p.as_rule() == Rule::step_decl)
+                            .map(build_step)
+                            .collect();
+                    }
+                    _ => {}
+                }
+            }
+
+            PxStep::Loop {
+                over,
+                times,
+                item_var,
+                steps,
+                output_var,
+            }
+        }
+        Rule::step_emit => {
+            let mut event = serde_json::Value::Object(serde_json::Map::new());
+            for child in inner.into_inner() {
+                match child.as_rule() {
+                    Rule::map_val => event = parse_value(child),
+                    Rule::param_pair => {
+                        let mut kv = child.into_inner();
+                        let k = next_str(&mut kv);
+                        let v = kv.next().map(parse_value).unwrap_or(serde_json::Value::Null);
+                        if let Some(obj) = event.as_object_mut() {
+                            obj.insert(k, v);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            PxStep::Emit { event }
+        }
+        Rule::step_try => {
+            let mut try_steps = vec![];
+            let mut catch_steps = vec![];
+
+            for child in inner.into_inner() {
+                match child.as_rule() {
+                    Rule::try_step_list => {
+                        try_steps = child.into_inner()
+                            .filter(|p| p.as_rule() == Rule::step_decl)
+                            .map(build_step)
+                            .collect();
+                    }
+                    Rule::catch_clause => {
+                        catch_steps = child.into_inner()
+                            .filter(|p| p.as_rule() == Rule::step_decl)
+                            .map(build_step)
+                            .collect();
+                    }
+                    _ => {}
+                }
+            }
+
+            PxStep::Try { steps: try_steps, catch: catch_steps }
         }
         _ => PxStep::Call {
             name: "unknown".into(),
@@ -489,6 +579,7 @@ fn parse_value(pair: Pair<'_, Rule>) -> serde_json::Value {
         Rule::integer => serde_json::json!(pair.as_str().parse::<i64>().unwrap_or(0)),
         Rule::float => serde_json::json!(pair.as_str().parse::<f64>().unwrap_or(0.0)),
         Rule::boolean => serde_json::json!(pair.as_str() == "true"),
+        Rule::var_ref => serde_json::Value::String(pair.as_str().to_string()),
         Rule::list_val => {
             let items: Vec<serde_json::Value> = pair.into_inner().map(parse_value).collect();
             serde_json::Value::Array(items)

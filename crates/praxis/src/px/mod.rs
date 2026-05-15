@@ -3,6 +3,8 @@
 //! Parses `.px` files into typed AST nodes using the pest PEG grammar.
 
 pub mod builder;
+pub mod compiler;
+pub mod executor;
 
 use pest::Parser;
 use pest_derive::Parser;
@@ -290,6 +292,127 @@ constraint warmth:
         assert!(c.when_expr.is_none());
         assert!(c.require_expr.is_none());
     }
+
+    #[test]
+    fn parse_procedure_with_loop() {
+        let source = "procedure batch_process:\n  trigger: manual\n  fetch_items {} -> $items\n  loop over $items as item -> $results:\n    process_item {val: $item}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        let proc = &doc.procedures[0];
+        assert_eq!(proc.name, "batch_process");
+        assert_eq!(proc.steps.len(), 2);
+
+        match &proc.steps[1] {
+            PxStep::Loop { over, times, item_var, steps, output_var } => {
+                assert_eq!(over.as_deref(), Some("$items"));
+                assert!(times.is_none());
+                assert_eq!(item_var, "item");
+                assert_eq!(output_var.as_deref(), Some("results"));
+                assert_eq!(steps.len(), 1);
+            }
+            other => panic!("expected Loop step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_procedure_with_emit() {
+        let source = "procedure notify:\n  trigger: manual\n  emit {type: \"alert\", level: \"high\"}\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        match &doc.procedures[0].steps[0] {
+            PxStep::Emit { event } => {
+                assert_eq!(event["type"], "alert");
+                assert_eq!(event["level"], "high");
+            }
+            other => panic!("expected Emit step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_procedure_with_try_catch() {
+        let source = "procedure resilient:\n  trigger: manual\n  try:\n    risky_action {}\n  catch:\n    fallback {}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        match &doc.procedures[0].steps[0] {
+            PxStep::Try { steps, catch } => {
+                assert_eq!(steps.len(), 1);
+                assert_eq!(catch.len(), 1);
+            }
+            other => panic!("expected Try step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn full_pipeline_loop_emit_try() {
+        // Parse → Compile → Execute with all new step kinds
+        use crate::px::{compiler::compile};
+        use crate::px::executor::{self, ActionHandler, ExecutionError};
+        use std::collections::HashMap;
+        use serde_json::{json, Value};
+
+        struct TestHandler;
+        impl ActionHandler for TestHandler {
+            fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                match name {
+                    "get_items" => Ok(json!(["a", "b", "c"])),
+                    "transform" => Ok(json!("done")),
+                    _ => Err(ExecutionError::UnknownAction(name.to_string())),
+                }
+            }
+        }
+
+        let source = "procedure pipeline:\n  trigger: manual\n  get_items {} -> $items\n  loop over $items as item -> $results:\n    transform {val: $item}\n  end\n  emit {type: \"complete\", count: 3}\n";
+
+        let doc = parse(source).expect("parse failed");
+        let records = compile(&doc);
+        assert_eq!(records.len(), 1);
+
+        let result = executor::execute(&records[0].data, &TestHandler).unwrap();
+        assert!(result.success);
+        assert_eq!(result.variables.get("results"), Some(&json!(["done", "done", "done"])));
+        // Check emit was captured
+        let emit = result.variables.get("emit").unwrap().as_array().unwrap();
+        assert_eq!(emit.len(), 1);
+        assert_eq!(emit[0]["type"], "complete");
+    }
 }
-pub mod compiler;
-pub mod executor;
+
+#[cfg(test)]
+mod parse_value_tests {
+    use super::*;
+    use pest::Parser;
+    
+    #[test]
+    fn parse_var_ref() {
+        let r = PxParser::parse(Rule::var_ref, "$item");
+        assert!(r.is_ok(), "var_ref failed: {:?}", r.err());
+    }
+    
+    #[test]
+    fn parse_value_with_var_ref() {
+        let r = PxParser::parse(Rule::value, "$item");
+        assert!(r.is_ok(), "value($item) failed: {:?}", r.err());
+    }
+    
+    #[test]
+    fn parse_map_val_with_var_ref() {
+        let r = PxParser::parse(Rule::map_val, "{val: $item}");
+        assert!(r.is_ok(), "map_val failed: {:?}", r.err());
+    }
+}
+
+#[cfg(test)]
+mod parse_step_tests {
+    use super::*;
+    
+    #[test]
+    fn parse_procedure_call_with_var_ref_in_map() {
+        let source = "procedure test:\n  trigger: manual\n  do_thing {val: $foo}\n";
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        assert_eq!(doc.procedures[0].steps.len(), 1);
+    }
+}
