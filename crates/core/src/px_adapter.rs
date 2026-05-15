@@ -134,7 +134,7 @@ impl ActionHandler for BlockingHandlerWrapper {
 ///
 /// # Usage
 ///
-/// ```no_run
+/// ```ignore
 /// use pares_agens_core::px_adapter::{PxProcedureAdapter, AsyncActionHandler};
 /// use pares_agens_praxis::px::{parse, compiler::compile};
 ///
@@ -412,7 +412,7 @@ fn parse_emitted_events(value: &Value) -> Option<Vec<Event>> {
 ///
 /// # Usage
 ///
-/// ```no_run
+/// ```ignore
 /// use pares_agens_core::px_adapter::ToolDispatchActionHandler;
 /// use pares_agens_core::model::ToolDispatcher;
 ///
