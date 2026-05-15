@@ -19,6 +19,7 @@ members = [
     "crates/bitnet",
     "crates/rector",
     "crates/omniscient",
+    "crates/mcp-server",
 ]
 
 [workspace.package]
