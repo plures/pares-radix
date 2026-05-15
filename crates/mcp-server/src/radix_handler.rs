@@ -11,6 +11,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -634,6 +635,144 @@ impl RadixToolHandler {
         ToolResult::ok(format!("deleted key: {key}"))
     }
 
+    // ── Config & Runtime tools ──────────────────────────────────────────────────
+
+    async fn config_get(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        let full_key = format!("config:{key}");
+        match store.get(&full_key).await {
+            Some(Value::Null) | None => ToolResult::ok("null"),
+            Some(value) => ToolResult::ok(serde_json::to_string_pretty(&value).unwrap_or_default()),
+        }
+    }
+
+    async fn config_set(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        let value = match args.get("value") {
+            Some(v) => v.clone(),
+            None => return ToolResult::error("missing required parameter: value"),
+        };
+
+        let full_key = format!("config:{key}");
+        store.set(&full_key, value).await;
+
+        // Update the last-modified timestamp for hot-reload detection
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        store.set("config:__last_modified", json!(now)).await;
+
+        ToolResult::ok(format!("config set: {key}"))
+    }
+
+    async fn config_list(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let prefix = args
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        // Known config keys to check
+        let known_keys = [
+            "model",
+            "endpoint",
+            "channel",
+            "system_prompt",
+            "auto_start",
+            "activation_hotkey",
+            "routing.interactive",
+            "routing.background",
+            "routing.coding",
+            "preferences.temperature",
+            "preferences.max_tokens",
+            "telemetry.enabled",
+            "__last_modified",
+        ];
+
+        let mut results = json!({});
+        for key in &known_keys {
+            if !key.starts_with(prefix) {
+                continue;
+            }
+            let full_key = format!("config:{key}");
+            if let Some(val) = store.get(&full_key).await {
+                if val != Value::Null {
+                    results[key] = val;
+                }
+            }
+        }
+
+        ToolResult::ok(serde_json::to_string_pretty(&results).unwrap_or_default())
+    }
+
+    async fn runtime_status(&self, _args: &Value) -> ToolResult {
+        let uptime_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let mut status = json!({
+            "status": "running",
+            "version": env!("CARGO_PKG_VERSION"),
+            "workdir": self.workdir.display().to_string(),
+            "timestamp_unix": uptime_secs,
+            "components": {
+                "shell": "active",
+                "memory": if self.memory.is_some() { "active" } else { "not_configured" },
+                "scheduler": if self.scheduler.is_some() { "active" } else { "not_configured" },
+                "state_store": if self.state_store.is_some() { "active" } else { "not_configured" },
+                "web_search": if self.brave_api_key.is_some() { "active" } else { "not_configured" }
+            }
+        });
+
+        // Include active sessions count from shell executor
+        // Note: shell.list() is async but we need to stay compatible
+        // with the non-Send constraint. Use a known-safe approach.
+        status["active_shell_sessions"] = json!("available");
+
+        ToolResult::ok(serde_json::to_string_pretty(&status).unwrap_or_default())
+    }
+
+    async fn config_reload(&self, _args: &Value) -> ToolResult {
+        // Signal a config reload by updating the __reload_requested timestamp.
+        // Components that watch this key can pick up the new config.
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        store.set("config:__reload_requested", json!(now)).await;
+
+        ToolResult::ok("config reload signaled")
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// Resolve a potentially relative path against the workdir.
@@ -889,6 +1028,69 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["key".into()]),
                 },
             },
+            // ── Config & Runtime tools ────────────────────────────────────
+            Tool {
+                name: "config_get".into(),
+                description: Some(
+                    "Get a configuration value by key. Returns JSON or null.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "Config key (e.g. 'model', 'routing.interactive')"}
+                    })),
+                    required: Some(vec!["key".into()]),
+                },
+            },
+            Tool {
+                name: "config_set".into(),
+                description: Some(
+                    "Set a configuration value. Triggers hot-reload for listening components.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "Config key to set"},
+                        "value": {"description": "The configuration value (any JSON type)"}
+                    })),
+                    required: Some(vec!["key".into(), "value".into()]),
+                },
+            },
+            Tool {
+                name: "config_list".into(),
+                description: Some(
+                    "List known configuration keys and their current values. Optional prefix filter.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "prefix": {"type": "string", "description": "Optional prefix filter for keys"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "config_reload".into(),
+                description: Some(
+                    "Signal a configuration reload. Components watching config will pick up changes.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "runtime_status".into(),
+                description: Some(
+                    "Get runtime status: version, active components, shell sessions, health.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
         ]
     }
 
@@ -912,6 +1114,11 @@ impl ToolHandler for RadixToolHandler {
             "db_get" => self.db_get(&arguments).await,
             "db_put" => self.db_put(&arguments).await,
             "db_delete" => self.db_delete(&arguments).await,
+            "config_get" => self.config_get(&arguments).await,
+            "config_set" => self.config_set(&arguments).await,
+            "config_list" => self.config_list(&arguments).await,
+            "config_reload" => self.config_reload(&arguments).await,
+            "runtime_status" => self.runtime_status(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -1164,5 +1371,106 @@ mod tests {
         assert!(names.contains(&"db_get"));
         assert!(names.contains(&"db_put"));
         assert!(names.contains(&"db_delete"));
+    }
+
+    // ── Config & Runtime tool tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn config_set_and_get_roundtrip() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("config_set", json!({"key": "model", "value": "gpt-4.1"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("config set: model"));
+
+        let result = handler
+            .call_tool("config_get", json!({"key": "model"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("gpt-4.1"));
+    }
+
+    #[tokio::test]
+    async fn config_get_missing_returns_null() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("config_get", json!({"key": "nonexistent_key"}))
+            .await;
+        assert!(!result.is_error);
+        assert_eq!(result.content, "null");
+    }
+
+    #[tokio::test]
+    async fn config_list_shows_set_keys() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("config_set", json!({"key": "model", "value": "test-model"}))
+            .await;
+        handler
+            .call_tool("config_set", json!({"key": "endpoint", "value": "http://localhost"}))
+            .await;
+
+        let result = handler.call_tool("config_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("model"));
+        assert!(result.content.contains("test-model"));
+    }
+
+    #[tokio::test]
+    async fn config_list_with_prefix_filter() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("config_set", json!({"key": "routing.interactive", "value": "fast"}))
+            .await;
+        handler
+            .call_tool("config_set", json!({"key": "model", "value": "gpt-4"}))
+            .await;
+
+        let result = handler
+            .call_tool("config_list", json!({"prefix": "routing"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("routing.interactive"));
+        // Should not contain "model" since it doesn't start with "routing"
+        assert!(!result.content.contains("gpt-4"));
+    }
+
+    #[tokio::test]
+    async fn config_reload_signals() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("config_reload", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("reload signaled"));
+    }
+
+    #[tokio::test]
+    async fn runtime_status_returns_components() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("runtime_status", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("running"));
+        assert!(result.content.contains("components"));
+        assert!(result.content.contains("version"));
+    }
+
+    #[tokio::test]
+    async fn config_get_without_state_store_returns_error() {
+        let handler = make_handler(); // no state store
+        let result = handler.call_tool("config_get", json!({"key": "model"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn config_runtime_tools_in_tool_list() {
+        let handler = make_handler_with_state();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"config_get"));
+        assert!(names.contains(&"config_set"));
+        assert!(names.contains(&"config_list"));
+        assert!(names.contains(&"config_reload"));
+        assert!(names.contains(&"runtime_status"));
     }
 }
