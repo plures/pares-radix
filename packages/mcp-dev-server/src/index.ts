@@ -58,9 +58,57 @@ if (!process.env.RADIX_DEV) {
   process.exit(1);
 }
 
-// ── In-Memory PluresDB (for standalone testing) ───────────────────────────────
+// ── Persistent PluresDB (file-backed JSON store) ─────────────────────────────
 
-const db = new Map<string, unknown>();
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
+
+// Determine storage path: RADIX_DB_PATH env or default ~/.radix/pluresdb.json
+const RADIX_DB_PATH = process.env.RADIX_DB_PATH
+  ?? join(homedir(), '.radix', 'pluresdb.json');
+
+function loadDbFromDisk(): Map<string, unknown> {
+  try {
+    if (existsSync(RADIX_DB_PATH)) {
+      const raw = readFileSync(RADIX_DB_PATH, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+        return new Map(Object.entries(parsed));
+      }
+    }
+  } catch (err: any) {
+    process.stderr.write(`⚠️  Failed to load DB from ${RADIX_DB_PATH}: ${err.message}\n`);
+  }
+  return new Map();
+}
+
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+const PERSIST_DEBOUNCE_MS = 500;
+
+function schedulePersist(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistDbToDisk();
+  }, PERSIST_DEBOUNCE_MS);
+}
+
+function persistDbToDisk(): void {
+  try {
+    const dir = dirname(RADIX_DB_PATH);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const obj: Record<string, unknown> = {};
+    for (const [k, v] of db) obj[k] = v;
+    writeFileSync(RADIX_DB_PATH, JSON.stringify(obj, null, 2), 'utf-8');
+  } catch (err: any) {
+    process.stderr.write(`⚠️  Failed to persist DB to ${RADIX_DB_PATH}: ${err.message}\n`);
+  }
+}
+
+const db = loadDbFromDisk();
 const subscribers = new Map<string, Set<(value: unknown) => void>>();
 
 function dbGet(key: string): unknown {
@@ -81,6 +129,7 @@ function dbPut(key: string, value: unknown): void {
     } catch { /* not JSON, store as-is */ }
   }
   db.set(key, resolved);
+  schedulePersist();
   const subs = subscribers.get(key);
   if (subs) {
     for (const cb of subs) {
@@ -91,6 +140,7 @@ function dbPut(key: string, value: unknown): void {
 
 function dbDelete(key: string): void {
   db.delete(key);
+  schedulePersist();
   const subs = subscribers.get(key);
   if (subs) {
     for (const cb of subs) {
@@ -346,6 +396,8 @@ const tools: ToolDef[] = [
       for (const [k, v] of db) state[k] = v;
       return {
         dbSize: db.size,
+        dbPath: RADIX_DB_PATH,
+        persistent: true,
         activeCanvas: activeCanvas?.meta?.title ?? null,
         savedCount: savedCanvases.size,
         state,
@@ -359,6 +411,7 @@ const tools: ToolDef[] = [
     handler: ({ confirm }) => {
       if (!confirm) return { error: 'Pass confirm: true to reset all state' };
       db.clear();
+      schedulePersist();
       activeCanvas = null;
       savedCanvases.clear();
       return { ok: true, message: 'All state cleared' };
@@ -753,4 +806,22 @@ process.stdin.on('data', (chunk: string) => {
 
 process.stderr.write('🔧 radix-mcp-dev server started (DEV MODE)\n');
 process.stderr.write(`📦 ${tools.length} tools available\n`);
+process.stderr.write(`💾 DB: ${RADIX_DB_PATH} (${db.size} keys loaded)\n`);
 process.stderr.write('⚠️  This server has FULL ACCESS to app state\n');
+
+// Flush pending writes on exit
+process.on('beforeExit', () => {
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    persistDbToDisk();
+  }
+});
+process.on('SIGINT', () => {
+  persistDbToDisk();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  persistDbToDisk();
+  process.exit(0);
+});
