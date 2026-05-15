@@ -19,6 +19,8 @@ use mcp_client::protocol::{Tool, ToolInputSchema};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
 
+use pares_agens_agenda::scheduler::Scheduler;
+
 use crate::handler::{ToolHandler, ToolResult};
 
 /// Production tool handler that connects MCP tool calls to real implementations.
@@ -27,6 +29,8 @@ pub struct RadixToolHandler {
     shell: Arc<ShellExecutor>,
     /// Memory system for semantic search/store.
     memory: Option<Arc<PluresLm>>,
+    /// Scheduler for cron tools.
+    scheduler: Option<Arc<Scheduler>>,
     /// Working directory for file operations.
     workdir: PathBuf,
     /// Brave Search API key (optional).
@@ -39,6 +43,7 @@ impl RadixToolHandler {
         Self {
             shell,
             memory: None,
+            scheduler: None,
             workdir,
             brave_api_key: None,
         }
@@ -47,6 +52,12 @@ impl RadixToolHandler {
     /// Attach a memory system for memory_search/memory_store tools.
     pub fn with_memory(mut self, memory: Arc<PluresLm>) -> Self {
         self.memory = Some(memory);
+        self
+    }
+
+    /// Attach a scheduler for cron tools.
+    pub fn with_scheduler(mut self, scheduler: Arc<Scheduler>) -> Self {
+        self.scheduler = Some(scheduler);
         self
     }
 
@@ -450,6 +461,112 @@ impl RadixToolHandler {
         }
     }
 
+    // ── Cron tools ────────────────────────────────────────────────────────────
+
+    async fn cron_list(&self, _args: &Value) -> ToolResult {
+        let scheduler = match &self.scheduler {
+            Some(s) => s,
+            None => return ToolResult::error("scheduler not configured"),
+        };
+
+        let tasks = scheduler.list().await;
+        let formatted: Vec<Value> = tasks
+            .into_iter()
+            .map(|t| {
+                json!({
+                    "id": t.id,
+                    "name": t.name,
+                    "schedule": t.schedule,
+                    "command": t.command,
+                    "enabled": t.enabled,
+                    "last_run": t.last_run.map(|dt| dt.to_rfc3339()),
+                    "last_result": t.last_result,
+                })
+            })
+            .collect();
+        ToolResult::ok(serde_json::to_string_pretty(&formatted).unwrap_or_default())
+    }
+
+    async fn cron_add(&self, args: &Value) -> ToolResult {
+        use pares_agens_agenda::scheduler::{Task, Schedule};
+
+        let scheduler = match &self.scheduler {
+            Some(s) => s,
+            None => return ToolResult::error("scheduler not configured"),
+        };
+
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n.to_string(),
+            None => return ToolResult::error("missing required parameter: name"),
+        };
+        let command = match args.get("command").and_then(|v| v.as_str()) {
+            Some(c) => c.to_string(),
+            None => return ToolResult::error("missing required parameter: command"),
+        };
+
+        let schedule = if let Some(expr) = args.get("cron").and_then(|v| v.as_str()) {
+            Schedule::Cron { expr: expr.to_string() }
+        } else if let Some(secs) = args.get("interval_secs").and_then(|v| v.as_u64()) {
+            Schedule::Interval { every_secs: secs }
+        } else {
+            return ToolResult::error("missing schedule: provide 'cron' or 'interval_secs'");
+        };
+
+        let task = Task {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            schedule,
+            command,
+            enabled: true,
+            last_run: None,
+            last_result: None,
+        };
+
+        let id = task.id.clone();
+        scheduler.add(task).await;
+        ToolResult::ok(format!("added task: {id}"))
+    }
+
+    async fn cron_remove(&self, args: &Value) -> ToolResult {
+        let scheduler = match &self.scheduler {
+            Some(s) => s,
+            None => return ToolResult::error("scheduler not configured"),
+        };
+
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(i) => i,
+            None => return ToolResult::error("missing required parameter: id"),
+        };
+
+        if scheduler.remove(id).await {
+            ToolResult::ok(format!("removed task: {id}"))
+        } else {
+            ToolResult::error(format!("task not found: {id}"))
+        }
+    }
+
+    async fn cron_toggle(&self, args: &Value) -> ToolResult {
+        let scheduler = match &self.scheduler {
+            Some(s) => s,
+            None => return ToolResult::error("scheduler not configured"),
+        };
+
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(i) => i,
+            None => return ToolResult::error("missing required parameter: id"),
+        };
+        let enabled = match args.get("enabled").and_then(|v| v.as_bool()) {
+            Some(e) => e,
+            None => return ToolResult::error("missing required parameter: enabled"),
+        };
+
+        if scheduler.set_enabled(id, enabled).await {
+            ToolResult::ok(format!("task {id} enabled={enabled}"))
+        } else {
+            ToolResult::error(format!("task not found: {id}"))
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// Resolve a potentially relative path against the workdir.
@@ -619,6 +736,50 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["query".into()]),
                 },
             },
+            Tool {
+                name: "cron_list".into(),
+                description: Some("List all scheduled cron tasks.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "cron_add".into(),
+                description: Some("Add a scheduled cron task. Provide 'cron' (5-field expr) or 'interval_secs'.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "name": {"type": "string", "description": "Human-readable task name"},
+                        "command": {"type": "string", "description": "Shell command to execute"},
+                        "cron": {"type": "string", "description": "Cron expression (5-field: min hour dom month dow)"},
+                        "interval_secs": {"type": "integer", "description": "Run every N seconds (alternative to cron)"}
+                    })),
+                    required: Some(vec!["name".into(), "command".into()]),
+                },
+            },
+            Tool {
+                name: "cron_remove".into(),
+                description: Some("Remove a scheduled task by id.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({"id": {"type": "string"}})),
+                    required: Some(vec!["id".into()]),
+                },
+            },
+            Tool {
+                name: "cron_toggle".into(),
+                description: Some("Enable or disable a scheduled task.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "id": {"type": "string"},
+                        "enabled": {"type": "boolean"}
+                    })),
+                    required: Some(vec!["id".into(), "enabled".into()]),
+                },
+            },
         ]
     }
 
@@ -635,6 +796,10 @@ impl ToolHandler for RadixToolHandler {
             "memory_store" => self.memory_store(&arguments).await,
             "web_fetch" => self.web_fetch(&arguments).await,
             "web_search" => self.web_search(&arguments).await,
+            "cron_list" => self.cron_list(&arguments).await,
+            "cron_add" => self.cron_add(&arguments).await,
+            "cron_remove" => self.cron_remove(&arguments).await,
+            "cron_toggle" => self.cron_toggle(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -749,5 +914,75 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn cron_list_without_scheduler_returns_error() {
+        let handler = make_handler();
+        let result = handler.call_tool("cron_list", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn cron_add_without_scheduler_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("cron_add", json!({"name": "test", "command": "echo hi", "interval_secs": 60}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn cron_tools_with_scheduler() {
+        let shell = Arc::new(ShellExecutor::new());
+        let scheduler = Arc::new(Scheduler::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_scheduler(scheduler);
+
+        // List starts empty
+        let result = handler.call_tool("cron_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("[]"));
+
+        // Add a task
+        let result = handler
+            .call_tool("cron_add", json!({
+                "name": "test_task",
+                "command": "echo hello",
+                "interval_secs": 300
+            }))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("added task:"));
+
+        // List has one task
+        let result = handler.call_tool("cron_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("test_task"));
+
+        // Parse id from list
+        let tasks: Vec<Value> = serde_json::from_str(&result.content).unwrap();
+        let task_id = tasks[0]["id"].as_str().unwrap().to_string();
+
+        // Toggle disable
+        let result = handler
+            .call_tool("cron_toggle", json!({"id": &task_id, "enabled": false}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("enabled=false"));
+
+        // Remove
+        let result = handler
+            .call_tool("cron_remove", json!({"id": &task_id}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("removed task:"));
+
+        // List empty again
+        let result = handler.call_tool("cron_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("[]"));
     }
 }

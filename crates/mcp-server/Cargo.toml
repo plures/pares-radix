@@ -16,8 +16,10 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
 mcp-client = { path = "../mcp-client" }
 pares-agens-core = { path = "../core" }
+pares-agens-agenda = { path = "../agenda" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
