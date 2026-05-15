@@ -853,7 +853,8 @@ impl RadixToolHandler {
                 "memory": if self.memory.is_some() { "active" } else { "not_configured" },
                 "scheduler": if self.scheduler.is_some() { "active" } else { "not_configured" },
                 "state_store": if self.state_store.is_some() { "active" } else { "not_configured" },
-                "web_search": if self.brave_api_key.is_some() { "active" } else { "not_configured" }
+                "web_search": if self.brave_api_key.is_some() { "active" } else { "not_configured" },
+                "media_tools": if self.openai_api_key.is_some() { "active" } else { "not_configured" }
             },
             "active_shell_sessions": active_count
         });
@@ -1358,6 +1359,72 @@ impl ToolHandler for RadixToolHandler {
                     required: None,
                 },
             },
+            // ── Browser automation tools ──────────────────────────────
+            Tool {
+                name: "browser_status".into(),
+                description: Some("Check if a browser is available via CDP.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "browser_navigate".into(),
+                description: Some("Navigate the browser to a URL.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "url": {"type": "string", "description": "URL to navigate to"}
+                    })),
+                    required: Some(vec!["url".into()]),
+                },
+            },
+            Tool {
+                name: "browser_snapshot".into(),
+                description: Some("Get page content as accessibility tree or text extract.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "browser_screenshot".into(),
+                description: Some("Capture a screenshot of the current page.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "format": {"type": "string", "enum": ["png", "jpeg"], "description": "Image format (default png)"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "browser_click".into(),
+                description: Some("Click an element by CSS selector or x/y coordinates.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "selector": {"type": "string", "description": "CSS selector of element to click"},
+                        "x": {"type": "number", "description": "X coordinate"},
+                        "y": {"type": "number", "description": "Y coordinate"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "browser_type".into(),
+                description: Some("Type text into the focused element or a specified selector.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "text": {"type": "string", "description": "Text to type"},
+                        "selector": {"type": "string", "description": "Optional CSS selector to focus first"}
+                    })),
+                    required: Some(vec!["text".into()]),
+                },
+            },
         ]
     }
 
@@ -1391,6 +1458,18 @@ impl ToolHandler for RadixToolHandler {
             "runtime_status" => self.runtime_status(&arguments).await,
             "runtime_restart" => self.runtime_restart(&arguments).await,
             "config_schema" => self.config_schema(&arguments).await,
+            "browser_status" => self.browser_status(&arguments).await,
+            "browser_navigate" => self.browser_navigate(&arguments).await,
+            "browser_snapshot" => self.browser_snapshot(&arguments).await,
+            "browser_screenshot" => self.browser_screenshot(&arguments).await,
+            "browser_click" => self.browser_click(&arguments).await,
+            "browser_type" => self.browser_type(&arguments).await,
+            "image_analyze" => self.image_analyze(&arguments).await,
+            "image_generate" => self.image_generate(&arguments).await,
+            "tts_generate" => self.tts_generate(&arguments).await,
+            "pdf_analyze" => self.pdf_analyze(&arguments).await,
+            "video_generate" => self.video_generate(&arguments).await,
+            "music_generate" => self.music_generate(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -1916,5 +1995,69 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"runtime_restart"));
         assert!(names.contains(&"config_schema"));
+    }
+
+    // ── Remote Node tool tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn node_tools_in_tool_list() {
+        let handler = make_handler_with_state();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"node_file_read"));
+        assert!(names.contains(&"node_file_write"));
+        assert!(names.contains(&"node_dir_list"));
+        assert!(names.contains(&"node_dir_fetch"));
+        assert!(names.contains(&"node_status"));
+    }
+
+    #[tokio::test]
+    async fn node_file_read_missing_params() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("node_file_read", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("node"));
+
+        let result = handler.call_tool("node_file_read", json!({"node": "test"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("path"));
+    }
+
+    #[tokio::test]
+    async fn node_file_read_unknown_node() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("node_file_read", json!({"node": "nonexistent", "path": "/etc/hostname"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn node_status_empty_returns_info() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("node_status", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("no nodes configured"));
+    }
+
+    #[tokio::test]
+    async fn node_status_without_state_store_errors() {
+        let handler = make_handler();
+        let result = handler.call_tool("node_status", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn node_resolve_direct_host() {
+        let handler = make_handler_with_state();
+        // Direct host format should resolve without state store lookup
+        let result = handler
+            .call_tool("node_file_read", json!({"node": "192.168.1.1", "path": "/etc/hostname"}))
+            .await;
+        // Will fail SSH connection but should NOT fail on "node not found"
+        assert!(result.is_error);
+        assert!(!result.content.contains("not found"));
     }
 }
