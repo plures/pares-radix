@@ -12,5 +12,7 @@ serde_json.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["time"] }
 pest = "2"
 pest_derive = "2"
