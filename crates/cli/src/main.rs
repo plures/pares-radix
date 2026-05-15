@@ -1207,15 +1207,47 @@ impl Procedure for WebFetchProcedure {
                 let result = match parse_tool_args(content) {
                     Ok(args) => match args.get("url").and_then(|v| v.as_str()) {
                         Some(url) => {
-                            let response = reqwest::get(url).await.map_err(|e| e.to_string());
+                            let max_chars = args
+                                .get("max_chars")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(30_000) as usize;
+                            let extract_mode = args
+                                .get("extract_mode")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("markdown");
+                            let client = reqwest::Client::builder()
+                                .user_agent("Mozilla/5.0 (compatible; pares-radix/0.1; +https://github.com/plures/pares-radix)")
+                                .timeout(std::time::Duration::from_secs(15))
+                                .build()
+                                .unwrap_or_else(|_| reqwest::Client::new());
+                            let response = client.get(url).send().await.map_err(|e| e.to_string());
                             match response {
                                 Ok(response) => {
+                                    let content_type = response
+                                        .headers()
+                                        .get("content-type")
+                                        .and_then(|v| v.to_str().ok())
+                                        .unwrap_or("")
+                                        .to_string();
                                     match response.text().await.map_err(|e| e.to_string()) {
                                         Ok(body) => {
-                                            let truncated = if body.len() > 10_000 {
-                                                body.chars().take(10_000).collect::<String>()
+                                            let extracted = if content_type.contains("text/html") || body.trim_start().starts_with('<') {
+                                                // HTML → readable text extraction
+                                                let width = match extract_mode {
+                                                    "text" => 80,
+                                                    _ => 120,
+                                                };
+                                                html2text::from_read(body.as_bytes(), width)
+                                                    .unwrap_or(body)
                                             } else {
                                                 body
+                                            };
+                                            let truncated = if extracted.len() > max_chars {
+                                                let mut s: String = extracted.chars().take(max_chars).collect();
+                                                s.push_str("\n\n[...truncated]");
+                                                s
+                                            } else {
+                                                extracted
                                             };
                                             Ok(truncated)
                                         }
@@ -1757,11 +1789,13 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "web_fetch".into(),
-            description: "Fetch a URL and return the response body (truncated)".into(),
+            description: "Fetch a URL and return readable content. HTML is automatically converted to text. Supports extract_mode (markdown/text) and max_chars.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string"}
+                    "url": {"type": "string", "description": "HTTP or HTTPS URL to fetch"},
+                    "extract_mode": {"type": "string", "enum": ["markdown", "text"], "description": "Extraction mode for HTML content"},
+                    "max_chars": {"type": "integer", "description": "Maximum characters to return (default 30000)"}
                 },
                 "required": ["url"]
             }),
