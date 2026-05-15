@@ -915,6 +915,20 @@ struct MemorySearchProcedure {
 struct MemoryStoreProcedure {
     plures_lm: Arc<PluresLm>,
 }
+
+struct CronListProcedure {
+    scheduler: Arc<pares_agens_agenda::scheduler::Scheduler>,
+}
+struct CronAddProcedure {
+    scheduler: Arc<pares_agens_agenda::scheduler::Scheduler>,
+}
+struct CronRemoveProcedure {
+    scheduler: Arc<pares_agens_agenda::scheduler::Scheduler>,
+}
+struct CronToggleProcedure {
+    scheduler: Arc<pares_agens_agenda::scheduler::Scheduler>,
+}
+
 struct ParesManusToolProcedure {
     tool_name: &'static str,
     manus_ws_url: Arc<String>,
@@ -1594,6 +1608,211 @@ impl Procedure for MemoryStoreProcedure {
 }
 
 #[async_trait]
+impl Procedure for CronListProcedure {
+    fn name(&self) -> &str {
+        "cron_list"
+    }
+
+    fn handles(&self) -> &str {
+        "cron_list"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, .. } => {
+                let tasks = self.scheduler.list().await;
+                let output = if tasks.is_empty() {
+                    "No scheduled tasks.".to_string()
+                } else {
+                    let items: Vec<serde_json::Value> = tasks
+                        .iter()
+                        .map(|t| {
+                            serde_json::json!({
+                                "id": t.id,
+                                "name": t.name,
+                                "schedule": t.schedule,
+                                "enabled": t.enabled,
+                                "last_run": t.last_run.map(|d| d.to_rfc3339()),
+                                "last_result": t.last_result,
+                            })
+                        })
+                        .collect();
+                    serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".into())
+                };
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "cron_list".into(),
+                    content: output,
+                    is_error: false,
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
+impl Procedure for CronAddProcedure {
+    fn name(&self) -> &str {
+        "cron_add"
+    }
+
+    fn handles(&self) -> &str {
+        "cron_add"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let result = match parse_tool_args(content) {
+                    Ok(args) => {
+                        let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        let schedule_kind = args.get("schedule_kind").and_then(|v| v.as_str()).unwrap_or("");
+                        let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
+
+                        if command.is_empty() {
+                            Err("missing 'command' parameter".to_string())
+                        } else {
+                            let schedule = match schedule_kind {
+                                "interval" => {
+                                    let secs = args.get("every_secs").and_then(|v| v.as_u64()).unwrap_or(3600);
+                                    pares_agens_agenda::scheduler::Schedule::Interval { every_secs: secs }
+                                }
+                                "cron" => {
+                                    let expr = args.get("cron_expr").and_then(|v| v.as_str()).unwrap_or("0 * * * *");
+                                    pares_agens_agenda::scheduler::Schedule::Cron { expr: expr.to_string() }
+                                }
+                                "once" => {
+                                    let at_str = args.get("at").and_then(|v| v.as_str()).unwrap_or("");
+                                    match chrono::DateTime::parse_from_rfc3339(at_str) {
+                                        Ok(dt) => pares_agens_agenda::scheduler::Schedule::Once { at: dt.with_timezone(&chrono::Utc) },
+                                        Err(e) => return vec![Event::ToolResult {
+                                            tool_call_id: id.clone(),
+                                            tool_name: "cron_add".into(),
+                                            content: format!("invalid 'at' timestamp: {e}"),
+                                            is_error: true,
+                                        }],
+                                    }
+                                }
+                                _ => {
+                                    return vec![Event::ToolResult {
+                                        tool_call_id: id.clone(),
+                                        tool_name: "cron_add".into(),
+                                        content: "schedule_kind must be 'interval', 'cron', or 'once'".into(),
+                                        is_error: true,
+                                    }];
+                                }
+                            };
+
+                            let task_id = format!("cron.{}", uuid::Uuid::new_v4());
+                            let task = pares_agens_agenda::scheduler::Task {
+                                id: task_id.clone(),
+                                name: if name.is_empty() { command.to_string() } else { name.to_string() },
+                                schedule,
+                                command: command.to_string(),
+                                enabled: true,
+                                last_run: None,
+                                last_result: None,
+                            };
+                            self.scheduler.add(task).await;
+                            Ok(format!("Scheduled task created: {task_id}"))
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "cron_add".into(),
+                    content: result.clone().unwrap_or_else(|e| e),
+                    is_error: result.is_err(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
+impl Procedure for CronRemoveProcedure {
+    fn name(&self) -> &str {
+        "cron_remove"
+    }
+
+    fn handles(&self) -> &str {
+        "cron_remove"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let result = match parse_tool_args(content) {
+                    Ok(args) => {
+                        let task_id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        if task_id.is_empty() {
+                            Err("missing 'id' parameter".to_string())
+                        } else if self.scheduler.remove(task_id).await {
+                            Ok(format!("Removed task: {task_id}"))
+                        } else {
+                            Err(format!("Task not found: {task_id}"))
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "cron_remove".into(),
+                    content: result.clone().unwrap_or_else(|e| e),
+                    is_error: result.is_err(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
+impl Procedure for CronToggleProcedure {
+    fn name(&self) -> &str {
+        "cron_toggle"
+    }
+
+    fn handles(&self) -> &str {
+        "cron_toggle"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let result = match parse_tool_args(content) {
+                    Ok(args) => {
+                        let task_id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+                        if task_id.is_empty() {
+                            Err("missing 'id' parameter".to_string())
+                        } else if self.scheduler.set_enabled(task_id, enabled).await {
+                            Ok(format!("Task {task_id} enabled={enabled}"))
+                        } else {
+                            Err(format!("Task not found: {task_id}"))
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "cron_toggle".into(),
+                    content: result.clone().unwrap_or_else(|e| e),
+                    is_error: result.is_err(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
 impl Procedure for ParesManusToolProcedure {
     fn name(&self) -> &str {
         self.tool_name
@@ -2158,6 +2377,53 @@ fn tool_definitions() -> Vec<ToolDefinition> {
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags for categorization"}
                 },
                 "required": ["content"]
+            }),
+        },
+        ToolDefinition {
+            name: "cron_list".into(),
+            description: "List all scheduled cron/interval tasks with their status and last run info.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {}
+            }),
+        },
+        ToolDefinition {
+            name: "cron_add".into(),
+            description: "Add a scheduled task. Supports interval (every N seconds), cron (5-field expression), or once (ISO timestamp).".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Human-readable name for the task"},
+                    "schedule_kind": {"type": "string", "enum": ["interval", "cron", "once"], "description": "Type of schedule"},
+                    "every_secs": {"type": "integer", "description": "Interval in seconds (for schedule_kind=interval)"},
+                    "cron_expr": {"type": "string", "description": "Cron expression: min hour dom month dow (for schedule_kind=cron)"},
+                    "at": {"type": "string", "description": "ISO 8601 timestamp (for schedule_kind=once)"},
+                    "command": {"type": "string", "description": "Shell command to execute"}
+                },
+                "required": ["schedule_kind", "command"]
+            }),
+        },
+        ToolDefinition {
+            name: "cron_remove".into(),
+            description: "Remove a scheduled task by ID.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Task ID to remove"}
+                },
+                "required": ["id"]
+            }),
+        },
+        ToolDefinition {
+            name: "cron_toggle".into(),
+            description: "Enable or disable a scheduled task by ID.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Task ID to toggle"},
+                    "enabled": {"type": "boolean", "description": "Whether the task should be enabled"}
+                },
+                "required": ["id", "enabled"]
             }),
         },
     ]
@@ -3431,6 +3697,46 @@ async fn main() {
                 }
             }
 
+
+            // Create scheduler (shared via Arc for cron tools)
+            let scheduler = Arc::new(pares_agens_agenda::scheduler::Scheduler::new().with_executor(
+                std::sync::Arc::new(|cmd: String| {
+                    tokio::spawn(async move {
+                        match tokio::process::Command::new("sh")
+                            .arg("-c")
+                            .arg(&cmd)
+                            .output()
+                            .await
+                        {
+                            Ok(output) => {
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                if output.status.success() {
+                                    stdout.to_string()
+                                } else {
+                                    format!("EXIT {}: {}\n{}", output.status, stdout, stderr)
+                                }
+                            }
+                            Err(e) => format!("EXEC ERROR: {e}"),
+                        }
+                    })
+                }),
+            ));
+
+            // Register cron tools
+            procedure_registry.register(Box::new(CronListProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            procedure_registry.register(Box::new(CronAddProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            procedure_registry.register(Box::new(CronRemoveProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            procedure_registry.register(Box::new(CronToggleProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+
             let procedure_registry = Arc::new(procedure_registry);
 
             let tool_trace_store = ToolTraceStore::default();
@@ -3602,37 +3908,13 @@ async fn main() {
                 }
             }
 
-            // Start the task scheduler in the background
-            let scheduler = pares_agens_agenda::scheduler::Scheduler::new().with_executor(
-                std::sync::Arc::new(|cmd: String| {
-                    tokio::spawn(async move {
-                        match tokio::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&cmd)
-                            .output()
-                            .await
-                        {
-                            Ok(output) => {
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                if output.status.success() {
-                                    stdout.to_string()
-                                } else {
-                                    format!("EXIT {}: {}\n{}", output.status, stdout, stderr)
-                                }
-                            }
-                            Err(e) => format!("EXEC ERROR: {e}"),
-                        }
-                    })
-                }),
-            );
-
             scheduler.add(self_update_task_from_env()).await;
             tracing::info!("Registered scheduled NixOS self-update task");
 
             // Spawn scheduler loop
+            let scheduler_handle = Arc::clone(&scheduler);
             tokio::spawn(async move {
-                scheduler.start().await;
+                scheduler_handle.start().await;
             });
             tracing::info!("Scheduler started");
 
