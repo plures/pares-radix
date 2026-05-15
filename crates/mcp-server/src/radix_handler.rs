@@ -579,6 +579,95 @@ impl RadixToolHandler {
         }
     }
 
+    // ── Heartbeat tools ─────────────────────────────────────────────────────────
+
+    async fn heartbeat_status(&self, _args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        // Read heartbeat config from state (same keys HeartbeatRunner uses)
+        let config = store.get("heartbeat/config").await;
+        let daily_count = store.get("heartbeat/daily_count").await;
+        let daily_date = store.get("heartbeat/daily_date").await;
+        let checklist = store.get("heartbeat/checklist").await;
+
+        let config_obj = config.unwrap_or(json!({
+            "enabled": true,
+            "interval_secs": 30,
+            "quiet_hours_enabled": true,
+            "quiet_hours_start": 23,
+            "quiet_hours_end": 8,
+            "max_proactive_per_day": 6
+        }));
+
+        let checklist_items = checklist
+            .and_then(|v| v.as_array().map(|a| a.len()))
+            .unwrap_or(0);
+
+        let status = json!({
+            "config": config_obj,
+            "daily_count": daily_count.unwrap_or(json!(0)),
+            "daily_date": daily_date.unwrap_or(json!(null)),
+            "checklist_item_count": checklist_items
+        });
+
+        ToolResult::ok(serde_json::to_string_pretty(&status).unwrap_or_default())
+    }
+
+    async fn heartbeat_configure(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        // Load existing config or defaults
+        let mut config = store
+            .get("heartbeat/config")
+            .await
+            .and_then(|v| serde_json::from_value::<serde_json::Map<String, Value>>(v).ok())
+            .unwrap_or_else(|| {
+                serde_json::from_value::<serde_json::Map<String, Value>>(json!({
+                    "enabled": true,
+                    "interval_secs": 30,
+                    "quiet_hours_enabled": true,
+                    "quiet_hours_start": 23,
+                    "quiet_hours_end": 8,
+                    "max_proactive_per_day": 6
+                }))
+                .unwrap()
+            });
+
+        // Apply provided overrides
+        if let Some(enabled) = args.get("enabled") {
+            config.insert("enabled".into(), enabled.clone());
+        }
+        if let Some(interval) = args.get("interval_secs") {
+            config.insert("interval_secs".into(), interval.clone());
+        }
+        if let Some(quiet_enabled) = args.get("quiet_hours_enabled") {
+            config.insert("quiet_hours_enabled".into(), quiet_enabled.clone());
+        }
+        if let Some(quiet_start) = args.get("quiet_hours_start") {
+            config.insert("quiet_hours_start".into(), quiet_start.clone());
+        }
+        if let Some(quiet_end) = args.get("quiet_hours_end") {
+            config.insert("quiet_hours_end".into(), quiet_end.clone());
+        }
+        if let Some(max) = args.get("max_proactive_per_day") {
+            config.insert("max_proactive_per_day".into(), max.clone());
+        }
+
+        let config_value = Value::Object(config);
+        store.set("heartbeat/config", config_value.clone()).await;
+
+        ToolResult::ok(format!(
+            "heartbeat config updated: {}",
+            serde_json::to_string_pretty(&config_value).unwrap_or_default()
+        ))
+    }
+
     // ── State/DB tools ────────────────────────────────────────────────────────
 
     async fn db_get(&self, args: &Value) -> ToolResult {
@@ -1013,6 +1102,36 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["id".into(), "enabled".into()]),
                 },
             },
+            // ── Heartbeat tools ───────────────────────────────────────────
+            Tool {
+                name: "heartbeat_status".into(),
+                description: Some(
+                    "Get heartbeat system status: config, daily count, checklist items.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({})),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "heartbeat_configure".into(),
+                description: Some(
+                    "Update heartbeat configuration. Provide only the fields to change.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "enabled": {"type": "boolean", "description": "Enable/disable heartbeat"},
+                        "interval_secs": {"type": "integer", "description": "Tick interval in seconds"},
+                        "quiet_hours_enabled": {"type": "boolean", "description": "Enable quiet hours"},
+                        "quiet_hours_start": {"type": "integer", "description": "Quiet start hour (0-23)"},
+                        "quiet_hours_end": {"type": "integer", "description": "Quiet end hour (0-23)"},
+                        "max_proactive_per_day": {"type": "integer", "description": "Max proactive messages/day"}
+                    })),
+                    required: None,
+                },
+            },
             // ── State/DB tools ────────────────────────────────────────────
             Tool {
                 name: "db_get".into(),
@@ -1151,6 +1270,8 @@ impl ToolHandler for RadixToolHandler {
             "cron_add" => self.cron_add(&arguments).await,
             "cron_remove" => self.cron_remove(&arguments).await,
             "cron_toggle" => self.cron_toggle(&arguments).await,
+            "heartbeat_status" => self.heartbeat_status(&arguments).await,
+            "heartbeat_configure" => self.heartbeat_configure(&arguments).await,
             "db_get" => self.db_get(&arguments).await,
             "db_put" => self.db_put(&arguments).await,
             "db_delete" => self.db_delete(&arguments).await,
@@ -1565,5 +1686,63 @@ mod tests {
         assert!(result.content.contains("custom.setting"));
         assert!(result.content.contains("custom.threshold"));
         assert!(result.content.contains("enabled"));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_status_returns_defaults() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("heartbeat_status", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("enabled"));
+        assert!(result.content.contains("interval_secs"));
+        assert!(result.content.contains("quiet_hours_start"));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_configure_updates_config() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("heartbeat_configure", json!({"enabled": false, "interval_secs": 60}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("false"));
+        assert!(result.content.contains("60"));
+
+        // Verify it persisted
+        let status = handler.call_tool("heartbeat_status", json!({})).await;
+        assert!(status.content.contains("false"));
+        assert!(status.content.contains("60"));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_configure_partial_update() {
+        let handler = make_handler_with_state();
+        // Only change one field
+        handler
+            .call_tool("heartbeat_configure", json!({"max_proactive_per_day": 10}))
+            .await;
+        let result = handler.call_tool("heartbeat_status", json!({})).await;
+        assert!(!result.is_error);
+        // Default enabled should still be true
+        assert!(result.content.contains("true"));
+        // But max should be updated
+        assert!(result.content.contains("10"));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_status_without_state_store_errors() {
+        let handler = make_handler();
+        let result = handler.call_tool("heartbeat_status", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("state store not configured"));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_tools_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"heartbeat_status"));
+        assert!(names.contains(&"heartbeat_configure"));
     }
 }
