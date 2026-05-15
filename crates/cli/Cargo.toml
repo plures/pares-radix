@@ -35,6 +35,7 @@ pares-models = { path = "../models" }
 pares-agens-agenda = { path = "../agenda" }
 pares-agens-tui = { path = "../tui" }
 pares-agens-bitnet = { path = "../bitnet", features = ["model-client"] }
+mcp-server = { path = "../mcp-server" }
 crossterm = "0.28"
 ratatui = "0.29"
 pares-rector = { path = "../rector" }

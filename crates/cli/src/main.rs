@@ -2961,6 +2961,17 @@ enum Commands {
         cerebellum_model_path: Option<PathBuf>,
     },
 
+    /// Run as an MCP server over stdio (for external agent integration).
+    McpServe {
+        /// Working directory for file operations.
+        #[arg(long, default_value = ".")]
+        workdir: PathBuf,
+
+        /// Brave Search API key (falls back to BRAVE_API_KEY env var).
+        #[arg(long, env = "BRAVE_API_KEY")]
+        brave_api_key: Option<String>,
+    },
+
     /// Run the agent with an interactive terminal UI.
     Tui {
         /// OpenAI-compatible API URL.
@@ -3975,6 +3986,25 @@ async fn main() {
 
             if let Err(e) = adapter_result {
                 tracing::error!("{e}");
+                std::process::exit(1);
+            }
+        }
+
+        Commands::McpServe { workdir, brave_api_key } => {
+            use mcp_server::{McpServer, RadixToolHandler};
+            use pares_agens_core::shell_executor::ShellExecutor;
+
+            let shell = Arc::new(ShellExecutor::new());
+            let resolved_workdir = std::fs::canonicalize(&workdir).unwrap_or(workdir);
+
+            let mut handler = RadixToolHandler::new(shell, resolved_workdir);
+            if let Some(key) = brave_api_key {
+                handler = handler.with_brave_api_key(key);
+            }
+
+            let server = McpServer::new(Arc::new(handler));
+            if let Err(e) = server.run().await {
+                tracing::error!("MCP server error: {e}");
                 std::process::exit(1);
             }
         }

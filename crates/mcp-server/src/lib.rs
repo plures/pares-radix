@@ -31,6 +31,8 @@
 
 pub mod server;
 pub mod handler;
+pub mod radix_handler;
 
 pub use server::McpServer;
 pub use handler::ToolHandler;
+pub use radix_handler::RadixToolHandler;
