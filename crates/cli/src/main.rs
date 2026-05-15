@@ -296,16 +296,19 @@ impl RuntimeAgentFactory {
         }
     }
 
+    fn build_plures_lm(&self) -> Arc<PluresLm> {
+        Arc::new(PluresLm::new(
+            Arc::clone(&self.store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>,
+            self.build_embedder(),
+            128_000,
+        ))
+    }
+
     fn load_system_prompt(&self) -> Result<String, String> {
         build_system_prompt(self.system_prompt_path.clone())
     }
 
-    fn build_agent(&self) -> Result<Arc<Agent>, String> {
-        let plures_lm = Arc::new(PluresLm::new(
-            Arc::clone(&self.store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>,
-            self.build_embedder(),
-            128_000,
-        ));
+    fn build_agent_with_lm(&self, plures_lm: Arc<PluresLm>) -> Result<Arc<Agent>, String> {
         let memory = Arc::new(PluresMemory {
             plures_lm: Arc::clone(&plures_lm),
         });
@@ -363,6 +366,11 @@ impl RuntimeAgentFactory {
                     Arc::new(chronos)
                 }),
         ))
+    }
+
+    fn build_agent(&self) -> Result<Arc<Agent>, String> {
+        let plures_lm = self.build_plures_lm();
+        self.build_agent_with_lm(plures_lm)
     }
 }
 
@@ -900,6 +908,12 @@ struct ListDirectoryProcedure;
 struct WebFetchProcedure;
 struct WebSearchProcedure {
     brave_api_key: Option<String>,
+}
+struct MemorySearchProcedure {
+    plures_lm: Arc<PluresLm>,
+}
+struct MemoryStoreProcedure {
+    plures_lm: Arc<PluresLm>,
 }
 struct ParesManusToolProcedure {
     tool_name: &'static str,
@@ -1468,6 +1482,118 @@ impl Procedure for WebSearchProcedure {
 }
 
 #[async_trait]
+impl Procedure for MemorySearchProcedure {
+    fn name(&self) -> &str {
+        "memory_search"
+    }
+
+    fn handles(&self) -> &str {
+        "memory_search"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let result = match parse_tool_args(content) {
+                    Ok(args) => {
+                        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                        let limit = args
+                            .get("limit")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(5) as usize;
+
+                        if query.is_empty() {
+                            Err("missing 'query' parameter".to_string())
+                        } else {
+                            match self.plures_lm.recall(query, limit, &[]).await {
+                                Ok(entries) => {
+                                    let results: Vec<serde_json::Value> = entries
+                                        .into_iter()
+                                        .map(|e| {
+                                            json!({
+                                                "id": e.id,
+                                                "content": e.content,
+                                                "category": format!("{:?}", e.category),
+                                                "tags": e.tags,
+                                                "created_at": e.created_at
+                                            })
+                                        })
+                                        .collect();
+                                    Ok(serde_json::to_string_pretty(&results)
+                                        .unwrap_or_else(|_| "[]".to_string()))
+                                }
+                                Err(e) => Err(format!("recall failed: {e}")),
+                            }
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "memory_search".into(),
+                    content: result.clone().unwrap_or_else(|e| e),
+                    is_error: result.is_err(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
+impl Procedure for MemoryStoreProcedure {
+    fn name(&self) -> &str {
+        "memory_store"
+    }
+
+    fn handles(&self) -> &str {
+        "memory_store"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let result = match parse_tool_args(content) {
+                    Ok(args) => {
+                        let text = args.get("content").and_then(|v| v.as_str());
+                        let tags: Vec<String> = args
+                            .get("tags")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+
+                        match text {
+                            Some(fact) if !fact.trim().is_empty() => {
+                                match self.plures_lm.capture_fact(fact, tags).await {
+                                    Ok(Some(id)) => Ok(format!("Stored memory: {id}")),
+                                    Ok(None) => Ok("Memory rejected by quality gate".to_string()),
+                                    Err(e) => Err(format!("store failed: {e}")),
+                                }
+                            }
+                            _ => Err("missing or empty 'content' parameter".to_string()),
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "memory_store".into(),
+                    content: result.clone().unwrap_or_else(|e| e),
+                    is_error: result.is_err(),
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
 impl Procedure for ParesManusToolProcedure {
     fn name(&self) -> &str {
         self.tool_name
@@ -2007,6 +2133,31 @@ fn tool_definitions() -> Vec<ToolDefinition> {
                     "limit": {"type": "integer", "description": "Log limit"}
                 },
                 "required": ["action"]
+            }),
+        },
+        ToolDefinition {
+            name: "memory_search".into(),
+            description: "Search long-term memory semantically. Returns the most relevant stored memories matching the query.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Semantic search query"},
+                    "limit": {"type": "integer", "description": "Max results to return (default 5)"},
+                    "min_score": {"type": "number", "description": "Minimum similarity score (0.0-1.0)"}
+                },
+                "required": ["query"]
+            }),
+        },
+        ToolDefinition {
+            name: "memory_store".into(),
+            description: "Store a fact, decision, or important information in long-term memory with optional tags.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "The content to store in memory"},
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags for categorization"}
+                },
+                "required": ["content"]
             }),
         },
     ]
@@ -3198,6 +3349,27 @@ async fn main() {
                 executor: Arc::clone(&shell_executor),
             }));
 
+            // Create PluresLM for memory tools (shared with agent later)
+            let embedder: Box<dyn EmbeddingProvider> = match &embed_url {
+                Some(url) => Box::new(OpenAiEmbedder::new(
+                    url.clone(),
+                    embed_model.clone(),
+                    api_key.clone(),
+                )),
+                None => Box::new(MockEmbedder),
+            };
+            let plures_lm = Arc::new(PluresLm::new(
+                Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>,
+                embedder,
+                128_000,
+            ));
+            procedure_registry.register(Box::new(MemorySearchProcedure {
+                plures_lm: Arc::clone(&plures_lm),
+            }));
+            procedure_registry.register(Box::new(MemoryStoreProcedure {
+                plures_lm: Arc::clone(&plures_lm),
+            }));
+
             // Initialize praxis write gate
             let write_gate = Arc::new(pares_agens_core::praxis::PraxisWriteGate::new());
 
@@ -3307,7 +3479,7 @@ async fn main() {
                 system_prompt_path: system_prompt_path.clone(),
                 cerebellum_model_path: cerebellum_model_path.clone(),
             });
-            let agent = match agent_factory.build_agent() {
+            let agent = match agent_factory.build_agent_with_lm(Arc::clone(&plures_lm)) {
                 Ok(agent) => agent,
                 Err(e) => {
                     tracing::error!("failed to initialize runtime agent: {e}");
@@ -3729,6 +3901,12 @@ async fn main() {
                 executor: Arc::clone(&shell_executor),
             }));
             procedure_registry.register(Box::new(WebFetchProcedure));
+            procedure_registry.register(Box::new(MemorySearchProcedure {
+                plures_lm: Arc::clone(&plures_lm),
+            }));
+            procedure_registry.register(Box::new(MemoryStoreProcedure {
+                plures_lm: Arc::clone(&plures_lm),
+            }));
 
             // Load .px procedures from praxis/ directory (TUI mode)
             let px_action_handler = Arc::new(
