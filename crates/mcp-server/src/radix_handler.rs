@@ -24,6 +24,7 @@ use pares_agens_core::StateStore;
 
 use pares_agens_agenda::scheduler::Scheduler;
 
+use crate::browser::BrowserClient;
 use crate::handler::{ToolHandler, ToolResult};
 
 /// Production tool handler that connects MCP tool calls to real implementations.
@@ -40,11 +41,18 @@ pub struct RadixToolHandler {
     workdir: PathBuf,
     /// Brave Search API key (optional).
     brave_api_key: Option<String>,
+    /// OpenAI API key for media tools (image gen, TTS, vision).
+    openai_api_key: Option<String>,
+    /// Media output directory for generated files.
+    media_dir: PathBuf,
+    /// Browser CDP client for browser automation tools.
+    browser: Option<Arc<BrowserClient>>,
 }
 
 impl RadixToolHandler {
     /// Create a new handler with required dependencies.
     pub fn new(shell: Arc<ShellExecutor>, workdir: PathBuf) -> Self {
+        let media_dir = workdir.join(".radix-media");
         Self {
             shell,
             memory: None,
@@ -52,6 +60,9 @@ impl RadixToolHandler {
             state_store: None,
             workdir,
             brave_api_key: None,
+            openai_api_key: None,
+            media_dir,
+            browser: None,
         }
     }
 
@@ -70,6 +81,12 @@ impl RadixToolHandler {
     /// Set the Brave Search API key for web_search.
     pub fn with_brave_api_key(mut self, key: String) -> Self {
         self.brave_api_key = Some(key);
+        self
+    }
+
+    /// Set the OpenAI API key for media tools.
+    pub fn with_openai_api_key(mut self, key: String) -> Self {
+        self.openai_api_key = Some(key);
         self
     }
 
@@ -970,6 +987,317 @@ impl RadixToolHandler {
         };
 
         ToolResult::ok(serde_json::to_string_pretty(&schema).unwrap_or_default())
+    }
+
+    // ── Media tools ────────────────────────────────────────────────────────────
+
+    async fn image_analyze(&self, args: &Value) -> ToolResult {
+        let api_key = match &self.openai_api_key {
+            Some(k) => k.clone(),
+            None => return ToolResult::error("OpenAI API key not configured"),
+        };
+
+        let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("Describe this image in detail.");
+        let image_url = args.get("image_url").and_then(|v| v.as_str());
+        let image_path = args.get("image_path").and_then(|v| v.as_str());
+
+        let image_content = if let Some(url) = image_url {
+            json!({"type": "image_url", "image_url": {"url": url}})
+        } else if let Some(path) = image_path {
+            let resolved = self.resolve_path(path);
+            match tokio::fs::read(&resolved).await {
+                Ok(bytes) => {
+                    use base64::Engine;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                    let mime = if path.ends_with(".png") { "image/png" }
+                        else if path.ends_with(".gif") { "image/gif" }
+                        else if path.ends_with(".webp") { "image/webp" }
+                        else { "image/jpeg" };
+                    json!({"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{b64}")}})
+                }
+                Err(e) => return ToolResult::error(format!("failed to read image: {e}")),
+            }
+        } else {
+            return ToolResult::error("provide either image_url or image_path");
+        };
+
+        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o");
+        let body = json!({
+            "model": model,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, image_content]}],
+            "max_tokens": 1024
+        });
+
+        let client = reqwest::Client::new();
+        match client.post("https://api.openai.com/v1/chat/completions").bearer_auth(&api_key).json(&body).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    return ToolResult::error(format!("API error {status}: {text}"));
+                }
+                match resp.json::<Value>().await {
+                    Ok(data) => ToolResult::ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("no response").to_string()),
+                    Err(e) => ToolResult::error(format!("failed to parse response: {e}")),
+                }
+            }
+            Err(e) => ToolResult::error(format!("request failed: {e}")),
+        }
+    }
+
+    async fn image_generate(&self, args: &Value) -> ToolResult {
+        let api_key = match &self.openai_api_key {
+            Some(k) => k.clone(),
+            None => return ToolResult::error("OpenAI API key not configured"),
+        };
+        let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: prompt"),
+        };
+        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-image-1");
+        let size = args.get("size").and_then(|v| v.as_str()).unwrap_or("1024x1024");
+        let quality = args.get("quality").and_then(|v| v.as_str()).unwrap_or("auto");
+
+        let body = json!({"model": model, "prompt": prompt, "n": 1, "size": size, "quality": quality});
+        let client = reqwest::Client::new();
+        match client.post("https://api.openai.com/v1/images/generations").bearer_auth(&api_key).json(&body).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    return ToolResult::error(format!("API error {status}: {text}"));
+                }
+                match resp.json::<Value>().await {
+                    Ok(data) => {
+                        if let Some(b64) = data["data"][0]["b64_json"].as_str() {
+                            let _ = tokio::fs::create_dir_all(&self.media_dir).await;
+                            let filename = format!("{}.png", uuid::Uuid::new_v4());
+                            let filepath = self.media_dir.join(&filename);
+                            use base64::Engine;
+                            match base64::engine::general_purpose::STANDARD.decode(b64) {
+                                Ok(bytes) => {
+                                    if let Err(e) = tokio::fs::write(&filepath, &bytes).await {
+                                        return ToolResult::error(format!("failed to save image: {e}"));
+                                    }
+                                    ToolResult::ok(json!({"path": filepath.display().to_string(), "size_bytes": bytes.len()}).to_string())
+                                }
+                                Err(e) => ToolResult::error(format!("failed to decode base64: {e}")),
+                            }
+                        } else if let Some(url) = data["data"][0]["url"].as_str() {
+                            ToolResult::ok(json!({"url": url}).to_string())
+                        } else {
+                            ToolResult::error(format!("unexpected response format: {data}"))
+                        }
+                    }
+                    Err(e) => ToolResult::error(format!("failed to parse response: {e}")),
+                }
+            }
+            Err(e) => ToolResult::error(format!("request failed: {e}")),
+        }
+    }
+
+    async fn tts_generate(&self, args: &Value) -> ToolResult {
+        let api_key = match &self.openai_api_key {
+            Some(k) => k.clone(),
+            None => return ToolResult::error("OpenAI API key not configured"),
+        };
+        let text = match args.get("text").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return ToolResult::error("missing required parameter: text"),
+        };
+        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o-mini-tts");
+        let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("alloy");
+
+        let body = json!({"model": model, "input": text, "voice": voice});
+        let client = reqwest::Client::new();
+        match client.post("https://api.openai.com/v1/audio/speech").bearer_auth(&api_key).json(&body).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let err_text = resp.text().await.unwrap_or_default();
+                    return ToolResult::error(format!("API error {status}: {err_text}"));
+                }
+                match resp.bytes().await {
+                    Ok(bytes) => {
+                        let _ = tokio::fs::create_dir_all(&self.media_dir).await;
+                        let filename = format!("{}.mp3", uuid::Uuid::new_v4());
+                        let filepath = self.media_dir.join(&filename);
+                        if let Err(e) = tokio::fs::write(&filepath, &bytes).await {
+                            return ToolResult::error(format!("failed to save audio: {e}"));
+                        }
+                        ToolResult::ok(json!({"path": filepath.display().to_string(), "size_bytes": bytes.len()}).to_string())
+                    }
+                    Err(e) => ToolResult::error(format!("failed to read response: {e}")),
+                }
+            }
+            Err(e) => ToolResult::error(format!("request failed: {e}")),
+        }
+    }
+
+    async fn pdf_analyze(&self, args: &Value) -> ToolResult {
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => self.resolve_path(p),
+            None => return ToolResult::error("missing required parameter: path"),
+        };
+        if !path.exists() {
+            return ToolResult::error(format!("file not found: {}", path.display()));
+        }
+
+        let output = tokio::process::Command::new("pdftotext").arg(path.to_string_lossy().as_ref()).arg("-").output().await;
+        let text = match output {
+            Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
+            Ok(out) => return ToolResult::error(format!("pdftotext failed: {}", String::from_utf8_lossy(&out.stderr))),
+            Err(e) => return ToolResult::error(format!("pdftotext not found or failed: {e}. Install poppler-utils.")),
+        };
+
+        let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => {
+                let truncated = if text.len() > 50_000 { format!("{}\n\n[truncated]", &text[..50_000]) } else { text };
+                return ToolResult::ok(truncated);
+            }
+        };
+
+        let api_key = match &self.openai_api_key {
+            Some(k) => k.clone(),
+            None => return ToolResult::ok(format!("[no API key for analysis]\n\n{}", if text.len() > 50_000 { &text[..50_000] } else { &text })),
+        };
+
+        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o-mini");
+        let max_text = 100_000;
+        let pdf_text = if text.len() > max_text { &text[..max_text] } else { &text };
+        let body = json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": "You are analyzing a PDF document."},
+                {"role": "user", "content": format!("{prompt}\n\n---\n\n{pdf_text}")}
+            ],
+            "max_tokens": 2048
+        });
+
+        let client = reqwest::Client::new();
+        match client.post("https://api.openai.com/v1/chat/completions").bearer_auth(&api_key).json(&body).send().await {
+            Ok(resp) => {
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let err_text = resp.text().await.unwrap_or_default();
+                    return ToolResult::error(format!("API error {status}: {err_text}"));
+                }
+                match resp.json::<Value>().await {
+                    Ok(data) => ToolResult::ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("no response").to_string()),
+                    Err(e) => ToolResult::error(format!("failed to parse response: {e}")),
+                }
+            }
+            Err(e) => ToolResult::error(format!("request failed: {e}")),
+        }
+    }
+
+    async fn video_generate(&self, _args: &Value) -> ToolResult {
+        ToolResult::error("video generation provider not configured. Configure a provider via config_set to enable.")
+    }
+
+    async fn music_generate(&self, _args: &Value) -> ToolResult {
+        ToolResult::error("music generation provider not configured. Configure a provider via config_set to enable.")
+    }
+
+    // ── Browser tools ─────────────────────────────────────────────────────────
+
+    async fn browser_status(&self, _args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured. Set CDP endpoint via config."),
+        };
+        if !browser.is_available().await {
+            return ToolResult::ok(json!({"available": false, "message": "no browser reachable at CDP endpoint"}).to_string());
+        }
+        match browser.version().await {
+            Ok(version) => ToolResult::ok(json!({"available": true, "version": version}).to_string()),
+            Err(e) => ToolResult::ok(json!({"available": false, "error": e}).to_string()),
+        }
+    }
+
+    async fn browser_navigate(&self, args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured"),
+        };
+        let url = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return ToolResult::error("missing required parameter: url"),
+        };
+        match browser.navigate(url).await {
+            Ok(result) => ToolResult::ok(format!("navigated to {url}: {result}")),
+            Err(e) => ToolResult::error(format!("navigation failed: {e}")),
+        }
+    }
+
+    async fn browser_snapshot(&self, _args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured"),
+        };
+        match browser.snapshot().await {
+            Ok(text) => ToolResult::ok(text),
+            Err(e) => ToolResult::error(format!("snapshot failed: {e}")),
+        }
+    }
+
+    async fn browser_screenshot(&self, args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured"),
+        };
+        let format = args.get("format").and_then(|v| v.as_str());
+        match browser.screenshot(format).await {
+            Ok(base64_data) => {
+                let ext = format.unwrap_or("png");
+                let filename = format!("screenshot-{}.{ext}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+                let path = self.media_dir.join(&filename);
+                if let Err(e) = tokio::fs::create_dir_all(&self.media_dir).await {
+                    return ToolResult::error(format!("failed to create media dir: {e}"));
+                }
+                match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data) {
+                    Ok(bytes) => {
+                        if let Err(e) = tokio::fs::write(&path, &bytes).await {
+                            return ToolResult::error(format!("failed to save screenshot: {e}"));
+                        }
+                        ToolResult::ok(format!("screenshot saved: {} ({} bytes)", path.display(), bytes.len()))
+                    }
+                    Err(e) => ToolResult::error(format!("failed to decode screenshot: {e}")),
+                }
+            }
+            Err(e) => ToolResult::error(format!("screenshot failed: {e}")),
+        }
+    }
+
+    async fn browser_click(&self, args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured"),
+        };
+        let selector = args.get("selector").and_then(|v| v.as_str());
+        let x = args.get("x").and_then(|v| v.as_f64());
+        let y = args.get("y").and_then(|v| v.as_f64());
+        match browser.click(selector, x, y).await {
+            Ok(msg) => ToolResult::ok(msg),
+            Err(e) => ToolResult::error(format!("click failed: {e}")),
+        }
+    }
+
+    async fn browser_type(&self, args: &Value) -> ToolResult {
+        let browser = match &self.browser {
+            Some(b) => b,
+            None => return ToolResult::error("browser not configured"),
+        };
+        let text = match args.get("text").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return ToolResult::error("missing required parameter: text"),
+        };
+        let selector = args.get("selector").and_then(|v| v.as_str());
+        match browser.type_text(text, selector).await {
+            Ok(msg) => ToolResult::ok(msg),
+            Err(e) => ToolResult::error(format!("type failed: {e}")),
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

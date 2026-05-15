@@ -29,6 +29,7 @@
 
 #![warn(missing_docs)]
 
+pub mod browser;
 pub mod server;
 pub mod handler;
 pub mod radix_handler;
