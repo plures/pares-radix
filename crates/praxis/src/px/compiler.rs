@@ -242,6 +242,32 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             "condition": condition,
             "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
         }),
+        PxStep::Loop { over, times, item_var, steps, output_var } => {
+            let mut obj = json!({
+                "kind": "loop",
+                "as": item_var,
+                "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
+            });
+            if let Some(over_var) = over {
+                obj["over"] = json!(over_var);
+            }
+            if let Some(n) = times {
+                obj["times"] = json!(n);
+            }
+            if let Some(out) = output_var {
+                obj["output_var"] = json!(out);
+            }
+            obj
+        }
+        PxStep::Emit { event } => json!({
+            "kind": "emit",
+            "event": event,
+        }),
+        PxStep::Try { steps, catch } => json!({
+            "kind": "try",
+            "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
+            "catch": catch.iter().map(compile_step).collect::<Vec<_>>(),
+        }),
     }
 }
 

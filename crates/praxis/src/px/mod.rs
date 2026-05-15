@@ -153,6 +153,28 @@ pub enum PxStep {
         condition: String,
         steps: Vec<PxStep>,
     },
+    Loop {
+        /// Variable name to iterate over (resolved from vars at runtime).
+        over: Option<String>,
+        /// Fixed number of iterations (alternative to `over`).
+        times: Option<u64>,
+        /// Variable name for the current item (default: "item").
+        item_var: String,
+        /// Nested steps executed per iteration.
+        steps: Vec<PxStep>,
+        /// Optional variable to collect results into.
+        output_var: Option<String>,
+    },
+    Emit {
+        /// Event data to emit (may contain $variable references).
+        event: serde_json::Value,
+    },
+    Try {
+        /// Steps to attempt.
+        steps: Vec<PxStep>,
+        /// Steps to execute on error.
+        catch: Vec<PxStep>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
