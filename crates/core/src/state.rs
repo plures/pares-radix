@@ -44,6 +44,21 @@ pub trait StateStore: Send + Sync {
     async fn get(&self, key: &str) -> Option<Value>;
     /// Persist `value` under `key`, replacing any previous value.
     async fn set(&self, key: &str, value: Value);
+    /// Delete a key, returning the previous value if it existed.
+    ///
+    /// The default implementation sets the value to `Value::Null`.
+    async fn delete(&self, key: &str) -> Option<Value> {
+        let prev = self.get(key).await;
+        self.set(key, Value::Null).await;
+        prev
+    }
+    /// Return all keys matching a given prefix.
+    ///
+    /// The default implementation returns an empty vec (backends should
+    /// override for efficient scanning).
+    async fn keys_with_prefix(&self, _prefix: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +97,20 @@ impl StateStore for InMemoryStateStore {
 
     async fn set(&self, key: &str, value: Value) {
         self.data.write().await.insert(key.to_string(), value);
+    }
+
+    async fn delete(&self, key: &str) -> Option<Value> {
+        self.data.write().await.remove(key)
+    }
+
+    async fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.data
+            .read()
+            .await
+            .keys()
+            .filter(|k| k.starts_with(prefix))
+            .cloned()
+            .collect()
     }
 }
 
@@ -137,6 +166,21 @@ impl StateStore for PluresDbStateStore {
     async fn set(&self, key: &str, value: Value) {
         self.store.put(key, ACTOR, value);
     }
+
+    async fn delete(&self, key: &str) -> Option<Value> {
+        let prev = self.get(key).await;
+        self.store.put(key, ACTOR, Value::Null);
+        prev
+    }
+
+    async fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.store
+            .list()
+            .into_iter()
+            .map(|r| r.id)
+            .filter(|id| id.starts_with(prefix))
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +229,40 @@ mod tests {
     async fn in_memory_default_is_empty() {
         let store = InMemoryStateStore::default();
         assert!(store.get("x").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_delete_returns_previous() {
+        let store = InMemoryStateStore::new();
+        store.set("del_me", json!("value")).await;
+        let prev = store.delete("del_me").await;
+        assert_eq!(prev, Some(json!("value")));
+        assert!(store.get("del_me").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn in_memory_delete_missing_returns_none() {
+        let store = InMemoryStateStore::new();
+        let prev = store.delete("missing").await;
+        assert_eq!(prev, None);
+    }
+
+    #[tokio::test]
+    async fn in_memory_keys_with_prefix() {
+        let store = InMemoryStateStore::new();
+        store.set("config:model", json!("gpt-4")).await;
+        store.set("config:endpoint", json!("http://localhost")).await;
+        store.set("state:version", json!(1)).await;
+
+        let mut keys = store.keys_with_prefix("config:").await;
+        keys.sort();
+        assert_eq!(keys, vec!["config:endpoint", "config:model"]);
+
+        let keys = store.keys_with_prefix("state:").await;
+        assert_eq!(keys, vec!["state:version"]);
+
+        let keys = store.keys_with_prefix("nonexistent").await;
+        assert!(keys.is_empty());
     }
 
     // ── PluresDbStateStore ────────────────────────────────────────────────
@@ -238,5 +316,28 @@ mod tests {
         });
         store.set("complex", complex.clone()).await;
         assert_eq!(store.get("complex").await, Some(complex));
+    }
+
+    #[tokio::test]
+    async fn pluresdb_delete_returns_previous() {
+        let store = PluresDbStateStore::in_memory();
+        store.set("del_me", json!("value")).await;
+        let prev = store.delete("del_me").await;
+        assert_eq!(prev, Some(json!("value")));
+        // After delete, get returns null (CRDT tombstone)
+        let val = store.get("del_me").await;
+        assert!(val.is_none() || val == Some(Value::Null));
+    }
+
+    #[tokio::test]
+    async fn pluresdb_keys_with_prefix() {
+        let store = PluresDbStateStore::in_memory();
+        store.set("config:model", json!("gpt-4")).await;
+        store.set("config:endpoint", json!("http://localhost")).await;
+        store.set("state:version", json!(1)).await;
+
+        let mut keys = store.keys_with_prefix("config:").await;
+        keys.sort();
+        assert_eq!(keys, vec!["config:endpoint", "config:model"]);
     }
 }

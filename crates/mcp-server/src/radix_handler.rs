@@ -695,32 +695,21 @@ impl RadixToolHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        // Known config keys to check
-        let known_keys = [
-            "model",
-            "endpoint",
-            "channel",
-            "system_prompt",
-            "auto_start",
-            "activation_hotkey",
-            "routing.interactive",
-            "routing.background",
-            "routing.coding",
-            "preferences.temperature",
-            "preferences.max_tokens",
-            "telemetry.enabled",
-            "__last_modified",
-        ];
+        // Dynamically scan all config keys from the store
+        let config_prefix = format!("config:{prefix}");
+        let keys = store.keys_with_prefix(&config_prefix).await;
 
         let mut results = json!({});
-        for key in &known_keys {
-            if !key.starts_with(prefix) {
+        for full_key in &keys {
+            // Strip the "config:" prefix to get the user-facing key
+            let user_key = full_key.strip_prefix("config:").unwrap_or(full_key);
+            // Skip internal keys
+            if user_key.starts_with("__") {
                 continue;
             }
-            let full_key = format!("config:{key}");
-            if let Some(val) = store.get(&full_key).await {
+            if let Some(val) = store.get(full_key).await {
                 if val != Value::Null {
-                    results[key] = val;
+                    results[user_key] = val;
                 }
             }
         }
@@ -728,11 +717,42 @@ impl RadixToolHandler {
         ToolResult::ok(serde_json::to_string_pretty(&results).unwrap_or_default())
     }
 
+    async fn config_delete(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        let full_key = format!("config:{key}");
+        let prev = store.delete(&full_key).await;
+
+        // Update the last-modified timestamp for hot-reload detection
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        store.set("config:__last_modified", json!(now)).await;
+
+        match prev {
+            Some(v) if v != Value::Null => ToolResult::ok(format!("deleted config: {key} (was: {v})")),
+            _ => ToolResult::ok(format!("config key not found: {key}")),
+        }
+    }
+
     async fn runtime_status(&self, _args: &Value) -> ToolResult {
         let uptime_secs = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+
+        // Get active shell session count
+        let shell_sessions = self.shell.list().await;
+        let active_count = shell_sessions.len();
 
         let mut status = json!({
             "status": "running",
@@ -745,13 +765,20 @@ impl RadixToolHandler {
                 "scheduler": if self.scheduler.is_some() { "active" } else { "not_configured" },
                 "state_store": if self.state_store.is_some() { "active" } else { "not_configured" },
                 "web_search": if self.brave_api_key.is_some() { "active" } else { "not_configured" }
-            }
+            },
+            "active_shell_sessions": active_count
         });
 
-        // Include active sessions count from shell executor
-        // Note: shell.list() is async but we need to stay compatible
-        // with the non-Send constraint. Use a known-safe approach.
-        status["active_shell_sessions"] = json!("available");
+        // Include config key count if state store is available
+        if let Some(store) = &self.state_store {
+            let config_keys = store.keys_with_prefix("config:").await;
+            let user_keys: Vec<_> = config_keys
+                .iter()
+                .filter_map(|k| k.strip_prefix("config:"))
+                .filter(|k| !k.starts_with("__"))
+                .collect();
+            status["config_key_count"] = json!(user_keys.len());
+        }
 
         ToolResult::ok(serde_json::to_string_pretty(&status).unwrap_or_default())
     }
@@ -1059,7 +1086,7 @@ impl ToolHandler for RadixToolHandler {
             Tool {
                 name: "config_list".into(),
                 description: Some(
-                    "List known configuration keys and their current values. Optional prefix filter.".into(),
+                    "List all configuration keys and their current values. Dynamically scans the store. Optional prefix filter.".into(),
                 ),
                 input_schema: ToolInputSchema {
                     schema_type: "object".into(),
@@ -1067,6 +1094,19 @@ impl ToolHandler for RadixToolHandler {
                         "prefix": {"type": "string", "description": "Optional prefix filter for keys"}
                     })),
                     required: None,
+                },
+            },
+            Tool {
+                name: "config_delete".into(),
+                description: Some(
+                    "Delete a configuration key. Returns the previous value if it existed.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "Config key to delete"}
+                    })),
+                    required: Some(vec!["key".into()]),
                 },
             },
             Tool {
@@ -1117,6 +1157,7 @@ impl ToolHandler for RadixToolHandler {
             "config_get" => self.config_get(&arguments).await,
             "config_set" => self.config_set(&arguments).await,
             "config_list" => self.config_list(&arguments).await,
+            "config_delete" => self.config_delete(&arguments).await,
             "config_reload" => self.config_reload(&arguments).await,
             "runtime_status" => self.runtime_status(&arguments).await,
             other => {
@@ -1470,7 +1511,59 @@ mod tests {
         assert!(names.contains(&"config_get"));
         assert!(names.contains(&"config_set"));
         assert!(names.contains(&"config_list"));
+        assert!(names.contains(&"config_delete"));
         assert!(names.contains(&"config_reload"));
         assert!(names.contains(&"runtime_status"));
+    }
+
+    #[tokio::test]
+    async fn config_delete_existing_key() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("config_set", json!({"key": "model", "value": "gpt-4"}))
+            .await;
+
+        let result = handler
+            .call_tool("config_delete", json!({"key": "model"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("deleted config: model"));
+        assert!(result.content.contains("gpt-4"));
+
+        // Verify it's gone
+        let result = handler
+            .call_tool("config_get", json!({"key": "model"}))
+            .await;
+        assert_eq!(result.content, "null");
+    }
+
+    #[tokio::test]
+    async fn config_delete_missing_key() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("config_delete", json!({"key": "nonexistent"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn config_list_dynamic_scanning() {
+        let handler = make_handler_with_state();
+        // Set some custom keys not in any hardcoded list
+        handler
+            .call_tool("config_set", json!({"key": "custom.setting", "value": "enabled"}))
+            .await;
+        handler
+            .call_tool("config_set", json!({"key": "custom.threshold", "value": 42}))
+            .await;
+
+        let result = handler
+            .call_tool("config_list", json!({"prefix": "custom"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("custom.setting"));
+        assert!(result.content.contains("custom.threshold"));
+        assert!(result.content.contains("enabled"));
     }
 }
