@@ -1753,6 +1753,79 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["text".into()]),
                 },
             },
+            // ── Media tools ───────────────────────────────────────────────
+            Tool {
+                name: "image_analyze".into(),
+                description: Some("Analyze an image using a vision model (GPT-4o). Accepts image_url or image_path.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "image_url": {"type": "string", "description": "URL of the image to analyze"},
+                        "image_path": {"type": "string", "description": "Local file path of the image"},
+                        "prompt": {"type": "string", "description": "Analysis prompt (default: describe the image)"},
+                        "model": {"type": "string", "description": "Vision model to use (default: gpt-4o)"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "image_generate".into(),
+                description: Some("Generate an image from a text prompt via OpenAI (DALL-E / gpt-image-1).".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "prompt": {"type": "string", "description": "Image generation prompt"},
+                        "model": {"type": "string", "description": "Model (default: gpt-image-1)"},
+                        "size": {"type": "string", "description": "Image size (default: 1024x1024)"},
+                        "quality": {"type": "string", "description": "Quality: auto, low, medium, high"}
+                    })),
+                    required: Some(vec!["prompt".into()]),
+                },
+            },
+            Tool {
+                name: "tts_generate".into(),
+                description: Some("Generate speech audio from text via OpenAI TTS. Returns path to MP3 file.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "text": {"type": "string", "description": "Text to convert to speech"},
+                        "voice": {"type": "string", "description": "Voice: alloy, echo, fable, onyx, nova, shimmer"},
+                        "model": {"type": "string", "description": "TTS model (default: gpt-4o-mini-tts)"}
+                    })),
+                    required: Some(vec!["text".into()]),
+                },
+            },
+            Tool {
+                name: "pdf_analyze".into(),
+                description: Some("Extract text from a PDF and optionally analyze with a model. Requires pdftotext.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "path": {"type": "string", "description": "Path to PDF file"},
+                        "prompt": {"type": "string", "description": "Analysis prompt (omit to just extract text)"},
+                        "model": {"type": "string", "description": "Model for analysis (default: gpt-4o-mini)"}
+                    })),
+                    required: Some(vec!["path".into()]),
+                },
+            },
+            Tool {
+                name: "video_generate".into(),
+                description: Some("Generate a video from a prompt. Requires an external provider.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({"prompt": {"type": "string", "description": "Video generation prompt"}})),
+                    required: Some(vec!["prompt".into()]),
+                },
+            },
+            Tool {
+                name: "music_generate".into(),
+                description: Some("Generate music from a prompt. Requires an external provider.".into()),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({"prompt": {"type": "string", "description": "Music generation prompt"}})),
+                    required: Some(vec!["prompt".into()]),
+                },
+            },
         ]
     }
 
@@ -2387,5 +2460,126 @@ mod tests {
         // Will fail SSH connection but should NOT fail on "node not found"
         assert!(result.is_error);
         assert!(!result.content.contains("not found"));
+    }
+
+    // ── Media tool tests ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn media_tools_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"image_analyze"));
+        assert!(names.contains(&"image_generate"));
+        assert!(names.contains(&"tts_generate"));
+        assert!(names.contains(&"pdf_analyze"));
+        assert!(names.contains(&"video_generate"));
+        assert!(names.contains(&"music_generate"));
+    }
+
+    #[tokio::test]
+    async fn image_analyze_without_api_key_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("image_analyze", json!({"image_url": "https://example.com/img.jpg"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn image_analyze_missing_image_returns_error() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_openai_api_key("sk-test".into());
+        let result = handler
+            .call_tool("image_analyze", json!({"prompt": "describe"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("image_url or image_path"));
+    }
+
+    #[tokio::test]
+    async fn image_generate_without_api_key_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("image_generate", json!({"prompt": "a cat"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn image_generate_missing_prompt_returns_error() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_openai_api_key("sk-test".into());
+        let result = handler
+            .call_tool("image_generate", json!({}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("prompt"));
+    }
+
+    #[tokio::test]
+    async fn tts_generate_without_api_key_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("tts_generate", json!({"text": "hello"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn tts_generate_missing_text_returns_error() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_openai_api_key("sk-test".into());
+        let result = handler
+            .call_tool("tts_generate", json!({}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("text"));
+    }
+
+    #[tokio::test]
+    async fn pdf_analyze_missing_path_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("pdf_analyze", json!({}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("path"));
+    }
+
+    #[tokio::test]
+    async fn pdf_analyze_nonexistent_file_returns_error() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("pdf_analyze", json!({"path": "/tmp/nonexistent_radix_test.pdf"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn video_generate_returns_not_configured() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("video_generate", json!({"prompt": "a sunset"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn music_generate_returns_not_configured() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("music_generate", json!({"prompt": "jazz"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
     }
 }
