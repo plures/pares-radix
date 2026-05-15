@@ -23,6 +23,8 @@ use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
 
 use pares_agens_agenda::scheduler::Scheduler;
+use pares_agens_praxis::module::PraxisModule;
+use pares_agens_praxis::rule::{RuleContext, RuleResult};
 
 use crate::browser::BrowserClient;
 use crate::handler::{ToolHandler, ToolResult};
@@ -47,6 +49,8 @@ pub struct RadixToolHandler {
     media_dir: PathBuf,
     /// Browser CDP client for browser automation tools.
     browser: Option<Arc<BrowserClient>>,
+    /// Praxis modules for constraint evaluation.
+    praxis_modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
 }
 
 impl RadixToolHandler {
@@ -63,6 +67,7 @@ impl RadixToolHandler {
             openai_api_key: None,
             media_dir,
             browser: None,
+            praxis_modules: Vec::new(),
         }
     }
 
@@ -93,6 +98,12 @@ impl RadixToolHandler {
     /// Attach a state store for db_get/db_put/db_delete tools.
     pub fn with_state_store(mut self, store: Arc<dyn StateStore>) -> Self {
         self.state_store = Some(store);
+        self
+    }
+
+    /// Attach praxis modules for constraint evaluation.
+    pub fn with_praxis_modules(mut self, modules: Vec<Box<dyn PraxisModule + Send + Sync>>) -> Self {
+        self.praxis_modules = modules;
         self
     }
 
@@ -1529,6 +1540,119 @@ impl RadixToolHandler {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// Resolve a potentially relative path against the workdir.
+    // ── Praxis tools ──────────────────────────────────────────────────────────
+
+    async fn praxis_evaluate(&self, args: &Value) -> ToolResult {
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a.to_string(),
+            None => return ToolResult::error("missing required parameter: action"),
+        };
+
+        let payload = args.get("payload").cloned().unwrap_or(json!({}));
+        let module_filter = args.get("module").and_then(|v| v.as_str());
+
+        if self.praxis_modules.is_empty() {
+            return ToolResult::ok(json!({
+                "warning": "no praxis modules loaded",
+                "results": []
+            }).to_string());
+        }
+
+        let ctx = RuleContext::new(&action, payload);
+        let mut all_results: Vec<Value> = Vec::new();
+
+        for module in &self.praxis_modules {
+            if let Some(filter) = module_filter {
+                if module.name() != filter {
+                    continue;
+                }
+            }
+
+            let results = module.evaluate_all(&ctx);
+            for (rule_name, result) in results {
+                let (status, message) = match &result {
+                    RuleResult::Pass => ("pass", None),
+                    RuleResult::Fail { reason } => ("fail", Some(reason.clone())),
+                    RuleResult::Warning { message } => ("warning", Some(message.clone())),
+                    RuleResult::Gate { action: _, rationale } => ("gate", Some(rationale.clone())),
+                };
+
+                let mut entry = json!({
+                    "module": module.name(),
+                    "rule": rule_name,
+                    "status": status,
+                });
+                if let Some(msg) = message {
+                    entry["message"] = Value::String(msg);
+                }
+                all_results.push(entry);
+            }
+        }
+
+        let failures = all_results.iter()
+            .filter(|r| r["status"] == "fail" || r["status"] == "gate")
+            .count();
+        let warnings = all_results.iter()
+            .filter(|r| r["status"] == "warning")
+            .count();
+
+        ToolResult::ok(json!({
+            "action": action,
+            "total_rules": all_results.len(),
+            "failures": failures,
+            "warnings": warnings,
+            "passed": all_results.len() - failures - warnings,
+            "results": all_results
+        }).to_string())
+    }
+
+    async fn praxis_list(&self, args: &Value) -> ToolResult {
+        let module_filter = args.get("module").and_then(|v| v.as_str());
+
+        if self.praxis_modules.is_empty() {
+            return ToolResult::ok(json!({
+                "modules": [],
+                "total_rules": 0,
+                "note": "no praxis modules loaded — use with_praxis_modules() to configure"
+            }).to_string());
+        }
+
+        let mut modules_info: Vec<Value> = Vec::new();
+        let mut total_rules = 0;
+
+        for module in &self.praxis_modules {
+            if let Some(filter) = module_filter {
+                if module.name() != filter {
+                    continue;
+                }
+            }
+
+            let rules = module.rules();
+            let audit = module.audit();
+            total_rules += rules.len();
+
+            let rule_list: Vec<Value> = rules.iter().map(|r| {
+                json!({
+                    "name": r.name(),
+                    "category": format!("{:?}", r.category()),
+                })
+            }).collect();
+
+            modules_info.push(json!({
+                "name": module.name(),
+                "rule_count": rules.len(),
+                "completeness_pct": audit.completeness_pct,
+                "expectations": module.expectations(),
+                "rules": rule_list,
+            }));
+        }
+
+        ToolResult::ok(json!({
+            "modules": modules_info,
+            "total_rules": total_rules
+        }).to_string())
+    }
+
     fn resolve_path(&self, path: &str) -> PathBuf {
         let p = PathBuf::from(path);
         if p.is_absolute() {
@@ -2119,6 +2243,36 @@ impl ToolHandler for RadixToolHandler {
             });
         }
 
+        // ── Praxis tools (always available) ───────────────────────────────────
+        tools.push(Tool {
+            name: "praxis_evaluate".into(),
+            description: Some(
+                "Evaluate praxis rules/constraints against a context. Returns pass/fail/warning results.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "action": {"type": "string", "description": "The action being evaluated (e.g. 'send_email', 'deploy')"},
+                    "payload": {"type": "object", "description": "Context payload for rule evaluation"},
+                    "module": {"type": "string", "description": "Optional: specific module to evaluate (safety, agent_lifecycle, task_routing, coordination). Omit for all."}
+                })),
+                required: Some(vec!["action".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "praxis_list".into(),
+            description: Some(
+                "List loaded praxis modules, their rules, and completeness audit.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "module": {"type": "string", "description": "Optional: specific module to inspect (omit for all)"}
+                })),
+                required: None,
+            },
+        });
+
         tools
     }
 
@@ -2169,6 +2323,8 @@ impl ToolHandler for RadixToolHandler {
             "node_dir_list" => self.node_dir_list(&arguments).await,
             "node_dir_fetch" => self.node_dir_fetch(&arguments).await,
             "node_status" => self.node_status(&arguments).await,
+            "praxis_evaluate" => self.praxis_evaluate(&arguments).await,
+            "praxis_list" => self.praxis_list(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -2879,5 +3035,81 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn praxis_evaluate_no_modules() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("praxis_evaluate", json!({"action": "send_email"}))
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["results"], json!([]));
+        assert!(parsed["warning"].as_str().unwrap().contains("no praxis modules"));
+    }
+
+    #[tokio::test]
+    async fn praxis_evaluate_with_safety_module() {
+        use pares_agens_praxis::modules::safety::SafetyModule;
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_praxis_modules(vec![Box::new(SafetyModule::default())]);
+
+        let result = handler
+            .call_tool("praxis_evaluate", json!({"action": "send_email", "payload": {"recipients": 50}}))
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["action"], "send_email");
+        assert!(parsed["total_rules"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn praxis_list_no_modules() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("praxis_list", json!({}))
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["total_rules"], 0);
+    }
+
+    #[tokio::test]
+    async fn praxis_list_with_modules() {
+        use pares_agens_praxis::modules::safety::SafetyModule;
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_praxis_modules(vec![Box::new(SafetyModule::default())]);
+
+        let result = handler
+            .call_tool("praxis_list", json!({}))
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert!(parsed["total_rules"].as_u64().unwrap() > 0);
+        let modules = parsed["modules"].as_array().unwrap();
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0]["name"], "safety");
+    }
+
+    #[tokio::test]
+    async fn praxis_evaluate_missing_action() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("praxis_evaluate", json!({}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("action"));
+    }
+
+    #[tokio::test]
+    async fn praxis_list_tools_always_present() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"praxis_evaluate"));
+        assert!(names.contains(&"praxis_list"));
     }
 }
