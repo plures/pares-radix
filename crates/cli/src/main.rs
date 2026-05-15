@@ -48,6 +48,7 @@ use pares_agens_core::model::{
 };
 use pares_agens_core::procedure::{Procedure, ProcedureRegistry};
 use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
+use pares_agens_core::shell_executor::{ExecRequest, ShellExecutor};
 use pares_agens_core::tool_governance::{GovernanceVerdict, ToolGovernor};
 use pares_agens_core::Event;
 use pares_agens_core::{PluresDbStateStore, StateStore};
@@ -887,7 +888,13 @@ impl Memory for PluresMemory {
 
 struct ReadFileProcedure;
 struct WriteFileProcedure;
-struct RunCommandProcedure;
+struct RunCommandProcedure {
+    executor: Arc<ShellExecutor>,
+}
+
+struct ProcessManageProcedure {
+    executor: Arc<ShellExecutor>,
+}
 struct EditFileProcedure;
 struct ListDirectoryProcedure;
 struct WebFetchProcedure;
@@ -997,75 +1004,168 @@ impl Procedure for RunCommandProcedure {
         match event {
             Event::Message { id, content, .. } => {
                 let result = match parse_tool_args(content) {
-                    Ok(args) => match args.get("command").and_then(|v| v.as_str()) {
-                        Some(command) => {
-                            // Default 30s timeout — the governance layer may
-                            // override this, but RunCommandProcedure also
-                            // enforces its own as a safety net.
-                            let timeout_secs: u64 = std::env::var("PARES_CMD_TIMEOUT_SECS")
-                                .ok()
-                                .and_then(|v| v.parse().ok())
-                                .unwrap_or(30);
-                            let timeout_dur = Duration::from_secs(timeout_secs);
+                    Ok(args) => {
+                        let command = match args.get("command").and_then(|v| v.as_str()) {
+                            Some(c) => c.to_string(),
+                            None => return vec![Event::ToolResult {
+                                tool_call_id: id.clone(),
+                                tool_name: "run_command".into(),
+                                content: "missing 'command' argument".into(),
+                                is_error: true,
+                            }],
+                        };
 
-                            let mut child = match tokio::process::Command::new("sh")
-                                .arg("-c")
-                                .arg(command)
-                                .stdout(std::process::Stdio::piped())
-                                .stderr(std::process::Stdio::piped())
-                                .kill_on_drop(true)
-                                .spawn()
-                            {
-                                Ok(child) => child,
-                                Err(e) => return vec![Event::ToolResult {
-                                    tool_call_id: id.clone(),
-                                    tool_name: "run_command".into(),
-                                    content: format!("failed to spawn command: {e}"),
-                                    is_error: true,
-                                }],
-                            };
+                        let req = ExecRequest {
+                            command,
+                            workdir: args.get("workdir").and_then(|v| v.as_str()).map(String::from),
+                            env: args.get("env")
+                                .and_then(|v| serde_json::from_value::<HashMap<String, String>>(v.clone()).ok())
+                                .unwrap_or_default(),
+                            timeout_secs: args.get("timeout")
+                                .and_then(|v| v.as_u64()),
+                            background: args.get("background")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false),
+                            pty: args.get("pty")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false),
+                            yield_ms: args.get("yieldMs")
+                                .and_then(|v| v.as_u64()),
+                        };
 
-                            match tokio::time::timeout(timeout_dur, child.wait()).await {
-                                Ok(Ok(status)) => {
-                                    let mut stdout_buf = Vec::new();
-                                    let mut stderr_buf = Vec::new();
-                                    if let Some(mut out) = child.stdout.take() {
-                                        let _ = tokio::io::AsyncReadExt::read_to_end(&mut out, &mut stdout_buf).await;
-                                    }
-                                    if let Some(mut err) = child.stderr.take() {
-                                        let _ = tokio::io::AsyncReadExt::read_to_end(&mut err, &mut stderr_buf).await;
-                                    }
-                                    let stdout = String::from_utf8_lossy(&stdout_buf);
-                                    let stderr = String::from_utf8_lossy(&stderr_buf);
-                                    let code = status
-                                        .code()
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| "signal".into());
-                                    Ok(format!(
-                                        "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
-                                        code, stdout, stderr
-                                    ))
-                                }
-                                Ok(Err(e)) => Err(format!("command I/O error: {e}")),
-                                Err(_) => {
-                                    // Timeout — kill the child process (kill_on_drop also covers this)
-                                    let _ = child.kill().await;
-                                    Err(format!(
-                                        "command timed out after {timeout_secs}s and was killed"
-                                    ))
-                                }
+                        let exec_result = self.executor.exec(req).await;
+
+                        // Format output similar to OpenClaw's exec tool
+                        let output = if let Some(session_id) = &exec_result.session_id {
+                            if exec_result.still_running {
+                                format!(
+                                    "Command still running (session {session_id}, pid {}).\nInitial output:\n{}{}\nUse process tool to poll/write/kill.",
+                                    exec_result.exit_code.map(|c| c.to_string()).unwrap_or("?".into()),
+                                    exec_result.stdout,
+                                    if exec_result.stderr.is_empty() { String::new() } else { format!("\nstderr:\n{}", exec_result.stderr) }
+                                )
+                            } else {
+                                format!(
+                                    "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
+                                    exec_result.exit_code.map(|c| c.to_string()).unwrap_or("signal".into()),
+                                    exec_result.stdout,
+                                    exec_result.stderr
+                                )
                             }
-                        }
-                        None => Err("missing 'command'".into()),
-                    },
+                        } else if exec_result.timed_out {
+                            format!("Command timed out and was killed.\nPartial stdout:\n{}\nPartial stderr:\n{}",
+                                exec_result.stdout, exec_result.stderr)
+                        } else {
+                            format!(
+                                "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
+                                exec_result.exit_code.map(|c| c.to_string()).unwrap_or("signal".into()),
+                                exec_result.stdout,
+                                exec_result.stderr
+                            )
+                        };
+
+                        Ok(output)
+                    }
                     Err(e) => Err(e),
                 };
 
                 vec![Event::ToolResult {
                     tool_call_id: id.clone(),
                     tool_name: "run_command".into(),
-                    content: result.clone().unwrap_or_else(|e| e),
-                    is_error: result.is_err(),
+                    content: result.unwrap_or_else(|e| e),
+                    is_error: false,
+                }]
+            }
+            _ => vec![],
+        }
+    }
+}
+
+#[async_trait]
+impl Procedure for ProcessManageProcedure {
+    fn name(&self) -> &str {
+        "process"
+    }
+
+    fn handles(&self) -> &str {
+        "process"
+    }
+
+    async fn execute(&self, event: &Event) -> Vec<Event> {
+        match event {
+            Event::Message { id, content, .. } => {
+                let args = match parse_tool_args(content) {
+                    Ok(a) => a,
+                    Err(e) => return vec![Event::ToolResult {
+                        tool_call_id: id.clone(),
+                        tool_name: "process".into(),
+                        content: e,
+                        is_error: true,
+                    }],
+                };
+
+                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                let session_id = args.get("sessionId").and_then(|v| v.as_str()).unwrap_or("");
+
+                let output = match action {
+                    "list" => {
+                        let sessions = self.executor.list().await;
+                        if sessions.is_empty() {
+                            "No active sessions.".to_string()
+                        } else {
+                            sessions.iter().map(|s| {
+                                format!("{} | {} | {} | exit={:?} | {}s",
+                                    s.id,
+                                    if s.running { "running" } else { "exited" },
+                                    s.command.chars().take(60).collect::<String>(),
+                                    s.exit_code,
+                                    s.elapsed_secs
+                                )
+                            }).collect::<Vec<_>>().join("\n")
+                        }
+                    }
+                    "poll" => {
+                        let timeout_ms = args.get("timeout").and_then(|v| v.as_u64());
+                        match self.executor.poll(session_id, timeout_ms).await {
+                            Some(pr) => {
+                                let status = if pr.running { "running" } else {
+                                    "exited"
+                                };
+                                format!("Session {}: {}\nexit_code: {:?}\nnew output:\n{}",
+                                    pr.session_id, status, pr.exit_code, pr.new_output)
+                            }
+                            None => format!("Session '{session_id}' not found."),
+                        }
+                    }
+                    "log" => {
+                        let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
+                        let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+                        match self.executor.log(session_id, offset, limit).await {
+                            Some(log) => log,
+                            None => format!("Session '{session_id}' not found."),
+                        }
+                    }
+                    "write" => {
+                        let data = args.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                        match self.executor.write_stdin(session_id, data).await {
+                            Ok(()) => "Written successfully.".to_string(),
+                            Err(e) => format!("Write failed: {e}"),
+                        }
+                    }
+                    "kill" => {
+                        match self.executor.kill(session_id).await {
+                            Ok(()) => format!("Session '{session_id}' killed."),
+                            Err(e) => format!("Kill failed: {e}"),
+                        }
+                    }
+                    other => format!("Unknown process action: '{other}'. Use list/poll/log/write/kill."),
+                };
+
+                vec![Event::ToolResult {
+                    tool_call_id: id.clone(),
+                    tool_name: "process".into(),
+                    content: output,
+                    is_error: false,
                 }]
             }
             _ => vec![],
@@ -1878,13 +1978,35 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "run_command".into(),
-            description: "Run a shell command and return stdout/stderr".into(),
+            description: "Run a shell command. Supports background, pty, yield_ms, workdir, env, timeout.".into(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string"}
+                    "command": {"type": "string", "description": "Shell command to execute"},
+                    "workdir": {"type": "string", "description": "Working directory"},
+                    "background": {"type": "boolean", "description": "Run in background"},
+                    "pty": {"type": "boolean", "description": "Use pseudo-terminal"},
+                    "timeout": {"type": "integer", "description": "Timeout in seconds"},
+                    "yieldMs": {"type": "integer", "description": "Wait ms before backgrounding"},
+                    "env": {"type": "object", "description": "Additional environment variables"}
                 },
                 "required": ["command"]
+            }),
+        },
+        ToolDefinition {
+            name: "process".into(),
+            description: "Manage background shell sessions: list, poll, log, write, kill.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": ["list", "poll", "log", "write", "kill"], "description": "Action to perform"},
+                    "sessionId": {"type": "string", "description": "Session ID (required for poll/log/write/kill)"},
+                    "timeout": {"type": "integer", "description": "Poll timeout in ms"},
+                    "data": {"type": "string", "description": "Data to write to stdin"},
+                    "offset": {"type": "integer", "description": "Log offset"},
+                    "limit": {"type": "integer", "description": "Log limit"}
+                },
+                "required": ["action"]
             }),
         },
     ]
@@ -3068,7 +3190,13 @@ async fn main() {
                 "cdp_execute",
                 Arc::clone(&manus_ws_url),
             )));
-            procedure_registry.register(Box::new(RunCommandProcedure));
+            let shell_executor = Arc::new(ShellExecutor::new());
+            procedure_registry.register(Box::new(RunCommandProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
+            procedure_registry.register(Box::new(ProcessManageProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
 
             // Initialize praxis write gate
             let write_gate = Arc::new(pares_agens_core::praxis::PraxisWriteGate::new());
@@ -3593,7 +3721,13 @@ async fn main() {
             procedure_registry.register(Box::new(WriteFileProcedure));
             procedure_registry.register(Box::new(EditFileProcedure));
             procedure_registry.register(Box::new(ListDirectoryProcedure));
-            procedure_registry.register(Box::new(RunCommandProcedure));
+            let shell_executor = Arc::new(ShellExecutor::new());
+            procedure_registry.register(Box::new(RunCommandProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
+            procedure_registry.register(Box::new(ProcessManageProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
             procedure_registry.register(Box::new(WebFetchProcedure));
 
             // Load .px procedures from praxis/ directory (TUI mode)
