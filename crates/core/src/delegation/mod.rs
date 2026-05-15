@@ -33,11 +33,13 @@ pub mod aggregator;
 pub mod broker;
 pub mod builtin;
 pub mod context;
+pub mod manager;
 pub mod registry;
 
 pub use aggregator::{AggregatedResult, ResultAggregator};
 pub use broker::{DelegationBroker, SubTask, SubTaskResult};
 pub use context::AgentContext;
+pub use manager::{CompletionEvent, SessionId, SessionInfo, SessionStatus, SpawnOptions, SubAgentManager};
 pub use registry::{AgentCapabilities, AgentDefinition, AgentRegistry};
 
 /// Errors that can arise during delegation.
