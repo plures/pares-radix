@@ -3836,6 +3836,7 @@ dependencies = [
  "pares-agens-agenda",
  "pares-agens-core",
  "pares-agens-praxis",
+ "pluresdb 2.9.10",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

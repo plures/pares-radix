@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 
 use mcp_client::protocol::{Tool, ToolInputSchema};
+use pares_agens_core::chronos::ChronosTimeline;
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
@@ -51,6 +52,8 @@ pub struct RadixToolHandler {
     browser: Option<Arc<BrowserClient>>,
     /// Praxis modules for constraint evaluation.
     praxis_modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
+    /// Chronos version timeline for audit/history queries.
+    chronos: Option<Arc<ChronosTimeline>>,
 }
 
 impl RadixToolHandler {
@@ -68,6 +71,7 @@ impl RadixToolHandler {
             media_dir,
             browser: None,
             praxis_modules: Vec::new(),
+            chronos: None,
         }
     }
 
@@ -104,6 +108,12 @@ impl RadixToolHandler {
     /// Attach praxis modules for constraint evaluation.
     pub fn with_praxis_modules(mut self, modules: Vec<Box<dyn PraxisModule + Send + Sync>>) -> Self {
         self.praxis_modules = modules;
+        self
+    }
+
+    /// Attach a Chronos timeline for version history tools.
+    pub fn with_chronos(mut self, chronos: Arc<ChronosTimeline>) -> Self {
+        self.chronos = Some(chronos);
         self
     }
 
@@ -1653,6 +1663,46 @@ impl RadixToolHandler {
         }).to_string())
     }
 
+    // ── Chronos tools ─────────────────────────────────────────────────────────
+
+    async fn chronos_history(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let entries = chronos.history(key, limit);
+        ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
+    }
+
+    async fn chronos_recent(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let entries = chronos.recent(limit);
+        ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
+    }
+
+    async fn chronos_by_actor(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let actor = match args.get("actor").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::error("missing required parameter: actor"),
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+        let entries = chronos.by_actor(actor, limit);
+        ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
+    }
+
     fn resolve_path(&self, path: &str) -> PathBuf {
         let p = PathBuf::from(path);
         if p.is_absolute() {
@@ -2273,6 +2323,49 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Chronos tools (always available) ────────────────────────────────────────
+        tools.push(Tool {
+            name: "chronos_history".into(),
+            description: Some(
+                "Get the version history for a data key. Returns causal chain of mutations.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "key": {"type": "string", "description": "The data key to get history for"},
+                    "limit": {"type": "integer", "description": "Max entries to return (default 20)"}
+                })),
+                required: Some(vec!["key".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "chronos_recent".into(),
+            description: Some(
+                "Get recent Chronos entries across all keys (newest first). Useful for auditing recent changes.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "limit": {"type": "integer", "description": "Max entries to return (default 20)"}
+                })),
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "chronos_by_actor".into(),
+            description: Some(
+                "Get Chronos entries by a specific actor (newest first). Useful for tracking who changed what.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "actor": {"type": "string", "description": "Actor name to filter by"},
+                    "limit": {"type": "integer", "description": "Max entries to return (default 20)"}
+                })),
+                required: Some(vec!["actor".into()]),
+            },
+        });
+
         tools
     }
 
@@ -2325,6 +2418,9 @@ impl ToolHandler for RadixToolHandler {
             "node_status" => self.node_status(&arguments).await,
             "praxis_evaluate" => self.praxis_evaluate(&arguments).await,
             "praxis_list" => self.praxis_list(&arguments).await,
+            "chronos_history" => self.chronos_history(&arguments).await,
+            "chronos_recent" => self.chronos_recent(&arguments).await,
+            "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -3111,5 +3207,117 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"praxis_evaluate"));
         assert!(names.contains(&"praxis_list"));
+    }
+
+    // ── Chronos tool tests ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn chronos_tools_always_present() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"chronos_history"));
+        assert!(names.contains(&"chronos_recent"));
+        assert!(names.contains(&"chronos_by_actor"));
+    }
+
+    #[tokio::test]
+    async fn chronos_history_without_timeline() {
+        let handler = make_handler();
+        let result = handler.call_tool("chronos_history", json!({"key": "test:key"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_recent_without_timeline() {
+        let handler = make_handler();
+        let result = handler.call_tool("chronos_recent", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_history_with_timeline() {
+        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        // Record an entry
+        let entry = timeline.build_entry(
+            "test:key1",
+            "test-actor",
+            ChronosAction::Create,
+            &json!({"hello": "world"}),
+            vec![],
+            Some("test rationale".into()),
+        );
+        timeline.record(&entry);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(timeline);
+
+        let result = handler.call_tool("chronos_history", json!({"key": "test:key1"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("test-actor"));
+        assert!(result.content.contains("test:key1"));
+    }
+
+    #[tokio::test]
+    async fn chronos_recent_with_timeline() {
+        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        let entry = timeline.build_entry(
+            "recent:test",
+            "actor-1",
+            ChronosAction::Update,
+            &json!("data"),
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(timeline);
+
+        let result = handler.call_tool("chronos_recent", json!({"limit": 5})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("recent:test"));
+    }
+
+    #[tokio::test]
+    async fn chronos_by_actor_with_timeline() {
+        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        let entry = timeline.build_entry(
+            "actor:test",
+            "special-actor",
+            ChronosAction::ToolInvoked,
+            &json!({"tool": "read_file"}),
+            vec!["safety:pass".into()],
+            Some("invoked by agent".into()),
+        );
+        timeline.record(&entry);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(timeline);
+
+        let result = handler.call_tool("chronos_by_actor", json!({"actor": "special-actor"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("special-actor"));
+        assert!(result.content.contains("ToolInvoked"));
     }
 }
