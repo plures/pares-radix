@@ -7,6 +7,7 @@
 //! - Memory (memory_search, memory_store)
 //! - Web (web_fetch, web_search)
 //! - Cron (cron_list, cron_add, cron_remove, cron_toggle)
+//! - State/DB (db_get, db_put, db_delete)
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +19,7 @@ use tracing::{debug, warn};
 use mcp_client::protocol::{Tool, ToolInputSchema};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
+use pares_agens_core::StateStore;
 
 use pares_agens_agenda::scheduler::Scheduler;
 
@@ -31,6 +33,8 @@ pub struct RadixToolHandler {
     memory: Option<Arc<PluresLm>>,
     /// Scheduler for cron tools.
     scheduler: Option<Arc<Scheduler>>,
+    /// Key-value state store for db_get/db_put/db_delete tools.
+    state_store: Option<Arc<dyn StateStore>>,
     /// Working directory for file operations.
     workdir: PathBuf,
     /// Brave Search API key (optional).
@@ -44,6 +48,7 @@ impl RadixToolHandler {
             shell,
             memory: None,
             scheduler: None,
+            state_store: None,
             workdir,
             brave_api_key: None,
         }
@@ -64,6 +69,12 @@ impl RadixToolHandler {
     /// Set the Brave Search API key for web_search.
     pub fn with_brave_api_key(mut self, key: String) -> Self {
         self.brave_api_key = Some(key);
+        self
+    }
+
+    /// Attach a state store for db_get/db_put/db_delete tools.
+    pub fn with_state_store(mut self, store: Arc<dyn StateStore>) -> Self {
+        self.state_store = Some(store);
         self
     }
 
@@ -567,6 +578,62 @@ impl RadixToolHandler {
         }
     }
 
+    // ── State/DB tools ────────────────────────────────────────────────────────
+
+    async fn db_get(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        match store.get(key).await {
+            Some(Value::Null) | None => ToolResult::ok("null"),
+            Some(value) => ToolResult::ok(serde_json::to_string_pretty(&value).unwrap_or_default()),
+        }
+    }
+
+    async fn db_put(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        let value = match args.get("value") {
+            Some(v) => v.clone(),
+            None => return ToolResult::error("missing required parameter: value"),
+        };
+
+        store.set(key, value).await;
+        ToolResult::ok(format!("stored key: {key}"))
+    }
+
+    async fn db_delete(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+
+        // Delete by writing null — StateStore doesn't have a native delete,
+        // so we use the JSON null convention.
+        store.set(key, Value::Null).await;
+        ToolResult::ok(format!("deleted key: {key}"))
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// Resolve a potentially relative path against the workdir.
@@ -780,6 +847,48 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["id".into(), "enabled".into()]),
                 },
             },
+            // ── State/DB tools ────────────────────────────────────────────
+            Tool {
+                name: "db_get".into(),
+                description: Some(
+                    "Get a value from the key-value state store. Returns JSON or null.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "The key to retrieve"}
+                    })),
+                    required: Some(vec!["key".into()]),
+                },
+            },
+            Tool {
+                name: "db_put".into(),
+                description: Some(
+                    "Store a JSON value under a key in the state store. Overwrites existing values."
+                        .into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "The key to store under"},
+                        "value": {"description": "The JSON value to store (any type)"}
+                    })),
+                    required: Some(vec!["key".into(), "value".into()]),
+                },
+            },
+            Tool {
+                name: "db_delete".into(),
+                description: Some(
+                    "Delete a key from the state store (sets to null).".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "key": {"type": "string", "description": "The key to delete"}
+                    })),
+                    required: Some(vec!["key".into()]),
+                },
+            },
         ]
     }
 
@@ -800,6 +909,9 @@ impl ToolHandler for RadixToolHandler {
             "cron_add" => self.cron_add(&arguments).await,
             "cron_remove" => self.cron_remove(&arguments).await,
             "cron_toggle" => self.cron_toggle(&arguments).await,
+            "db_get" => self.db_get(&arguments).await,
+            "db_put" => self.db_put(&arguments).await,
+            "db_delete" => self.db_delete(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -984,5 +1096,73 @@ mod tests {
         let result = handler.call_tool("cron_list", json!({})).await;
         assert!(!result.is_error);
         assert!(result.content.contains("[]"));
+    }
+
+    // ── State/DB tool tests ─────────────────────────────────────────────────
+
+    fn make_handler_with_state() -> RadixToolHandler {
+        let shell = Arc::new(ShellExecutor::new());
+        let state = Arc::new(pares_agens_core::InMemoryStateStore::new());
+        RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_state_store(state)
+    }
+
+    #[tokio::test]
+    async fn db_get_missing_key_returns_null() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("db_get", json!({"key": "nonexistent"})).await;
+        assert!(!result.is_error);
+        assert_eq!(result.content, "null");
+    }
+
+    #[tokio::test]
+    async fn db_put_then_get_roundtrip() {
+        let handler = make_handler_with_state();
+
+        let result = handler
+            .call_tool("db_put", json!({"key": "test:foo", "value": {"bar": 42}}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("stored key: test:foo"));
+
+        let result = handler.call_tool("db_get", json!({"key": "test:foo"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("42"));
+        assert!(result.content.contains("bar"));
+    }
+
+    #[tokio::test]
+    async fn db_delete_sets_null() {
+        let handler = make_handler_with_state();
+
+        handler
+            .call_tool("db_put", json!({"key": "del:me", "value": "hello"}))
+            .await;
+        let result = handler.call_tool("db_delete", json!({"key": "del:me"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("deleted key: del:me"));
+
+        let result = handler.call_tool("db_get", json!({"key": "del:me"})).await;
+        assert!(!result.is_error);
+        // After delete, value is null
+        assert_eq!(result.content, "null");
+    }
+
+    #[tokio::test]
+    async fn db_get_without_state_store_returns_error() {
+        let handler = make_handler(); // no state store attached
+        let result = handler.call_tool("db_get", json!({"key": "x"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn db_tools_appear_in_tool_list() {
+        let handler = make_handler_with_state();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"db_get"));
+        assert!(names.contains(&"db_put"));
+        assert!(names.contains(&"db_delete"));
     }
 }
