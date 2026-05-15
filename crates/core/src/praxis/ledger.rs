@@ -1206,6 +1206,9 @@ mod tests {
             store.insert(entry).await.unwrap();
         }
 
+        // Allow sled to release its file lock before reopening.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
         // Reopen the same path — entries must survive the restart.
         let store2 = PluresDbLedgerStore::open(dir.path()).unwrap();
         let all = store2.all().await.unwrap();
