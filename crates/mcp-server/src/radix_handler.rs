@@ -18,7 +18,8 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 
 use mcp_client::protocol::{Tool, ToolInputSchema};
-use pares_agens_core::chronos::ChronosTimeline;
+use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
+use pares_agens_core::delegation::{SubAgentManager, SpawnOptions};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
@@ -57,6 +58,8 @@ pub struct RadixToolHandler {
     praxis_modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
     /// Chronos version timeline for audit/history queries.
     chronos: Option<Arc<ChronosTimeline>>,
+    /// Sub-agent manager for delegation tools.
+    subagent_manager: Option<Arc<SubAgentManager>>,
 }
 
 impl RadixToolHandler {
@@ -75,6 +78,7 @@ impl RadixToolHandler {
             browser: None,
             praxis_modules: Vec::new(),
             chronos: None,
+            subagent_manager: None,
         }
     }
 
@@ -117,6 +121,12 @@ impl RadixToolHandler {
     /// Attach a Chronos timeline for version history tools.
     pub fn with_chronos(mut self, chronos: Arc<ChronosTimeline>) -> Self {
         self.chronos = Some(chronos);
+        self
+    }
+
+    /// Attach a sub-agent manager for delegation tools.
+    pub fn with_subagent_manager(mut self, manager: Arc<SubAgentManager>) -> Self {
+        self.subagent_manager = Some(manager);
         self
     }
 
@@ -1810,6 +1820,123 @@ impl RadixToolHandler {
         ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
     }
 
+    // ── Chronos record tool ────────────────────────────────────────────────────────
+
+    async fn chronos_record(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let key = match args.get("key").and_then(|v| v.as_str()) {
+            Some(k) => k,
+            None => return ToolResult::error("missing required parameter: key"),
+        };
+        let actor = args.get("actor").and_then(|v| v.as_str()).unwrap_or("agent");
+        let action_str = args.get("action").and_then(|v| v.as_str()).unwrap_or("Create");
+        let action = match action_str.to_lowercase().as_str() {
+            "create" => ChronosAction::Create,
+            "update" => ChronosAction::Update,
+            "delete" => ChronosAction::Delete,
+            "move" => ChronosAction::Move,
+            "tool_invoked" | "toolinvoked" => ChronosAction::ToolInvoked,
+            "message_received" | "messagereceived" => ChronosAction::MessageReceived,
+            "response_generated" | "responsegenerated" => ChronosAction::ResponseGenerated,
+            "context_managed" | "contextmanaged" => ChronosAction::ContextManaged,
+            "model_called" | "modelcalled" => ChronosAction::ModelCalled,
+            "outcome_recorded" | "outcomerecorded" => ChronosAction::OutcomeRecorded,
+            _ => return ToolResult::error(format!("unknown action: {action_str}. Valid: create, update, delete, move, tool_invoked, message_received, response_generated, context_managed, model_called, outcome_recorded")),
+        };
+        let data = args.get("data").cloned().unwrap_or(json!({}));
+        let rationale = args.get("rationale").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let constraints: Vec<String> = args.get("constraints")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+
+        let entry = chronos.build_entry(key, actor, action, &data, constraints, rationale);
+        chronos.record(&entry);
+
+        ToolResult::ok(json!({
+            "id": entry.id,
+            "key": entry.key,
+            "timestamp": entry.timestamp
+        }).to_string())
+    }
+
+    // ── Sub-agent tools ──────────────────────────────────────────────────────────
+
+    async fn subagent_spawn(&self, args: &Value) -> ToolResult {
+        let manager = match &self.subagent_manager {
+            Some(m) => m,
+            None => return ToolResult::error("Sub-agent manager not configured"),
+        };
+        let agent = match args.get("agent").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::error("missing required parameter: agent"),
+        };
+        let task = match args.get("task").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => return ToolResult::error("missing required parameter: task"),
+        };
+
+        let mut options = SpawnOptions::default();
+        if let Some(label) = args.get("label").and_then(|v| v.as_str()) {
+            options = options.with_label(label);
+        }
+        if let Some(timeout_secs) = args.get("timeout_seconds").and_then(|v| v.as_u64()) {
+            options = options.with_timeout(std::time::Duration::from_secs(timeout_secs));
+        }
+        if let Some(ctx) = args.get("context").and_then(|v| v.as_str()) {
+            options = options.with_parent_context(ctx);
+        }
+
+        let session_id = manager.spawn(agent, task, options).await;
+
+        ToolResult::ok(json!({
+            "session_id": session_id,
+            "status": "running",
+            "agent": agent,
+            "task": task
+        }).to_string())
+    }
+
+    async fn subagent_list(&self, _args: &Value) -> ToolResult {
+        let manager = match &self.subagent_manager {
+            Some(m) => m,
+            None => return ToolResult::error("Sub-agent manager not configured"),
+        };
+
+        let sessions = manager.list().await;
+        let output: Vec<Value> = sessions.iter().map(|s| json!({
+            "id": s.id,
+            "agent": s.agent_name,
+            "label": s.label,
+            "status": format!("{:?}", s.status),
+            "started_at": s.started_at.to_rfc3339(),
+            "completed_at": s.completed_at.map(|t| t.to_rfc3339()),
+        })).collect();
+
+        ToolResult::ok(serde_json::to_string_pretty(&output).unwrap_or_default())
+    }
+
+    async fn subagent_kill(&self, args: &Value) -> ToolResult {
+        let manager = match &self.subagent_manager {
+            Some(m) => m,
+            None => return ToolResult::error("Sub-agent manager not configured"),
+        };
+        let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
+            Some(id) => id,
+            None => return ToolResult::error("missing required parameter: session_id"),
+        };
+
+        let killed = manager.kill(session_id).await;
+        if killed {
+            ToolResult::ok(json!({"killed": true, "session_id": session_id}).to_string())
+        } else {
+            ToolResult::error(format!("session not found or already completed: {session_id}"))
+        }
+    }
+
     fn resolve_path(&self, path: &str) -> PathBuf {
         let p = PathBuf::from(path);
         if p.is_absolute() {
@@ -2489,6 +2616,67 @@ impl ToolHandler for RadixToolHandler {
                 required: Some(vec!["actor".into()]),
             },
         });
+        tools.push(Tool {
+            name: "chronos_record".into(),
+            description: Some(
+                "Record a mutation event in the Chronos timeline. Creates an auditable entry with causal chain.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "key": {"type": "string", "description": "Data key this event relates to"},
+                    "actor": {"type": "string", "description": "Who/what performed this action (default: agent)"},
+                    "action": {"type": "string", "description": "Action type: create, update, delete, move, tool_invoked, message_received, response_generated, context_managed, model_called, outcome_recorded"},
+                    "data": {"type": "object", "description": "Arbitrary data payload for this event"},
+                    "rationale": {"type": "string", "description": "Human-readable reason for this mutation"},
+                    "constraints": {"type": "array", "items": {"type": "string"}, "description": "Constraint results that apply to this event"}
+                })),
+                required: Some(vec!["key".into()]),
+            },
+        });
+
+        // ── Sub-agent tools ─────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "subagent_spawn".into(),
+            description: Some(
+                "Spawn an isolated sub-agent to perform a delegated task. Returns session_id for tracking.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "agent": {"type": "string", "description": "Agent name to spawn (must be registered)"},
+                    "task": {"type": "string", "description": "Task/prompt for the sub-agent to execute"},
+                    "label": {"type": "string", "description": "Optional human-readable label for the session"},
+                    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default: 1800)"},
+                    "context": {"type": "string", "description": "Optional parent context to pass to the sub-agent"}
+                })),
+                required: Some(vec!["agent".into(), "task".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "subagent_list".into(),
+            description: Some(
+                "List all sub-agent sessions (running and completed).".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({})),
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "subagent_kill".into(),
+            description: Some(
+                "Kill a running sub-agent session by ID.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "session_id": {"type": "string", "description": "Session ID to kill"}
+                })),
+                required: Some(vec!["session_id".into()]),
+            },
+        });
 
         tools
     }
@@ -2546,6 +2734,10 @@ impl ToolHandler for RadixToolHandler {
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
+            "chronos_record" => self.chronos_record(&arguments).await,
+            "subagent_spawn" => self.subagent_spawn(&arguments).await,
+            "subagent_list" => self.subagent_list(&arguments).await,
+            "subagent_kill" => self.subagent_kill(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -3641,5 +3833,75 @@ mod tests {
         assert!(!result.is_error);
         assert!(result.content.contains("special-actor"));
         assert!(result.content.contains("ToolInvoked"));
+    }
+
+    #[tokio::test]
+    async fn chronos_record_creates_entry() {
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(Arc::clone(&timeline));
+
+        let result = handler.call_tool("chronos_record", json!({
+            "key": "test:record",
+            "actor": "test-agent",
+            "action": "create",
+            "data": {"foo": "bar"},
+            "rationale": "testing record"
+        })).await;
+        assert!(!result.is_error, "error: {}", result.content);
+        assert!(result.content.contains("test:record"));
+
+        // Verify it's in history
+        let entries = timeline.history("test:record", 10);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].actor, "test-agent");
+    }
+
+    #[tokio::test]
+    async fn chronos_record_without_timeline() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler.call_tool("chronos_record", json!({"key": "x"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn subagent_list_without_manager() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler.call_tool("subagent_list", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn subagent_spawn_without_manager() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler.call_tool("subagent_spawn", json!({
+            "agent": "researcher",
+            "task": "find info"
+        })).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn subagent_kill_without_manager() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler.call_tool("subagent_kill", json!({"session_id": "abc"})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
     }
 }
