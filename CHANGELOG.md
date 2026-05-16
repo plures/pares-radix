@@ -1,3 +1,7 @@
+## [1.42.4] — 2026-05-16
+
+- fix(mcp): wrap context in evalScope so 'context.X' expressions resolve correctly (eacdda4)
+
 ## [1.42.3] — 2026-05-16
 
 - fix(mcp): handle === and !== in Praxis simpleEval (ac3d70e)
