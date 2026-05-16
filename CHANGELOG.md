@@ -1,3 +1,7 @@
+## [1.43.6] — 2026-05-16
+
+- fix: use official ONNX Runtime release with .so for build + runtime (2fafc28)
+
 ## [1.43.5] — 2026-05-16
 
 - fix: let ort-sys handle its own ONNX Runtime download (93f0c74)
