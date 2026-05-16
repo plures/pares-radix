@@ -1297,18 +1297,21 @@ impl ChannelAdapter for TelegramAdapter {
                                 let commit = option_env!("GIT_COMMIT_HASH").unwrap_or("unknown");
                                 let event_spine_status = if event_spine.is_some() { "active" } else { "disabled" };
                                 let uptime = {
-                                    use std::time::SystemTime;
-                                    let secs = SystemTime::now()
-                                        .duration_since(SystemTime::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_secs();
-                                    let pid_start = std::fs::read_to_string(format!("/proc/{}/stat", std::process::id()))
+                                    // /proc/<pid>/stat field 22 = starttime in clock ticks since boot
+                                    // /proc/uptime first field = seconds since boot
+                                    let system_uptime = std::fs::read_to_string("/proc/uptime")
+                                        .ok()
+                                        .and_then(|s| s.split_whitespace().next().and_then(|t| t.parse::<f64>().ok()))
+                                        .unwrap_or(0.0);
+                                    let clk_tck: u64 = 100; // sysconf(_SC_CLK_TCK), almost always 100 on Linux
+                                    let proc_start_ticks = std::fs::read_to_string(format!("/proc/{}/stat", std::process::id()))
                                         .ok()
                                         .and_then(|s| s.split_whitespace().nth(21).and_then(|t| t.parse::<u64>().ok()))
-                                        .map(|ticks| secs.saturating_sub(ticks / 100))
                                         .unwrap_or(0);
-                                    let hours = pid_start / 3600;
-                                    let mins = (pid_start % 3600) / 60;
+                                    let proc_start_secs = proc_start_ticks / clk_tck;
+                                    let proc_uptime = (system_uptime as u64).saturating_sub(proc_start_secs);
+                                    let hours = proc_uptime / 3600;
+                                    let mins = (proc_uptime % 3600) / 60;
                                     format!("{hours}h {mins}m")
                                 };
                                 let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
