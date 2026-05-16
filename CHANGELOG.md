@@ -1,3 +1,7 @@
+## [1.43.3] — 2026-05-16
+
+- fix: restore ORT_LIB_LOCATION for ort-sys static lib (4ec8d86)
+
 ## [1.43.2] — 2026-05-16
 
 - fix: use __noChroot for Nix builds instead of sandbox workarounds (fb139a7)
