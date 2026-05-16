@@ -25,6 +25,9 @@ use pares_agens_core::StateStore;
 
 use pares_agens_agenda::scheduler::Scheduler;
 use pares_agens_praxis::module::PraxisModule;
+use pares_agens_praxis::px;
+use pares_agens_praxis::px::async_executor::{self as px_async, AsyncActionHandler};
+use pares_agens_praxis::px::compiler;
 use pares_agens_praxis::rule::{RuleContext, RuleResult};
 
 use crate::browser::BrowserClient;
@@ -1663,6 +1666,111 @@ impl RadixToolHandler {
         }).to_string())
     }
 
+    /// Run a .px procedure by inline source or file path.
+    async fn praxis_run(&self, args: &Value) -> ToolResult {
+        use std::collections::HashMap;
+
+        // Get source from inline or file
+        let source = if let Some(src) = args.get("source").and_then(|v| v.as_str()) {
+            src.to_string()
+        } else if let Some(file_path) = args.get("file").and_then(|v| v.as_str()) {
+            let resolved = self.resolve_path(file_path);
+            match tokio::fs::read_to_string(&resolved).await {
+                Ok(content) => content,
+                Err(e) => return ToolResult::error(format!("failed to read .px file: {e}")),
+            }
+        } else {
+            return ToolResult::error(
+                "either 'source' (inline .px code) or 'file' (path to .px file) is required",
+            );
+        };
+
+        // Parse
+        let doc = match px::parse(&source) {
+            Ok(d) => d,
+            Err(e) => return ToolResult::error(format!("parse error: {e}")),
+        };
+
+        if doc.procedures.is_empty() {
+            return ToolResult::error("no procedures found in source");
+        }
+
+        // Compile
+        let records = compiler::compile(&doc);
+        let procedure_records: Vec<_> = records
+            .iter()
+            .filter(|r| r.data.get("type").and_then(|v| v.as_str()) == Some("procedure"))
+            .collect();
+
+        if procedure_records.is_empty() {
+            return ToolResult::error("no compiled procedure records found");
+        }
+
+        // Select the target procedure
+        let target_name = args.get("procedure").and_then(|v| v.as_str());
+        let record = if let Some(name) = target_name {
+            match procedure_records.iter().find(|r| {
+                r.data.get("name").and_then(|v| v.as_str()) == Some(name)
+            }) {
+                Some(r) => r,
+                None => {
+                    let available: Vec<_> = procedure_records
+                        .iter()
+                        .filter_map(|r| r.data.get("name").and_then(|v| v.as_str()))
+                        .collect();
+                    return ToolResult::error(format!(
+                        "procedure '{name}' not found. Available: {available:?}"
+                    ));
+                }
+            }
+        } else {
+            &procedure_records[0]
+        };
+
+        // Build initial vars from args
+        let mut initial_vars: HashMap<String, Value> = HashMap::new();
+        if let Some(vars) = args.get("vars").and_then(|v| v.as_object()) {
+            for (k, v) in vars {
+                initial_vars.insert(k.clone(), v.clone());
+            }
+        }
+
+        // Create a handler that delegates calls to the shell executor
+        let handler = ShellBackedProcedureHandler {
+            shell: Arc::clone(&self.shell),
+            workdir: self.workdir.clone(),
+        };
+
+        // Execute
+        match px_async::execute_async_with_vars(&record.data, &handler, initial_vars).await {
+            Ok(result) => {
+                let step_summaries: Vec<Value> = result
+                    .step_results
+                    .iter()
+                    .map(|s| {
+                        json!({
+                            "index": s.index,
+                            "kind": s.kind,
+                            "skipped": s.skipped,
+                            "output": s.output,
+                        })
+                    })
+                    .collect();
+
+                ToolResult::ok(
+                    json!({
+                        "procedure": result.procedure_name,
+                        "success": result.success,
+                        "variables": result.variables,
+                        "steps": step_summaries,
+                    })
+                    .to_string(),
+                )
+            }
+            Err(e) => ToolResult::error(format!("execution error: {e}")),
+        }
+    }
+
     // ── Chronos tools ─────────────────────────────────────────────────────────
 
     async fn chronos_history(&self, args: &Value) -> ToolResult {
@@ -2323,6 +2431,23 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        tools.push(Tool {
+            name: "praxis_run".into(),
+            description: Some(
+                "Run a .px procedure by name or inline source. Executes the procedure's steps asynchronously with tool dispatch.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "source": {"type": "string", "description": "Inline .px source code containing the procedure to run"},
+                    "file": {"type": "string", "description": "Path to a .px file containing the procedure (relative to workdir)"},
+                    "procedure": {"type": "string", "description": "Name of the procedure to run (if source/file contains multiple). Omit to run the first."},
+                    "vars": {"type": "object", "description": "Initial variables to seed the execution context with"}
+                })),
+                required: None,
+            },
+        });
+
         // ── Chronos tools (always available) ────────────────────────────────────────
         tools.push(Tool {
             name: "chronos_history".into(),
@@ -2418,12 +2543,168 @@ impl ToolHandler for RadixToolHandler {
             "node_status" => self.node_status(&arguments).await,
             "praxis_evaluate" => self.praxis_evaluate(&arguments).await,
             "praxis_list" => self.praxis_list(&arguments).await,
+            "praxis_run" => self.praxis_run(&arguments).await,
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
+            }
+        }
+    }
+}
+
+// ── Procedure Action Handler (bridges .px steps to shell/tools) ────────────────
+
+/// Action handler for .px procedures that delegates `call` steps to shell commands.
+///
+/// Step names are interpreted as shell commands unless they match a known built-in.
+/// Parameters are passed as JSON via stdin or command-line args.
+struct ShellBackedProcedureHandler {
+    #[allow(dead_code)]
+    shell: Arc<ShellExecutor>,
+    workdir: PathBuf,
+}
+
+#[async_trait]
+impl AsyncActionHandler for ShellBackedProcedureHandler {
+    async fn call(&self, name: &str, params: &Value) -> Result<Value, pares_agens_praxis::px::executor::ExecutionError> {
+        use pares_agens_praxis::px::executor::ExecutionError;
+
+        match name {
+            // Built-in: run a shell command
+            "shell" | "run" | "exec" => {
+                let cmd = params
+                    .get("command")
+                    .or_else(|| params.get("cmd"))
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'command' parameter".into(),
+                    })?;
+
+                let output = tokio::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(cmd)
+                    .current_dir(&self.workdir)
+                    .output()
+                    .await
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("spawn failed: {e}"),
+                    })?;
+
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                if output.status.success() {
+                    Ok(json!({
+                        "status": "ok",
+                        "stdout": stdout.trim(),
+                        "stderr": stderr.trim(),
+                        "exit_code": 0
+                    }))
+                } else {
+                    Ok(json!({
+                        "status": "error",
+                        "stdout": stdout.trim(),
+                        "stderr": stderr.trim(),
+                        "exit_code": output.status.code().unwrap_or(-1)
+                    }))
+                }
+            }
+
+            // Built-in: read a file
+            "read_file" | "read" => {
+                let path = params
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'path' parameter".into(),
+                    })?;
+
+                let full_path = if std::path::Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    self.workdir.join(path)
+                };
+
+                let content = tokio::fs::read_to_string(&full_path)
+                    .await
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("read failed: {e}"),
+                    })?;
+
+                Ok(Value::String(content))
+            }
+
+            // Built-in: write a file
+            "write_file" | "write" => {
+                let path = params
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'path' parameter".into(),
+                    })?;
+                let content = params
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                let full_path = if std::path::Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    self.workdir.join(path)
+                };
+
+                if let Some(parent) = full_path.parent() {
+                    let _ = tokio::fs::create_dir_all(parent).await;
+                }
+
+                tokio::fs::write(&full_path, content)
+                    .await
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("write failed: {e}"),
+                    })?;
+
+                Ok(json!({"status": "ok", "path": full_path.display().to_string()}))
+            }
+
+            // Built-in: echo/noop (useful for testing)
+            "echo" | "noop" => Ok(params.clone()),
+
+            // Default: treat the step name as a shell command with params as JSON env
+            other => {
+                let params_str = serde_json::to_string(params).unwrap_or_default();
+                let output = tokio::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(format!("{other} '{params_str}'"))
+                    .current_dir(&self.workdir)
+                    .output()
+                    .await
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: other.to_string(),
+                        message: format!("command failed: {e}"),
+                    })?;
+
+                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                if output.status.success() {
+                    let value = serde_json::from_str::<Value>(stdout.trim())
+                        .unwrap_or_else(|_| Value::String(stdout.trim().to_string()));
+                    Ok(value)
+                } else {
+                    Err(ExecutionError::ActionFailed {
+                        action: other.to_string(),
+                        message: format!("exit {}: {}", output.status.code().unwrap_or(-1), stderr.trim()),
+                    })
+                }
             }
         }
     }
@@ -3207,6 +3488,48 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"praxis_evaluate"));
         assert!(names.contains(&"praxis_list"));
+        assert!(names.contains(&"praxis_run"));
+    }
+
+    #[tokio::test]
+    async fn praxis_run_inline_echo() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "praxis_run",
+                json!({
+                    "source": "procedure hello:\n  trigger: manual\n  echo {msg: \"world\"}\n"
+                }),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["procedure"], "hello");
+    }
+
+    #[tokio::test]
+    async fn praxis_run_missing_source() {
+        let handler = make_handler();
+        let result = handler.call_tool("praxis_run", json!({})).await;
+        assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn praxis_run_shell_step() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "praxis_run",
+                json!({
+                    "source": "procedure test_shell:\n  trigger: manual\n  shell {command: \"echo hello\"}  -> $out\n"
+                }),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert_eq!(parsed["variables"]["out"]["stdout"], "hello");
     }
 
     // ── Chronos tool tests ──────────────────────────────────────────────────────
