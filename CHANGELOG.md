@@ -1,3 +1,7 @@
+## [1.43.8] — 2026-05-16
+
+- fix: add libstdc++ to LD_LIBRARY_PATH for onnxruntime (87f3641)
+
 ## [1.43.7] — 2026-05-16
 
 - fix: set ORT_PREFER_DYNAMIC_LINK=1 for ort-sys (f38c46c)
