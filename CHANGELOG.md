@@ -1,3 +1,7 @@
+## [1.42.1] — 2026-05-16
+
+- fix: pin svelte-ratatui to rev for deterministic Nix builds (d8f604b)
+
 ## [1.42.0] — 2026-05-16
 
 - fix: sync version to v1.41.0 (match latest tag) (cff88e6)
