@@ -673,6 +673,22 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
 
+  // Handle === comparison (must check before == to avoid false split)
+  if (trimmed.includes('===')) {
+    const [lhs, rhs] = trimmed.split('===').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return lhsVal === rhsVal;
+  }
+
+  // Handle !== comparison (must check before != to avoid false split)
+  if (trimmed.includes('!==')) {
+    const [lhs, rhs] = trimmed.split('!==').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return lhsVal !== rhsVal;
+  }
+
   // Handle == comparison
   if (trimmed.includes('==')) {
     const [lhs, rhs] = trimmed.split('==').map((s) => s.trim());
@@ -692,6 +708,18 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
   // Bare value — truthy check
   const val = resolvePath(trimmed, context);
   return !!val;
+}
+
+function resolveValue(raw: string, context: Record<string, unknown>): unknown {
+  const trimmed = raw.trim();
+  if (trimmed === 'true') return true;
+  if (trimmed === 'false') return false;
+  if (trimmed === 'null') return null;
+  if (trimmed === 'undefined') return undefined;
+  if (/^\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+  if (/^["'].*["']$/.test(trimmed)) return trimmed.slice(1, -1);
+  // Treat as path into context
+  return resolvePath(trimmed, context);
 }
 
 function resolvePath(path: string, obj: Record<string, unknown>): unknown {
