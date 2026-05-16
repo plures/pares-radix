@@ -29,6 +29,7 @@ use pares_agens_agenda::scheduler::Scheduler;
 use pares_radix_praxis::module::PraxisModule;
 use pares_radix_praxis::px;
 use pares_radix_praxis::px::async_executor::{self as px_async, AsyncActionHandler};
+use pares_radix_praxis::px::compose::{ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::px::compiler;
 use pares_radix_praxis::rule::{RuleContext, RuleResult};
 
@@ -1971,6 +1972,10 @@ impl RadixToolHandler {
     async fn praxis_run(&self, args: &Value) -> ToolResult {
         use std::collections::HashMap;
 
+        // Build a ProcedureRegistry from all loaded procedures so that
+        // procedure-to-procedure calls resolve via ComposableHandler.
+        let mut registry = self.build_procedure_registry();
+
         // Check if requesting a pre-loaded procedure by name
         let target_name = args.get("procedure").and_then(|v| v.as_str());
         if let Some(name) = target_name {
@@ -1982,10 +1987,11 @@ impl RadixToolHandler {
                         initial_vars.insert(k.clone(), v.clone());
                     }
                 }
-                let handler = ShellBackedProcedureHandler {
+                let shell_handler = ShellBackedProcedureHandler {
                     shell: Arc::clone(&self.shell),
                     workdir: self.workdir.clone(),
                 };
+                let handler = ComposableHandler::new(registry, shell_handler);
                 return match px_async::execute_async_with_vars(&loaded.data, &handler, initial_vars)
                     .await
                 {
@@ -2054,6 +2060,14 @@ impl RadixToolHandler {
             return ToolResult::error("no compiled procedure records found");
         }
 
+        // Add all procedures from the inline/file source to the registry
+        // so they can call each other during execution.
+        for record in &procedure_records {
+            if let Some(name) = record.data.get("name").and_then(|v| v.as_str()) {
+                registry.register_as(name.to_string(), record.data.clone());
+            }
+        }
+
         // Select the target procedure
         let target_name = args.get("procedure").and_then(|v| v.as_str());
         let record = if let Some(name) = target_name {
@@ -2084,11 +2098,12 @@ impl RadixToolHandler {
             }
         }
 
-        // Create a handler that delegates calls to the shell executor
-        let handler = ShellBackedProcedureHandler {
+        // Create a composable handler that resolves procedure-to-procedure calls
+        let shell_handler = ShellBackedProcedureHandler {
             shell: Arc::clone(&self.shell),
             workdir: self.workdir.clone(),
         };
+        let handler = ComposableHandler::new(registry, shell_handler);
 
         // Execute
         match px_async::execute_async_with_vars(&record.data, &handler, initial_vars).await {
@@ -2302,6 +2317,15 @@ impl RadixToolHandler {
                 "session not found or already completed: {session_id}"
             ))
         }
+    }
+
+    /// Build a ProcedureRegistry from all loaded procedures.
+    fn build_procedure_registry(&self) -> ProcedureRegistry {
+        let mut registry = ProcedureRegistry::new();
+        for (name, loaded) in &self.loaded_procedures {
+            registry.register_as(name.clone(), loaded.data.clone());
+        }
+        registry
     }
 
     fn resolve_path(&self, path: &str) -> PathBuf {
@@ -4378,6 +4402,46 @@ mod tests {
             .call_tool("praxis_run", json!({"procedure": "echo_test"}))
             .await;
         assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("preloaded"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn praxis_run_procedure_composition() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("radix_test_px_compose");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        // Create two procedures: "helper" emits a value, "main_proc" calls "helper"
+        let px_file = dir.join("compose.px");
+        let mut f = std::fs::File::create(&px_file).unwrap();
+        // .px syntax: step_call is `name {params} -> $var`
+        write!(
+            f,
+            "procedure helper:\n  trigger: manual\n  echo {{value: \"from_helper\"}} -> $result\n\nprocedure main_proc:\n  trigger: manual\n  helper {{}} -> $sub_result\n"
+        )
+        .unwrap();
+        drop(f);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
+
+        // Both procedures should be loaded
+        assert!(
+            handler.loaded_procedures.contains_key("helper"),
+            "expected 'helper' procedure, got: {:?}",
+            handler.loaded_procedures.keys().collect::<Vec<_>>()
+        );
+        assert!(handler.loaded_procedures.contains_key("main_proc"));
+
+        // Run main_proc — it should call helper via ComposableHandler
+        let result = handler
+            .call_tool("praxis_run", json!({"procedure": "main_proc"}))
+            .await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("sub_result"), "expected sub_result in output: {}", result.content);
         assert!(result.content.contains("preloaded"));
 
         let _ = std::fs::remove_dir_all(&dir);
