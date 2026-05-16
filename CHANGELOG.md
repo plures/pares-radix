@@ -1,3 +1,7 @@
+## [1.44.2] — 2026-05-16
+
+- fix: revert flake.nix to working fb11189 base + naming only (6358498)
+
 ## [1.44.1] — 2026-05-16
 
 - fix: proper ONNX Runtime for Nix build — no code changes (4a9e95f)
