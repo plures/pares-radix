@@ -68,10 +68,11 @@
         ORT_LIB_LOCATION = "${ort}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
 
-        # Runtime: ort dlopen needs to find the .so
+        # Runtime: ort dlopen needs the .so + its deps (libstdc++)
         postInstall = ''
           wrapProgram $out/bin/pares-radix \
-            --set ORT_DYLIB_PATH "${ort}/lib/libonnxruntime.so"
+            --set ORT_DYLIB_PATH "${ort}/lib/libonnxruntime.so" \
+            --prefix LD_LIBRARY_PATH : "${ort}/lib:${pkgs.stdenv.cc.cc.lib}/lib"
         '';
 
         meta = {
