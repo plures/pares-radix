@@ -27,6 +27,23 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
 
+  // Handle && (logical AND)
+  if (trimmed.includes(' && ')) {
+    const parts = trimmed.split(' && ');
+    return parts.every((part) => simpleEval(part, context));
+  }
+
+  // Handle || (logical OR)
+  if (trimmed.includes(' || ')) {
+    const parts = trimmed.split(' || ');
+    return parts.some((part) => simpleEval(part, context));
+  }
+
+  // Handle negation prefix: !expr
+  if (trimmed.startsWith('!') && !trimmed.startsWith('!=')) {
+    return !simpleEval(trimmed.slice(1), context);
+  }
+
   if (trimmed.includes('===')) {
     const [lhs, rhs] = trimmed.split('===').map((s) => s.trim());
     const lhsVal = resolvePath(lhs, context);
@@ -39,6 +56,26 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
     const lhsVal = resolvePath(lhs, context);
     const rhsVal = resolveValue(rhs, context);
     return lhsVal !== rhsVal;
+  }
+
+  if (trimmed.includes('>=')) {
+    const [lhs, rhs] = trimmed.split('>=').map((s) => s.trim());
+    return Number(resolvePath(lhs, context)) >= Number(resolveValue(rhs, context));
+  }
+
+  if (trimmed.includes('<=')) {
+    const [lhs, rhs] = trimmed.split('<=').map((s) => s.trim());
+    return Number(resolvePath(lhs, context)) <= Number(resolveValue(rhs, context));
+  }
+
+  if (trimmed.includes('>')) {
+    const [lhs, rhs] = trimmed.split('>').map((s) => s.trim());
+    return Number(resolvePath(lhs, context)) > Number(resolveValue(rhs, context));
+  }
+
+  if (trimmed.includes('<')) {
+    const [lhs, rhs] = trimmed.split('<').map((s) => s.trim());
+    return Number(resolvePath(lhs, context)) < Number(resolveValue(rhs, context));
   }
 
   if (trimmed.includes('==')) {
@@ -90,5 +127,72 @@ describe('simpleEval', () => {
     expect(simpleEval("context.type === 'deployment'", { context: { type: 'deployment', approved: false } })).toBe(true);
     // Require: context.approved === true should be FALSE
     expect(simpleEval("context.approved === true", { context: { type: 'deployment', approved: false } })).toBe(false);
+  });
+
+  // ── Compound expressions (&&, ||) ──
+
+  it('evaluates && with both conditions true', () => {
+    expect(simpleEval("context.type === 'deployment' && context.approved === true",
+      { context: { type: 'deployment', approved: true } })).toBe(true);
+  });
+
+  it('evaluates && with one condition false', () => {
+    expect(simpleEval("context.type === 'deployment' && context.approved === true",
+      { context: { type: 'deployment', approved: false } })).toBe(false);
+  });
+
+  it('evaluates || with one condition true', () => {
+    expect(simpleEval("context.env === 'prod' || context.env === 'staging'",
+      { context: { env: 'staging' } })).toBe(true);
+  });
+
+  it('evaluates || with both conditions false', () => {
+    expect(simpleEval("context.env === 'prod' || context.env === 'staging'",
+      { context: { env: 'dev' } })).toBe(false);
+  });
+
+  it('evaluates && with three conditions', () => {
+    expect(simpleEval("context.a === 1 && context.b === 2 && context.c === 3",
+      { context: { a: 1, b: 2, c: 3 } })).toBe(true);
+    expect(simpleEval("context.a === 1 && context.b === 2 && context.c === 3",
+      { context: { a: 1, b: 2, c: 99 } })).toBe(false);
+  });
+
+  // ── Negation ──
+
+  it('evaluates ! negation on truthy path', () => {
+    expect(simpleEval("!context.disabled", { context: { disabled: false } })).toBe(true);
+    expect(simpleEval("!context.disabled", { context: { disabled: true } })).toBe(false);
+  });
+
+  // ── Comparison operators ──
+
+  it('evaluates > correctly', () => {
+    expect(simpleEval("context.count > 5", { context: { count: 10 } })).toBe(true);
+    expect(simpleEval("context.count > 5", { context: { count: 3 } })).toBe(false);
+  });
+
+  it('evaluates >= correctly', () => {
+    expect(simpleEval("context.count >= 5", { context: { count: 5 } })).toBe(true);
+    expect(simpleEval("context.count >= 5", { context: { count: 4 } })).toBe(false);
+  });
+
+  it('evaluates < correctly', () => {
+    expect(simpleEval("context.count < 5", { context: { count: 3 } })).toBe(true);
+    expect(simpleEval("context.count < 5", { context: { count: 5 } })).toBe(false);
+  });
+
+  it('evaluates <= correctly', () => {
+    expect(simpleEval("context.count <= 5", { context: { count: 5 } })).toBe(true);
+    expect(simpleEval("context.count <= 5", { context: { count: 6 } })).toBe(false);
+  });
+
+  // ── Combined: compound + comparison ──
+
+  it('evaluates compound with comparison operators', () => {
+    expect(simpleEval("context.type === 'deployment' && context.replicas >= 3",
+      { context: { type: 'deployment', replicas: 5 } })).toBe(true);
+    expect(simpleEval("context.type === 'deployment' && context.replicas >= 3",
+      { context: { type: 'deployment', replicas: 1 } })).toBe(false);
   });
 });

@@ -676,6 +676,24 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
   if (trimmed === 'true') return true;
   if (trimmed === 'false') return false;
 
+  // Handle && (logical AND) — split and require all parts to be true
+  // Use a regex that matches ' && ' to avoid splitting inside strings
+  if (trimmed.includes(' && ')) {
+    const parts = trimmed.split(' && ');
+    return parts.every((part) => simpleEval(part, context));
+  }
+
+  // Handle || (logical OR) — split and require at least one part to be true
+  if (trimmed.includes(' || ')) {
+    const parts = trimmed.split(' || ');
+    return parts.some((part) => simpleEval(part, context));
+  }
+
+  // Handle negation prefix: !expr
+  if (trimmed.startsWith('!') && !trimmed.startsWith('!=')) {
+    return !simpleEval(trimmed.slice(1), context);
+  }
+
   // Handle === comparison (must check before == to avoid false split)
   if (trimmed.includes('===')) {
     const [lhs, rhs] = trimmed.split('===').map((s) => s.trim());
@@ -690,6 +708,38 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
     const lhsVal = resolvePath(lhs, context);
     const rhsVal = resolveValue(rhs, context);
     return lhsVal !== rhsVal;
+  }
+
+  // Handle >= comparison (must check before > to avoid false match)
+  if (trimmed.includes('>=')) {
+    const [lhs, rhs] = trimmed.split('>=').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return Number(lhsVal) >= Number(rhsVal);
+  }
+
+  // Handle <= comparison (must check before < to avoid false match)
+  if (trimmed.includes('<=')) {
+    const [lhs, rhs] = trimmed.split('<=').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return Number(lhsVal) <= Number(rhsVal);
+  }
+
+  // Handle > comparison
+  if (trimmed.includes('>')) {
+    const [lhs, rhs] = trimmed.split('>').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return Number(lhsVal) > Number(rhsVal);
+  }
+
+  // Handle < comparison
+  if (trimmed.includes('<')) {
+    const [lhs, rhs] = trimmed.split('<').map((s) => s.trim());
+    const lhsVal = resolvePath(lhs, context);
+    const rhsVal = resolveValue(rhs, context);
+    return Number(lhsVal) < Number(rhsVal);
   }
 
   // Handle == comparison
