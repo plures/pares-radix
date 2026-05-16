@@ -90,6 +90,23 @@ pub fn build_system_prompt(
         prompt.push('\n');
     }
 
+    // Response formatting — suppress internal monologue
+    prompt.push_str("\n## Response Style\n");
+    prompt
+        .push_str("- Do NOT narrate your thinking process, reasoning steps, or decision-making.\n");
+    prompt.push_str("- Do NOT explain what tools you are about to call or why.\n");
+    prompt.push_str(
+        "- Do NOT say 'Let me...', 'I\'ll...', 'First, I need to...', or similar preambles.\n",
+    );
+    prompt.push_str("- When using tools: just call them. Report the result, not the process.\n");
+    prompt.push_str("- Keep responses concise and direct. Lead with the answer.\n");
+    prompt.push_str(
+        "- If a task requires multiple steps, do them silently and report the outcome.\n",
+    );
+    prompt.push_str(
+        "- Only explain your process if the user explicitly asks how you did something.\n",
+    );
+
     // Conversation summary
     if let Some(summary) = context.conversation_summary {
         if !summary.trim().is_empty() {
@@ -165,5 +182,27 @@ mod tests {
         };
         let prompt = build_system_prompt(&contract, &ctx);
         assert!(prompt.starts_with("Think deeply"));
+    }
+
+    #[test]
+    fn prompt_includes_response_style_section() {
+        let contract = PersonalityContract::default_contract(None);
+        let ctx = AgentContext {
+            channel: None,
+            learned_context: "",
+            conversation_summary: None,
+            deep: false,
+            personality_documents: None,
+            plugin_context: None,
+        };
+        let prompt = build_system_prompt(&contract, &ctx);
+        assert!(
+            prompt.contains("## Response Style"),
+            "missing Response Style section"
+        );
+        assert!(
+            prompt.contains("Do NOT narrate"),
+            "missing monologue suppression"
+        );
     }
 }

@@ -24,7 +24,10 @@ pub enum ResolveError {
     /// The imported file failed to parse.
     ParseError { path: PathBuf, message: String },
     /// The import path could not be resolved.
-    InvalidPath { import_path: String, message: String },
+    InvalidPath {
+        import_path: String,
+        message: String,
+    },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -83,14 +86,20 @@ pub struct ResolvedDocument {
 /// let doc = pares_radix_praxis::px::parse(source)?;
 /// let resolved = resolve_imports(&doc, Path::new("./praxis/skills/"))?;
 /// ```
-pub fn resolve_imports(doc: &PxDocument, base_path: &Path) -> Result<ResolvedDocument, ResolveError> {
+pub fn resolve_imports(
+    doc: &PxDocument,
+    base_path: &Path,
+) -> Result<ResolvedDocument, ResolveError> {
     let mut visited = HashSet::new();
     let mut chain = Vec::new();
     resolve_recursive(doc, base_path, &mut visited, &mut chain)
 }
 
 /// Resolve imports from source string with a virtual path (useful for testing).
-pub fn resolve_from_source(source: &str, base_path: &Path) -> Result<ResolvedDocument, ResolveError> {
+pub fn resolve_from_source(
+    source: &str,
+    base_path: &Path,
+) -> Result<ResolvedDocument, ResolveError> {
     let doc = parse(source).map_err(|e| ResolveError::ParseError {
         path: base_path.to_path_buf(),
         message: e,
@@ -129,10 +138,11 @@ fn resolve_recursive(
         }
 
         // Read and parse the imported file
-        let source = std::fs::read_to_string(&resolved_path).map_err(|e| ResolveError::IoError {
-            path: resolved_path.clone(),
-            message: e.to_string(),
-        })?;
+        let source =
+            std::fs::read_to_string(&resolved_path).map_err(|e| ResolveError::IoError {
+                path: resolved_path.clone(),
+                message: e.to_string(),
+            })?;
 
         let imported_doc = parse(&source).map_err(|e| ResolveError::ParseError {
             path: resolved_path.clone(),
@@ -143,9 +153,7 @@ fn resolve_recursive(
         chain.push(canonical.clone());
 
         // Recursively resolve the imported document's own imports
-        let import_base = resolved_path
-            .parent()
-            .unwrap_or(base_path);
+        let import_base = resolved_path.parent().unwrap_or(base_path);
         let child_resolved = resolve_recursive(&imported_doc, import_base, visited, chain)?;
 
         chain.pop();
@@ -154,7 +162,11 @@ fn resolve_recursive(
         visited.insert(canonical);
 
         // Merge the resolved imported document into our merged doc
-        merge_document(&mut merged, &child_resolved.document, import.alias.as_deref());
+        merge_document(
+            &mut merged,
+            &child_resolved.document,
+            import.alias.as_deref(),
+        );
         resolved_paths.push(resolved_path);
         resolved_paths.extend(child_resolved.resolved_paths);
     }
@@ -349,8 +361,16 @@ fact local_state:
         assert_eq!(resolved.document.constraints.len(), 1);
         assert_eq!(resolved.resolved_paths.len(), 1);
         // Without alias, names are unchanged
-        assert!(resolved.document.facts.iter().any(|f| f.name == "shared_state"));
-        assert!(resolved.document.facts.iter().any(|f| f.name == "local_state"));
+        assert!(resolved
+            .document
+            .facts
+            .iter()
+            .any(|f| f.name == "shared_state"));
+        assert!(resolved
+            .document
+            .facts
+            .iter()
+            .any(|f| f.name == "local_state"));
     }
 
     #[test]
@@ -419,8 +439,16 @@ fact top_fact:
         let resolved = resolve_imports(&doc, base).unwrap();
 
         assert_eq!(resolved.document.facts.len(), 3);
-        assert!(resolved.document.facts.iter().any(|f| f.name == "base_fact"));
-        assert!(resolved.document.facts.iter().any(|f| f.name == "middle_fact"));
+        assert!(resolved
+            .document
+            .facts
+            .iter()
+            .any(|f| f.name == "base_fact"));
+        assert!(resolved
+            .document
+            .facts
+            .iter()
+            .any(|f| f.name == "middle_fact"));
         assert!(resolved.document.facts.iter().any(|f| f.name == "top_fact"));
         assert_eq!(resolved.resolved_paths.len(), 2);
     }
@@ -486,17 +514,9 @@ import b
         let tmp = TempDir::new().unwrap();
         let base = tmp.path();
 
-        write_px_file(
-            base,
-            "a.px",
-            "import b\n\nfact a_state:\n  x: int\n",
-        );
+        write_px_file(base, "a.px", "import b\n\nfact a_state:\n  x: int\n");
 
-        write_px_file(
-            base,
-            "b.px",
-            "import a\n\nfact b_state:\n  y: int\n",
-        );
+        write_px_file(base, "b.px", "import a\n\nfact b_state:\n  y: int\n");
 
         let source = r#"import a"#;
         let doc = parse(source).unwrap();
@@ -544,7 +564,11 @@ fact local:
         let resolved = resolve_imports(&doc, base).unwrap();
 
         assert_eq!(resolved.document.facts.len(), 2);
-        assert!(resolved.document.facts.iter().any(|f| f.name == "ct.common_type"));
+        assert!(resolved
+            .document
+            .facts
+            .iter()
+            .any(|f| f.name == "ct.common_type"));
     }
 
     #[test]

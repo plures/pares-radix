@@ -1986,12 +1986,8 @@ impl RadixToolHandler {
                     shell: Arc::clone(&self.shell),
                     workdir: self.workdir.clone(),
                 };
-                return match px_async::execute_async_with_vars(
-                    &loaded.data,
-                    &handler,
-                    initial_vars,
-                )
-                .await
+                return match px_async::execute_async_with_vars(&loaded.data, &handler, initial_vars)
+                    .await
                 {
                     Ok(result) => {
                         let step_summaries: Vec<Value> = result

@@ -1311,9 +1311,15 @@ mod tests {
         // Both true
         assert!(default_evaluate_condition("status == ok && flag", &vars));
         // First false
-        assert!(!default_evaluate_condition("status == error && flag", &vars));
+        assert!(!default_evaluate_condition(
+            "status == error && flag",
+            &vars
+        ));
         // Second false
-        assert!(!default_evaluate_condition("flag && status == error", &vars));
+        assert!(!default_evaluate_condition(
+            "flag && status == error",
+            &vars
+        ));
         // Triple AND
         assert!(default_evaluate_condition(
             "status == ok && flag && count == 5",
@@ -1335,7 +1341,10 @@ mod tests {
         // First true
         assert!(default_evaluate_condition("status == ok || flag", &vars));
         // Second true (first false)
-        assert!(default_evaluate_condition("status == error || status == ok", &vars));
+        assert!(default_evaluate_condition(
+            "status == error || status == ok",
+            &vars
+        ));
         // Both false
         assert!(!default_evaluate_condition(
             "status == error || flag",
