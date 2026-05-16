@@ -6,6 +6,7 @@ pub mod async_executor;
 pub mod builder;
 pub mod compiler;
 pub mod executor;
+pub mod resolver;
 
 use pest::Parser;
 use pest_derive::Parser;
