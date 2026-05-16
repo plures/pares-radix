@@ -2,11 +2,28 @@ name: CI
 on:
   push:
     branches: [main, "copilot/**", "feature/**"]
+    paths:
+      - 'crates/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/ci-reusable.yml'
   pull_request:
+    paths:
+      - 'crates/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/ci-reusable.yml'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   ci:
     uses: plures/.github/.github/workflows/ci-reusable.yml@main
-
