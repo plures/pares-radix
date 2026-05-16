@@ -9,6 +9,7 @@
 //! - Cron (cron_list, cron_add, cron_remove, cron_toggle)
 //! - State/DB (db_get, db_put, db_delete)
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -34,6 +35,19 @@ use pares_radix_praxis::rule::{RuleContext, RuleResult};
 use crate::browser::BrowserClient;
 use crate::handler::{ToolHandler, ToolResult};
 
+/// A pre-loaded .px procedure ready for execution.
+#[derive(Debug, Clone)]
+pub struct LoadedProcedure {
+    /// Procedure name (from the .px source).
+    pub name: String,
+    /// Source file path (for reference).
+    pub source_file: PathBuf,
+    /// Compiled record data (ready for async execution).
+    pub data: Value,
+    /// Optional description extracted from the procedure's doc comment.
+    pub description: Option<String>,
+}
+
 /// Production tool handler that connects MCP tool calls to real implementations.
 pub struct RadixToolHandler {
     /// Shell executor for run_command/process tools.
@@ -56,6 +70,8 @@ pub struct RadixToolHandler {
     browser: Option<Arc<BrowserClient>>,
     /// Praxis modules for constraint evaluation.
     praxis_modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
+    /// Pre-loaded .px procedures (name → compiled record data).
+    loaded_procedures: HashMap<String, LoadedProcedure>,
     /// Chronos version timeline for audit/history queries.
     chronos: Option<Arc<ChronosTimeline>>,
     /// Sub-agent manager for delegation tools.
@@ -77,6 +93,7 @@ impl RadixToolHandler {
             media_dir,
             browser: None,
             praxis_modules: Vec::new(),
+            loaded_procedures: HashMap::new(),
             chronos: None,
             subagent_manager: None,
         }
@@ -130,6 +147,65 @@ impl RadixToolHandler {
     /// Attach a sub-agent manager for delegation tools.
     pub fn with_subagent_manager(mut self, manager: Arc<SubAgentManager>) -> Self {
         self.subagent_manager = Some(manager);
+        self
+    }
+
+    /// Load all .px files from a directory (recursively) and register their procedures.
+    ///
+    /// Procedures are then available via `praxis_run` by name (without needing
+    /// to specify a file path) and are listed in `praxis_list`.
+    pub fn with_px_dir(mut self, dir: PathBuf) -> Self {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("px") {
+                    if let Ok(source) = std::fs::read_to_string(&path) {
+                        match px::parse(&source) {
+                            Ok(doc) => {
+                                let records = compiler::compile(&doc);
+                                for record in &records {
+                                    if record.data.get("type").and_then(|v| v.as_str())
+                                        == Some("procedure")
+                                    {
+                                        let name = record
+                                            .data
+                                            .get("name")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("unknown")
+                                            .to_string();
+                                        let description = record
+                                            .data
+                                            .get("description")
+                                            .and_then(|v| v.as_str())
+                                            .map(|s| s.to_string());
+                                        tracing::info!(
+                                            "loaded .px procedure: {} from {:?}",
+                                            name,
+                                            path
+                                        );
+                                        self.loaded_procedures.insert(
+                                            name.clone(),
+                                            LoadedProcedure {
+                                                name,
+                                                source_file: path.clone(),
+                                                data: record.data.clone(),
+                                                description,
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("failed to parse {:?}: {e}", path);
+                            }
+                        }
+                    }
+                } else if path.is_dir() {
+                    // Recurse into subdirectories
+                    self = self.with_px_dir(path);
+                }
+            }
+        }
         self
     }
 
@@ -1804,12 +1880,36 @@ impl RadixToolHandler {
     async fn praxis_list(&self, args: &Value) -> ToolResult {
         let module_filter = args.get("module").and_then(|v| v.as_str());
 
-        if self.praxis_modules.is_empty() {
+        if self.praxis_modules.is_empty() && self.loaded_procedures.is_empty() {
             return ToolResult::ok(
                 json!({
                     "modules": [],
                     "total_rules": 0,
-                    "note": "no praxis modules loaded — use with_praxis_modules() to configure"
+                    "loaded_procedures": [],
+                    "note": "no praxis modules or procedures loaded"
+                })
+                .to_string(),
+            );
+        }
+
+        if self.praxis_modules.is_empty() {
+            let procedures_info: Vec<Value> = self
+                .loaded_procedures
+                .iter()
+                .map(|(name, proc)| {
+                    json!({
+                        "name": name,
+                        "source_file": proc.source_file.display().to_string(),
+                        "description": proc.description,
+                    })
+                })
+                .collect();
+            return ToolResult::ok(
+                json!({
+                    "modules": [],
+                    "total_rules": 0,
+                    "loaded_procedures": procedures_info,
+                    "note": "no praxis modules loaded, but procedures available"
                 })
                 .to_string(),
             );
@@ -1848,10 +1948,20 @@ impl RadixToolHandler {
             }));
         }
 
+        let mut procedures_info: Vec<Value> = Vec::new();
+        for (name, proc) in &self.loaded_procedures {
+            procedures_info.push(json!({
+                "name": name,
+                "source_file": proc.source_file.display().to_string(),
+                "description": proc.description,
+            }));
+        }
+
         ToolResult::ok(
             json!({
                 "modules": modules_info,
-                "total_rules": total_rules
+                "total_rules": total_rules,
+                "loaded_procedures": procedures_info,
             })
             .to_string(),
         )
@@ -1860,6 +1970,57 @@ impl RadixToolHandler {
     /// Run a .px procedure by inline source or file path.
     async fn praxis_run(&self, args: &Value) -> ToolResult {
         use std::collections::HashMap;
+
+        // Check if requesting a pre-loaded procedure by name
+        let target_name = args.get("procedure").and_then(|v| v.as_str());
+        if let Some(name) = target_name {
+            if let Some(loaded) = self.loaded_procedures.get(name) {
+                // Execute the pre-loaded procedure directly
+                let mut initial_vars: HashMap<String, Value> = HashMap::new();
+                if let Some(vars) = args.get("vars").and_then(|v| v.as_object()) {
+                    for (k, v) in vars {
+                        initial_vars.insert(k.clone(), v.clone());
+                    }
+                }
+                let handler = ShellBackedProcedureHandler {
+                    shell: Arc::clone(&self.shell),
+                    workdir: self.workdir.clone(),
+                };
+                return match px_async::execute_async_with_vars(
+                    &loaded.data,
+                    &handler,
+                    initial_vars,
+                )
+                .await
+                {
+                    Ok(result) => {
+                        let step_summaries: Vec<Value> = result
+                            .step_results
+                            .iter()
+                            .map(|s| {
+                                json!({
+                                    "index": s.index,
+                                    "kind": s.kind,
+                                    "skipped": s.skipped,
+                                    "output": s.output,
+                                })
+                            })
+                            .collect();
+                        ToolResult::ok(
+                            json!({
+                                "procedure": result.procedure_name,
+                                "success": result.success,
+                                "variables": result.variables,
+                                "steps": step_summaries,
+                                "source": "preloaded",
+                            })
+                            .to_string(),
+                        )
+                    }
+                    Err(e) => ToolResult::error(format!("procedure execution failed: {e}")),
+                };
+            }
+        }
 
         // Get source from inline or file
         let source = if let Some(src) = args.get("source").and_then(|v| v.as_str()) {
@@ -1872,7 +2033,7 @@ impl RadixToolHandler {
             }
         } else {
             return ToolResult::error(
-                "either 'source' (inline .px code) or 'file' (path to .px file) is required",
+                "'procedure' (name of preloaded .px), 'source' (inline .px code), or 'file' (path to .px file) is required",
             );
         };
 
@@ -4165,5 +4326,64 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn with_px_dir_loads_procedures() {
+        use std::io::Write;
+        // Create a temp dir with a .px file
+        let dir = std::env::temp_dir().join("radix_test_px_autoload");
+        let _ = std::fs::create_dir_all(&dir);
+        let px_file = dir.join("hello.px");
+        let mut f = std::fs::File::create(&px_file).unwrap();
+        writeln!(
+            f,
+            "procedure greet:\n  trigger: manual\n  emit {{message: \"hello world\"}}"
+        )
+        .unwrap();
+        drop(f); // Ensure file is flushed before reading
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
+
+        // Verify the procedure was loaded
+        assert!(
+            handler.loaded_procedures.contains_key("greet"),
+            "expected 'greet' procedure to be loaded, got: {:?}",
+            handler.loaded_procedures.keys().collect::<Vec<_>>()
+        );
+
+        // Verify praxis_list shows it
+        let result = handler.call_tool("praxis_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("greet"));
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn praxis_run_preloaded_procedure() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("radix_test_px_run");
+        let _ = std::fs::create_dir_all(&dir);
+        let px_file = dir.join("echo_test.px");
+        let mut f = std::fs::File::create(&px_file).unwrap();
+        writeln!(
+            f,
+            "procedure echo_test:\n  trigger: manual\n  emit {{result: \"ok\"}}"
+        )
+        .unwrap();
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
+
+        let result = handler
+            .call_tool("praxis_run", json!({"procedure": "echo_test"}))
+            .await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("preloaded"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

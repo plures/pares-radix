@@ -4132,9 +4132,22 @@ async fn main() {
             let shell = Arc::new(ShellExecutor::new());
             let resolved_workdir = std::fs::canonicalize(&workdir).unwrap_or(workdir);
 
-            let mut handler = RadixToolHandler::new(shell, resolved_workdir);
+            let mut handler = RadixToolHandler::new(shell, resolved_workdir.clone());
             if let Some(key) = brave_api_key {
                 handler = handler.with_brave_api_key(key);
+            }
+
+            // Auto-load .px procedures from praxis/ directory if it exists
+            let px_dir = resolved_workdir.join("praxis");
+            if px_dir.is_dir() {
+                handler = handler.with_px_dir(px_dir);
+            }
+            // Also check ~/.radix/praxis/ for user-level procedures
+            if let Ok(home) = std::env::var("HOME") {
+                let user_px_dir = std::path::PathBuf::from(home).join(".radix").join("praxis");
+                if user_px_dir.is_dir() {
+                    handler = handler.with_px_dir(user_px_dir);
+                }
             }
 
             let server = McpServer::new(Arc::new(handler));
