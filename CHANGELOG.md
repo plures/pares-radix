@@ -1,3 +1,8 @@
+## [1.43.0] — 2026-05-16
+
+- feat(mcp): add compound expressions (&&, ||, !, >, >=, <, <=) to Praxis simpleEval (7d62b4a)
+- fix(mcp): wrap context in evalScope so 'context.X' expressions resolve correctly (eacdda4)
+
 ## [1.42.3] — 2026-05-16
 
 - fix(mcp): handle === and !== in Praxis simpleEval (ac3d70e)
