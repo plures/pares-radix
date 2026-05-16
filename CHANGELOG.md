@@ -1,3 +1,7 @@
+## [1.43.7] — 2026-05-16
+
+- fix: set ORT_PREFER_DYNAMIC_LINK=1 for ort-sys (f38c46c)
+
 ## [1.43.6] — 2026-05-16
 
 - fix: use official ONNX Runtime release with .so for build + runtime (2fafc28)
