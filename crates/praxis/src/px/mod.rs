@@ -8,6 +8,7 @@ pub mod compiler;
 pub mod compose;
 pub mod executor;
 pub mod resolver;
+pub mod watcher;
 
 use pest::Parser;
 use pest_derive::Parser;
