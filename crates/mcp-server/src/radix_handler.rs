@@ -1950,6 +1950,9 @@ impl RadixToolHandler {
     // ── Praxis tools ──────────────────────────────────────────────────────────
 
     async fn praxis_evaluate(&self, args: &Value) -> ToolResult {
+        use pares_radix_praxis::px::executor::default_evaluate_condition;
+        use std::collections::HashMap;
+
         let action = match args.get("action").and_then(|v| v.as_str()) {
             Some(a) => a.to_string(),
             None => return ToolResult::error("missing required parameter: action"),
@@ -1957,20 +1960,11 @@ impl RadixToolHandler {
 
         let payload = args.get("payload").cloned().unwrap_or(json!({}));
         let module_filter = args.get("module").and_then(|v| v.as_str());
+        let phase_filter = args.get("phase").and_then(|v| v.as_str());
 
-        if self.praxis_modules.is_empty() {
-            return ToolResult::ok(
-                json!({
-                    "warning": "no praxis modules loaded",
-                    "results": []
-                })
-                .to_string(),
-            );
-        }
-
-        let ctx = RuleContext::new(&action, payload);
         let mut all_results: Vec<Value> = Vec::new();
 
+        // ── Phase 1: Evaluate classic PraxisModule rules ──────────────────────
         for module in &self.praxis_modules {
             if let Some(filter) = module_filter {
                 if module.name() != filter {
@@ -1978,6 +1972,7 @@ impl RadixToolHandler {
                 }
             }
 
+            let ctx = RuleContext::new(&action, payload.clone());
             let results = module.evaluate_all(&ctx);
             for (rule_name, result) in results {
                 let (status, message) = match &result {
@@ -1999,6 +1994,95 @@ impl RadixToolHandler {
                     entry["message"] = Value::String(msg);
                 }
                 all_results.push(entry);
+            }
+        }
+
+        // ── Phase 2: Evaluate persisted px:constraint/* from PluresDB ─────────
+        if let Some(ref store) = self.state_store {
+            let constraint_keys = store.keys_with_prefix("px:constraint/").await;
+
+            // Build vars from payload for condition evaluation
+            let mut vars: HashMap<String, Value> = HashMap::new();
+            vars.insert("action".to_string(), Value::String(action.clone()));
+            if let Value::Object(map) = &payload {
+                for (k, v) in map {
+                    vars.insert(k.clone(), v.clone());
+                }
+            }
+
+            for key in constraint_keys {
+                if let Some(record) = store.get(&key).await {
+                    let name = record
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    let severity = record
+                        .get("severity")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("error")
+                        .to_string();
+                    let message_tmpl = record
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let when_expr = record
+                        .get("when")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("true");
+                    let require_expr = record
+                        .get("require")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("true");
+                    let phases: Vec<String> = record
+                        .get("phases")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    // Apply phase filter: skip if constraint has phases and none match
+                    if let Some(pf) = phase_filter {
+                        if !phases.is_empty() && !phases.iter().any(|p| p == pf) {
+                            continue;
+                        }
+                    }
+
+                    // Evaluate `when` — if false, constraint doesn't apply (skip)
+                    if !default_evaluate_condition(when_expr, &vars) {
+                        continue;
+                    }
+
+                    // Evaluate `require` — if false, constraint is violated
+                    let satisfied = default_evaluate_condition(require_expr, &vars);
+
+                    let status = if satisfied {
+                        "pass"
+                    } else {
+                        match severity.as_str() {
+                            "warning" => "warning",
+                            "gate" => "gate",
+                            _ => "fail",
+                        }
+                    };
+
+                    let mut entry = json!({
+                        "source": "px",
+                        "constraint": name,
+                        "status": status,
+                    });
+                    if !satisfied && !message_tmpl.is_empty() {
+                        entry["message"] = Value::String(message_tmpl);
+                    }
+                    if !phases.is_empty() {
+                        entry["phases"] = json!(phases);
+                    }
+                    all_results.push(entry);
+                }
             }
         }
 
@@ -3070,14 +3154,15 @@ impl ToolHandler for RadixToolHandler {
         tools.push(Tool {
             name: "praxis_evaluate".into(),
             description: Some(
-                "Evaluate praxis rules/constraints against a context. Returns pass/fail/warning results.".into(),
+                "Evaluate praxis rules/constraints against a context. Checks both loaded PraxisModules and persisted px:constraint/* records from PluresDB. Returns pass/fail/warning results.".into(),
             ),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
                     "action": {"type": "string", "description": "The action being evaluated (e.g. 'send_email', 'deploy')"},
-                    "payload": {"type": "object", "description": "Context payload for rule evaluation"},
-                    "module": {"type": "string", "description": "Optional: specific module to evaluate (safety, agent_lifecycle, task_routing, coordination). Omit for all."}
+                    "payload": {"type": "object", "description": "Context payload for rule evaluation — keys become variables for constraint when/require expressions"},
+                    "module": {"type": "string", "description": "Optional: specific PraxisModule to evaluate. Omit for all."},
+                    "phase": {"type": "string", "description": "Optional: filter px constraints by phase (e.g. 'pre-commit', 'pre-push', 'runtime')"}
                 })),
                 required: Some(vec!["action".into()]),
             },
@@ -4185,11 +4270,10 @@ mod tests {
             .await;
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["action"], "send_email");
+        assert_eq!(parsed["total_rules"], 0);
+        assert_eq!(parsed["failures"], 0);
         assert_eq!(parsed["results"], json!([]));
-        assert!(parsed["warning"]
-            .as_str()
-            .unwrap()
-            .contains("no praxis modules"));
     }
 
     #[tokio::test]
@@ -4209,6 +4293,118 @@ mod tests {
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         assert_eq!(parsed["action"], "send_email");
         assert!(parsed["total_rules"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn praxis_evaluate_px_constraints_from_pluresdb() {
+        let shell = Arc::new(ShellExecutor::new());
+        let state = Arc::new(pares_agens_core::InMemoryStateStore::new());
+
+        // Seed a px constraint that requires `approved == true` when action is `deploy`
+        state
+            .set(
+                "px:constraint/require_approval",
+                json!({
+                    "type": "constraint",
+                    "name": "require_approval",
+                    "scope": "deploy",
+                    "phases": ["pre-push"],
+                    "when": "action == deploy",
+                    "require": "approved",
+                    "severity": "error",
+                    "message": "Deployment requires approval"
+                }),
+            )
+            .await;
+
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_state_store(state);
+
+        // Test 1: action=deploy without approved → should fail
+        let result = handler
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "deploy", "payload": {}}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["failures"], 1);
+        assert_eq!(parsed["results"][0]["status"], "fail");
+        assert_eq!(parsed["results"][0]["source"], "px");
+        assert_eq!(parsed["results"][0]["constraint"], "require_approval");
+        assert_eq!(parsed["results"][0]["message"], "Deployment requires approval");
+
+        // Test 2: action=deploy with approved=true → should pass
+        let result = handler
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "deploy", "payload": {"approved": true}}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["failures"], 0);
+        assert_eq!(parsed["results"][0]["status"], "pass");
+
+        // Test 3: action=build → when condition doesn't match, constraint skipped
+        let result = handler
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "build", "payload": {}}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["total_rules"], 0);
+    }
+
+    #[tokio::test]
+    async fn praxis_evaluate_px_constraints_phase_filter() {
+        let shell = Arc::new(ShellExecutor::new());
+        let state = Arc::new(pares_agens_core::InMemoryStateStore::new());
+
+        state
+            .set(
+                "px:constraint/lint_check",
+                json!({
+                    "type": "constraint",
+                    "name": "lint_check",
+                    "phases": ["pre-commit"],
+                    "when": "true",
+                    "require": "linted",
+                    "severity": "warning",
+                    "message": "Code should be linted"
+                }),
+            )
+            .await;
+
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_state_store(state);
+
+        // Filter by pre-push phase → should skip the pre-commit constraint
+        let result = handler
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "commit", "phase": "pre-push"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["total_rules"], 0);
+
+        // Filter by pre-commit phase → should include it
+        let result = handler
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "commit", "phase": "pre-commit"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["total_rules"], 1);
+        assert_eq!(parsed["warnings"], 1);
+        assert_eq!(parsed["results"][0]["status"], "warning");
     }
 
     #[tokio::test]
