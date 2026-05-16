@@ -1,3 +1,7 @@
+## [1.43.2] — 2026-05-16
+
+- fix: use __noChroot for Nix builds instead of sandbox workarounds (fb139a7)
+
 ## [1.43.1] — 2026-05-16
 
 - fix: wrap pares-radix binary with ORT_DYLIB_PATH for ONNX Runtime (c914e48)
