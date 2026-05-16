@@ -1,3 +1,7 @@
+## [1.43.1] — 2026-05-16
+
+- fix: wrap pares-radix binary with ORT_DYLIB_PATH for ONNX Runtime (c914e48)
+
 ## [1.43.0] — 2026-05-16
 
 - feat(mcp): add compound expressions (&&, ||, !, >, >=, <, <=) to Praxis simpleEval (7d62b4a)
