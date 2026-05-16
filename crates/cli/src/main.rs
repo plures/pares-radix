@@ -3993,11 +3993,17 @@ async fn main() {
             tracing::info!("Telegram adapter starting — bot is live");
 
             // Initialize the event spine if enabled
+            let mut adapter = adapter;
             if !no_event_spine {
                 let crdt = store.crdt_store();
                 let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-radix");
                 spine.seed_contracts();
                 spine.register_core_procedures();
+                let handle = pares_agens_core::event_spine::EventSpineHandle::from_arc_store(
+                    store.crdt_store_arc(),
+                    "pares-radix",
+                );
+                adapter.event_spine = Some(handle);
                 tracing::info!("AgensRuntime event spine initialized with core procedures");
                 // The spine is stack-local for now — future work will make it
                 // accessible from the adapter via Arc.  The important thing is

@@ -630,7 +630,7 @@ pub struct TelegramRuntimeConfig {
 /// Telegram messages.
 pub struct TelegramAdapter {
     config: TelegramConfig,
-    event_spine: Option<EventSpineHandle>,
+    pub event_spine: Option<EventSpineHandle>,
 }
 
 #[derive(Debug)]

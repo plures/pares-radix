@@ -4496,7 +4496,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-agenda"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4511,7 +4511,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-audit"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4527,7 +4527,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "pares-agens-bitnet-sys",
@@ -4539,14 +4539,14 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet-sys"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "pares-agens-channels"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "pares-agens-agenda",
@@ -4566,7 +4566,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-core"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4600,7 +4600,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-privacy"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "regex",
  "serde",
@@ -4611,7 +4611,7 @@ dependencies = [
 
 [[package]]
 name = "pares-models"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4655,7 +4655,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-cli"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4687,7 +4687,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-marketplace"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -4697,7 +4697,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-mcp-client"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4712,7 +4712,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-mcp-server"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4737,7 +4737,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-praxis"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4752,7 +4752,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-sync"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "chrono",
  "hostname",
@@ -4791,7 +4791,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-tui"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4807,7 +4807,7 @@ dependencies = [
 
 [[package]]
 name = "pares-rector"
-version = "1.44.2"
+version = "1.44.3"
 dependencies = [
  "hostname",
  "num_cpus",
