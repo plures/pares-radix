@@ -1,3 +1,7 @@
+## [1.44.4] — 2026-05-16
+
+- fix: uptime calculation was comparing ticks-since-boot to epoch seconds (d1062c2)
+
 ## [1.44.3] — 2026-05-16
 
 - fix: pin fastembed 5.13.2 / ort rc.11 (static linking, no dlopen) (afba0d7)
