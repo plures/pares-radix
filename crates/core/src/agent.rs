@@ -146,7 +146,7 @@ pub struct Agent {
     /// Current channel name (e.g. "telegram").
     current_channel: std::sync::Mutex<Option<String>>,
     /// Per-channel conversation history keyed by channel/session label.
-    conversation_history: Mutex<HashMap<String, Vec<ChatMessage>>>,
+    conversation_history: Arc<Mutex<HashMap<String, Vec<ChatMessage>>>>,
     /// Optional persistent turn store (PluresDB). When `Some`, conversation
     /// turns are persisted across restarts. Falls back to in-memory only.
     turn_store: Option<Arc<dyn MemoryStore>>,
@@ -205,7 +205,7 @@ impl Agent {
             system_prompt: String::new(),
             personality: None,
             current_channel: std::sync::Mutex::new(None),
-            conversation_history: Mutex::new(HashMap::new()),
+            conversation_history: Arc::new(Mutex::new(HashMap::new())),
             turn_store: None,
             audit_store: None,
             delegation_broker: None,
@@ -241,7 +241,7 @@ impl Agent {
             system_prompt: String::new(),
             personality: None,
             current_channel: std::sync::Mutex::new(None),
-            conversation_history: Mutex::new(HashMap::new()),
+            conversation_history: Arc::new(Mutex::new(HashMap::new())),
             turn_store: None,
             audit_store: None,
             delegation_broker: None,

@@ -24,15 +24,9 @@ pub enum PxWatchEvent {
         records: Vec<CompiledRecord>,
     },
     /// A `.px` file was removed — these keys should be evicted.
-    Removed {
-        path: PathBuf,
-        keys: Vec<String>,
-    },
+    Removed { path: PathBuf, keys: Vec<String> },
     /// A `.px` file had a parse/compile error.
-    Error {
-        path: PathBuf,
-        error: String,
-    },
+    Error { path: PathBuf, error: String },
     /// Initial scan complete (all existing `.px` files loaded).
     Ready {
         file_count: usize,
@@ -107,25 +101,12 @@ impl PxWatcher {
                                 record_count += records.len();
                                 file_count += 1;
 
-                                key_index
-                                    .lock()
-                                    .unwrap()
-                                    .insert(path.clone(), keys);
+                                key_index.lock().unwrap().insert(path.clone(), keys);
 
-                                let _ = tx
-                                    .send(PxWatchEvent::Loaded {
-                                        path,
-                                        records,
-                                    })
-                                    .await;
+                                let _ = tx.send(PxWatchEvent::Loaded { path, records }).await;
                             }
                             Err(e) => {
-                                let _ = tx
-                                    .send(PxWatchEvent::Error {
-                                        path,
-                                        error: e,
-                                    })
-                                    .await;
+                                let _ = tx.send(PxWatchEvent::Error { path, error: e }).await;
                             }
                         }
                     }
@@ -270,8 +251,7 @@ fn is_px_file(path: &Path) -> bool {
 
 /// Load a `.px` file from disk, parse, and compile it.
 fn load_and_compile(path: &Path) -> Result<Vec<CompiledRecord>, String> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|e| format!("read error: {e}"))?;
+    let source = std::fs::read_to_string(path).map_err(|e| format!("read error: {e}"))?;
 
     let doc = parse(&source)?;
     Ok(compile(&doc))
@@ -397,11 +377,7 @@ constraint must_be_ready:
     async fn detects_modified_px_file() {
         let dir = TempDir::new().unwrap();
         let px_path = dir.path().join("mutable.px");
-        std::fs::write(
-            &px_path,
-            "fact original:\n  val: string\n",
-        )
-        .unwrap();
+        std::fs::write(&px_path, "fact original:\n  val: string\n").unwrap();
 
         let watcher = PxWatcher::new(PxWatcherConfig {
             watch_path: dir.path().to_path_buf(),
