@@ -21,8 +21,6 @@
       in builtins.head (builtins.match ''.*"(.*)".*'' raw);
 
       # Prefetch ONNX Runtime static library for ort-sys.
-      # NOTE: Only used by Tauri desktop build. CLI build uses __noChroot
-      # to let ort-sys download directly during build.
       onnxruntimeLib = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
         name = "onnxruntime-prebuilt-1.23.2";
         src = pkgs.fetchurl {
@@ -55,7 +53,7 @@ tar.extractall(os.environ['out'] + '/lib')
           allowBuiltinFetchGit = true;
         };
 
-        # Let ort-sys download ONNX Runtime binaries during build
+        # Let build access network for git deps
         __noChroot = true;
 
         cargoBuildFlags = [ "-p" "pares-radix-cli" ];
@@ -66,6 +64,8 @@ tar.extractall(os.environ['out'] + '/lib')
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
+
+        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
 
         meta = {
           description = "Pares Radix — headless AI agent daemon";
@@ -96,6 +96,8 @@ tar.extractall(os.environ['out'] + '/lib')
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
+
+        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
 
         preBuild = ''
           npm ci --ignore-scripts
