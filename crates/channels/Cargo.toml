@@ -17,7 +17,7 @@ teloxide.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 pares-agens-core = { path = "../core" }
-pares-agens-marketplace = { path = "../marketplace" }
+pares-radix-marketplace = { path = "../marketplace" }
 pares-agens-agenda = { path = "../agenda" }
 pares-rector = { path = "../rector" }
 

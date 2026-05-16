@@ -5,7 +5,7 @@ use pares_agens_core::{
     procedure::{Procedure, ProcedureRegistry},
     source::EventSource,
 };
-use pares_agens_praxis::db::{
+use pares_radix_praxis::db::{
     schema::{Condition, Constraint, Severity},
     seed::default_store,
     store::PraxisStore,

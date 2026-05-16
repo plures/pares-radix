@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-praxis"
+name = "pares-radix-praxis"
 description = "Declarative logic management for Pares Agens — rules factory, typed RuleResult, PraxisModules, and completeness audits"
 version.workspace = true
 edition.workspace = true

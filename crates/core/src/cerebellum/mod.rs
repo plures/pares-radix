@@ -39,7 +39,7 @@ use crate::praxis::constraints::AuthorizationGate;
 use crate::procedure::{Procedure, ProcedureRegistry};
 
 use async_trait::async_trait;
-use pares_agens_praxis::rule::{Rule, RuleContext, RuleResult};
+use pares_radix_praxis::rule::{Rule, RuleContext, RuleResult};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info, instrument, warn};
@@ -272,7 +272,7 @@ impl Cerebellum {
                         id,
                         content: m.content.clone(),
                         tokens: m.content.len() / 4, // rough estimate
-                        relevance: 0.0, // scored by manager
+                        relevance: 0.0,              // scored by manager
                         source: context_manager::ContextSource::Memory,
                         age_turns: 0,
                         success_count: 0,
@@ -376,7 +376,10 @@ impl Cerebellum {
                 guidance.push(message.clone());
             }
             // Level 4: destructive/external → require approval
-            RuleResult::Gate { ref action, ref rationale } => {
+            RuleResult::Gate {
+                ref action,
+                ref rationale,
+            } => {
                 debug!(action, rationale, "authorization gate: approval required");
                 approval_required = Some(ApprovalRequest {
                     action: action.clone(),
@@ -416,7 +419,8 @@ impl Cerebellum {
         let shifted = embeddings
             .get(&channel_key)
             .map(|previous| {
-                cosine_similarity(previous, current_embedding) < self.config.topic_similarity_threshold
+                cosine_similarity(previous, current_embedding)
+                    < self.config.topic_similarity_threshold
             })
             .unwrap_or(false);
         embeddings.insert(channel_key, current_embedding.to_vec());
@@ -491,10 +495,14 @@ impl Procedure for CerebellumProcedure {
     }
 
     async fn execute(&self, event: &Event) -> Vec<Event> {
-        let (cerebellum, memory, registry) = match (&self.cerebellum, &self.memory, &self.registry) {
+        let (cerebellum, memory, registry) = match (&self.cerebellum, &self.memory, &self.registry)
+        {
             (Some(c), Some(m), Some(r)) => (c, m, r),
             _ => {
-                debug!(event_kind = event.kind(), "cerebellum procedure stub (no live system)");
+                debug!(
+                    event_kind = event.kind(),
+                    "cerebellum procedure stub (no live system)"
+                );
                 return vec![];
             }
         };
@@ -587,9 +595,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     }
     let (dot, norm_a_sq, norm_b_sq) = a.iter().zip(b.iter()).fold(
         (0.0f32, 0.0f32, 0.0f32),
-        |(dot, norm_a_sq, norm_b_sq), (&x, &y)| {
-            (dot + x * y, norm_a_sq + x * x, norm_b_sq + y * y)
-        },
+        |(dot, norm_a_sq, norm_b_sq), (&x, &y)| (dot + x * y, norm_a_sq + x * x, norm_b_sq + y * y),
     );
     let norm_a = norm_a_sq.sqrt();
     let norm_b = norm_b_sq.sqrt();
@@ -651,8 +657,8 @@ mod tests {
         entry::{MemoryCategory, MemoryEntry},
         store::{InMemoryStore, MemoryStore as _},
     };
+    use pares_radix_praxis::rule::RuleResult;
     use std::sync::Arc;
-    use pares_agens_praxis::rule::RuleResult;
 
     #[test]
     fn extract_query_from_message() {
@@ -732,7 +738,10 @@ mod tests {
             .preprocess(&rust_msg, &memory, &registry)
             .await
             .expect("first preprocess should succeed");
-        assert!(!rust_ctx.clear_history, "first topic should not clear history");
+        assert!(
+            !rust_ctx.clear_history,
+            "first topic should not clear history"
+        );
 
         let cooking_msg = Event::Message {
             id: "2".into(),
@@ -744,7 +753,10 @@ mod tests {
             .preprocess(&cooking_msg, &memory, &registry)
             .await
             .expect("second preprocess should succeed");
-        assert!(cooking_ctx.clear_history, "different topic should clear history");
+        assert!(
+            cooking_ctx.clear_history,
+            "different topic should clear history"
+        );
 
         let rust_return_msg = Event::Message {
             id: "3".into(),

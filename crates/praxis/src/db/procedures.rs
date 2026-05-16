@@ -71,9 +71,9 @@ impl std::error::Error for ActionBlocked {}
 /// # Example
 ///
 /// ```rust
-/// use pares_agens_praxis::db::{AgentContext, SessionType};
-/// use pares_agens_praxis::db::procedures::evaluate;
-/// use pares_agens_praxis::db::seed::default_store;
+/// use pares_radix_praxis::db::{AgentContext, SessionType};
+/// use pares_radix_praxis::db::procedures::evaluate;
+/// use pares_radix_praxis::db::seed::default_store;
 /// use serde_json::json;
 ///
 /// let store = default_store();
@@ -119,9 +119,9 @@ pub fn evaluate(store: &PraxisStore, ctx: &AgentContext) -> Vec<Violation> {
 /// # Example
 ///
 /// ```rust
-/// use pares_agens_praxis::db::{AgentContext, SessionType};
-/// use pares_agens_praxis::db::procedures::on_action;
-/// use pares_agens_praxis::db::seed::default_store;
+/// use pares_radix_praxis::db::{AgentContext, SessionType};
+/// use pares_radix_praxis::db::procedures::on_action;
+/// use pares_radix_praxis::db::seed::default_store;
 /// use serde_json::json;
 ///
 /// let store = default_store();
@@ -262,8 +262,8 @@ pub struct CorrectionApplied {
 /// # Example
 ///
 /// ```rust
-/// use pares_agens_praxis::db::procedures::apply_correction;
-/// use pares_agens_praxis::db::store::PraxisStore;
+/// use pares_radix_praxis::db::procedures::apply_correction;
+/// use pares_radix_praxis::db::store::PraxisStore;
 ///
 /// let mut store = PraxisStore::new();
 /// let result = apply_correction(
@@ -459,7 +459,7 @@ mod tests {
                 tested_at: Utc::now(),
                 condition: HashMap::new(),
                 result: EvidenceResult::Unknown,
-                reference: "https://github.com/plures/pares-agens/issues/999".into(),
+                reference: "https://github.com/plures/pares-radix/issues/999".into(),
             })
             .unwrap();
 

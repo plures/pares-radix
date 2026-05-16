@@ -242,15 +242,16 @@ pub fn manage_context(
 
     // Score everything
     for item in current.iter_mut() {
-        let sim = query_similarities
-            .get(&item.id)
-            .copied()
-            .unwrap_or(0.0);
+        let sim = query_similarities.get(&item.id).copied().unwrap_or(0.0);
         item.relevance = scorer.score(item, sim, entities);
     }
 
     // Sort by relevance (highest first)
-    current.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
+    current.sort_by(|a, b| {
+        b.relevance
+            .partial_cmp(&a.relevance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Fit within budget — remove lowest relevance items
     let mut tokens_used = 0;
@@ -280,7 +281,10 @@ mod tests {
     #[test]
     fn entity_extraction_ado_items() {
         let entities = EntityExtractor::extract("Close #2608832 and check #2605477");
-        let ado: Vec<_> = entities.iter().filter(|e| e.kind == EntityKind::AdoWorkItem).collect();
+        let ado: Vec<_> = entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::AdoWorkItem)
+            .collect();
         assert_eq!(ado.len(), 2);
         assert_eq!(ado[0].value, "2608832");
         assert_eq!(ado[1].value, "2605477");
@@ -289,14 +293,20 @@ mod tests {
     #[test]
     fn entity_extraction_git_shas() {
         let entities = EntityExtractor::extract("Check commit f6fcf65 on main");
-        let shas: Vec<_> = entities.iter().filter(|e| e.kind == EntityKind::GitSha).collect();
+        let shas: Vec<_> = entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::GitSha)
+            .collect();
         assert!(shas.iter().any(|e| e.value == "f6fcf65"));
     }
 
     #[test]
     fn entity_extraction_file_paths() {
         let entities = EntityExtractor::extract("Edit ~/projects/pares-radix/src/main.rs");
-        let paths: Vec<_> = entities.iter().filter(|e| e.kind == EntityKind::FilePath).collect();
+        let paths: Vec<_> = entities
+            .iter()
+            .filter(|e| e.kind == EntityKind::FilePath)
+            .collect();
         assert!(!paths.is_empty());
     }
 
@@ -304,32 +314,55 @@ mod tests {
     fn relevance_scorer_age_decay() {
         let scorer = RelevanceScorer::default();
         let fresh = ContextItem {
-            id: "1".into(), content: "test".into(), tokens: 10,
-            relevance: 0.0, source: ContextSource::Memory,
-            age_turns: 0, success_count: 0, failure_count: 0,
+            id: "1".into(),
+            content: "test".into(),
+            tokens: 10,
+            relevance: 0.0,
+            source: ContextSource::Memory,
+            age_turns: 0,
+            success_count: 0,
+            failure_count: 0,
         };
         let stale = ContextItem {
-            id: "2".into(), content: "test".into(), tokens: 10,
-            relevance: 0.0, source: ContextSource::Memory,
-            age_turns: 5, success_count: 0, failure_count: 0,
+            id: "2".into(),
+            content: "test".into(),
+            tokens: 10,
+            relevance: 0.0,
+            source: ContextSource::Memory,
+            age_turns: 5,
+            success_count: 0,
+            failure_count: 0,
         };
         let fresh_score = scorer.score(&fresh, 0.8, &[]);
         let stale_score = scorer.score(&stale, 0.8, &[]);
-        assert!(fresh_score > stale_score, "fresh should score higher than stale");
+        assert!(
+            fresh_score > stale_score,
+            "fresh should score higher than stale"
+        );
     }
 
     #[test]
     fn relevance_scorer_success_boost() {
         let scorer = RelevanceScorer::default();
         let successful = ContextItem {
-            id: "1".into(), content: "test".into(), tokens: 10,
-            relevance: 0.0, source: ContextSource::Memory,
-            age_turns: 0, success_count: 5, failure_count: 0,
+            id: "1".into(),
+            content: "test".into(),
+            tokens: 10,
+            relevance: 0.0,
+            source: ContextSource::Memory,
+            age_turns: 0,
+            success_count: 5,
+            failure_count: 0,
         };
         let failed = ContextItem {
-            id: "2".into(), content: "test".into(), tokens: 10,
-            relevance: 0.0, source: ContextSource::Memory,
-            age_turns: 0, success_count: 0, failure_count: 5,
+            id: "2".into(),
+            content: "test".into(),
+            tokens: 10,
+            relevance: 0.0,
+            source: ContextSource::Memory,
+            age_turns: 0,
+            success_count: 0,
+            failure_count: 5,
         };
         let s_score = scorer.score(&successful, 0.8, &[]);
         let f_score = scorer.score(&failed, 0.8, &[]);
@@ -341,14 +374,24 @@ mod tests {
         let scorer = RelevanceScorer::default();
         let mut current = vec![
             ContextItem {
-                id: "1".into(), content: "important".into(), tokens: 50,
-                relevance: 0.0, source: ContextSource::Memory,
-                age_turns: 0, success_count: 3, failure_count: 0,
+                id: "1".into(),
+                content: "important".into(),
+                tokens: 50,
+                relevance: 0.0,
+                source: ContextSource::Memory,
+                age_turns: 0,
+                success_count: 3,
+                failure_count: 0,
             },
             ContextItem {
-                id: "2".into(), content: "less important".into(), tokens: 50,
-                relevance: 0.0, source: ContextSource::Memory,
-                age_turns: 3, success_count: 0, failure_count: 2,
+                id: "2".into(),
+                content: "less important".into(),
+                tokens: 50,
+                relevance: 0.0,
+                source: ContextSource::Memory,
+                age_turns: 3,
+                success_count: 0,
+                failure_count: 2,
             },
         ];
         let sims: HashMap<String, f32> = [("1".into(), 0.9), ("2".into(), 0.3)].into();
@@ -361,9 +404,14 @@ mod tests {
     fn entity_boost_in_scoring() {
         let scorer = RelevanceScorer::default();
         let item = ContextItem {
-            id: "1".into(), content: "Work item #2608832 status: Active".into(), tokens: 10,
-            relevance: 0.0, source: ContextSource::Memory,
-            age_turns: 0, success_count: 0, failure_count: 0,
+            id: "1".into(),
+            content: "Work item #2608832 status: Active".into(),
+            tokens: 10,
+            relevance: 0.0,
+            source: ContextSource::Memory,
+            age_turns: 0,
+            success_count: 0,
+            failure_count: 0,
         };
         let entities = vec![ExtractedEntity {
             kind: EntityKind::AdoWorkItem,
@@ -372,6 +420,9 @@ mod tests {
         }];
         let with_entity = scorer.score(&item, 0.5, &entities);
         let without_entity = scorer.score(&item, 0.5, &[]);
-        assert!(with_entity > without_entity, "entity match should boost score");
+        assert!(
+            with_entity > without_entity,
+            "entity match should boost score"
+        );
     }
 }

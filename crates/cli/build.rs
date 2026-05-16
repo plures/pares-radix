@@ -26,7 +26,9 @@ fn git_hash_from_cli() -> Option<String> {
 
 /// Fall back to the `GIT_COMMIT_HASH` env var (can be set by nix or CI).
 fn git_hash_from_env() -> Option<String> {
-    std::env::var("GIT_COMMIT_HASH").ok().filter(|s| !s.is_empty())
+    std::env::var("GIT_COMMIT_HASH")
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 /// Fall back to reading `.git/HEAD` directly and resolving a ref.

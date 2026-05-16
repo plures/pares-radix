@@ -18,15 +18,15 @@
 //! 1. Vector search + graph expansion → candidate set
 //! 2. LLM reranking → scored, explained results
 
+pub mod enrichment;
 pub mod extractor;
 pub mod file_node;
-pub mod scanner;
-pub mod enrichment;
-pub mod query;
-pub mod store;
 pub mod plugin;
+pub mod query;
+pub mod scanner;
+pub mod store;
 
 pub use file_node::{FileNode, FileNodeBuilder, NodeIdentity};
-pub use scanner::{Scanner, ScanConfig, ScanEvent};
-pub use query::{Query, QueryResult, QueryConfig};
-pub use plugin::{OmniscientPlugin, OmniscientConfig};
+pub use plugin::{OmniscientConfig, OmniscientPlugin};
+pub use query::{Query, QueryConfig, QueryResult};
+pub use scanner::{ScanConfig, ScanEvent, Scanner};

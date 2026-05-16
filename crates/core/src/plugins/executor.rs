@@ -13,7 +13,7 @@ use crate::chronos::{ChronosAction, ChronosTimeline};
 use crate::praxis::write_gate::PraxisWriteGate;
 
 /// The PluresDB actor ID used for all plugin write operations.
-const ACTOR: &str = "pares-agens-plugin";
+const ACTOR: &str = "pares-radix-plugin";
 
 /// Prefix for plugin entity nodes.
 const ENTITY_PREFIX: &str = "plugin:";
@@ -34,12 +34,20 @@ pub struct PluginCrudExecutor {
 impl PluginCrudExecutor {
     /// Create a new executor backed by the given CrdtStore.
     pub fn new(store: Arc<CrdtStore>) -> Self {
-        Self { store, write_gate: None, chronos: None }
+        Self {
+            store,
+            write_gate: None,
+            chronos: None,
+        }
     }
 
     /// Create a new executor with a write gate.
     pub fn with_write_gate(store: Arc<CrdtStore>, gate: Arc<PraxisWriteGate>) -> Self {
-        Self { store, write_gate: Some(gate), chronos: None }
+        Self {
+            store,
+            write_gate: Some(gate),
+            chronos: None,
+        }
     }
 
     /// Create a new executor with a write gate and Chronos timeline.
@@ -80,7 +88,14 @@ impl PluginCrudExecutor {
     }
 
     /// Record a Chronos entry after a successful write.
-    fn record_chronos(&self, key: &str, actor: &str, action: ChronosAction, data: &Value, warnings: &[String]) {
+    fn record_chronos(
+        &self,
+        key: &str,
+        actor: &str,
+        action: ChronosAction,
+        data: &Value,
+        warnings: &[String],
+    ) {
         if let Some(chronos) = &self.chronos {
             let constraint_results: Vec<String> = warnings.to_vec();
             let entry = chronos.build_entry(key, actor, action, data, constraint_results, None);
@@ -103,7 +118,11 @@ impl PluginCrudExecutor {
 
         let mut data = match fields {
             Value::Object(map) => map,
-            _ => return Err(PluginError::InvalidManifest("fields must be an object".into())),
+            _ => {
+                return Err(PluginError::InvalidManifest(
+                    "fields must be an object".into(),
+                ))
+            }
         };
         data.insert("_type".into(), json!("plugin_entity"));
         data.insert("_plugin".into(), json!(plugin_name));
@@ -140,14 +159,16 @@ impl PluginCrudExecutor {
             if let Some(record) = self.store.get(&key) {
                 let data = record.data;
                 // Check for soft-deleted
-                if data.get("_deleted").and_then(|v| v.as_bool()).unwrap_or(false) {
+                if data
+                    .get("_deleted")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
                     continue;
                 }
                 // Apply filters
                 if let Some(Value::Object(filter_map)) = filters {
-                    let matches = filter_map.iter().all(|(k, v)| {
-                        data.get(k) == Some(v)
-                    });
+                    let matches = filter_map.iter().all(|(k, v)| data.get(k) == Some(v));
                     if !matches {
                         continue;
                     }
@@ -240,10 +261,7 @@ impl PluginCrudExecutor {
             _ => return Err(PluginError::Storage("corrupt entity data".into())),
         };
 
-        data.insert(
-            format!("_parent_{relationship}"),
-            json!(new_parent_id),
-        );
+        data.insert(format!("_parent_{relationship}"), json!(new_parent_id));
         data.insert("_updated_at".into(), json!(Utc::now().to_rfc3339()));
         self.gate_put(&key, ACTOR, Value::Object(data))?;
         Ok(())
@@ -273,7 +291,11 @@ impl PluginCrudExecutor {
                 continue;
             }
             let data = &record.data;
-            if data.get("_deleted").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if data
+                .get("_deleted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
                 continue;
             }
             // Filter by entity types if specified
@@ -305,11 +327,7 @@ impl PluginCrudExecutor {
     }
 
     /// Store a plugin manifest in PluresDB for persistence across restarts.
-    pub fn persist_manifest(
-        &self,
-        name: &str,
-        manifest_json: &Value,
-    ) -> Result<(), PluginError> {
+    pub fn persist_manifest(&self, name: &str, manifest_json: &Value) -> Result<(), PluginError> {
         let key = format!("{INSTALLED_PREFIX}{name}");
         self.gate_put(&key, ACTOR, manifest_json.clone())?;
         Ok(())
@@ -350,13 +368,11 @@ impl PluginCrudExecutor {
         self.store
             .get(&key)
             .and_then(|r| {
-                r.data
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
+                r.data.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
             })
             .unwrap_or_default()
     }
@@ -414,8 +430,16 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        let id1 = executor.create("item", "inventory", json!({"name": "Laptop", "value": 1500})).unwrap();
-        let id2 = executor.create("item", "inventory", json!({"name": "Phone", "value": 800})).unwrap();
+        let id1 = executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "Laptop", "value": 1500}),
+            )
+            .unwrap();
+        let id2 = executor
+            .create("item", "inventory", json!({"name": "Phone", "value": 800}))
+            .unwrap();
 
         assert_ne!(id1, id2);
 
@@ -430,7 +454,13 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        let id = executor.create("item", "inventory", json!({"name": "Laptop", "value": 1500})).unwrap();
+        let id = executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "Laptop", "value": 1500}),
+            )
+            .unwrap();
         executor.update(&id, json!({"value": 2000})).unwrap();
 
         let items = executor.list("item", "inventory", None, 50).unwrap();
@@ -443,7 +473,9 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        let id = executor.create("item", "inventory", json!({"name": "Laptop"})).unwrap();
+        let id = executor
+            .create("item", "inventory", json!({"name": "Laptop"}))
+            .unwrap();
         executor.delete(&id).unwrap();
 
         let items = executor.list("item", "inventory", None, 50).unwrap();
@@ -455,14 +487,22 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        let room_id = executor.create("room", "inventory", json!({"name": "Office"})).unwrap();
-        let item_id = executor.create("item", "inventory", json!({"name": "Laptop"})).unwrap();
+        let room_id = executor
+            .create("room", "inventory", json!({"name": "Office"}))
+            .unwrap();
+        let item_id = executor
+            .create("item", "inventory", json!({"name": "Laptop"}))
+            .unwrap();
 
         executor.move_entity(&item_id, &room_id, "room").unwrap();
 
         let items = executor.list("item", "inventory", None, 50).unwrap();
         assert_eq!(
-            items[0].get("_parent_room".to_string()).unwrap().as_str().unwrap(),
+            items[0]
+                .get("_parent_room".to_string())
+                .unwrap()
+                .as_str()
+                .unwrap(),
             room_id
         );
     }
@@ -472,8 +512,20 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        executor.create("item", "inventory", json!({"name": "MacBook Pro", "category": "electronics"})).unwrap();
-        executor.create("item", "inventory", json!({"name": "Coffee Table", "category": "furniture"})).unwrap();
+        executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "MacBook Pro", "category": "electronics"}),
+            )
+            .unwrap();
+        executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "Coffee Table", "category": "furniture"}),
+            )
+            .unwrap();
 
         let results = executor.search("macbook", "inventory", None, 10).unwrap();
         assert_eq!(results.len(), 1);
@@ -485,11 +537,25 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        executor.create("item", "inventory", json!({"name": "Laptop", "category": "electronics"})).unwrap();
-        executor.create("item", "inventory", json!({"name": "Desk", "category": "furniture"})).unwrap();
+        executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "Laptop", "category": "electronics"}),
+            )
+            .unwrap();
+        executor
+            .create(
+                "item",
+                "inventory",
+                json!({"name": "Desk", "category": "furniture"}),
+            )
+            .unwrap();
 
         let filters = json!({"category": "electronics"});
-        let results = executor.list("item", "inventory", Some(&filters), 50).unwrap();
+        let results = executor
+            .list("item", "inventory", Some(&filters), 50)
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("name").unwrap(), "Laptop");
     }
@@ -512,9 +578,15 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        executor.create("item", "inventory", json!({"name": "A"})).unwrap();
-        executor.create("item", "inventory", json!({"name": "B"})).unwrap();
-        executor.create("room", "inventory", json!({"name": "C"})).unwrap();
+        executor
+            .create("item", "inventory", json!({"name": "A"}))
+            .unwrap();
+        executor
+            .create("item", "inventory", json!({"name": "B"}))
+            .unwrap();
+        executor
+            .create("room", "inventory", json!({"name": "C"}))
+            .unwrap();
 
         assert_eq!(executor.count("inventory", "item"), 2);
         assert_eq!(executor.count("inventory", "room"), 1);
@@ -532,11 +604,21 @@ mod tests {
         let store = test_store();
         let executor = PluginCrudExecutor::new(store);
 
-        executor.create("item", "inventory", json!({"name": "Laptop"})).unwrap();
-        executor.create("room", "inventory", json!({"name": "Living Room with Laptop"})).unwrap();
+        executor
+            .create("item", "inventory", json!({"name": "Laptop"}))
+            .unwrap();
+        executor
+            .create(
+                "room",
+                "inventory",
+                json!({"name": "Living Room with Laptop"}),
+            )
+            .unwrap();
 
         let types = vec!["item".to_string()];
-        let results = executor.search("laptop", "inventory", Some(&types), 10).unwrap();
+        let results = executor
+            .search("laptop", "inventory", Some(&types), 10)
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].get("_entity_type").unwrap(), "item");
     }

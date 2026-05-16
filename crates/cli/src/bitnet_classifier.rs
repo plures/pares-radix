@@ -3,13 +3,13 @@
 //! Uses the local BitNet model for fast message routing decisions.
 //! Each classification is a single-token generation (~20ms on modern CPUs).
 
+use pares_agens_bitnet::BitNetRunner;
 use pares_agens_core::cerebellum::classifier::{
     ClassifierBackend, MessageClassification, MessageIntent,
 };
-use pares_agens_bitnet::BitNetRunner;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// BitNet-powered classifier that uses single-token prompts for speed.
@@ -61,7 +61,12 @@ impl BitNetClassifier {
             truncated
         );
 
-        match self.generate_short(&prompt, 5).trim().to_lowercase().as_str() {
+        match self
+            .generate_short(&prompt, 5)
+            .trim()
+            .to_lowercase()
+            .as_str()
+        {
             s if s.starts_with("question") || s.starts_with('q') => MessageIntent::Question,
             s if s.starts_with("task") || s.starts_with('t') => MessageIntent::Task,
             s if s.starts_with("command") || s.starts_with("cmd") || s.starts_with('/') => {
@@ -140,9 +145,15 @@ impl BitNetClassifier {
                                     if let Ok(piece) = ctx.decode_token(token_id) {
                                         output.push_str(&piece);
                                         // Stop on text-level end markers
-                                        if output.contains("<|end|>") || output.contains("<|eot_id|>") || output.contains("<|end_of_text|>") {
+                                        if output.contains("<|end|>")
+                                            || output.contains("<|eot_id|>")
+                                            || output.contains("<|end_of_text|>")
+                                        {
                                             // Trim the stop marker
-                                            if let Some(pos) = output.find("<|end") .or_else(|| output.find("<|eot")) {
+                                            if let Some(pos) = output
+                                                .find("<|end")
+                                                .or_else(|| output.find("<|eot"))
+                                            {
                                                 output.truncate(pos);
                                             }
                                             break;
@@ -174,7 +185,8 @@ impl ClassifierBackend for BitNetClassifier {
 
         // Update metrics
         self.total_classifications.fetch_add(1, Ordering::Relaxed);
-        self.total_latency_us.fetch_add(elapsed_us, Ordering::Relaxed);
+        self.total_latency_us
+            .fetch_add(elapsed_us, Ordering::Relaxed);
         self.min_latency_us.fetch_min(elapsed_us, Ordering::Relaxed);
         self.max_latency_us.fetch_max(elapsed_us, Ordering::Relaxed);
 
@@ -215,7 +227,9 @@ fn extract_topic(message: &str) -> String {
         message.to_string()
     } else {
         // Take the first noun-like words (skip question starters, articles)
-        let skip = ["what", "how", "can", "you", "please", "the", "a", "an", "is", "are", "do"];
+        let skip = [
+            "what", "how", "can", "you", "please", "the", "a", "an", "is", "are", "do",
+        ];
         words
             .iter()
             .filter(|w| !skip.contains(&w.to_lowercase().as_str()))

@@ -118,7 +118,6 @@ pub enum FunctionMode {
     Hybrid,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PxTrigger {
     pub name: String,
@@ -188,8 +187,7 @@ pub struct PxMatchArm {
 
 /// Parse a .px source string into a document AST.
 pub fn parse(source: &str) -> Result<PxDocument, String> {
-    let pairs = PxParser::parse(Rule::document, source)
-        .map_err(|e| format!("parse error: {e}"))?;
+    let pairs = PxParser::parse(Rule::document, source).map_err(|e| format!("parse error: {e}"))?;
 
     Ok(builder::build(pairs))
 }
@@ -265,7 +263,10 @@ contract auto_merge_behavior:
         assert_eq!(rule.actions.len(), 1);
         assert_eq!(rule.captures.len(), 1);
         assert_eq!(rule.captures[0].content, "Merged PR");
-        assert_eq!(rule.captures[0].category.as_deref(), Some("work_in_progress"));
+        assert_eq!(
+            rule.captures[0].category.as_deref(),
+            Some("work_in_progress")
+        );
         assert_eq!(rule.captures[0].tags, vec!["lifecycle", "merge"]);
     }
 
@@ -287,7 +288,10 @@ constraint warmth:
         assert_eq!(c.trait_category.as_deref(), Some("warmth"));
         assert_eq!(c.phases, vec!["user_communication", "error_reporting"]);
         assert!((c.weight.unwrap() - 0.8).abs() < f64::EPSILON);
-        assert_eq!(c.prompt_injection.as_deref(), Some("Use a warm, approachable tone."));
+        assert_eq!(
+            c.prompt_injection.as_deref(),
+            Some("Use a warm, approachable tone.")
+        );
         assert_eq!(c.severity, "info");
         // when/require are optional for personality constraints
         assert!(c.when_expr.is_none());
@@ -305,7 +309,13 @@ constraint warmth:
         assert_eq!(proc.steps.len(), 2);
 
         match &proc.steps[1] {
-            PxStep::Loop { over, times, item_var, steps, output_var } => {
+            PxStep::Loop {
+                over,
+                times,
+                item_var,
+                steps,
+                output_var,
+            } => {
                 assert_eq!(over.as_deref(), Some("$items"));
                 assert!(times.is_none());
                 assert_eq!(item_var, "item");
@@ -318,7 +328,8 @@ constraint warmth:
 
     #[test]
     fn parse_procedure_with_emit() {
-        let source = "procedure notify:\n  trigger: manual\n  emit {type: \"alert\", level: \"high\"}\n";
+        let source =
+            "procedure notify:\n  trigger: manual\n  emit {type: \"alert\", level: \"high\"}\n";
 
         let doc = parse(source).expect("parse failed");
         assert_eq!(doc.procedures.len(), 1);
@@ -349,10 +360,10 @@ constraint warmth:
     #[test]
     fn full_pipeline_loop_emit_try() {
         // Parse → Compile → Execute with all new step kinds
-        use crate::px::{compiler::compile};
+        use crate::px::compiler::compile;
         use crate::px::executor::{self, ActionHandler, ExecutionError};
-        use std::collections::HashMap;
         use serde_json::{json, Value};
+        use std::collections::HashMap;
 
         struct TestHandler;
         impl ActionHandler for TestHandler {
@@ -373,7 +384,10 @@ constraint warmth:
 
         let result = executor::execute(&records[0].data, &TestHandler).unwrap();
         assert!(result.success);
-        assert_eq!(result.variables.get("results"), Some(&json!(["done", "done", "done"])));
+        assert_eq!(
+            result.variables.get("results"),
+            Some(&json!(["done", "done", "done"]))
+        );
         // Check emit was captured
         let emit = result.variables.get("emit").unwrap().as_array().unwrap();
         assert_eq!(emit.len(), 1);
@@ -385,19 +399,19 @@ constraint warmth:
 mod parse_value_tests {
     use super::*;
     use pest::Parser;
-    
+
     #[test]
     fn parse_var_ref() {
         let r = PxParser::parse(Rule::var_ref, "$item");
         assert!(r.is_ok(), "var_ref failed: {:?}", r.err());
     }
-    
+
     #[test]
     fn parse_value_with_var_ref() {
         let r = PxParser::parse(Rule::value, "$item");
         assert!(r.is_ok(), "value($item) failed: {:?}", r.err());
     }
-    
+
     #[test]
     fn parse_map_val_with_var_ref() {
         let r = PxParser::parse(Rule::map_val, "{val: $item}");
@@ -408,7 +422,7 @@ mod parse_value_tests {
 #[cfg(test)]
 mod parse_step_tests {
     use super::*;
-    
+
     #[test]
     fn parse_procedure_call_with_var_ref_in_map() {
         let source = "procedure test:\n  trigger: manual\n  do_thing {val: $foo}\n";

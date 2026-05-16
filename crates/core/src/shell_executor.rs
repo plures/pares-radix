@@ -249,7 +249,9 @@ impl ShellExecutor {
                 return ExecResult {
                     exit_code: None,
                     stdout: String::new(),
-                    stderr: format!("maximum sessions ({MAX_SESSIONS}) reached; kill old sessions first"),
+                    stderr: format!(
+                        "maximum sessions ({MAX_SESSIONS}) reached; kill old sessions first"
+                    ),
                     timed_out: false,
                     session_id: None,
                     still_running: false,
@@ -309,7 +311,10 @@ impl ShellExecutor {
             stdin,
         };
 
-        self.sessions.write().await.insert(session_id.clone(), session);
+        self.sessions
+            .write()
+            .await
+            .insert(session_id.clone(), session);
 
         // Spawn background tasks to read stdout/stderr into session buffers
         let sessions_ref = self.sessions.clone();
@@ -552,7 +557,10 @@ impl ShellExecutor {
             .await
             .map_err(|e| format!("write failed: {e}"))?;
 
-        stdin.flush().await.map_err(|e| format!("flush failed: {e}"))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| format!("flush failed: {e}"))?;
 
         Ok(())
     }
@@ -653,12 +661,12 @@ static SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Generate a human-friendly unique session ID (adjective-noun-N pattern).
 fn generate_session_id() -> String {
     let adjectives = [
-        "swift", "calm", "bold", "keen", "warm", "cool", "bright", "dark",
-        "quick", "slow", "fresh", "wild", "soft", "loud", "deep", "high",
+        "swift", "calm", "bold", "keen", "warm", "cool", "bright", "dark", "quick", "slow",
+        "fresh", "wild", "soft", "loud", "deep", "high",
     ];
     let nouns = [
-        "oak", "fox", "elm", "owl", "bay", "ash", "sky", "dew",
-        "gem", "wave", "leaf", "star", "moon", "sun", "reed", "pine",
+        "oak", "fox", "elm", "owl", "bay", "ash", "sky", "dew", "gem", "wave", "leaf", "star",
+        "moon", "sun", "reed", "pine",
     ];
 
     let n = SESSION_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -873,7 +881,10 @@ mod tests {
         let session_id = result.session_id.unwrap();
 
         // Write to stdin
-        executor.write_stdin(&session_id, "hello from stdin\n").await.unwrap();
+        executor
+            .write_stdin(&session_id, "hello from stdin\n")
+            .await
+            .unwrap();
 
         // Give it a moment to process
         tokio::time::sleep(Duration::from_millis(200)).await;

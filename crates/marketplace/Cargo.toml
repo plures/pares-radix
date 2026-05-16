@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-marketplace"
+name = "pares-radix-marketplace"
 description = "Marketplace crate for skill and extension discovery, installation, and security validation"
 version.workspace = true
 edition.workspace = true

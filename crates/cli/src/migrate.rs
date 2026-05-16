@@ -1,5 +1,5 @@
 //! Migration orchestration — converts an [`OpenClawInstallation`] into
-//! pares-agens data and writes it to an output directory.
+//! pares-radix data and writes it to an output directory.
 //!
 //! # Output layout
 //! ```text
@@ -343,7 +343,7 @@ mod tests {
                 },
                 PersonalityFile {
                     key: "identity".into(),
-                    content: "# Identity\nPares Agens.".into(),
+                    content: "# Identity\nPares Radix.".into(),
                 },
             ],
         }
@@ -406,7 +406,7 @@ mod tests {
             let mut f = std::fs::File::create(src_dir.path().join("SOUL.md")).unwrap();
             f.write_all(b"# Soul\nI am helpful.").unwrap();
             let mut f = std::fs::File::create(src_dir.path().join("IDENTITY.md")).unwrap();
-            f.write_all(b"# Identity\nPares Agens.").unwrap();
+            f.write_all(b"# Identity\nPares Radix.").unwrap();
         }
 
         let report = run(src_dir.path(), out_dir.path(), /* dry_run */ false).unwrap();

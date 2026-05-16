@@ -53,7 +53,8 @@ fn decide_message(content: &str, learned_context: &str, config: &CerebellumConfi
         let tasks = build_subtasks(content, learned_context, &signals);
         if !tasks.is_empty() {
             return Route::Delegate {
-                reason: "decomposition signals detected (multi-part or cross-domain request)".into(),
+                reason: "decomposition signals detected (multi-part or cross-domain request)"
+                    .into(),
                 tasks,
             };
         }
@@ -129,17 +130,7 @@ fn analyze(content: &str) -> Signals {
     let research = research_keywords.iter().any(|kw| lower.contains(kw));
 
     let noise_patterns = [
-        "ok",
-        "sure",
-        "thanks",
-        "got it",
-        "k",
-        "cool",
-        "np",
-        "ty",
-        "thx",
-        "okay",
-        "alright",
+        "ok", "sure", "thanks", "got it", "k", "cool", "np", "ty", "thx", "okay", "alright",
     ];
     let noise = noise_patterns.iter().any(|p| lower.trim() == *p);
 
@@ -213,13 +204,9 @@ fn estimate_complexity(signals: &Signals) -> f32 {
 
 fn count_file_mentions(lower: &str) -> usize {
     let extensions = [
-        ".rs", ".ts", ".js", ".py", ".go", ".java", ".toml", ".json", ".yml", ".yaml",
-        ".md",
+        ".rs", ".ts", ".js", ".py", ".go", ".java", ".toml", ".json", ".yml", ".yaml", ".md",
     ];
-    extensions
-        .iter()
-        .filter(|ext| lower.contains(*ext))
-        .count()
+    extensions.iter().filter(|ext| lower.contains(*ext)).count()
         + ["/src/", "crates/", "modules/"]
             .iter()
             .filter(|segment| lower.contains(*segment))

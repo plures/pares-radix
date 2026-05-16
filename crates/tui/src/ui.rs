@@ -31,14 +31,8 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
 
     for msg in &app.messages {
         let (prefix, style) = match msg.role {
-            Role::User => (
-                "You: ",
-                Style::default().fg(Color::Cyan),
-            ),
-            Role::Assistant => (
-                "Agent: ",
-                Style::default().fg(Color::Green),
-            ),
+            Role::User => ("You: ", Style::default().fg(Color::Cyan)),
+            Role::Assistant => ("Agent: ", Style::default().fg(Color::Green)),
             Role::System => (
                 "⚙ ",
                 Style::default()
@@ -79,11 +73,7 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" Chat "),
-        )
+        .block(Block::default().borders(Borders::ALL).title(" Chat "))
         .wrap(Wrap { trim: false })
         .scroll((app.scroll_offset, 0));
 
@@ -103,10 +93,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 
     // Place cursor
     #[allow(clippy::cast_possible_truncation)]
-    f.set_cursor_position((
-        area.x + app.input_cursor as u16 + 1,
-        area.y + 1,
-    ));
+    f.set_cursor_position((area.x + app.input_cursor as u16 + 1, area.y + 1));
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
@@ -115,8 +102,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     } else {
         format!(" {} | ready ", app.current_model)
     };
-    let bar = Paragraph::new(status)
-        .style(Style::default().bg(Color::DarkGray).fg(Color::White));
+    let bar = Paragraph::new(status).style(Style::default().bg(Color::DarkGray).fg(Color::White));
     f.render_widget(bar, area);
 }
 

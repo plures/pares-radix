@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::task::{Assignment, CompletionCondition, Task, TaskStatus};
 
 /// PluresDB actor ID used for task write operations.
-const ACTOR: &str = "pares-agens-tasks";
+const ACTOR: &str = "pares-radix-tasks";
 
 /// Key prefix for task nodes in PluresDB.
 const TASK_PREFIX: &str = "task:";
@@ -185,7 +185,12 @@ impl TaskManager {
             task.attempts += 1;
             task.last_evaluated_at = Some(Self::now_ms());
             task.updated_at = Self::now_ms();
-            debug!(task_id, attempts = task.attempts, "Evaluation recorded: {}", result);
+            debug!(
+                task_id,
+                attempts = task.attempts,
+                "Evaluation recorded: {}",
+                result
+            );
             self.store_task(&task);
         }
     }
@@ -200,8 +205,7 @@ impl TaskManager {
         self.all_tasks()
             .into_iter()
             .filter(|t| {
-                t.chat_id.as_deref() == Some(chat_id)
-                    && (include_completed || !t.is_terminal())
+                t.chat_id.as_deref() == Some(chat_id) && (include_completed || !t.is_terminal())
             })
             .collect()
     }
@@ -224,7 +228,10 @@ impl TaskManager {
             task.updated_at = Self::now_ms();
             // Also satisfy any RequesterAck conditions
             for cond in &mut task.completion_conditions {
-                if matches!(cond.condition_type, crate::task::ConditionType::RequesterAck) {
+                if matches!(
+                    cond.condition_type,
+                    crate::task::ConditionType::RequesterAck
+                ) {
                     cond.satisfied = true;
                 }
             }
@@ -280,9 +287,7 @@ mod tests {
     fn create_subtask_links_parent() {
         let mgr = make_manager();
         let parent = mgr.create_task("Parent", "chat_1", vec![]);
-        let sub = mgr
-            .create_subtask(&parent.id, "Child", vec![])
-            .unwrap();
+        let sub = mgr.create_subtask(&parent.id, "Child", vec![]).unwrap();
         assert_eq!(sub.parent_task.as_deref(), Some(parent.id.as_str()));
         let reloaded = mgr.get_task(&parent.id).unwrap();
         assert!(reloaded.subtasks.contains(&sub.id));

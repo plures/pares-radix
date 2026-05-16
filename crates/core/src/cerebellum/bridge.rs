@@ -1,4 +1,4 @@
-//! Bridge between pares-agens cerebellum and PluresDB procedure engine.
+//! Bridge between pares-radix cerebellum and PluresDB procedure engine.
 //!
 //! The bridge exposes two execution paths:
 //!
@@ -8,7 +8,7 @@
 //!
 //! # Store adapter
 //!
-//! [`StoreAdapter`] populates an in-process [`CrdtStore`] from a pares-agens
+//! [`StoreAdapter`] populates an in-process [`CrdtStore`] from a pares-radix
 //! [`MemoryStore`], making the full corpus of memory entries available to the
 //! PluresDB procedure engine without any network hop.
 //!
@@ -65,12 +65,12 @@ pub enum BridgeError {
 // StoreAdapter
 // ---------------------------------------------------------------------------
 
-/// Populates a [`CrdtStore`] with entries from a pares-agens [`MemoryStore`].
+/// Populates a [`CrdtStore`] with entries from a pares-radix [`MemoryStore`].
 ///
-/// This adapter is the glue layer between the pares-agens memory subsystem and
+/// This adapter is the glue layer between the pares-radix memory subsystem and
 /// the PluresDB procedure engine.  The [`CrdtStore`] it builds is a snapshot
-/// of the pares-agens store at the moment [`StoreAdapter::load`] is called.
-/// Subsequent writes to the pares-agens store are not reflected automatically;
+/// of the pares-radix store at the moment [`StoreAdapter::load`] is called.
+/// Subsequent writes to the pares-radix store are not reflected automatically;
 /// callers should construct a fresh [`PluresDbBridge`] (or call
 /// [`PluresDbBridge::reload`]) when a fresh view is required.
 pub struct StoreAdapter {
@@ -78,16 +78,16 @@ pub struct StoreAdapter {
 }
 
 impl StoreAdapter {
-    /// Create a new adapter wrapping the given pares-agens memory store.
+    /// Create a new adapter wrapping the given pares-radix memory store.
     pub fn new(store: Arc<dyn MemoryStore>) -> Self {
         Self { inner: store }
     }
 
-    /// Load all memory entries from the pares-agens store into a freshly
+    /// Load all memory entries from the pares-radix store into a freshly
     /// created [`CrdtStore`] and return it.
     ///
     /// Each [`MemoryEntry`][crate::memory::entry::MemoryEntry] is stored as a
-    /// JSON node under its own ID with actor `"pares-agens"`.  The `category`,
+    /// JSON node under its own ID with actor `"pares-radix"`.  The `category`,
     /// `content`, `score`, `tags`, and `created_at` fields are preserved in
     /// the node payload so that PluresDB filter / sort / project steps can
     /// reference them.
@@ -98,7 +98,7 @@ impl StoreAdapter {
     ///
     /// # Errors
     ///
-    /// Returns [`BridgeError::Store`] if the underlying pares-agens store
+    /// Returns [`BridgeError::Store`] if the underlying pares-radix store
     /// fails to enumerate its entries.
     pub async fn load(&self) -> Result<CrdtStore, BridgeError> {
         let crdt = CrdtStore::default();
@@ -118,9 +118,9 @@ impl StoreAdapter {
                 "created_at": entry.created_at,
             });
             if embedding.is_empty() {
-                crdt.put(&entry.id, "pares-agens", data);
+                crdt.put(&entry.id, "pares-radix", data);
             } else {
-                crdt.put_with_embedding(&entry.id, "pares-agens", data, embedding);
+                crdt.put_with_embedding(&entry.id, "pares-radix", data, embedding);
             }
         }
 
@@ -132,12 +132,12 @@ impl StoreAdapter {
 // PluresDbBridge
 // ---------------------------------------------------------------------------
 
-/// Bridge between the pares-agens cerebellum and the PluresDB procedure engine.
+/// Bridge between the pares-radix cerebellum and the PluresDB procedure engine.
 ///
 /// The bridge maintains:
-/// - An in-process [`CrdtStore`] snapshot of the pares-agens memory store.
+/// - An in-process [`CrdtStore`] snapshot of the pares-radix memory store.
 /// - A named-procedure registry (mapping procedure names to DSL strings).
-/// - A reference to the pares-agens [`MemoryStore`] for reloading on demand.
+/// - A reference to the pares-radix [`MemoryStore`] for reloading on demand.
 pub struct PluresDbBridge {
     crdt: CrdtStore,
     store: Arc<dyn MemoryStore>,
@@ -146,7 +146,7 @@ pub struct PluresDbBridge {
 }
 
 impl PluresDbBridge {
-    /// Create a bridge connected to the given pares-agens memory store.
+    /// Create a bridge connected to the given pares-radix memory store.
     ///
     /// All existing memory entries are loaded into the internal [`CrdtStore`]
     /// immediately so they are available to procedure pipelines.
@@ -171,9 +171,9 @@ impl PluresDbBridge {
         self.procedures.insert(name.into(), dsl.into());
     }
 
-    /// Reload the internal [`CrdtStore`] snapshot from the pares-agens store.
+    /// Reload the internal [`CrdtStore`] snapshot from the pares-radix store.
     ///
-    /// Call this when the pares-agens store has been updated and you want the
+    /// Call this when the pares-radix store has been updated and you want the
     /// bridge to reflect the latest entries.
     ///
     /// # Errors
@@ -200,7 +200,7 @@ impl PluresDbBridge {
             .get(name)
             .ok_or_else(|| BridgeError::NotFound(name.to_string()))?;
 
-        let engine = ProcedureEngine::new(&self.crdt, "pares-agens");
+        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
         engine
             .exec_dsl(dsl)
             .map_err(|e| BridgeError::Execution(e.to_string()))
@@ -212,7 +212,7 @@ impl PluresDbBridge {
     ///
     /// Returns [`BridgeError::Execution`] if the pipeline fails.
     pub async fn run_steps(&self, steps: Vec<Step>) -> Result<ProcedureResult, BridgeError> {
-        let engine = ProcedureEngine::new(&self.crdt, "pares-agens");
+        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
         engine
             .exec(&steps)
             .map_err(|e| BridgeError::Execution(e.to_string()))
@@ -225,14 +225,14 @@ impl PluresDbBridge {
     /// are stored (the caller should merge with seed constraints).
     pub fn load_constraints(
         &self,
-    ) -> Result<Vec<pares_agens_praxis::db::schema::Constraint>, BridgeError> {
+    ) -> Result<Vec<pares_radix_praxis::db::schema::Constraint>, BridgeError> {
         use pluresdb_procedures::ir::{Predicate, Step};
 
         let steps = vec![Step::Filter {
             predicate: Predicate::eq("type", "praxis:constraint"),
         }];
 
-        let engine = ProcedureEngine::new(&self.crdt, "pares-agens");
+        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
         let result = engine
             .exec(&steps)
             .map_err(|e| BridgeError::Execution(e.to_string()))?;
@@ -240,7 +240,7 @@ impl PluresDbBridge {
         let mut constraints = Vec::new();
         for node in &result.nodes {
             // Each node is a serde_json::Value; try to deserialize the constraint data
-            match serde_json::from_value::<pares_agens_praxis::db::schema::Constraint>(node.clone())
+            match serde_json::from_value::<pares_radix_praxis::db::schema::Constraint>(node.clone())
             {
                 Ok(c) => constraints.push(c),
                 Err(e) => {

@@ -16,7 +16,7 @@ use crate::{MarketplaceError, SkillCategory, SkillMetadata};
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
-/// Client for the Pares Agens skill marketplace.
+/// Client for the Pares Radix skill marketplace.
 ///
 /// Provides discovery APIs to browse and search the remote catalogue of
 /// published skills and extensions.

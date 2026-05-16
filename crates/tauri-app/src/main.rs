@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    pares_agens_tauri::run();
+    pares_radix_tauri::run();
 }

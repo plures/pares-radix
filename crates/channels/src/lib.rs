@@ -1,5 +1,5 @@
 #![warn(missing_docs)]
-//! Channel adapters for Pares Agens.
+//! Channel adapters for Pares Radix.
 //!
 //! Provides the [`ChannelAdapter`] trait and concrete adapter implementations
 //! for stdin, Tauri IPC, and Telegram. A [`ChannelAdapter`] bridges an external

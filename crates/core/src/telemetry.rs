@@ -97,15 +97,10 @@ impl TelemetryLogger {
     pub fn log(&self, mut record: TelemetryRecord) {
         // Set node and causal link
         record.node = self.node.clone();
-        record.previous_interaction_id = self
-            .last_interaction_id
-            .lock()
-            .unwrap()
-            .clone();
+        record.previous_interaction_id = self.last_interaction_id.lock().unwrap().clone();
 
         // Update causal chain
-        *self.last_interaction_id.lock().unwrap() =
-            Some(record.interaction_id.clone());
+        *self.last_interaction_id.lock().unwrap() = Some(record.interaction_id.clone());
 
         // Write to daily JSONL file
         let date = Utc::now().format("%Y-%m-%d").to_string();
@@ -251,11 +246,18 @@ impl TelemetryAggregate {
     pub fn snapshot(&self) -> TelemetrySnapshot {
         TelemetrySnapshot {
             total_model_calls: self.total_model_calls,
-            avg_latency_ms: self.total_latency_ms.checked_div(self.total_model_calls).unwrap_or(0),
+            avg_latency_ms: self
+                .total_latency_ms
+                .checked_div(self.total_model_calls)
+                .unwrap_or(0),
             top_tools: {
                 let mut tools: Vec<_> = self.tool_usage.iter().collect();
                 tools.sort_by(|a, b| b.1.cmp(a.1));
-                tools.into_iter().take(10).map(|(k, v)| (k.clone(), *v)).collect()
+                tools
+                    .into_iter()
+                    .take(10)
+                    .map(|(k, v)| (k.clone(), *v))
+                    .collect()
             },
             last_uploaded_at: self.last_uploaded_at.clone(),
         }

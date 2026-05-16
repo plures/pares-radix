@@ -279,7 +279,7 @@ impl LedgerStore for InMemoryLedgerStore {
 // ---------------------------------------------------------------------------
 
 /// The PluresDB actor ID used for all ledger write operations.
-const LEDGER_ACTOR: &str = "pares-agens-ledger";
+const LEDGER_ACTOR: &str = "pares-radix-ledger";
 
 /// A [`LedgerStore`] backed by a PluresDB [`CrdtStore`].
 ///

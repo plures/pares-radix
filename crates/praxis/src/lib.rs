@@ -1,4 +1,4 @@
-//! `pares-agens-praxis` — Declarative logic management for Pares Agens.
+//! `pares-radix-praxis` — Declarative logic management for Pares Radix.
 //!
 //! This crate provides a typed rules engine modelled on the `@plures/praxis`
 //! framework.  Every piece of routing, lifecycle, coordination, and safety
@@ -31,7 +31,7 @@
 //! # Quick start
 //!
 //! ```rust
-//! use pares_agens_praxis::{
+//! use pares_radix_praxis::{
 //!     RuleContext, RuleResult,
 //!     module::PraxisModule,
 //!     modules::safety::SafetyModule,

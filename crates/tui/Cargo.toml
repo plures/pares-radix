@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-tui"
+name = "pares-radix-tui"
 description = "Terminal UI frontend for Pares Agens"
 version.workspace = true
 edition.workspace = true

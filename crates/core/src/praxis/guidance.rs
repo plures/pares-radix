@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use uuid::Uuid;
 
-pub use pares_agens_praxis::db::guidance::{
+pub use pares_radix_praxis::db::guidance::{
     AnalysisEvent, GuidanceCategory, GuidanceEntry, GuidanceStore, SourceSpan,
 };
 

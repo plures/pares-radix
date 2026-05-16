@@ -269,11 +269,7 @@ impl BrowserClient {
     pub async fn screenshot(&self, format: Option<&str>) -> Result<String, String> {
         let fmt = format.unwrap_or("png");
         let result = self
-            .send_command(
-                "Page.captureScreenshot",
-                json!({"format": fmt}),
-                None,
-            )
+            .send_command("Page.captureScreenshot", json!({"format": fmt}), None)
             .await?;
         result
             .get("data")
@@ -359,11 +355,7 @@ impl BrowserClient {
     }
 
     /// Type text, optionally into a focused element or after clicking a selector.
-    pub async fn type_text(
-        &self,
-        text: &str,
-        selector: Option<&str>,
-    ) -> Result<String, String> {
+    pub async fn type_text(&self, text: &str, selector: Option<&str>) -> Result<String, String> {
         // If selector provided, click it first to focus
         if let Some(sel) = selector {
             self.click(Some(sel), None, None).await?;
@@ -372,12 +364,8 @@ impl BrowserClient {
         }
 
         // Use Input.insertText for the full string (handles unicode properly)
-        self.send_command(
-            "Input.insertText",
-            json!({"text": text}),
-            None,
-        )
-        .await?;
+        self.send_command("Input.insertText", json!({"text": text}), None)
+            .await?;
 
         Ok(format!("typed {} chars", text.len()))
     }

@@ -255,7 +255,10 @@ fn parse_toml_manifest_unified(toml_str: &str) -> Result<PluginManifest, Manifes
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let author = plugin.get("author").and_then(|v| v.as_str()).map(String::from);
+    let author = plugin
+        .get("author")
+        .and_then(|v| v.as_str())
+        .map(String::from);
 
     // Schema
     let entities = parse_toml_entities(&value);
@@ -286,7 +289,7 @@ fn parse_toml_manifest_unified(toml_str: &str) -> Result<PluginManifest, Manifes
         ui: None,
         permissions,
         hooks: Vec::new(),
-            dependencies: Vec::new(),
+        dependencies: Vec::new(),
     })
 }
 
@@ -408,7 +411,11 @@ fn parse_toml_entities(value: &toml::Value) -> Vec<EntityDefinition> {
                 .and_then(|f| f.as_array())
                 .map(|arr| {
                     arr.iter()
-                        .filter_map(|f| serde_json::to_string(f).ok().and_then(|s| serde_json::from_str(&s).ok()))
+                        .filter_map(|f| {
+                            serde_json::to_string(f)
+                                .ok()
+                                .and_then(|s| serde_json::from_str(&s).ok())
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -453,9 +460,21 @@ fn parse_toml_rules(value: &toml::Value) -> Vec<PluginRule> {
         .filter_map(|r| {
             Some(PluginRule {
                 name: r.get("name")?.as_str()?.to_string(),
-                description: r.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                condition: r.get("condition").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                action: r.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                description: r
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                condition: r
+                    .get("condition")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                action: r
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()
@@ -473,9 +492,21 @@ fn parse_toml_constraints(value: &toml::Value) -> Vec<PluginConstraint> {
         .filter_map(|c| {
             Some(PluginConstraint {
                 name: c.get("name")?.as_str()?.to_string(),
-                description: c.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                check: c.get("check").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                error_message: c.get("error_message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                description: c
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                check: c
+                    .get("check")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                error_message: c
+                    .get("error_message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
             })
         })
         .collect()

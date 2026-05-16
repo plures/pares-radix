@@ -79,11 +79,9 @@ impl EnrichmentPipeline {
     }
 
     /// Process the next batch of enrichment requests.
-    pub fn process_batch(
-        &mut self,
-        backend: &dyn EnrichmentBackend,
-    ) -> Vec<EnrichmentResult> {
-        let batch: Vec<_> = self.queue
+    pub fn process_batch(&mut self, backend: &dyn EnrichmentBackend) -> Vec<EnrichmentResult> {
+        let batch: Vec<_> = self
+            .queue
             .drain(..self.batch_size.min(self.queue.len()))
             .collect();
 

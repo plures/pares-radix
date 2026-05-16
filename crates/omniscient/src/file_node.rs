@@ -192,22 +192,38 @@ fn classify_mime(mime: &str, path: &str) -> ContentClass {
         .unwrap_or("");
 
     match mime.split('/').next().unwrap_or("") {
-        "text" => {
-            match ext {
-                "rs" => ContentClass::Code { language: "rust".into() },
-                "ts" | "tsx" => ContentClass::Code { language: "typescript".into() },
-                "js" | "jsx" => ContentClass::Code { language: "javascript".into() },
-                "py" => ContentClass::Code { language: "python".into() },
-                "nix" => ContentClass::Code { language: "nix".into() },
-                "go" => ContentClass::Code { language: "go".into() },
-                "c" | "h" => ContentClass::Code { language: "c".into() },
-                "cpp" | "cc" | "cxx" | "hpp" => ContentClass::Code { language: "cpp".into() },
-                "sh" | "bash" | "zsh" => ContentClass::Code { language: "shell".into() },
-                "toml" | "yaml" | "yml" | "json" | "xml" => ContentClass::Text,
-                "md" | "txt" | "log" | "csv" | "ini" | "cfg" => ContentClass::Text,
-                _ => ContentClass::Text,
-            }
-        }
+        "text" => match ext {
+            "rs" => ContentClass::Code {
+                language: "rust".into(),
+            },
+            "ts" | "tsx" => ContentClass::Code {
+                language: "typescript".into(),
+            },
+            "js" | "jsx" => ContentClass::Code {
+                language: "javascript".into(),
+            },
+            "py" => ContentClass::Code {
+                language: "python".into(),
+            },
+            "nix" => ContentClass::Code {
+                language: "nix".into(),
+            },
+            "go" => ContentClass::Code {
+                language: "go".into(),
+            },
+            "c" | "h" => ContentClass::Code {
+                language: "c".into(),
+            },
+            "cpp" | "cc" | "cxx" | "hpp" => ContentClass::Code {
+                language: "cpp".into(),
+            },
+            "sh" | "bash" | "zsh" => ContentClass::Code {
+                language: "shell".into(),
+            },
+            "toml" | "yaml" | "yml" | "json" | "xml" => ContentClass::Text,
+            "md" | "txt" | "log" | "csv" | "ini" | "cfg" => ContentClass::Text,
+            _ => ContentClass::Text,
+        },
         "image" => ContentClass::Image,
         "audio" => ContentClass::Audio,
         "video" => ContentClass::Video,
@@ -242,7 +258,9 @@ mod tests {
     fn test_classify_rust() {
         assert_eq!(
             classify_mime("text/plain", "src/main.rs"),
-            ContentClass::Code { language: "rust".into() }
+            ContentClass::Code {
+                language: "rust".into()
+            }
         );
     }
 
@@ -250,7 +268,9 @@ mod tests {
     fn test_classify_typescript() {
         assert_eq!(
             classify_mime("text/plain", "app.tsx"),
-            ContentClass::Code { language: "typescript".into() }
+            ContentClass::Code {
+                language: "typescript".into()
+            }
         );
     }
 
@@ -264,10 +284,7 @@ mod tests {
 
     #[test]
     fn test_classify_image() {
-        assert_eq!(
-            classify_mime("image/png", "photo.png"),
-            ContentClass::Image
-        );
+        assert_eq!(classify_mime("image/png", "photo.png"), ContentClass::Image);
     }
 
     #[test]
@@ -290,7 +307,9 @@ mod tests {
     fn test_classify_nix() {
         assert_eq!(
             classify_mime("text/plain", "flake.nix"),
-            ContentClass::Code { language: "nix".into() }
+            ContentClass::Code {
+                language: "nix".into()
+            }
         );
     }
 
@@ -298,7 +317,9 @@ mod tests {
     fn test_classify_shell() {
         assert_eq!(
             classify_mime("text/plain", "deploy.sh"),
-            ContentClass::Code { language: "shell".into() }
+            ContentClass::Code {
+                language: "shell".into()
+            }
         );
     }
 

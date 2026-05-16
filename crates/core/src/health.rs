@@ -71,10 +71,7 @@ impl SystemHealth {
 
     /// Get degraded or failed subsystems.
     pub fn issues(&self) -> Vec<&HealthReport> {
-        self.reports
-            .iter()
-            .filter(|r| !r.status.is_ok())
-            .collect()
+        self.reports.iter().filter(|r| !r.status.is_ok()).collect()
     }
 
     /// Format as a human-readable status report.
@@ -82,7 +79,12 @@ impl SystemHealth {
         let mut lines = Vec::with_capacity(self.reports.len() + 1);
         lines.push("System Health Report:".to_string());
         for r in &self.reports {
-            lines.push(format!("  {} {}: {}", r.status.emoji(), r.subsystem, r.message));
+            lines.push(format!(
+                "  {} {}: {}",
+                r.status.emoji(),
+                r.subsystem,
+                r.message
+            ));
         }
         lines.join("\n")
     }
@@ -93,7 +95,12 @@ impl SystemHealth {
         lines.push("<b>System Health</b>".to_string());
         lines.push(String::new());
         for r in &self.reports {
-            lines.push(format!("{} <b>{}</b>: {}", r.status.emoji(), r.subsystem, r.message));
+            lines.push(format!(
+                "{} <b>{}</b>: {}",
+                r.status.emoji(),
+                r.subsystem,
+                r.message
+            ));
         }
         if self.all_ok() {
             lines.push(String::new());
@@ -112,7 +119,10 @@ impl SystemHealth {
                 ChronosAction::Update,
                 &data,
                 vec![],
-                Some(format!("Health check: {} = {:?}", report.subsystem, report.status)),
+                Some(format!(
+                    "Health check: {} = {:?}",
+                    report.subsystem, report.status
+                )),
             );
             chronos.record(&entry);
         }

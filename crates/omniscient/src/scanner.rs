@@ -1,9 +1,9 @@
 //! Filesystem scanner — watches for changes and queues extraction.
 
-use crate::file_node::{FileNode, FileNodeBuilder, NodeIdentity};
 use crate::extractor;
-use std::path::{Path, PathBuf};
+use crate::file_node::{FileNode, FileNodeBuilder, NodeIdentity};
 use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -79,14 +79,17 @@ impl Scanner {
 
             for watch_path in &config.watch_paths {
                 if !watch_path.exists() {
-                    let _ = tx.send(ScanEvent::Error {
-                        path: watch_path.clone(),
-                        error: "path does not exist".into(),
-                    }).await;
+                    let _ = tx
+                        .send(ScanEvent::Error {
+                            path: watch_path.clone(),
+                            error: "path does not exist".into(),
+                        })
+                        .await;
                     continue;
                 }
 
-                let files = collect_files(watch_path, &config.ignore_patterns, config.max_file_size);
+                let files =
+                    collect_files(watch_path, &config.ignore_patterns, config.max_file_size);
                 let file_count = files.len();
                 info!(path = %watch_path.display(), count = file_count, "scanning directory");
 
@@ -96,19 +99,23 @@ impl Scanner {
                             let _ = tx.send(ScanEvent::Indexed(Box::new(node))).await;
                         }
                         Err(e) => {
-                            let _ = tx.send(ScanEvent::Error {
-                                path: file_path,
-                                error: e.to_string(),
-                            }).await;
+                            let _ = tx
+                                .send(ScanEvent::Error {
+                                    path: file_path,
+                                    error: e.to_string(),
+                                })
+                                .await;
                         }
                     }
 
                     total += 1;
                     if total % 100 == 0 {
-                        let _ = tx.send(ScanEvent::Progress {
-                            scanned: total,
-                            total: file_count,
-                        }).await;
+                        let _ = tx
+                            .send(ScanEvent::Progress {
+                                scanned: total,
+                                total: file_count,
+                            })
+                            .await;
                     }
                 }
             }
@@ -127,7 +134,7 @@ impl Scanner {
         let config = self.config.clone();
 
         tokio::spawn(async move {
-            use notify::{RecommendedWatcher, RecursiveMode, Watcher, Event, EventKind};
+            use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
             let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel::<Event>(1000);
 
@@ -258,7 +265,8 @@ mod tests {
         std::fs::write(root.join("src/main.rs"), "fn main() {}").unwrap();
 
         let files = collect_files(root, &[".git".into()], 100 * 1024 * 1024);
-        let names: Vec<String> = files.iter()
+        let names: Vec<String> = files
+            .iter()
             .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
             .collect();
 
@@ -276,7 +284,8 @@ mod tests {
         std::fs::write(root.join("big.txt"), "x".repeat(1000)).unwrap();
 
         let files = collect_files(root, &[], 100); // 100 byte limit
-        let names: Vec<String> = files.iter()
+        let names: Vec<String> = files
+            .iter()
             .map(|f| f.file_name().unwrap().to_str().unwrap().to_string())
             .collect();
 
@@ -286,9 +295,18 @@ mod tests {
 
     #[test]
     fn test_should_ignore() {
-        assert!(should_ignore(Path::new("/home/user/.git/config"), &[".git".into()]));
-        assert!(should_ignore(Path::new("/tmp/project/node_modules/pkg/index.js"), &["node_modules".into()]));
-        assert!(!should_ignore(Path::new("/tmp/project/src/main.rs"), &[".git".into()]));
+        assert!(should_ignore(
+            Path::new("/home/user/.git/config"),
+            &[".git".into()]
+        ));
+        assert!(should_ignore(
+            Path::new("/tmp/project/node_modules/pkg/index.js"),
+            &["node_modules".into()]
+        ));
+        assert!(!should_ignore(
+            Path::new("/tmp/project/src/main.rs"),
+            &[".git".into()]
+        ));
     }
 
     #[test]

@@ -59,7 +59,10 @@ impl Orchestrator {
     }
 
     /// Parse a .px file and build the orchestrator.
-    pub fn from_px_str(input: &str, nodes: Vec<ClusterNode>) -> Result<Self, crate::px_parser::ParseError> {
+    pub fn from_px_str(
+        input: &str,
+        nodes: Vec<ClusterNode>,
+    ) -> Result<Self, crate::px_parser::ParseError> {
         let config = crate::px_parser::parse(input)?;
         Ok(Self::new(config, nodes))
     }
@@ -286,7 +289,11 @@ gates = ["deploy_safe"]
 
     #[test]
     fn constraints_pass_with_healthy_cluster() {
-        let nodes = vec![make_node("a", 20.0), make_node("b", 30.0), make_node("c", 40.0)];
+        let nodes = vec![
+            make_node("a", 20.0),
+            make_node("b", 30.0),
+            make_node("c", 40.0),
+        ];
         let orch = Orchestrator::from_px_str(PX, nodes).unwrap();
         let results = orch.evaluate_constraints();
         assert!(results.iter().all(|r| r.passed));
@@ -297,16 +304,26 @@ gates = ["deploy_safe"]
         let nodes = vec![make_node("a", 20.0)];
         let orch = Orchestrator::from_px_str(PX, nodes).unwrap();
         let results = orch.evaluate_constraints();
-        let node_req = results.iter().find(|r| r.constraint_name == "minimum_nodes").unwrap();
+        let node_req = results
+            .iter()
+            .find(|r| r.constraint_name == "minimum_nodes")
+            .unwrap();
         assert!(!node_req.passed);
     }
 
     #[test]
     fn constraints_fail_with_high_cpu() {
-        let nodes = vec![make_node("a", 90.0), make_node("b", 95.0), make_node("c", 85.0)];
+        let nodes = vec![
+            make_node("a", 90.0),
+            make_node("b", 95.0),
+            make_node("c", 85.0),
+        ];
         let orch = Orchestrator::from_px_str(PX, nodes).unwrap();
         let results = orch.evaluate_constraints();
-        let deploy = results.iter().find(|r| r.constraint_name == "deploy_safe").unwrap();
+        let deploy = results
+            .iter()
+            .find(|r| r.constraint_name == "deploy_safe")
+            .unwrap();
         assert!(!deploy.passed);
     }
 
@@ -321,7 +338,11 @@ gates = ["deploy_safe"]
 
     #[test]
     fn reconcile_succeeds_when_healthy() {
-        let nodes = vec![make_node("a", 20.0), make_node("b", 30.0), make_node("c", 40.0)];
+        let nodes = vec![
+            make_node("a", 20.0),
+            make_node("b", 30.0),
+            make_node("c", 40.0),
+        ];
         let orch = Orchestrator::from_px_str(PX, nodes).unwrap();
         let result = orch.reconcile();
         assert_eq!(result.assignments.len(), 1);

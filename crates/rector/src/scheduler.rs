@@ -43,7 +43,10 @@ impl WorkloadScheduler {
         }
     }
 
-    fn schedule_prefer_idle(&self, workload: &PxWorkload) -> Result<Vec<NodeAssignment>, ScheduleError> {
+    fn schedule_prefer_idle(
+        &self,
+        workload: &PxWorkload,
+    ) -> Result<Vec<NodeAssignment>, ScheduleError> {
         let mut candidates: Vec<&ClusterNode> = self.schedulable_nodes();
         if candidates.is_empty() {
             return Err(ScheduleError::NoNodes);
@@ -78,7 +81,10 @@ impl WorkloadScheduler {
         }
     }
 
-    fn schedule_everywhere(&self, workload: &PxWorkload) -> Result<Vec<NodeAssignment>, ScheduleError> {
+    fn schedule_everywhere(
+        &self,
+        workload: &PxWorkload,
+    ) -> Result<Vec<NodeAssignment>, ScheduleError> {
         let nodes = self.schedulable_nodes();
         if nodes.is_empty() {
             return Err(ScheduleError::NoNodes);
@@ -144,7 +150,11 @@ mod tests {
         }
     }
 
-    fn make_workload(name: &str, placement: PlacementStrategy, replicas: ReplicaSpec) -> PxWorkload {
+    fn make_workload(
+        name: &str,
+        placement: PlacementStrategy,
+        replicas: ReplicaSpec,
+    ) -> PxWorkload {
         PxWorkload {
             name: name.into(),
             image: "nixos#test".into(),
@@ -191,7 +201,11 @@ mod tests {
             make_node("c", 30.0, false),
         ];
         let sched = WorkloadScheduler::new(nodes);
-        let w = make_workload("test", PlacementStrategy::Everywhere, ReplicaSpec::Named("all".into()));
+        let w = make_workload(
+            "test",
+            PlacementStrategy::Everywhere,
+            ReplicaSpec::Named("all".into()),
+        );
         let assignments = sched.schedule(&w).unwrap();
         assert_eq!(assignments.len(), 3);
     }

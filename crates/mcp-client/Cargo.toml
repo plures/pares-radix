@@ -1,5 +1,5 @@
 [package]
-name = "mcp-client"
+name = "pares-radix-mcp-client"
 description = "MCP (Model Context Protocol) client for tool orchestration"
 version.workspace = true
 edition.workspace = true

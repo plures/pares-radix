@@ -63,7 +63,10 @@ impl PluginRuntime {
     }
 
     /// Install multiple plugins in dependency order (topological sort).
-    pub async fn install_batch(&self, manifests: Vec<PluginManifest>) -> Result<Vec<String>, PluginError> {
+    pub async fn install_batch(
+        &self,
+        manifests: Vec<PluginManifest>,
+    ) -> Result<Vec<String>, PluginError> {
         let ordered = topological_sort(&manifests)?;
         let mut installed = Vec::new();
         for manifest in ordered {
@@ -119,8 +122,7 @@ impl PluginRuntime {
         let mut entity_types: Vec<String> = Vec::new();
         for plugin in plugins.values() {
             for entity in &plugin.manifest.schema.entities {
-                entity_types
-                    .push(format!("{}/{}", plugin.manifest.name, entity.name));
+                entity_types.push(format!("{}/{}", plugin.manifest.name, entity.name));
             }
         }
         if entity_types.is_empty() {
@@ -149,8 +151,7 @@ impl PluginRuntime {
                     .entities
                     .iter()
                     .map(|e| {
-                        let fields: Vec<&str> =
-                            e.fields.iter().map(|f| f.name.as_str()).collect();
+                        let fields: Vec<&str> = e.fields.iter().map(|f| f.name.as_str()).collect();
                         format!("{} ({})", e.display_name, fields.join(", "))
                     })
                     .collect();
@@ -163,9 +164,7 @@ impl PluginRuntime {
                     .schema
                     .relationships
                     .iter()
-                    .map(|r| {
-                        format!("{} {} {}", r.from_entity, r.name, r.to_entity)
-                    })
+                    .map(|r| format!("{} {} {}", r.from_entity, r.name, r.to_entity))
                     .collect();
                 out.push_str(&rels.join(", "));
                 out.push('\n');
@@ -184,7 +183,8 @@ impl PluginRuntime {
 fn topological_sort(manifests: &[PluginManifest]) -> Result<Vec<PluginManifest>, PluginError> {
     use std::collections::{HashMap, VecDeque};
 
-    let name_map: HashMap<&str, &PluginManifest> = manifests.iter().map(|m| (m.name.as_str(), m)).collect();
+    let name_map: HashMap<&str, &PluginManifest> =
+        manifests.iter().map(|m| (m.name.as_str(), m)).collect();
 
     // Kahn's algorithm
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
@@ -195,7 +195,10 @@ fn topological_sort(manifests: &[PluginManifest]) -> Result<Vec<PluginManifest>,
         for dep in &m.dependencies {
             if name_map.contains_key(dep.as_str()) {
                 *in_degree.entry(m.name.as_str()).or_insert(0) += 1;
-                dependents.entry(dep.as_str()).or_default().push(m.name.as_str());
+                dependents
+                    .entry(dep.as_str())
+                    .or_default()
+                    .push(m.name.as_str());
             }
             // External deps (not in batch) are assumed satisfied
         }
@@ -334,7 +337,7 @@ fn parse_toml_manifest(toml_str: &str) -> Result<PluginManifest, PluginError> {
             network: root.permissions.network,
         },
         hooks: Vec::new(),
-            dependencies: Vec::new(),
+        dependencies: Vec::new(),
     })
 }
 
@@ -496,7 +499,9 @@ network = false
     async fn install_with_satisfied_dep_works() {
         let rt = PluginRuntime::new();
         rt.install(make_manifest("parent", &[])).await.unwrap();
-        rt.install(make_manifest("child", &["parent"])).await.unwrap();
+        rt.install(make_manifest("child", &["parent"]))
+            .await
+            .unwrap();
         assert_eq!(rt.list().await.len(), 2);
     }
 
@@ -515,10 +520,7 @@ network = false
     #[tokio::test]
     async fn batch_install_circular_dep_fails() {
         let rt = PluginRuntime::new();
-        let plugins = vec![
-            make_manifest("x", &["y"]),
-            make_manifest("y", &["x"]),
-        ];
+        let plugins = vec![make_manifest("x", &["y"]), make_manifest("y", &["x"])];
         let err = rt.install_batch(plugins).await.unwrap_err();
         assert!(err.to_string().contains("circular"));
     }

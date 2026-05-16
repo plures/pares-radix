@@ -37,7 +37,10 @@ impl GroupContextBuffer {
 
     /// Record an observed message in the given chat.
     pub fn push(&mut self, chat_id: i64, msg: GroupMessage) {
-        let buf = self.buffers.entry(chat_id).or_insert_with(|| VecDeque::with_capacity(self.capacity));
+        let buf = self
+            .buffers
+            .entry(chat_id)
+            .or_insert_with(|| VecDeque::with_capacity(self.capacity));
         if buf.len() >= self.capacity {
             buf.pop_front();
         }
@@ -74,8 +77,22 @@ mod tests {
     #[test]
     fn push_and_format_context() {
         let mut buf = GroupContextBuffer::new(3);
-        buf.push(1, GroupMessage { sender: "Alice".into(), text: "hello".into(), timestamp: 100 });
-        buf.push(1, GroupMessage { sender: "Bob".into(), text: "hi".into(), timestamp: 101 });
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "Alice".into(),
+                text: "hello".into(),
+                timestamp: 100,
+            },
+        );
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "Bob".into(),
+                text: "hi".into(),
+                timestamp: 101,
+            },
+        );
 
         let ctx = buf.format_context(1).unwrap();
         assert!(ctx.contains("[Alice]: hello"));
@@ -85,9 +102,30 @@ mod tests {
     #[test]
     fn capacity_eviction() {
         let mut buf = GroupContextBuffer::new(2);
-        buf.push(1, GroupMessage { sender: "A".into(), text: "1".into(), timestamp: 1 });
-        buf.push(1, GroupMessage { sender: "B".into(), text: "2".into(), timestamp: 2 });
-        buf.push(1, GroupMessage { sender: "C".into(), text: "3".into(), timestamp: 3 });
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "A".into(),
+                text: "1".into(),
+                timestamp: 1,
+            },
+        );
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "B".into(),
+                text: "2".into(),
+                timestamp: 2,
+            },
+        );
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "C".into(),
+                text: "3".into(),
+                timestamp: 3,
+            },
+        );
 
         let ctx = buf.format_context(1).unwrap();
         assert!(!ctx.contains("[A]: 1"), "oldest should be evicted");

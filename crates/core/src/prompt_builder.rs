@@ -31,7 +31,10 @@ pub struct AgentContext<'a> {
 /// 4. Channel-specific overrides
 /// 5. Recalled memory context
 /// 6. Conversation summary
-pub fn build_system_prompt(personality: &PersonalityContract, context: &AgentContext<'_>) -> String {
+pub fn build_system_prompt(
+    personality: &PersonalityContract,
+    context: &AgentContext<'_>,
+) -> String {
     let mut prompt = String::with_capacity(2048);
 
     // Deep preamble
@@ -116,7 +119,7 @@ pub fn build_system_prompt_from_file(path: Option<&std::path::Path>) -> Result<S
     }
 
     if let Ok(home) = std::env::var("HOME") {
-        let home_prompt = std::path::PathBuf::from(&home).join(".pares-agens/SYSTEM-PROMPT.md");
+        let home_prompt = std::path::PathBuf::from(&home).join(".pares-radix/SYSTEM-PROMPT.md");
         if home_prompt.exists() {
             tracing::info!("Loading system prompt from {}", home_prompt.display());
             return std::fs::read_to_string(&home_prompt)
@@ -124,7 +127,7 @@ pub fn build_system_prompt_from_file(path: Option<&std::path::Path>) -> Result<S
         }
     }
 
-    Ok("You are Pares Agens, an AI agent built on the plures technology stack. Be direct, use tools proactively, and push commits without asking.".to_string())
+    Ok("You are Pares Radix, an AI agent built on the plures technology stack. Be direct, use tools proactively, and push commits without asking.".to_string())
 }
 
 #[cfg(test)]
@@ -143,7 +146,7 @@ mod tests {
             plugin_context: None,
         };
         let prompt = build_system_prompt(&contract, &ctx);
-        assert!(prompt.contains("Pares Agens"));
+        assert!(prompt.contains("Pares Radix"));
         assert!(prompt.contains("MUST: Never share private data"));
         assert!(prompt.contains("Channel Rules (telegram)"));
         assert!(prompt.contains("Recalled Context"));

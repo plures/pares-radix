@@ -82,13 +82,19 @@ pub struct ChronosTimeline {
 impl ChronosTimeline {
     /// Create a new timeline backed by the given store.
     pub fn new(store: Arc<CrdtStore>) -> Self {
-        Self { store, jsonl_dir: None }
+        Self {
+            store,
+            jsonl_dir: None,
+        }
     }
 
     /// Create a timeline with JSONL file output.
     pub fn with_jsonl(store: Arc<CrdtStore>, dir: std::path::PathBuf) -> Self {
         std::fs::create_dir_all(&dir).ok();
-        Self { store, jsonl_dir: Some(dir) }
+        Self {
+            store,
+            jsonl_dir: Some(dir),
+        }
     }
 
     /// Enable JSONL output from an environment variable.
@@ -97,9 +103,15 @@ impl ChronosTimeline {
             let path = std::path::PathBuf::from(dir);
             std::fs::create_dir_all(&path).ok();
             tracing::info!(dir = %path.display(), "chronos JSONL output enabled");
-            Self { store, jsonl_dir: Some(path) }
+            Self {
+                store,
+                jsonl_dir: Some(path),
+            }
         } else {
-            Self { store, jsonl_dir: None }
+            Self {
+                store,
+                jsonl_dir: None,
+            }
         }
     }
 
@@ -299,24 +311,10 @@ mod tests {
         let store = test_store();
         let timeline = ChronosTimeline::new(store);
 
-        let e1 = timeline.build_entry(
-            "k",
-            "a",
-            ChronosAction::Create,
-            &json!(1),
-            vec![],
-            None,
-        );
+        let e1 = timeline.build_entry("k", "a", ChronosAction::Create, &json!(1), vec![], None);
         timeline.record(&e1);
 
-        let e2 = timeline.build_entry(
-            "k",
-            "a",
-            ChronosAction::Update,
-            &json!(2),
-            vec![],
-            None,
-        );
+        let e2 = timeline.build_entry("k", "a", ChronosAction::Update, &json!(2), vec![], None);
         assert_eq!(e2.parent_id.as_deref(), Some(e1.id.as_str()));
         timeline.record(&e2);
 
@@ -332,7 +330,14 @@ mod tests {
         let store = test_store();
         let timeline = ChronosTimeline::new(store);
 
-        let e1 = timeline.build_entry("k1", "alice", ChronosAction::Create, &json!(1), vec![], None);
+        let e1 = timeline.build_entry(
+            "k1",
+            "alice",
+            ChronosAction::Create,
+            &json!(1),
+            vec![],
+            None,
+        );
         timeline.record(&e1);
         let e2 = timeline.build_entry("k2", "bob", ChronosAction::Create, &json!(2), vec![], None);
         timeline.record(&e2);

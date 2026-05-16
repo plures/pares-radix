@@ -44,7 +44,10 @@ impl ClassifierBackend for BitNetClassifierBackend {
         let tokens = ctx.tokenize(&prompt).map_err(|e| e.to_string())?;
 
         let mut output = String::new();
-        for token in ctx.generate(&tokens, &self.gen_params).map_err(|e| e.to_string())? {
+        for token in ctx
+            .generate(&tokens, &self.gen_params)
+            .map_err(|e| e.to_string())?
+        {
             let tok = token.map_err(|e| e.to_string())?;
             let piece = ctx.decode_token(tok).map_err(|e| e.to_string())?;
             output.push_str(&piece);

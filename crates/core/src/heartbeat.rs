@@ -229,7 +229,11 @@ impl HeartbeatRunner {
             if let Some(arr) = promises.as_array() {
                 for promise in arr {
                     if let Some(what) = promise.get("what").and_then(|w| w.as_str()) {
-                        if !promise.get("completed").and_then(|c| c.as_bool()).unwrap_or(false) {
+                        if !promise
+                            .get("completed")
+                            .and_then(|c| c.as_bool())
+                            .unwrap_or(false)
+                        {
                             work_items.push(format!("unfulfilled promise: {what}"));
                         }
                     }
@@ -249,12 +253,19 @@ impl HeartbeatRunner {
         let count = if date == today { count } else { 0 };
 
         if count >= self.config.max_proactive_per_day as u32 {
-            debug!(count, max = self.config.max_proactive_per_day, "heartbeat gated — daily limit");
+            debug!(
+                count,
+                max = self.config.max_proactive_per_day,
+                "heartbeat gated — daily limit"
+            );
             return;
         }
 
         // ── Escalate to conscious (tokens spent here) ────────────────
-        info!(items = work_items.len(), "heartbeat: work found, escalating");
+        info!(
+            items = work_items.len(),
+            "heartbeat: work found, escalating"
+        );
 
         let combined = work_items.join("\n");
         if let Some(spine) = &self.event_spine {

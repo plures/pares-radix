@@ -1,7 +1,7 @@
 //! Local multi-agent delegation.
 //!
 //! The delegation system lets the cerebellum spawn and coordinate multiple
-//! specialised sub-agents within a single pares-agens instance.  Each
+//! specialised sub-agents within a single pares-radix instance.  Each
 //! sub-agent has:
 //!
 //! * Its own system prompt and model preference.
@@ -39,7 +39,9 @@ pub mod registry;
 pub use aggregator::{AggregatedResult, ResultAggregator};
 pub use broker::{DelegationBroker, SubTask, SubTaskResult};
 pub use context::AgentContext;
-pub use manager::{CompletionEvent, SessionId, SessionInfo, SessionStatus, SpawnOptions, SubAgentManager};
+pub use manager::{
+    CompletionEvent, SessionId, SessionInfo, SessionStatus, SpawnOptions, SubAgentManager,
+};
 pub use registry::{AgentCapabilities, AgentDefinition, AgentRegistry};
 
 /// Errors that can arise during delegation.

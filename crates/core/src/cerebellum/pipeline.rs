@@ -1,6 +1,6 @@
 //! Built-in procedure pipelines for the cerebellum.
 //!
-//! These are the standard procedures that ship with pares-agens:
+//! These are the standard procedures that ship with pares-radix:
 //!
 //! - **autorecall** — retrieve + compress memories before agent execution
 //! - **primitive-extract** — extract typed primitives (decisions, facts, risks)

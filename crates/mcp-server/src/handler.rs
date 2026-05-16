@@ -21,7 +21,7 @@ pub trait ToolHandler: Send + Sync {
     /// List available tool definitions.
     ///
     /// Returns tool names, descriptions, and JSON schemas for parameters.
-    async fn list_tools(&self) -> Vec<mcp_client::protocol::Tool>;
+    async fn list_tools(&self) -> Vec<pares_radix_mcp_client::protocol::Tool>;
 
     /// Execute a named tool with the given arguments.
     async fn call_tool(&self, name: &str, arguments: Value) -> ToolResult;

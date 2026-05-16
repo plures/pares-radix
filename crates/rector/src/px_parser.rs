@@ -109,7 +109,6 @@ pub enum PlacementStrategy {
     Pin(String),
 }
 
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceSpec {
     pub cpu: Option<f32>,
@@ -341,7 +340,7 @@ severity = "error"
 message = "Cannot deploy: cluster not healthy enough"
 
 [[workload]]
-name = "pares-agens"
+name = "pares-radix"
 image = "nixos#pares-radix"
 replicas = 1
 placement = "prefer_idle"
@@ -394,7 +393,7 @@ log_message = "Auto-scaled {workload.name} to {workload.replicas}"
         assert_eq!(px.rules().len(), 2);
 
         let w0 = &px.workload[0];
-        assert_eq!(w0.name, "pares-agens");
+        assert_eq!(w0.name, "pares-radix");
         assert_eq!(w0.placement, PlacementStrategy::PreferIdle);
         assert_eq!(w0.gates, vec!["deploy_safe"]);
 
@@ -454,30 +453,38 @@ topic_key = ""
     }
 }
 
-    #[test]
-    fn parse_personality_px() {
-        let input = include_str!("../../../config/radix-personality.px");
-        let px = parse(input).expect("personality.px should parse");
-        assert_eq!(px.safety.len(), 5);
-        assert_eq!(px.personality.len(), 14);
+#[test]
+fn parse_personality_px() {
+    let input = include_str!("../../../config/radix-personality.px");
+    let px = parse(input).expect("personality.px should parse");
+    assert_eq!(px.safety.len(), 5);
+    assert_eq!(px.personality.len(), 14);
 
-        // Safety axioms are never overridable
-        for s in &px.safety {
-            assert!(!s.overridable, "safety axiom {} must not be overridable", s.name);
-        }
-
-        // All personality rules have confidence > 0
-        for p in &px.personality {
-            assert!(p.confidence > 0.0, "rule {} has zero confidence", p.name);
-            assert!(p.confidence <= 1.0, "rule {} has confidence > 1.0", p.name);
-        }
-
-        // Check specific rules
-        let push = px.personality.iter().find(|p| p.name == "push-without-asking").unwrap();
-        assert_eq!(push.confidence, 0.98);
-        assert_eq!(push.source, PersonalitySource::Explicit);
-        assert_eq!(push.evidence.len(), 1);
-
-        let harm = px.safety.iter().find(|s| s.name == "do-no-harm").unwrap();
-        assert_eq!(harm.on_violation, "reject");
+    // Safety axioms are never overridable
+    for s in &px.safety {
+        assert!(
+            !s.overridable,
+            "safety axiom {} must not be overridable",
+            s.name
+        );
     }
+
+    // All personality rules have confidence > 0
+    for p in &px.personality {
+        assert!(p.confidence > 0.0, "rule {} has zero confidence", p.name);
+        assert!(p.confidence <= 1.0, "rule {} has confidence > 1.0", p.name);
+    }
+
+    // Check specific rules
+    let push = px
+        .personality
+        .iter()
+        .find(|p| p.name == "push-without-asking")
+        .unwrap();
+    assert_eq!(push.confidence, 0.98);
+    assert_eq!(push.source, PersonalitySource::Explicit);
+    assert_eq!(push.evidence.len(), 1);
+
+    let harm = px.safety.iter().find(|s| s.name == "do-no-harm").unwrap();
+    assert_eq!(harm.on_violation, "reject");
+}

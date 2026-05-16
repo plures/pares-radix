@@ -3750,46 +3750,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mcp-client"
-version = "1.42.0"
-dependencies = [
- "async-trait",
- "chrono",
- "pares-agens-core",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "mcp-server"
-version = "1.42.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "chrono",
- "futures-util",
- "html2text",
- "mcp-client",
- "pares-agens-agenda",
- "pares-agens-core",
- "pares-agens-praxis",
- "pluresdb 2.9.10",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.26.2",
- "tracing",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4563,7 +4523,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-agenda"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4578,7 +4538,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-audit"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4594,7 +4554,7 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "pares-agens-bitnet-sys",
@@ -4606,19 +4566,19 @@ dependencies = [
 
 [[package]]
 name = "pares-agens-bitnet-sys"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "pares-agens-channels"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "pares-agens-agenda",
  "pares-agens-core",
- "pares-agens-marketplace",
+ "pares-radix-marketplace",
  "pares-rector",
  "pluresdb 2.9.10",
  "reqwest 0.12.28",
@@ -4632,40 +4592,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pares-agens-cli"
-version = "1.42.0"
-dependencies = [
- "async-trait",
- "chrono",
- "clap",
- "crossterm",
- "futures-util",
- "html2text",
- "mcp-server",
- "pares-agens-agenda",
- "pares-agens-bitnet",
- "pares-agens-channels",
- "pares-agens-core",
- "pares-agens-tui",
- "pares-models",
- "pares-rector",
- "ratatui",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite 0.28.0",
- "toml 0.8.2",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "pares-agens-core"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4673,8 +4601,8 @@ dependencies = [
  "futures-util",
  "hostname",
  "pares-agens-audit",
- "pares-agens-praxis",
  "pares-agens-privacy",
+ "pares-radix-praxis",
  "pluresdb 2.9.10",
  "pluresdb-procedures",
  "pluresdb-sea",
@@ -4698,33 +4626,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pares-agens-marketplace"
-version = "1.42.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "pares-agens-praxis"
-version = "1.42.0"
-dependencies = [
- "async-trait",
- "chrono",
- "pest",
- "pest_derive",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "pares-agens-privacy"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "regex",
  "serde",
@@ -4734,63 +4637,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "pares-agens-sync"
-version = "1.42.0"
-dependencies = [
- "chrono",
- "hostname",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "pares-agens-tauri"
-version = "0.5.0"
-dependencies = [
- "async-trait",
- "futures-util",
- "mcp-client",
- "pares-agens-channels",
- "pares-agens-cli",
- "pares-agens-core",
- "pares-models",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-notification",
- "tauri-plugin-tui",
- "tauri-plugin-window-state",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "pares-agens-tui"
-version = "1.42.0"
-dependencies = [
- "async-trait",
- "chrono",
- "crossterm",
- "pares-agens-core",
- "ratatui",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "pares-models"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4833,8 +4681,160 @@ dependencies = [
 ]
 
 [[package]]
+name = "pares-radix-cli"
+version = "1.42.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "clap",
+ "crossterm",
+ "futures-util",
+ "html2text",
+ "pares-agens-agenda",
+ "pares-agens-bitnet",
+ "pares-agens-channels",
+ "pares-agens-core",
+ "pares-models",
+ "pares-radix-mcp-server",
+ "pares-radix-tui",
+ "pares-rector",
+ "ratatui",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "pares-radix-marketplace"
+version = "1.42.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "pares-radix-mcp-client"
+version = "1.42.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "pares-agens-core",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pares-radix-mcp-server"
+version = "1.42.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "html2text",
+ "pares-agens-agenda",
+ "pares-agens-core",
+ "pares-radix-mcp-client",
+ "pares-radix-praxis",
+ "pluresdb 2.9.10",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.26.2",
+ "tracing",
+ "urlencoding",
+ "uuid",
+]
+
+[[package]]
+name = "pares-radix-praxis"
+version = "1.42.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "pest",
+ "pest_derive",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "pares-radix-sync"
+version = "1.42.1"
+dependencies = [
+ "chrono",
+ "hostname",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "pares-radix-tauri"
+version = "0.5.0"
+dependencies = [
+ "async-trait",
+ "futures-util",
+ "pares-agens-channels",
+ "pares-agens-core",
+ "pares-models",
+ "pares-radix-cli",
+ "pares-radix-mcp-client",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-notification",
+ "tauri-plugin-tui",
+ "tauri-plugin-window-state",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "pares-radix-tui"
+version = "1.42.1"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "crossterm",
+ "pares-agens-core",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "pares-rector"
-version = "1.42.0"
+version = "1.42.1"
 dependencies = [
  "hostname",
  "num_cpus",

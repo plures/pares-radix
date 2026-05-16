@@ -13,7 +13,9 @@ use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
 
-use crate::model::{ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolCall};
+use crate::model::{
+    ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolCall, ToolDefinition,
+};
 
 const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
@@ -80,14 +82,14 @@ impl CopilotAuth {
             verification_uri: String,
         }
 
-        let client = reqwest::Client::builder().http1_only().build().expect("failed to build HTTP client");
+        let client = reqwest::Client::builder()
+            .http1_only()
+            .build()
+            .expect("failed to build HTTP client");
         let response = client
             .post(DEVICE_CODE_URL)
             .header(ACCEPT, "application/json")
-            .form(&[
-                ("client_id", COPILOT_CLIENT_ID),
-                ("scope", "copilot"),
-            ])
+            .form(&[("client_id", COPILOT_CLIENT_ID), ("scope", "copilot")])
             .send()
             .await?
             .error_for_status()?;
@@ -109,7 +111,10 @@ impl CopilotAuth {
             error_description: Option<String>,
         }
 
-        let client = reqwest::Client::builder().http1_only().build().expect("failed to build HTTP client");
+        let client = reqwest::Client::builder()
+            .http1_only()
+            .build()
+            .expect("failed to build HTTP client");
         let mut interval = Duration::from_secs(5);
         loop {
             let response = client
@@ -144,9 +149,7 @@ impl CopilotAuth {
                         let detail = payload
                             .error_description
                             .unwrap_or_else(|| "unknown error".into());
-                        return Err(CopilotAuthError::OAuth(format!(
-                            "{error}: {detail}"
-                        )));
+                        return Err(CopilotAuthError::OAuth(format!("{error}: {detail}")));
                     }
                 }
             }
@@ -167,8 +170,14 @@ impl CopilotAuth {
             expires_at: Value,
         }
 
-        let client = reqwest::Client::builder().http1_only().build().expect("failed to build HTTP client");
-        tracing::info!(url = COPILOT_TOKEN_URL, "exchanging OAuth token for Copilot session token");
+        let client = reqwest::Client::builder()
+            .http1_only()
+            .build()
+            .expect("failed to build HTTP client");
+        tracing::info!(
+            url = COPILOT_TOKEN_URL,
+            "exchanging OAuth token for Copilot session token"
+        );
         let response = client
             .get(COPILOT_TOKEN_URL)
             .header(AUTHORIZATION, format!("Bearer {oauth_token}"))
@@ -181,16 +190,19 @@ impl CopilotAuth {
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             tracing::error!(%status, body = &body[..body.len().min(500)], "Copilot token exchange failed");
-            return Err(CopilotAuthError::OAuth(format!("token exchange failed ({status}): {}", &body[..body.len().min(200)])));
+            return Err(CopilotAuthError::OAuth(format!(
+                "token exchange failed ({status}): {}",
+                &body[..body.len().min(200)]
+            )));
         }
         let payload: CopilotTokenResponse = response.json().await?;
         let expires_at = match payload.expires_at {
-            Value::Number(num) => num.as_u64().ok_or_else(|| {
-                CopilotAuthError::InvalidResponse("invalid expires_at".into())
-            })?,
-            Value::String(s) => s.parse::<u64>().map_err(|_| {
-                CopilotAuthError::InvalidResponse("invalid expires_at".into())
-            })?,
+            Value::Number(num) => num
+                .as_u64()
+                .ok_or_else(|| CopilotAuthError::InvalidResponse("invalid expires_at".into()))?,
+            Value::String(s) => s
+                .parse::<u64>()
+                .map_err(|_| CopilotAuthError::InvalidResponse("invalid expires_at".into()))?,
             _ => {
                 return Err(CopilotAuthError::InvalidResponse(
                     "invalid expires_at".into(),
@@ -198,8 +210,8 @@ impl CopilotAuth {
             }
         };
 
-        let api_base = extract_api_base_url(&payload.token)
-            .unwrap_or_else(|| DEFAULT_API_BASE.to_string());
+        let api_base =
+            extract_api_base_url(&payload.token).unwrap_or_else(|| DEFAULT_API_BASE.to_string());
 
         tracing::info!(
             api_base = %api_base,
@@ -224,9 +236,10 @@ impl CopilotAuth {
 
         if needs_refresh {
             tracing::info!("Copilot session token expired or missing, refreshing");
-            let oauth_token = self.oauth_token.clone().ok_or_else(|| {
-                CopilotAuthError::InvalidResponse("missing oauth token".into())
-            })?;
+            let oauth_token = self
+                .oauth_token
+                .clone()
+                .ok_or_else(|| CopilotAuthError::InvalidResponse("missing oauth token".into()))?;
             let (session_token, expires_at, api_base) =
                 Self::exchange_copilot_token(&oauth_token).await?;
             self.session_token = Some(session_token);
@@ -234,8 +247,7 @@ impl CopilotAuth {
             self.api_base_url = api_base;
         }
 
-        self
-            .session_token
+        self.session_token
             .as_deref()
             .ok_or_else(|| CopilotAuthError::InvalidResponse("missing session token".into()))
     }
@@ -347,7 +359,9 @@ impl ModelClient for CopilotModelClient {
         }
 
         if let Some(temp) = options.temperature {
-            body["temperature"] = Value::Number(serde_json::Number::from_f64(temp).unwrap_or_else(|| serde_json::Number::from(0)));
+            body["temperature"] = Value::Number(
+                serde_json::Number::from_f64(temp).unwrap_or_else(|| serde_json::Number::from(0)),
+            );
         }
         if options.logprobs {
             body["logprobs"] = Value::Bool(true);
@@ -371,7 +385,10 @@ impl ModelClient for CopilotModelClient {
         );
         headers.insert("Editor-Version", HeaderValue::from_static(EDITOR_VERSION));
         headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
-        headers.insert("X-Github-Api-Version", HeaderValue::from_static(API_VERSION));
+        headers.insert(
+            "X-Github-Api-Version",
+            HeaderValue::from_static(API_VERSION),
+        );
         headers.insert(
             "Copilot-Integration-Id",
             HeaderValue::from_static(INTEGRATION_ID),
@@ -388,12 +405,18 @@ impl ModelClient for CopilotModelClient {
             .map_err(|e| e.to_string())?;
 
         let status = response.status();
-        let body_text = response.text().await.map_err(|e| format!("response body read error: {e}"))?;
+        let body_text = response
+            .text()
+            .await
+            .map_err(|e| format!("response body read error: {e}"))?;
 
         // Retry logic for transient failures.
         let (status, body_text) = if status == reqwest::StatusCode::MISDIRECTED_REQUEST {
             // 421: HTTP/2 connection coalescing issue — rebuild client and retry once.
-            tracing::warn!(attempt = 1, "421 Misdirected Request — retrying with fresh connection");
+            tracing::warn!(
+                attempt = 1,
+                "421 Misdirected Request — retrying with fresh connection"
+            );
             let fresh_client = reqwest::Client::builder()
                 .pool_max_idle_per_host(0)
                 .build()
@@ -406,23 +429,42 @@ impl ModelClient for CopilotModelClient {
                 .await
                 .map_err(|e| e.to_string())?;
             let s = resp.status();
-            let t = resp.text().await.map_err(|e| format!("response body read error: {e}"))?;
+            let t = resp
+                .text()
+                .await
+                .map_err(|e| format!("response body read error: {e}"))?;
             (s, t)
         } else if status == reqwest::StatusCode::UNAUTHORIZED {
             // 401: token may have expired — refresh and retry once.
-            tracing::warn!(attempt = 1, "401 Unauthorized — refreshing token and retrying");
+            tracing::warn!(
+                attempt = 1,
+                "401 Unauthorized — refreshing token and retrying"
+            );
             let new_token = {
                 let mut auth = self.auth.lock().await;
-                auth.ensure_fresh_token().await.map_err(|e| e.to_string())?.to_string()
+                auth.ensure_fresh_token()
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .to_string()
             };
             let mut retry_headers = headers.clone();
             retry_headers.insert(
                 AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {new_token}")).map_err(|e| e.to_string())?,
             );
-            let resp = self.client.post(&url).headers(retry_headers).json(&body).send().await.map_err(|e| e.to_string())?;
+            let resp = self
+                .client
+                .post(&url)
+                .headers(retry_headers)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
             let s = resp.status();
-            let t = resp.text().await.map_err(|e| format!("response body read error: {e}"))?;
+            let t = resp
+                .text()
+                .await
+                .map_err(|e| format!("response body read error: {e}"))?;
             (s, t)
         } else if status.is_server_error() {
             // 5xx: retry up to 2 times with exponential backoff.
@@ -432,9 +474,19 @@ impl ModelClient for CopilotModelClient {
             for (i, delay) in backoffs.iter().enumerate() {
                 tracing::warn!(attempt = i + 1, status = %last_status, delay_ms = delay.as_millis(), "server error — retrying");
                 sleep(*delay).await;
-                let resp = self.client.post(&url).headers(headers.clone()).json(&body).send().await.map_err(|e| e.to_string())?;
+                let resp = self
+                    .client
+                    .post(&url)
+                    .headers(headers.clone())
+                    .json(&body)
+                    .send()
+                    .await
+                    .map_err(|e| e.to_string())?;
                 last_status = resp.status();
-                last_body = resp.text().await.map_err(|e| format!("response body read error: {e}"))?;
+                last_body = resp
+                    .text()
+                    .await
+                    .map_err(|e| format!("response body read error: {e}"))?;
                 if !last_status.is_server_error() {
                     break;
                 }
@@ -451,9 +503,13 @@ impl ModelClient for CopilotModelClient {
             body_preview = &body_text[..body_text.len().min(200)],
             "Copilot completion response"
         );
-        
-        let payload: Value = serde_json::from_str(&body_text)
-            .map_err(|e| format!("error decoding response body: {e}\nBody: {}", &body_text[..body_text.len().min(500)]))?;
+
+        let payload: Value = serde_json::from_str(&body_text).map_err(|e| {
+            format!(
+                "error decoding response body: {e}\nBody: {}",
+                &body_text[..body_text.len().min(500)]
+            )
+        })?;
         if !status.is_success() {
             let is_client_error = status.is_client_error();
             let err_msg = format!("copilot error ({status}): {payload}");
@@ -502,7 +558,10 @@ impl ModelClient for CopilotModelClient {
             .get("message")
             .ok_or_else(|| "model returned no message".to_string())?;
 
-        let content = message.get("content").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let content = message
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let tool_calls = message
             .get("tool_calls")

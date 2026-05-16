@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-sync"
+name = "pares-radix-sync"
 description = "P2P device sync via Hyperswarm DHT for Pares Agens — offline-first, CRDT-merge, bandwidth-aware"
 version.workspace = true
 edition.workspace = true

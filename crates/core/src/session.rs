@@ -159,7 +159,11 @@ impl SessionManager {
             .unwrap_or_default();
 
         // Take most recent archives.
-        for key in index.iter().rev().take(limit.saturating_sub(summaries.len())) {
+        for key in index
+            .iter()
+            .rev()
+            .take(limit.saturating_sub(summaries.len()))
+        {
             if let Some(value) = self.store.get(key).await {
                 if let Ok(session) = serde_json::from_value::<SavedSession>(value) {
                     summaries.push(SessionSummary {
@@ -201,8 +205,7 @@ mod tests {
             ChatMessage::user("hello"),
             ChatMessage::assistant("hi there"),
         ];
-        mgr.save_session("chat1", &messages, make_metadata(2))
-            .await;
+        mgr.save_session("chat1", &messages, make_metadata(2)).await;
 
         let loaded = mgr.load_active_session("chat1").await.unwrap();
         assert_eq!(loaded.messages.len(), 2);
@@ -219,8 +222,7 @@ mod tests {
     async fn archive_moves_active_to_archive() {
         let mgr = make_manager();
         let messages = vec![ChatMessage::user("test")];
-        mgr.save_session("chat1", &messages, make_metadata(1))
-            .await;
+        mgr.save_session("chat1", &messages, make_metadata(1)).await;
 
         mgr.archive_session("chat1").await;
 
@@ -239,14 +241,12 @@ mod tests {
 
         // Create and archive a session.
         let messages = vec![ChatMessage::user("old")];
-        mgr.save_session("chat1", &messages, make_metadata(1))
-            .await;
+        mgr.save_session("chat1", &messages, make_metadata(1)).await;
         mgr.archive_session("chat1").await;
 
         // Create a new active session.
         let messages = vec![ChatMessage::user("new")];
-        mgr.save_session("chat1", &messages, make_metadata(1))
-            .await;
+        mgr.save_session("chat1", &messages, make_metadata(1)).await;
 
         let sessions = mgr.list_sessions("chat1", 10).await;
         assert_eq!(sessions.len(), 2);

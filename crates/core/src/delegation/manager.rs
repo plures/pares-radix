@@ -217,9 +217,7 @@ impl SubAgentManager {
             let status = match &result {
                 Ok(_) => SessionStatus::Completed,
                 Err(e) if e.contains("timed out") => SessionStatus::TimedOut,
-                Err(_) => SessionStatus::Failed(
-                    result.as_ref().unwrap_err().clone(),
-                ),
+                Err(_) => SessionStatus::Failed(result.as_ref().unwrap_err().clone()),
             };
 
             {
@@ -348,7 +346,9 @@ fn extract_single_result(mut results: Vec<SubTaskResult>) -> Result<String, Stri
 mod tests {
     use super::*;
     use crate::delegation::registry::{AgentDefinition, AgentRegistry};
-    use crate::model::{ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher};
+    use crate::model::{
+        ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher,
+    };
     use async_trait::async_trait;
     use serde_json::Value;
     use std::time::Duration;
@@ -457,9 +457,7 @@ mod tests {
         }));
         let (manager, mut rx) = SubAgentManager::new(broker);
 
-        let id = manager
-            .spawn("echo", "test", SpawnOptions::default())
-            .await;
+        let id = manager.spawn("echo", "test", SpawnOptions::default()).await;
 
         // Should be running immediately.
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -539,9 +537,7 @@ mod tests {
         let broker = make_broker(Arc::new(EchoModel));
         let (manager, mut rx) = SubAgentManager::new(broker);
 
-        let id = manager
-            .spawn("echo", "done", SpawnOptions::default())
-            .await;
+        let id = manager.spawn("echo", "done", SpawnOptions::default()).await;
 
         let _ = rx.recv().await;
 

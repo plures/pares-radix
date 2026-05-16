@@ -88,7 +88,8 @@ pub fn tool_definitions(entity_types: &[String]) -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "plugin_move".into(),
-            description: "Move an entity to a new parent (e.g., move item to different room).".into(),
+            description: "Move an entity to a new parent (e.g., move item to different room)."
+                .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {

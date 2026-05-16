@@ -74,7 +74,11 @@ fn build_bitnet(src_dir: &std::path::Path, manifest_dir: &str) {
     let shim_dir = std::path::Path::new(manifest_dir).join("shim");
     let llama_include = src_dir.join("3rdparty").join("llama.cpp").join("include");
     let llama_common = src_dir.join("3rdparty").join("llama.cpp").join("common");
-    let ggml_include = src_dir.join("3rdparty").join("llama.cpp").join("ggml").join("include");
+    let ggml_include = src_dir
+        .join("3rdparty")
+        .join("llama.cpp")
+        .join("ggml")
+        .join("include");
 
     cc::Build::new()
         .cpp(true)
@@ -90,7 +94,11 @@ fn build_bitnet(src_dir: &std::path::Path, manifest_dir: &str) {
     // Search for llama.cpp libraries in various possible locations
     let search_dirs = [
         build_dir.join("3rdparty").join("llama.cpp").join("src"),
-        build_dir.join("3rdparty").join("llama.cpp").join("ggml").join("src"),
+        build_dir
+            .join("3rdparty")
+            .join("llama.cpp")
+            .join("ggml")
+            .join("src"),
         build_dir.join("3rdparty").join("llama.cpp").join("common"),
         build_dir.join("src"),
         build_dir.clone(),

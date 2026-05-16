@@ -84,11 +84,7 @@ pub trait VectorSearch: Send + Sync {
 /// Trait for the LLM reranker (Pass 2 retrieval).
 pub trait Reranker: Send + Sync {
     /// Rerank candidates given the original query.
-    fn rerank(
-        &self,
-        query: &str,
-        candidates: Vec<RerankCandidate>,
-    ) -> Vec<RerankResult>;
+    fn rerank(&self, query: &str, candidates: Vec<RerankCandidate>) -> Vec<RerankResult>;
 }
 
 /// Input to the reranker.
@@ -114,13 +110,23 @@ pub struct RerankResult {
 pub fn build_rerank_prompt(query: &str, candidates: &[RerankCandidate]) -> String {
     let mut candidate_text = String::new();
     for (i, c) in candidates.iter().enumerate() {
-        let preview = c.summary.as_deref()
+        let preview = c
+            .summary
+            .as_deref()
             .or(c.extracted_text_preview.as_deref())
             .unwrap_or("[no text]");
-        let truncated = if preview.len() > 200 { &preview[..200] } else { preview };
+        let truncated = if preview.len() > 200 {
+            &preview[..200]
+        } else {
+            preview
+        };
         candidate_text.push_str(&format!(
             "\n{}. [{}/{}] (score: {:.2})\n   {}\n",
-            i + 1, c.node_id, c.path, c.vector_score, truncated
+            i + 1,
+            c.node_id,
+            c.path,
+            c.vector_score,
+            truncated
         ));
     }
 

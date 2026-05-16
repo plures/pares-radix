@@ -11,16 +11,30 @@ pub trait OmniscientStore: Send + Sync {
     fn upsert(&self, node: &FileNode) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get a file node by path + node_id.
-    fn get(&self, node_id: &str, path: &str) -> Result<Option<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
+    fn get(
+        &self,
+        node_id: &str,
+        path: &str,
+    ) -> Result<Option<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Delete a file node.
-    fn delete(&self, node_id: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    fn delete(
+        &self,
+        node_id: &str,
+        path: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Find nodes with the same content hash (cross-system duplicates).
-    fn find_by_hash(&self, content_hash: &str) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
+    fn find_by_hash(
+        &self,
+        content_hash: &str,
+    ) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get all nodes that need Pass 2 enrichment (enriched_at is None).
-    fn unenriched(&self, limit: usize) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
+    fn unenriched(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get stats.
     fn stats(&self) -> Result<StoreStats, Box<dyn std::error::Error + Send + Sync>>;
@@ -71,25 +85,51 @@ impl OmniscientStore for MemoryStore {
         Ok(())
     }
 
-    fn get(&self, node_id: &str, path: &str) -> Result<Option<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
+    fn get(
+        &self,
+        node_id: &str,
+        path: &str,
+    ) -> Result<Option<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
         let nodes = self.nodes.read().map_err(|e| format!("lock: {}", e))?;
-        Ok(nodes.iter().find(|n| n.node.node_id == node_id && n.path == path).cloned())
+        Ok(nodes
+            .iter()
+            .find(|n| n.node.node_id == node_id && n.path == path)
+            .cloned())
     }
 
-    fn delete(&self, node_id: &str, path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn delete(
+        &self,
+        node_id: &str,
+        path: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut nodes = self.nodes.write().map_err(|e| format!("lock: {}", e))?;
         nodes.retain(|n| !(n.path == path && n.node.node_id == node_id));
         Ok(())
     }
 
-    fn find_by_hash(&self, content_hash: &str) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
+    fn find_by_hash(
+        &self,
+        content_hash: &str,
+    ) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
         let nodes = self.nodes.read().map_err(|e| format!("lock: {}", e))?;
-        Ok(nodes.iter().filter(|n| n.content_hash == content_hash).cloned().collect())
+        Ok(nodes
+            .iter()
+            .filter(|n| n.content_hash == content_hash)
+            .cloned()
+            .collect())
     }
 
-    fn unenriched(&self, limit: usize) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
+    fn unenriched(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<FileNode>, Box<dyn std::error::Error + Send + Sync>> {
         let nodes = self.nodes.read().map_err(|e| format!("lock: {}", e))?;
-        Ok(nodes.iter().filter(|n| n.enriched_at.is_none()).take(limit).cloned().collect())
+        Ok(nodes
+            .iter()
+            .filter(|n| n.enriched_at.is_none())
+            .take(limit)
+            .cloned()
+            .collect())
     }
 
     fn stats(&self) -> Result<StoreStats, Box<dyn std::error::Error + Send + Sync>> {
@@ -100,8 +140,14 @@ impl OmniscientStore for MemoryStore {
         };
 
         for node in nodes.iter() {
-            *stats.files_per_node.entry(node.node.node_id.clone()).or_insert(0) += 1;
-            *stats.by_class.entry(format!("{:?}", node.content_class)).or_insert(0) += 1;
+            *stats
+                .files_per_node
+                .entry(node.node.node_id.clone())
+                .or_insert(0) += 1;
+            *stats
+                .by_class
+                .entry(format!("{:?}", node.content_class))
+                .or_insert(0) += 1;
             if node.enriched_at.is_some() {
                 stats.enriched_files += 1;
             } else {

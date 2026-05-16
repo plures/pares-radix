@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{error, info};
 
-use mcp_client::protocol::{Tool as McpTool, ToolContent};
-use mcp_client::transport::stdio::StdioTransport;
-use mcp_client::McpClient;
+use pares_radix_mcp_client::protocol::{Tool as McpTool, ToolContent};
+use pares_radix_mcp_client::transport::stdio::StdioTransport;
+use pares_radix_mcp_client::McpClient;
 
 use crate::state::{AppState, McpServerConfig};
 

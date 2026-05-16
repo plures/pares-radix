@@ -16,7 +16,7 @@
 //!
 //! The executor is intentionally model-agnostic: it doesn't know about LLMs,
 //! HTTP, or any specific runtime. The [`ActionHandler`] trait is the
-//! integration point where the host system (pares-agens core, MCP server,
+//! integration point where the host system (pares-radix core, MCP server,
 //! etc.) provides concrete implementations.
 
 use std::collections::HashMap;
@@ -314,10 +314,7 @@ fn execute_loop(
         .and_then(|v| v.as_array())
         .ok_or_else(|| ExecutionError::InvalidStructure("loop step missing 'steps'".into()))?;
 
-    let item_var = step
-        .get("as")
-        .and_then(|v| v.as_str())
-        .unwrap_or("item");
+    let item_var = step.get("as").and_then(|v| v.as_str()).unwrap_or("item");
 
     let output_var = step.get("output_var").and_then(|v| v.as_str());
 
@@ -328,7 +325,14 @@ fn execute_loop(
         match vars.get(var_name) {
             Some(Value::Array(arr)) => arr.clone(),
             Some(other) => vec![other.clone()], // single-item iteration
-            None => return Ok(StepResult { index, kind: "loop".into(), output: None, skipped: true }),
+            None => {
+                return Ok(StepResult {
+                    index,
+                    kind: "loop".into(),
+                    output: None,
+                    skipped: true,
+                })
+            }
         }
     } else if let Some(times) = step.get("times").and_then(|v| v.as_u64()) {
         (0..times).map(|i| Value::Number(i.into())).collect()
@@ -423,9 +427,7 @@ fn execute_try(
         .and_then(|v| v.as_array())
         .ok_or_else(|| ExecutionError::InvalidStructure("try step missing 'steps'".into()))?;
 
-    let catch_steps = step
-        .get("catch")
-        .and_then(|v| v.as_array());
+    let catch_steps = step.get("catch").and_then(|v| v.as_array());
 
     // Attempt the try block
     for (i, nested) in try_steps.iter().enumerate() {
@@ -491,9 +493,7 @@ fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
                 .collect();
             Value::Object(resolved)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(|v| resolve_vars(v, vars)).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.iter().map(|v| resolve_vars(v, vars)).collect()),
         other => other.clone(),
     }
 }
@@ -621,9 +621,10 @@ mod tests {
 
     impl ActionHandler for MockHandler {
         fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
-            self.results.get(name).cloned().ok_or_else(|| {
-                ExecutionError::UnknownAction(name.to_string())
-            })
+            self.results
+                .get(name)
+                .cloned()
+                .ok_or_else(|| ExecutionError::UnknownAction(name.to_string()))
         }
     }
 
@@ -664,7 +665,10 @@ mod tests {
 
         let result = execute(&procedure, &handler).unwrap();
         assert!(result.success);
-        assert_eq!(result.variables.get("data"), Some(&json!({"status": "ok", "count": 42})));
+        assert_eq!(
+            result.variables.get("data"),
+            Some(&json!({"status": "ok", "count": 42}))
+        );
         assert_eq!(result.variables.get("result"), Some(&json!("done")));
     }
 
@@ -799,7 +803,10 @@ mod tests {
 
         let result = execute(&procedure, &handler);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ExecutionError::UnknownAction(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            ExecutionError::UnknownAction(_)
+        ));
     }
 
     #[test]
@@ -845,10 +852,7 @@ mod tests {
 
     #[test]
     fn dotted_access_in_conditions() {
-        let vars = HashMap::from([(
-            "result".to_string(),
-            json!({"status": "green", "count": 3}),
-        )]);
+        let vars = HashMap::from([("result".to_string(), json!({"status": "green", "count": 3}))]);
 
         assert!(default_evaluate_condition("result.status == green", &vars));
         assert!(!default_evaluate_condition("result.status == red", &vars));
@@ -876,8 +880,7 @@ mod tests {
             ]
         });
 
-        let handler = MockHandler::new()
-            .with_result("check_window", json!("open"));
+        let handler = MockHandler::new().with_result("check_window", json!("open"));
 
         let result = execute(&proc_data, &handler).unwrap();
         assert!(result.success);
@@ -889,8 +892,7 @@ mod tests {
 
     #[test]
     fn execute_loop_over_array() {
-        let handler = MockHandler::new()
-            .with_result("process_item", json!("processed"));
+        let handler = MockHandler::new().with_result("process_item", json!("processed"));
 
         let procedure = json!({
             "type": "procedure",
@@ -919,8 +921,7 @@ mod tests {
 
     #[test]
     fn execute_loop_times() {
-        let handler = MockHandler::new()
-            .with_result("tick", json!("tock"));
+        let handler = MockHandler::new().with_result("tick", json!("tock"));
 
         let procedure = json!({
             "type": "procedure",
@@ -939,7 +940,10 @@ mod tests {
 
         let result = execute(&procedure, &handler).unwrap();
         assert!(result.success);
-        assert_eq!(result.variables.get("ticks"), Some(&json!(["tock", "tock", "tock"])));
+        assert_eq!(
+            result.variables.get("ticks"),
+            Some(&json!(["tock", "tock", "tock"]))
+        );
     }
 
     #[test]
@@ -1015,8 +1019,7 @@ mod tests {
 
     #[test]
     fn execute_try_catches_error() {
-        let handler = MockHandler::new()
-            .with_result("fallback", json!("recovered"));
+        let handler = MockHandler::new().with_result("fallback", json!("recovered"));
 
         let procedure = json!({
             "type": "procedure",
@@ -1045,8 +1048,7 @@ mod tests {
 
     #[test]
     fn execute_try_no_error_clears_error_var() {
-        let handler = MockHandler::new()
-            .with_result("safe_action", json!("ok"));
+        let handler = MockHandler::new().with_result("safe_action", json!("ok"));
 
         let procedure = json!({
             "type": "procedure",
@@ -1095,7 +1097,7 @@ mod tests {
     #[test]
     fn end_to_end_parse_compile_execute() {
         // Full pipeline: parse .px source → compile → execute
-        use crate::px::{parse, compiler::compile};
+        use crate::px::{compiler::compile, parse};
 
         // Use valid .px grammar syntax
         let source = "procedure greet_user:\n  trigger: manual\n  say_hello {} -> $greeting\n";
@@ -1104,12 +1106,14 @@ mod tests {
         let records = compile(&doc);
         assert_eq!(records.len(), 1);
 
-        let handler = MockHandler::new()
-            .with_result("say_hello", json!("hello world"));
+        let handler = MockHandler::new().with_result("say_hello", json!("hello world"));
 
         let result = execute(&records[0].data, &handler).unwrap();
         assert!(result.success);
         assert_eq!(result.procedure_name, "greet_user");
-        assert_eq!(result.variables.get("greeting"), Some(&json!("hello world")));
+        assert_eq!(
+            result.variables.get("greeting"),
+            Some(&json!("hello world"))
+        );
     }
 }

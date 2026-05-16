@@ -239,8 +239,8 @@ impl ModelClient for AppModelClient {
 }
 
 struct McpToolDispatcher {
-    mcp_tools: Arc<RwLock<Vec<(String, mcp_client::protocol::Tool)>>>,
-    mcp_clients: Arc<Mutex<std::collections::HashMap<String, mcp_client::McpClient>>>,
+    mcp_tools: Arc<RwLock<Vec<(String, pares_radix_mcp_client::protocol::Tool)>>>,
+    mcp_clients: Arc<Mutex<std::collections::HashMap<String, pares_radix_mcp_client::McpClient>>>,
     settings: Arc<Mutex<Settings>>,
     telemetry_service: Arc<TelemetryService>,
 }
@@ -284,7 +284,9 @@ impl ToolDispatcher for McpToolDispatcher {
                         .content
                         .into_iter()
                         .filter_map(|c| match c {
-                            mcp_client::protocol::ToolContent::Text { text } => Some(text),
+                            pares_radix_mcp_client::protocol::ToolContent::Text { text } => {
+                                Some(text)
+                            }
                             _ => None,
                         })
                         .collect::<Vec<_>>()
@@ -364,9 +366,9 @@ pub fn run() {
                 Arc::new(RwLock::new(ModelRouter::new(router_config)));
 
             // MCP state shared between AppState and the adapter callback.
-            let mcp_clients: Arc<Mutex<std::collections::HashMap<String, mcp_client::McpClient>>> =
+            let mcp_clients: Arc<Mutex<std::collections::HashMap<String, pares_radix_mcp_client::McpClient>>> =
                 Arc::new(Mutex::new(std::collections::HashMap::new()));
-            let mcp_tools: Arc<RwLock<Vec<(String, mcp_client::protocol::Tool)>>> =
+            let mcp_tools: Arc<RwLock<Vec<(String, pares_radix_mcp_client::protocol::Tool)>>> =
                 Arc::new(RwLock::new(Vec::new()));
             let telemetry_store: Arc<dyn StateStore> = match app
                 .path()
@@ -650,7 +652,7 @@ pub fn run() {
             plugins::plugin_crud_search,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Pares Agens");
+        .expect("error while running Pares Radix");
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────

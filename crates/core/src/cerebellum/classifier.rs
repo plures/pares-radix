@@ -105,10 +105,7 @@ impl CerebellumClassifier {
 
     /// Create a classifier with a model backend (falls back to heuristic on
     /// model failure).
-    pub fn with_backend(
-        backend: Arc<dyn ClassifierBackend>,
-        plugin_names: Vec<String>,
-    ) -> Self {
+    pub fn with_backend(backend: Arc<dyn ClassifierBackend>, plugin_names: Vec<String>) -> Self {
         Self {
             backend: Some(backend),
             last_topic: Mutex::new(None),
@@ -142,16 +139,9 @@ impl CerebellumClassifier {
         // ── Intent ───────────────────────────────────────────────────────
         let intent = if lower.starts_with('/') {
             MessageIntent::Command
-        } else if lower.ends_with('?')
-            || QUESTION_STARTERS
-                .iter()
-                .any(|w| lower.starts_with(w))
-        {
+        } else if lower.ends_with('?') || QUESTION_STARTERS.iter().any(|w| lower.starts_with(w)) {
             MessageIntent::Question
-        } else if FEEDBACK_STARTERS
-            .iter()
-            .any(|w| lower.starts_with(w))
-        {
+        } else if FEEDBACK_STARTERS.iter().any(|w| lower.starts_with(w)) {
             MessageIntent::Feedback
         } else if TASK_KEYWORDS.iter().any(|w| lower.contains(w)) {
             MessageIntent::Task
@@ -181,9 +171,7 @@ impl CerebellumClassifier {
         // ── Topic extraction ─────────────────────────────────────────────
         let topic_words: Vec<&str> = words
             .iter()
-            .filter(|w| {
-                !STOPWORDS.contains(&w.to_lowercase().as_str()) && w.len() > 2
-            })
+            .filter(|w| !STOPWORDS.contains(&w.to_lowercase().as_str()) && w.len() > 2)
             .take(3)
             .copied()
             .collect();
@@ -194,11 +182,7 @@ impl CerebellumClassifier {
             let mut last = self.last_topic.lock().unwrap();
             let shifted = last
                 .as_ref()
-                .map(|lt| {
-                    !topic.is_empty()
-                        && !lt.contains(&topic)
-                        && !topic.contains(lt.as_str())
-                })
+                .map(|lt| !topic.is_empty() && !lt.contains(&topic) && !topic.contains(lt.as_str()))
                 .unwrap_or(false);
             *last = Some(topic.clone());
             shifted
@@ -225,34 +209,68 @@ impl CerebellumClassifier {
 // ── word lists ───────────────────────────────────────────────────────────────
 
 const QUESTION_STARTERS: &[&str] = &[
-    "what", "how", "why", "when", "where", "who", "is", "are", "can", "do",
-    "does", "will", "would", "should", "could",
+    "what", "how", "why", "when", "where", "who", "is", "are", "can", "do", "does", "will",
+    "would", "should", "could",
 ];
 
 const FEEDBACK_STARTERS: &[&str] = &[
-    "ok", "yes", "no", "thanks", "thank", "good", "great", "perfect", "done",
-    "approved", "lgtm", "nice", "cool", "sure", "agree", "correct", "right",
-    "wrong", "nope",
+    "ok", "yes", "no", "thanks", "thank", "good", "great", "perfect", "done", "approved", "lgtm",
+    "nice", "cool", "sure", "agree", "correct", "right", "wrong", "nope",
 ];
 
 const TASK_KEYWORDS: &[&str] = &[
-    "build", "create", "fix", "implement", "deploy", "set up", "install",
-    "configure", "write", "add", "remove", "delete", "update", "change",
-    "move", "migrate", "refactor", "test", "review", "check", "scan", "index",
-    "push", "pull", "commit", "merge",
+    "build",
+    "create",
+    "fix",
+    "implement",
+    "deploy",
+    "set up",
+    "install",
+    "configure",
+    "write",
+    "add",
+    "remove",
+    "delete",
+    "update",
+    "change",
+    "move",
+    "migrate",
+    "refactor",
+    "test",
+    "review",
+    "check",
+    "scan",
+    "index",
+    "push",
+    "pull",
+    "commit",
+    "merge",
 ];
 
 const TOOL_KEYWORDS: &[&str] = &[
-    "file", "run", "command", "search", "code", "git", "build", "deploy",
-    "install", "read", "write", "edit", "list", "directory", "ls", "cat",
+    "file",
+    "run",
+    "command",
+    "search",
+    "code",
+    "git",
+    "build",
+    "deploy",
+    "install",
+    "read",
+    "write",
+    "edit",
+    "list",
+    "directory",
+    "ls",
+    "cat",
     "grep",
 ];
 
 const STOPWORDS: &[&str] = &[
-    "the", "a", "an", "is", "are", "was", "were", "be", "been", "to", "of",
-    "in", "for", "on", "with", "at", "by", "this", "that", "it", "my",
-    "your", "i", "you", "we", "he", "she", "they", "me", "us", "and", "or",
-    "but", "not", "can", "do", "does", "will", "would", "should", "could",
+    "the", "a", "an", "is", "are", "was", "were", "be", "been", "to", "of", "in", "for", "on",
+    "with", "at", "by", "this", "that", "it", "my", "your", "i", "you", "we", "he", "she", "they",
+    "me", "us", "and", "or", "but", "not", "can", "do", "does", "will", "would", "should", "could",
     "please", "just", "also",
 ];
 
@@ -263,10 +281,7 @@ mod tests {
     use super::*;
 
     fn make_classifier() -> CerebellumClassifier {
-        CerebellumClassifier::heuristic_only(vec![
-            "weather-plugin".into(),
-            "code-search".into(),
-        ])
+        CerebellumClassifier::heuristic_only(vec!["weather-plugin".into(), "code-search".into()])
     }
 
     #[test]
@@ -338,11 +353,16 @@ mod tests {
         let r = c.classify("hello");
         assert_eq!(r.complexity, 1);
 
-        let r = c.classify("can you help me understand how the deployment pipeline works in our CI system");
+        let r = c.classify(
+            "can you help me understand how the deployment pipeline works in our CI system",
+        );
         assert!(r.complexity >= 2);
 
         // Very long message
-        let long = (0..70).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        let long = (0..70)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let r = c.classify(&long);
         assert_eq!(r.complexity, 5);
     }
@@ -362,7 +382,11 @@ mod tests {
         // Simulate a model backend that returns valid JSON
         struct MockBackend;
         impl ClassifierBackend for MockBackend {
-            fn classify(&self, _system_prompt: &str, _user_message: &str) -> Result<String, String> {
+            fn classify(
+                &self,
+                _system_prompt: &str,
+                _user_message: &str,
+            ) -> Result<String, String> {
                 Ok(r#"{"intent":"Task","complexity":3,"topic":"deploy API","topic_shift":false,"entities":["API","production"],"plugin_match":null,"completion_hint":"deployment complete","needs_tools":true,"needs_deep_model":false}"#.into())
             }
         }

@@ -1,4 +1,4 @@
-//! Four concrete [`PraxisModule`] implementations for Pares Agens.
+//! Four concrete [`PraxisModule`] implementations for Pares Radix.
 //!
 //! | Module | Description |
 //! |--------|-------------|

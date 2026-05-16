@@ -4,8 +4,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
-use mcp_client::protocol::Tool as McpTool;
-use mcp_client::McpClient;
 use pares_agens_channels::tauri_ipc::TauriIpcHandle;
 use pares_agens_core::license::License;
 use pares_agens_core::memory::store::MemoryStore;
@@ -14,6 +12,8 @@ use pares_agens_core::praxis::GuidanceService;
 use pares_agens_core::secrets::{provider_api_key, SecretStore};
 use pares_models::config::{ProviderConfig, RouterConfig};
 use pares_models::ModelRouter;
+use pares_radix_mcp_client::protocol::Tool as McpTool;
+use pares_radix_mcp_client::McpClient;
 
 use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
 
@@ -161,7 +161,7 @@ pub struct AgentPreferences {
 impl Default for AgentPreferences {
     fn default() -> Self {
         Self {
-            agent_name: "Pares Agens".to_string(),
+            agent_name: "Pares Radix".to_string(),
             personality_notes: String::new(),
             auto_recall: true,
             capture_categories: vec![
@@ -243,7 +243,7 @@ impl Default for Settings {
             model: std::env::var("PARES_MODEL").unwrap_or_else(|_| "claude-opus-4.6".to_string()),
             endpoint: "https://api.githubcopilot.com".to_string(),
             channel: "tauri".to_string(),
-            system_prompt: "You are Pares Agens, a helpful desktop AI assistant.".to_string(),
+            system_prompt: "You are Pares Radix, a helpful desktop AI assistant.".to_string(),
             api_key: None,
             telegram_token: None,
             auto_start: false,
@@ -253,7 +253,10 @@ impl Default for Settings {
                     name: "anthropic".to_string(),
                     base_url: "https://api.anthropic.com/v1".to_string(),
                     api_key: None,
-                    models: vec!["claude-sonnet-4-20250514".to_string(), "claude-opus-4-20250514".to_string()],
+                    models: vec![
+                        "claude-sonnet-4-20250514".to_string(),
+                        "claude-opus-4-20250514".to_string(),
+                    ],
                 },
                 ProviderEntry {
                     name: "copilot".to_string(),
@@ -265,7 +268,8 @@ impl Default for Settings {
             routing: RoutingPrefs {
                 interactive: Some(ModelRef {
                     provider: "copilot".to_string(),
-                    model: std::env::var("PARES_MODEL").unwrap_or_else(|_| "claude-opus-4.6".to_string()),
+                    model: std::env::var("PARES_MODEL")
+                        .unwrap_or_else(|_| "claude-opus-4.6".to_string()),
                 }),
                 background: None,
                 coding: None,

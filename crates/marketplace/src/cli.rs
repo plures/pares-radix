@@ -1,13 +1,13 @@
-//! CLI module — marketplace sub-commands for the `pares-agens` binary.
+//! CLI module — marketplace sub-commands for the `pares-radix` binary.
 //!
 //! Exposes a thin command-dispatch layer for the marketplace sub-command group:
 //!
 //! ```text
-//! pares-agens marketplace search  <query>
-//! pares-agens marketplace install <id>
-//! pares-agens marketplace update  [id]
-//! pares-agens marketplace remove  <id>
-//! pares-agens marketplace list
+//! pares-radix marketplace search  <query>
+//! pares-radix marketplace install <id>
+//! pares-radix marketplace update  [id]
+//! pares-radix marketplace remove  <id>
+//! pares-radix marketplace list
 //! ```
 
 use crate::{
@@ -202,7 +202,7 @@ pub fn run_cli(
 
 /// Print usage information for the marketplace CLI group.
 pub fn print_usage() {
-    println!("Usage: pares-agens marketplace <COMMAND> [ARGS]");
+    println!("Usage: pares-radix marketplace <COMMAND> [ARGS]");
     println!();
     println!("Commands:");
     println!("  search <query>   Search the marketplace catalogue");

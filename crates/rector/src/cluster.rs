@@ -19,7 +19,10 @@ pub struct ClusterSummary {
 
 impl ClusterSummary {
     pub fn from_nodes(nodes: &[ClusterNode]) -> Self {
-        let online: Vec<_> = nodes.iter().filter(|n| n.status == NodeStatus::Online).collect();
+        let online: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.status == NodeStatus::Online)
+            .collect();
         let total_cores: u32 = online.iter().map(|n| n.capabilities.cpu_cores).sum();
         let total_memory_mb: u64 = online.iter().map(|n| n.capabilities.memory_total_mb).sum();
         let workload_count: usize = online.iter().map(|n| n.workloads.len()).sum();
@@ -93,7 +96,11 @@ pub fn format_cluster_workloads(workloads: &[WorkloadState]) -> String {
     if workloads.is_empty() {
         return "No active workloads.".to_string();
     }
-    let mut out = format!("📦 {} workload{}:", workloads.len(), if workloads.len() != 1 { "s" } else { "" });
+    let mut out = format!(
+        "📦 {} workload{}:",
+        workloads.len(),
+        if workloads.len() != 1 { "s" } else { "" }
+    );
     for w in workloads {
         let status = format!("{:?}", w.status).to_lowercase();
         out.push_str(&format!(
@@ -153,10 +160,7 @@ pub fn format_deploy_result(px_content: &str, nodes: &[ClusterNode]) -> String {
 /// Format `/cluster info` (local node capabilities).
 pub fn format_node_info(caps: &crate::node::NodeCapabilities) -> String {
     let gpu_str = if caps.gpu {
-        caps.gpu_model
-            .as_deref()
-            .unwrap_or("detected")
-            .to_string()
+        caps.gpu_model.as_deref().unwrap_or("detected").to_string()
     } else {
         "none".to_string()
     };

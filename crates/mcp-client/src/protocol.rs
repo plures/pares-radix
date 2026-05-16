@@ -93,7 +93,7 @@ impl Default for InitializeParams {
             protocol_version: "2024-11-05".into(),
             capabilities: ClientCapabilities::default(),
             client_info: ClientInfo {
-                name: "pares-agens".into(),
+                name: "pares-radix".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
             },
         }
@@ -371,7 +371,7 @@ mod tests {
     fn initialize_params_default_has_correct_protocol_version() {
         let params = InitializeParams::default();
         assert_eq!(params.protocol_version, "2024-11-05");
-        assert_eq!(params.client_info.name, "pares-agens");
+        assert_eq!(params.client_info.name, "pares-radix");
     }
 
     #[test]

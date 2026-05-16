@@ -312,7 +312,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
             .into_iter()
             .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/blob/main/Cargo.toml".into(),
+        reference: "https://github.com/plures/pares-radix/blob/main/Cargo.toml".into(),
     });
 
     store.upsert_evidence(Evidence {
@@ -322,7 +322,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
             .into_iter()
             .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/blob/main/.github/workflows/ci.yml"
+        reference: "https://github.com/plures/pares-radix/blob/main/.github/workflows/ci.yml"
             .into(),
     });
 
@@ -338,7 +338,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
         .into_iter()
         .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/blob/main/Cargo.toml".into(),
+        reference: "https://github.com/plures/pares-radix/blob/main/Cargo.toml".into(),
     });
 
     // ── ADR-0003 evidence ────────────────────────────────────────────────────
@@ -350,7 +350,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
             .into_iter()
             .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/tree/main/crates/sync".into(),
+        reference: "https://github.com/plures/pares-radix/tree/main/crates/sync".into(),
     });
 
     // ── ADR-0004 evidence ────────────────────────────────────────────────────
@@ -368,7 +368,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
         .into_iter()
         .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/tree/main/crates/praxis/src/db/schema.rs"
+        reference: "https://github.com/plures/pares-radix/tree/main/crates/praxis/src/db/schema.rs"
             .into(),
     });
 
@@ -386,7 +386,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
         .collect(),
         result: EvidenceResult::Passed,
         reference:
-            "https://github.com/plures/pares-agens/tree/main/crates/praxis/src/db/procedures.rs"
+            "https://github.com/plures/pares-radix/tree/main/crates/praxis/src/db/procedures.rs"
                 .into(),
     });
 
@@ -396,7 +396,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
         tested_at: Utc::now(),
         condition: HashMap::new(),
         result: EvidenceResult::Unknown,
-        reference: "https://github.com/plures/pares-agens/issues/344".into(),
+        reference: "https://github.com/plures/pares-radix/issues/344".into(),
     });
 
     // ── ADR-0013 evidence ────────────────────────────────────────────────────
@@ -413,7 +413,7 @@ pub fn seed_evidence(store: &mut PraxisStore) {
         .into_iter()
         .collect(),
         result: EvidenceResult::Passed,
-        reference: "https://github.com/plures/pares-agens/issues/396".into(),
+        reference: "https://github.com/plures/pares-radix/issues/396".into(),
     });
 }
 

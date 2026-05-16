@@ -1,6 +1,6 @@
 //! Agent-invoke step — allows procedures to call an LLM model during execution.
 //!
-//! The `AgentInvoke` step lives in the application layer (pares-agens), NOT in
+//! The `AgentInvoke` step lives in the application layer (pares-radix), NOT in
 //! PluresDB.  PluresDB procedures are pure data operations; LLM calls are
 //! app-layer concerns.
 //!
@@ -236,9 +236,7 @@ impl AgentInvoke {
         // ── Call the model with timeout ───────────────────────────────────────
         let duration = Duration::from_millis(self.config.timeout_ms);
         let options = ChatOptions::default();
-        let call = self
-            .model_client
-            .complete(&messages, &[], &options);
+        let call = self.model_client.complete(&messages, &[], &options);
 
         let completion = timeout(duration, call)
             .await

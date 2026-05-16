@@ -1,4 +1,4 @@
-//! Tauri IPC commands for the OpenClaw → Pares Agens migration wizard.
+//! Tauri IPC commands for the OpenClaw → Pares Radix migration wizard.
 //!
 //! Three commands are exposed:
 //!
@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
-use pares_agens_migrate::{migrate, openclaw};
+use pares_radix_migrate::{migrate, openclaw};
 
 // ── Serialisable summary ──────────────────────────────────────────────────────
 

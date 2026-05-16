@@ -1,4 +1,4 @@
-//! `pares-agens-sync` — P2P device sync via Hyperswarm DHT for Pares Agens.
+//! `pares-radix-sync` — P2P device sync via Hyperswarm DHT for Pares Radix.
 //!
 //! Implements cross-device memory and state synchronisation using the
 //! Hyperswarm DHT.  The crate provides a pure-Rust abstraction over the
@@ -28,7 +28,7 @@
 //! # Quick start
 //!
 //! ```rust
-//! use pares_agens_sync::{SyncEngine, SyncTopic};
+//! use pares_radix_sync::{SyncEngine, SyncTopic};
 //!
 //! let mut engine = SyncEngine::new("my-device");
 //! engine.subscribe_topic(SyncTopic::MemoryEntries);
@@ -61,7 +61,7 @@ use thiserror::Error;
 
 // ── SyncTopic ─────────────────────────────────────────────────────────────────
 
-/// Hyperswarm DHT topics that Pares Agens devices synchronise over.
+/// Hyperswarm DHT topics that Pares Radix devices synchronise over.
 ///
 /// Each topic corresponds to a logical data domain.  Devices must subscribe to
 /// a topic before they send or receive sync payloads for that domain.
@@ -83,10 +83,10 @@ impl SyncTopic {
     #[must_use]
     pub fn as_key(&self) -> &'static str {
         match self {
-            Self::MemoryEntries => "pares-agens/memory-entries/v1",
-            Self::Procedures => "pares-agens/procedures/v1",
-            Self::AgentConfig => "pares-agens/agent-config/v1",
-            Self::ConversationHistory => "pares-agens/conversation-history/v1",
+            Self::MemoryEntries => "pares-radix/memory-entries/v1",
+            Self::Procedures => "pares-radix/procedures/v1",
+            Self::AgentConfig => "pares-radix/agent-config/v1",
+            Self::ConversationHistory => "pares-radix/conversation-history/v1",
         }
     }
 
@@ -148,16 +148,16 @@ mod tests {
     fn sync_topic_as_key_is_stable() {
         assert_eq!(
             SyncTopic::MemoryEntries.as_key(),
-            "pares-agens/memory-entries/v1"
+            "pares-radix/memory-entries/v1"
         );
-        assert_eq!(SyncTopic::Procedures.as_key(), "pares-agens/procedures/v1");
+        assert_eq!(SyncTopic::Procedures.as_key(), "pares-radix/procedures/v1");
         assert_eq!(
             SyncTopic::AgentConfig.as_key(),
-            "pares-agens/agent-config/v1"
+            "pares-radix/agent-config/v1"
         );
         assert_eq!(
             SyncTopic::ConversationHistory.as_key(),
-            "pares-agens/conversation-history/v1"
+            "pares-radix/conversation-history/v1"
         );
     }
 

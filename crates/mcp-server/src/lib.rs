@@ -30,10 +30,10 @@
 #![warn(missing_docs)]
 
 pub mod browser;
-pub mod server;
 pub mod handler;
 pub mod radix_handler;
+pub mod server;
 
-pub use server::McpServer;
 pub use handler::ToolHandler;
 pub use radix_handler::RadixToolHandler;
+pub use server::McpServer;

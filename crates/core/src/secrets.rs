@@ -179,7 +179,7 @@ impl VaultSecretStore {
             }
             Err(_) => {
                 manager
-                    .init_vault("pares-agens", master_password)
+                    .init_vault("pares-radix", master_password)
                     .await
                     .map_err(|e| SecretError::Storage(e.to_string()))?;
                 manager

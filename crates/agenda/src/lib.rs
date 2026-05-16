@@ -1,4 +1,4 @@
-//! `pares-agens-agenda` — Issue and pull-request workflow management for Pares Agens.
+//! `pares-agens-agenda` — Issue and pull-request workflow management for Pares Radix.
 //!
 //! Provides an in-process issue tracker and lightweight pull-request model so
 //! that Pares agents can manage their own work items without requiring an

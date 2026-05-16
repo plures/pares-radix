@@ -1,5 +1,5 @@
 #![warn(missing_docs)]
-//! `pares-agens-audit` — Comprehensive audit log for Pares Agens.
+//! `pares-agens-audit` — Comprehensive audit log for Pares Radix.
 //!
 //! Provides a full audit trail of what data went where: every model call,
 //! every memory write, every external action.
@@ -51,7 +51,7 @@
 //! # #[tokio::main] async fn main() {
 //! // Open (or create) a durable PluresDB-backed store.
 //! let store = Arc::new(
-//!     PluresDbAuditStore::open("/var/lib/pares-agens/audit").expect("open audit store"),
+//!     PluresDbAuditStore::open("/var/lib/pares-radix/audit").expect("open audit store"),
 //! );
 //!
 //! store.append(AuditEvent::new(

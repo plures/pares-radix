@@ -133,10 +133,8 @@ impl LanDiscovery {
             };
 
             if let Ok(data) = serde_json::to_vec(&announce) {
-                let broadcast_addr = SocketAddr::new(
-                    IpAddr::V4(Ipv4Addr::BROADCAST),
-                    LAN_DISCOVERY_PORT,
-                );
+                let broadcast_addr =
+                    SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), LAN_DISCOVERY_PORT);
                 match socket.send_to(&data, broadcast_addr) {
                     Ok(_) => debug!(topic_prefix = ?prefix, "LAN announce sent"),
                     Err(e) => debug!(error = %e, "LAN announce failed"),
@@ -211,24 +209,32 @@ impl LanDiscovery {
 
     /// Get all currently known LAN peers.
     pub fn known_peers(&self) -> Vec<LanPeer> {
-        self.peers.lock().ok()
+        self.peers
+            .lock()
+            .ok()
             .map(|p| p.values().cloned().collect())
             .unwrap_or_default()
     }
 
     /// Check if a specific device is reachable on the LAN.
     pub fn is_lan_peer(&self, device_id: &str) -> bool {
-        self.peers.lock().ok()
+        self.peers
+            .lock()
+            .ok()
             .map(|p| p.contains_key(device_id))
             .unwrap_or(false)
     }
 
     /// Get the best LAN address for a peer.
     pub fn lan_addr(&self, device_id: &str) -> Option<SocketAddr> {
-        self.peers.lock().ok()
+        self.peers
+            .lock()
+            .ok()
             .and_then(|p| p.get(device_id).cloned())
             .and_then(|peer| {
-                peer.addrs.first().map(|ip| SocketAddr::new(*ip, peer.sync_port))
+                peer.addrs
+                    .first()
+                    .map(|ip| SocketAddr::new(*ip, peer.sync_port))
             })
     }
 }

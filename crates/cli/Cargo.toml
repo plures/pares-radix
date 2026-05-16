@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-cli"
+name = "pares-radix-cli"
 description = "CLI binary for Pares Agens"
 version.workspace = true
 edition.workspace = true
@@ -11,7 +11,7 @@ name = "pares-radix"
 path = "src/main.rs"
 
 [lib]
-name = "pares_agens_migrate"
+name = "pares_radix_migrate"
 path = "src/lib.rs"
 
 [dependencies]
@@ -33,9 +33,9 @@ pares-agens-core = { path = "../core", features = ["embeddings"] }
 pares-agens-channels = { path = "../channels" }
 pares-models = { path = "../models" }
 pares-agens-agenda = { path = "../agenda" }
-pares-agens-tui = { path = "../tui" }
+pares-radix-tui = { path = "../tui" }
 pares-agens-bitnet = { path = "../bitnet", features = ["model-client"] }
-mcp-server = { path = "../mcp-server" }
+pares-radix-mcp-server = { path = "../mcp-server" }
 crossterm = "0.28"
 ratatui = "0.29"
 pares-rector = { path = "../rector" }

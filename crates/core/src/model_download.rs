@@ -65,8 +65,7 @@ impl ModelManager {
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok())
                 {
-                    let local_size =
-                        std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
+                    let local_size = std::fs::metadata(&model_path).map(|m| m.len()).unwrap_or(0);
                     Ok(remote_size != local_size)
                 } else {
                     Ok(false)

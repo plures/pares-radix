@@ -69,11 +69,11 @@ fn default_log_level() -> String {
 }
 fn default_log_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".pares-agens/logs")
+    PathBuf::from(home).join(".pares-radix/logs")
 }
 fn default_memory_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    PathBuf::from(home).join(".pares-agens/memory")
+    PathBuf::from(home).join(".pares-radix/memory")
 }
 
 impl Default for ModelConfig {

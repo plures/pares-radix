@@ -53,7 +53,7 @@ tar.extractall(os.environ['out'] + '/lib')
           allowBuiltinFetchGit = true;
         };
 
-        cargoBuildFlags = [ "-p" "pares-agens-cli" ];
+        cargoBuildFlags = [ "-p" "pares-radix-cli" ];
 
         # Skip tests — 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
         # TODO: fix the tests properly and re-enable
@@ -142,34 +142,34 @@ tar.extractall(os.environ['out'] + '/lib')
       # NixOS module — headless agent daemon service
       nixosModules.default = { config, lib, pkgs, ... }:
         let
-          cfg = config.services.pares-agens;
+          cfg = config.services.pares-radix;
         in
         {
-          options.services.pares-agens = {
-            enable = lib.mkEnableOption "Pares Agens AI agent daemon";
+          options.services.pares-radix = {
+            enable = lib.mkEnableOption "Pares Radix AI agent daemon";
 
             package = lib.mkOption {
               type = lib.types.package;
-              default = pkgs.pares-agens;
-              defaultText = lib.literalExpression "pkgs.pares-agens";
-              description = "The pares-agens package to use. Requires the pares-radix overlay.";
+              default = pkgs.pares-radix;
+              defaultText = lib.literalExpression "pkgs.pares-radix";
+              description = "The pares-radix package to use. Requires the pares-radix overlay.";
             };
 
             user = lib.mkOption {
               type = lib.types.str;
-              default = "pares-agens";
+              default = "pares-radix";
               description = "User account under which the service runs.";
             };
 
             group = lib.mkOption {
               type = lib.types.str;
-              default = "pares-agens";
+              default = "pares-radix";
               description = "Group under which the service runs.";
             };
 
             dataDir = lib.mkOption {
               type = lib.types.path;
-              default = "/var/lib/pares-agens";
+              default = "/var/lib/pares-radix";
               description = "Directory for PluresDB storage and Copilot auth cache.";
             };
 
@@ -244,11 +244,11 @@ tar.extractall(os.environ['out'] + '/lib')
             assertions = [
               {
                 assertion = cfg.telegramTokenFile != null;
-                message = "services.pares-agens.telegramTokenFile must be set.";
+                message = "services.pares-radix.telegramTokenFile must be set.";
               }
               {
                 assertion = cfg.syncTopicKey == null || cfg.syncSharedKeyFile != null;
-                message = "services.pares-agens.syncSharedKeyFile must be set when syncTopicKey is configured.";
+                message = "services.pares-radix.syncSharedKeyFile must be set when syncTopicKey is configured.";
               }
             ];
 
@@ -261,8 +261,8 @@ tar.extractall(os.environ['out'] + '/lib')
 
             users.groups.${cfg.group} = lib.mkIf cfg.createUser {};
 
-            systemd.services.pares-agens = {
-              description = "Pares Agens — AI Agent Daemon";
+            systemd.services.pares-radix = {
+              description = "Pares Radix — AI Agent Daemon";
               wantedBy = [ "multi-user.target" ];
               after = [ "network-online.target" ];
               wants = [ "network-online.target" ];

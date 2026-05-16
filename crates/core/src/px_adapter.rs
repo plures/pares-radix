@@ -1,7 +1,7 @@
 //! Bridge between compiled `.px` procedures and the core [`Procedure`] trait.
 //!
 //! This module provides [`PxProcedureAdapter`], which wraps a compiled `.px`
-//! procedure record (from `pares-agens-praxis`) and implements the core
+//! procedure record (from `pares-radix-praxis`) and implements the core
 //! [`Procedure`] trait so that `.px` procedures can be registered in the
 //! [`ProcedureRegistry`] and dispatched through the normal event system.
 //!
@@ -20,7 +20,7 @@
 //! # Action Handler Integration
 //!
 //! The adapter requires an [`AsyncActionHandler`] implementation that bridges
-//! the synchronous [`pares_agens_praxis::px::executor::ActionHandler`] into
+//! the synchronous [`pares_radix_praxis::px::executor::ActionHandler`] into
 //! the async world of the core event loop. This is the integration point
 //! where tool calls, model invocations, and state mutations are wired in.
 
@@ -32,7 +32,7 @@ use serde_json::Value;
 
 use crate::event::Event;
 use crate::procedure::Procedure;
-use pares_agens_praxis::px::executor::{self, ActionHandler, ExecutionError, ExecutionResult};
+use pares_radix_praxis::px::executor::{self, ActionHandler, ExecutionError, ExecutionResult};
 
 // ── Async Action Handler ─────────────────────────────────────────────────────
 
@@ -73,21 +73,37 @@ pub trait AsyncActionHandler: Send + Sync {
 /// - `$new_value` — new value (for StateChange events)
 pub fn default_event_to_vars(event: &Event) -> HashMap<String, Value> {
     let mut vars = HashMap::new();
-    vars.insert("event_kind".to_string(), Value::String(event.kind().to_string()));
+    vars.insert(
+        "event_kind".to_string(),
+        Value::String(event.kind().to_string()),
+    );
 
     match event {
-        Event::Message { id, channel, sender, content } => {
+        Event::Message {
+            id,
+            channel,
+            sender,
+            content,
+        } => {
             vars.insert("message_id".to_string(), Value::String(id.clone()));
             vars.insert("channel".to_string(), Value::String(channel.clone()));
             vars.insert("sender".to_string(), Value::String(sender.clone()));
             vars.insert("content".to_string(), Value::String(content.clone()));
         }
-        Event::Timer { id, name, recurring } => {
+        Event::Timer {
+            id,
+            name,
+            recurring,
+        } => {
             vars.insert("timer_id".to_string(), Value::String(id.clone()));
             vars.insert("timer_name".to_string(), Value::String(name.clone()));
             vars.insert("recurring".to_string(), Value::Bool(*recurring));
         }
-        Event::StateChange { key, old_value, new_value } => {
+        Event::StateChange {
+            key,
+            old_value,
+            new_value,
+        } => {
             vars.insert("key".to_string(), Value::String(key.clone()));
             if let Some(old) = old_value {
                 vars.insert("old_value".to_string(), old.clone());
@@ -136,7 +152,7 @@ impl ActionHandler for BlockingHandlerWrapper {
 ///
 /// ```ignore
 /// use pares_agens_core::px_adapter::{PxProcedureAdapter, AsyncActionHandler};
-/// use pares_agens_praxis::px::{parse, compiler::compile};
+/// use pares_radix_praxis::px::{parse, compiler::compile};
 ///
 /// let source = r#"procedure on_message:
 ///   trigger: message
@@ -170,10 +186,7 @@ impl PxProcedureAdapter {
     /// Create an adapter from a compiled procedure record.
     ///
     /// Returns `None` if the record is not a valid procedure or lacks a trigger.
-    pub fn from_compiled(
-        data: Value,
-        handler: Arc<dyn AsyncActionHandler>,
-    ) -> Option<Self> {
+    pub fn from_compiled(data: Value, handler: Arc<dyn AsyncActionHandler>) -> Option<Self> {
         let record_type = data.get("type")?.as_str()?;
         if record_type != "procedure" {
             return None;
@@ -259,9 +272,20 @@ impl PxProcedureAdapter {
         // Input parameters are $vars that aren't produced by earlier steps
         // (and aren't built-in event vars)
         let builtin_vars: std::collections::HashSet<&str> = [
-            "event_kind", "channel", "sender", "content", "message_id",
-            "timer_id", "timer_name", "recurring", "key", "old_value", "new_value",
-        ].into_iter().collect();
+            "event_kind",
+            "channel",
+            "sender",
+            "content",
+            "message_id",
+            "timer_id",
+            "timer_name",
+            "recurring",
+            "key",
+            "old_value",
+            "new_value",
+        ]
+        .into_iter()
+        .collect();
 
         let mut properties = serde_json::Map::new();
         for var in &inputs {
@@ -539,10 +563,9 @@ pub fn load_px_procedures(
     source: &str,
     handler: Arc<dyn AsyncActionHandler>,
 ) -> Result<Vec<PxProcedureAdapter>, String> {
-    let doc = pares_agens_praxis::px::parse(source)
-        .map_err(|e| format!("parse error: {e}"))?;
+    let doc = pares_radix_praxis::px::parse(source).map_err(|e| format!("parse error: {e}"))?;
 
-    let records = pares_agens_praxis::px::compiler::compile(&doc);
+    let records = pares_radix_praxis::px::compiler::compile(&doc);
 
     let adapters: Vec<PxProcedureAdapter> = records
         .into_iter()
@@ -640,9 +663,8 @@ mod tests {
             ]
         });
 
-        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
-            TestHandler::new().with_result("say_hello", json!("hello world")),
-        );
+        let handler: Arc<dyn AsyncActionHandler> =
+            Arc::new(TestHandler::new().with_result("say_hello", json!("hello world")));
         let adapter = PxProcedureAdapter::from_compiled(data, handler).unwrap();
 
         let event = Event::Message {
@@ -668,9 +690,8 @@ mod tests {
             ]
         });
 
-        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
-            TestHandler::new().with_result("do_check", json!("green")),
-        );
+        let handler: Arc<dyn AsyncActionHandler> =
+            Arc::new(TestHandler::new().with_result("do_check", json!("green")));
         let adapter = PxProcedureAdapter::from_compiled(data, handler).unwrap();
 
         let vars = HashMap::new();
@@ -698,9 +719,8 @@ mod tests {
     #[test]
     fn load_px_procedures_parses_and_wraps() {
         let source = "procedure health_check:\n  trigger: manual\n  check_health {} -> $status\n";
-        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
-            TestHandler::new().with_result("check_health", json!("ok")),
-        );
+        let handler: Arc<dyn AsyncActionHandler> =
+            Arc::new(TestHandler::new().with_result("check_health", json!("ok")));
 
         let adapters = load_px_procedures(source, handler).unwrap();
         assert_eq!(adapters.len(), 1);
@@ -720,9 +740,8 @@ mod tests {
             ]
         });
 
-        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
-            TestHandler::new().with_result("llm_complete", json!("done")),
-        );
+        let handler: Arc<dyn AsyncActionHandler> =
+            Arc::new(TestHandler::new().with_result("llm_complete", json!("done")));
         let adapter = PxProcedureAdapter::from_compiled(data, handler).unwrap();
         let tool_def = adapter.tool_definition();
 
@@ -778,9 +797,7 @@ mod tests {
 
     #[test]
     fn load_px_directory_handles_missing_dir() {
-        let handler: Arc<dyn AsyncActionHandler> = Arc::new(
-            TestHandler::new(),
-        );
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(TestHandler::new());
         let adapters = load_px_directory(std::path::Path::new("/nonexistent/path"), handler);
         assert!(adapters.is_empty());
     }

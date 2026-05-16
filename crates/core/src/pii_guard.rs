@@ -25,19 +25,43 @@ impl PiiGuard {
     pub fn new() -> Self {
         let patterns: Vec<(regex::Regex, &'static str)> = vec![
             // GitHub PATs (classic and fine-grained)
-            (regex::Regex::new(r"ghp_[A-Za-z0-9]{36}").unwrap(), "[GITHUB_PAT]"),
-            (regex::Regex::new(r"github_pat_[A-Za-z0-9_]{82}").unwrap(), "[GITHUB_PAT]"),
+            (
+                regex::Regex::new(r"ghp_[A-Za-z0-9]{36}").unwrap(),
+                "[GITHUB_PAT]",
+            ),
+            (
+                regex::Regex::new(r"github_pat_[A-Za-z0-9_]{82}").unwrap(),
+                "[GITHUB_PAT]",
+            ),
             // OpenAI keys
-            (regex::Regex::new(r"sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}").unwrap(), "[OPENAI_KEY]"),
-            (regex::Regex::new(r"sk-proj-[A-Za-z0-9\-_]{40,}").unwrap(), "[OPENAI_KEY]"),
+            (
+                regex::Regex::new(r"sk-[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}").unwrap(),
+                "[OPENAI_KEY]",
+            ),
+            (
+                regex::Regex::new(r"sk-proj-[A-Za-z0-9\-_]{40,}").unwrap(),
+                "[OPENAI_KEY]",
+            ),
             // AWS keys
             (regex::Regex::new(r"AKIA[A-Z0-9]{16}").unwrap(), "[AWS_KEY]"),
             // Azure/Microsoft tokens
-            (regex::Regex::new(r"eyJ[A-Za-z0-9\-_]{50,}\.[A-Za-z0-9\-_]{50,}\.[A-Za-z0-9\-_]{20,}").unwrap(), "[JWT_TOKEN]"),
+            (
+                regex::Regex::new(
+                    r"eyJ[A-Za-z0-9\-_]{50,}\.[A-Za-z0-9\-_]{50,}\.[A-Za-z0-9\-_]{20,}",
+                )
+                .unwrap(),
+                "[JWT_TOKEN]",
+            ),
             // Private keys
-            (regex::Regex::new(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----").unwrap(), "[PRIVATE_KEY_HEADER]"),
+            (
+                regex::Regex::new(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----").unwrap(),
+                "[PRIVATE_KEY_HEADER]",
+            ),
             // Generic long hex secrets (64+ chars, likely keys)
-            (regex::Regex::new(r"\b[0-9a-f]{64,}\b").unwrap(), "[HEX_SECRET]"),
+            (
+                regex::Regex::new(r"\b[0-9a-f]{64,}\b").unwrap(),
+                "[HEX_SECRET]",
+            ),
         ];
         Self { patterns }
     }
@@ -50,10 +74,9 @@ impl PiiGuard {
         for (pattern, replacement) in &self.patterns {
             if pattern.is_match(&redacted) {
                 let match_count = pattern.find_iter(&redacted).count();
-                report.redactions.push(format!(
-                    "{}x {}",
-                    match_count, replacement
-                ));
+                report
+                    .redactions
+                    .push(format!("{}x {}", match_count, replacement));
                 report.count += match_count;
                 redacted = pattern.replace_all(&redacted, *replacement).into_owned();
             }

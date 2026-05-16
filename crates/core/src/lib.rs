@@ -30,16 +30,18 @@
 //! # }
 //! ```
 
-/// Chronos version timeline — causal audit trail for every data mutation.
-pub mod chronos;
-/// Content-addressed deduplicating blob storage.
-pub mod content_store;
 /// High-level agent abstraction and in-memory storage.
 pub mod agent;
 /// Authentication helpers for external providers.
 pub mod auth;
 /// Cerebellum orchestrator — autorecall, routing, and pipeline execution.
 pub mod cerebellum;
+/// Chronos version timeline — causal audit trail for every data mutation.
+pub mod chronos;
+/// Shared slash command registry for all channel adapters.
+pub mod commands;
+/// Content-addressed deduplicating blob storage.
+pub mod content_store;
 /// Local multi-agent delegation and concurrent sub-task execution.
 pub mod delegation;
 /// Event types consumed and emitted by the reactive event loop.
@@ -76,8 +78,6 @@ pub mod source;
 pub mod state;
 /// Privacy-first anonymous telemetry aggregation primitives.
 pub mod telemetry;
-/// Shared slash command registry for all channel adapters.
-pub mod commands;
 
 pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};
@@ -85,7 +85,7 @@ pub use event::Event;
 pub use state::{InMemoryStateStore, PluresDbStateStore, StateStore};
 /// Channel capability contracts for output rendering.
 pub mod channel_contract;
-/// Event spine — bridges pares-agens to PluresDB's AgensRuntime.
+/// Event spine — bridges pares-radix to PluresDB's AgensRuntime.
 pub mod event_spine;
 pub mod lifecycle;
 /// Personality contracts — identity, tone, and behavioral rules.
@@ -97,22 +97,22 @@ pub mod renderers;
 /// Tool execution governance — policies, timeouts, blocked-command filtering.
 pub mod tool_governance;
 
-pub mod model_download;
 /// Heartbeat system — periodic proactive check-ins.
 pub mod heartbeat;
+pub mod model_download;
 /// Plugin framework — application platform for schema-driven apps.
 pub mod plugins;
 /// Session persistence — save and restore conversation sessions.
 pub mod session;
 /// Praxis-driven task model — tracked units of work with completion conditions.
 pub mod task;
-/// Task manager — CRUD and lifecycle for tasks backed by PluresDB.
-pub mod task_manager;
 /// Task loop — idle-time evaluator that cycles open tasks.
 pub mod task_loop;
+/// Task manager — CRUD and lifecycle for tasks backed by PluresDB.
+pub mod task_manager;
 
-pub mod health;
 pub mod error_display;
+pub mod health;
 pub mod pii_guard;
 /// Bridge between compiled `.px` procedures and the core [`Procedure`] trait.
 pub mod px_adapter;

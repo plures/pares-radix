@@ -8,7 +8,7 @@
 //! | Concept       | Mapping                                         |
 //! |---------------|-------------------------------------------------|
 //! | Table/bucket  | All state nodes share a common `actor` tag      |
-//! |               | `"pares-agens-state"` for write attribution.    |
+//! |               | `"pares-radix-state"` for write attribution.    |
 //! | Row key       | The state key string, used directly as the      |
 //! |               | [`NodeId`] so lookups are O(1) hash-map reads.  |
 //! | Row value     | The [`serde_json::Value`] stored verbatim as    |
@@ -27,7 +27,7 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 
 /// The PluresDB actor ID used for all state write operations.
-const ACTOR: &str = "pares-agens-state";
+const ACTOR: &str = "pares-radix-state";
 
 // ---------------------------------------------------------------------------
 // Trait
@@ -251,7 +251,9 @@ mod tests {
     async fn in_memory_keys_with_prefix() {
         let store = InMemoryStateStore::new();
         store.set("config:model", json!("gpt-4")).await;
-        store.set("config:endpoint", json!("http://localhost")).await;
+        store
+            .set("config:endpoint", json!("http://localhost"))
+            .await;
         store.set("state:version", json!(1)).await;
 
         let mut keys = store.keys_with_prefix("config:").await;
@@ -333,7 +335,9 @@ mod tests {
     async fn pluresdb_keys_with_prefix() {
         let store = PluresDbStateStore::in_memory();
         store.set("config:model", json!("gpt-4")).await;
-        store.set("config:endpoint", json!("http://localhost")).await;
+        store
+            .set("config:endpoint", json!("http://localhost"))
+            .await;
         store.set("state:version", json!(1)).await;
 
         let mut keys = store.keys_with_prefix("config:").await;

@@ -1,4 +1,4 @@
-//! `pares-agens-marketplace` — Skill and extension marketplace for Pares Agens.
+//! `pares-radix-marketplace` — Skill and extension marketplace for Pares Radix.
 //!
 //! Provides skill/extension discovery, metadata parsing and validation,
 //! installation workflows, security checks for third-party code, and

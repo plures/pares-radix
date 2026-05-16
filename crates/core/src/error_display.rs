@@ -6,7 +6,7 @@
 /// Summarize an error for user-facing display.
 ///
 /// Strips:
-/// - Absolute file paths (e.g. `/home/user/.pares-agens/...`)
+/// - Absolute file paths (e.g. `/home/user/.pares-radix/...`)
 /// - Stack traces / backtrace lines
 /// - Repeated "Caused by:" chains beyond the first
 /// - Internal crate names
@@ -43,7 +43,7 @@ pub fn summarize_error_str(raw: &str) -> String {
     let mut result = lines.join("\n");
 
     // Strip absolute paths
-    let path_re = regex::Regex::new(r"/[a-zA-Z0-9_./-]+/\.pares-agens/[a-zA-Z0-9_./-]+")
+    let path_re = regex::Regex::new(r"/[a-zA-Z0-9_./-]+/\.pares-radix/[a-zA-Z0-9_./-]+")
         .unwrap_or_else(|_| regex::Regex::new(r"^$").unwrap());
     result = path_re.replace_all(&result, "<internal path>").to_string();
 
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn strips_paths() {
-        let msg = "failed to read /home/user/.pares-agens/memory/db.sqlite: permission denied";
+        let msg = "failed to read /home/user/.pares-radix/memory/db.sqlite: permission denied";
         let result = summarize_error_str(msg);
         assert!(!result.contains("/home/user"));
         assert!(result.contains("permission denied"));

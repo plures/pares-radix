@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{debug, info, warn};
 
-use mcp_client::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
+use pares_radix_mcp_client::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 
 use crate::handler::ToolHandler;
 
@@ -69,8 +69,7 @@ impl McpServer {
                             data: None,
                         }),
                     };
-                    let response_json =
-                        serde_json::to_string(&error_response).unwrap_or_default();
+                    let response_json = serde_json::to_string(&error_response).unwrap_or_default();
                     stdout
                         .write_all(response_json.as_bytes())
                         .await
@@ -197,10 +196,7 @@ impl McpServer {
             })?
             .to_string();
 
-        let arguments = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or(json!({}));
+        let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
         debug!(tool = %name, "calling tool");
 
@@ -233,11 +229,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ToolHandler for MockHandler {
-        async fn list_tools(&self) -> Vec<mcp_client::protocol::Tool> {
-            vec![mcp_client::protocol::Tool {
+        async fn list_tools(&self) -> Vec<pares_radix_mcp_client::protocol::Tool> {
+            vec![pares_radix_mcp_client::protocol::Tool {
                 name: "test_tool".to_string(),
                 description: Some("A test tool".to_string()),
-                input_schema: mcp_client::protocol::ToolInputSchema {
+                input_schema: pares_radix_mcp_client::protocol::ToolInputSchema {
                     schema_type: "object".to_string(),
                     properties: Some(json!({"input": {"type": "string"}})),
                     required: Some(vec!["input".to_string()]),
@@ -285,10 +281,7 @@ mod tests {
         let result = server.handle_tools_call(params).await.unwrap();
         let content = result["content"].as_array().unwrap();
         assert_eq!(content[0]["type"], "text");
-        assert!(content[0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("test_tool"));
+        assert!(content[0]["text"].as_str().unwrap().contains("test_tool"));
         assert_eq!(result["isError"], false);
     }
 

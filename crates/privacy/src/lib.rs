@@ -1,4 +1,4 @@
-//! `pares-agens-privacy` — Privacy filter and PII protection for Pares Agens.
+//! `pares-agens-privacy` — Privacy filter and PII protection for Pares Radix.
 //!
 //! Provides PII detection and scrubbing for training data, differential
 //! privacy noise injection for adapter weights, red-team testing, and
@@ -405,10 +405,7 @@ impl PrivacyFilter {
     /// # Errors
     ///
     /// Returns [`PrivacyError::InvalidConfig`] when the adapter path is empty.
-    pub fn red_team_test(
-        &self,
-        adapter: &LoRAAdapter,
-    ) -> Result<RedTeamResults, PrivacyError> {
+    pub fn red_team_test(&self, adapter: &LoRAAdapter) -> Result<RedTeamResults, PrivacyError> {
         if adapter.adapter_path.is_empty() {
             return Err(PrivacyError::InvalidConfig(
                 "adapter_path must not be empty".to_string(),

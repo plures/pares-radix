@@ -7,10 +7,10 @@
 //! # Quick start
 //!
 //! ```no_run
-//! use mcp_client::{McpClient, transport::stdio::StdioTransport};
+//! use pares_radix_mcp_client::{McpClient, transport::stdio::StdioTransport};
 //!
 //! #[tokio::main]
-//! async fn main() -> mcp_client::Result<()> {
+//! async fn main() -> pares_radix_mcp_client::Result<()> {
 //!     let transport = StdioTransport::spawn("uvx", &["mcp-server-time"]).await?;
 //!     let mut client = McpClient::new(transport);
 //!     client.initialize().await?;

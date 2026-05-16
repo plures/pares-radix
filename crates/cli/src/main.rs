@@ -1,10 +1,10 @@
-//! `pares-agens` CLI binary.
+//! `pares-radix` CLI binary.
 //!
 //! # Usage
 //!
 //! ```text
-//! pares-agens migrate [--from ~/.openclaw] [--output ./migration] [--dry-run]
-//! pares-agens serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
+//! pares-radix migrate [--from ~/.openclaw] [--output ./migration] [--dry-run]
+//! pares-radix serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
 //! ```
 
 mod config;
@@ -27,6 +27,7 @@ use uuid::Uuid;
 
 use reqwest::header::{HeaderMap, HeaderValue};
 
+use pares_agens_bitnet::BitnetModelClient;
 use pares_agens_channels::adapter::ChannelAdapter;
 use pares_agens_channels::telegram::{
     TelegramAdapter, TelegramConfig, TelegramConfigControl, TelegramModelControl,
@@ -46,23 +47,22 @@ use pares_agens_core::memory::{
 use pares_agens_core::model::{
     ChatMessage as CoreChatMessage, ChatOptions, ModelClient, ToolDefinition, ToolDispatcher,
 };
-use pares_agens_core::procedure::{Procedure, ProcedureRegistry};
 use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
+use pares_agens_core::procedure::{Procedure, ProcedureRegistry};
 use pares_agens_core::shell_executor::{ExecRequest, ShellExecutor};
 use pares_agens_core::tool_governance::{GovernanceVerdict, ToolGovernor};
 use pares_agens_core::Event;
 use pares_agens_core::{PluresDbStateStore, StateStore};
-use pares_agens_bitnet::BitnetModelClient;
-use pares_agens_migrate::{migrate, openclaw};
 use pares_models::config::{ProviderConfig, RouterConfig};
 use pares_models::router::ModelRouter;
 use pares_models::types::{ChatCompletionRequest, ChatMessage, Role, Tool};
+use pares_radix_migrate::{migrate, openclaw};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "pares-agens",
+    name = "pares-radix",
     version,
-    about = "Pares Agens agent runtime CLI",
+    about = "Pares Radix agent runtime CLI",
     long_about = None,
 )]
 struct Cli {
@@ -328,7 +328,9 @@ impl RuntimeAgentFactory {
                     cerebellum.with_classifier(classifier)
                 }
                 Err(e) => {
-                    tracing::warn!("BitNet classifier failed to load: {e}, falling back to heuristic");
+                    tracing::warn!(
+                        "BitNet classifier failed to load: {e}, falling back to heuristic"
+                    );
                     let classifier = pares_agens_core::cerebellum::classifier::CerebellumClassifier::heuristic_only(vec![]);
                     cerebellum.with_classifier(classifier)
                 }
@@ -341,7 +343,8 @@ impl RuntimeAgentFactory {
 
         // Create default personality contract. Runtime seeding into PluresDB
         // happens in the async serve path.
-        let personality = pares_agens_core::personality::PersonalityContract::default_contract(None);
+        let personality =
+            pares_agens_core::personality::PersonalityContract::default_contract(None);
         let delegation_broker = DelegationBroker::new(
             Arc::clone(&self.registry),
             Arc::clone(&self.model_client),
@@ -362,7 +365,7 @@ impl RuntimeAgentFactory {
                 .with_personality(personality)
                 .with_chronos({
                     let chronos = pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
-                        self.store.crdt_store_arc()
+                        self.store.crdt_store_arc(),
                     );
                     Arc::new(chronos)
                 }),
@@ -525,7 +528,9 @@ impl TelegramPersonalityControl for RuntimePersonalityControl {
     }
 
     async fn add_rule(&self, rule_text: &str) -> Result<String, String> {
-        use pares_agens_core::personality::{BehaviorRule, PersonalityContract, PERSONALITY_STATE_KEY};
+        use pares_agens_core::personality::{
+            BehaviorRule, PersonalityContract, PERSONALITY_STATE_KEY,
+        };
         let mut contract = match self.state_store.get(PERSONALITY_STATE_KEY).await {
             Some(v) => serde_json::from_value::<PersonalityContract>(v)
                 .map_err(|e| format!("parse error: {e}"))?,
@@ -579,21 +584,32 @@ impl TelegramPersonalityControl for RuntimePersonalityControl {
     async fn get_document(&self, doc_type: &str) -> String {
         use pares_agens_core::personality::get_document;
         match get_document(self.state_store.as_ref(), doc_type).await {
-            Some(doc) => format!("## {} (updated: {})\n{}", doc.doc_type, doc.updated_at, doc.content),
+            Some(doc) => format!(
+                "## {} (updated: {})\n{}",
+                doc.doc_type, doc.updated_at, doc.content
+            ),
             None => format!("No '{doc_type}' document found."),
         }
     }
 
     async fn set_document(&self, doc_type: &str, content: &str) -> Result<(), String> {
-        use pares_agens_core::personality::{store_document, get_all_documents, format_documents_for_prompt, PERSONALITY_DOC_TYPES};
+        use pares_agens_core::personality::{
+            format_documents_for_prompt, get_all_documents, store_document, PERSONALITY_DOC_TYPES,
+        };
         if !PERSONALITY_DOC_TYPES.contains(&doc_type) {
-            return Err(format!("Unknown document type '{}'. Valid types: {:?}", doc_type, PERSONALITY_DOC_TYPES));
+            return Err(format!(
+                "Unknown document type '{}'. Valid types: {:?}",
+                doc_type, PERSONALITY_DOC_TYPES
+            ));
         }
         store_document(self.state_store.as_ref(), doc_type, content).await;
         // Update agent cache
         let docs = get_all_documents(self.state_store.as_ref()).await;
         let formatted = format_documents_for_prompt(&docs);
-        self.agent.read().await.set_personality_documents(Some(formatted));
+        self.agent
+            .read()
+            .await
+            .set_personality_documents(Some(formatted));
         Ok(())
     }
 }
@@ -737,14 +753,20 @@ impl ToolDispatcher for ProcedureToolDispatcher {
         // --- Governance pre-execution check ---
         match self.governor.check(name, &args_str) {
             GovernanceVerdict::Blocked { pattern } => {
-                let result = format!("Command blocked by policy: matched blocked pattern \"{}\".", pattern);
+                let result = format!(
+                    "Command blocked by policy: matched blocked pattern \"{}\".",
+                    pattern
+                );
                 self.trace_store
                     .record_for_current_request(name, &args_for_trace, &result, true)
                     .await;
                 return result;
             }
             GovernanceVerdict::AllowWithApprovalWarning => {
-                tracing::info!(tool = name, "tool execution proceeding with approval warning (Phase 5+)");
+                tracing::info!(
+                    tool = name,
+                    "tool execution proceeding with approval warning (Phase 5+)"
+                );
             }
             GovernanceVerdict::Allow => {}
         }
@@ -791,7 +813,11 @@ impl ToolDispatcher for ProcedureToolDispatcher {
         };
 
         let elapsed = start.elapsed();
-        tracing::debug!(tool = name, elapsed_ms = elapsed.as_millis() as u64, "tool execution completed");
+        tracing::debug!(
+            tool = name,
+            elapsed_ms = elapsed.as_millis() as u64,
+            "tool execution completed"
+        );
         for result in results {
             if let Event::ToolResult {
                 content, is_error, ..
@@ -1036,30 +1062,36 @@ impl Procedure for RunCommandProcedure {
                     Ok(args) => {
                         let command = match args.get("command").and_then(|v| v.as_str()) {
                             Some(c) => c.to_string(),
-                            None => return vec![Event::ToolResult {
-                                tool_call_id: id.clone(),
-                                tool_name: "run_command".into(),
-                                content: "missing 'command' argument".into(),
-                                is_error: true,
-                            }],
+                            None => {
+                                return vec![Event::ToolResult {
+                                    tool_call_id: id.clone(),
+                                    tool_name: "run_command".into(),
+                                    content: "missing 'command' argument".into(),
+                                    is_error: true,
+                                }]
+                            }
                         };
 
                         let req = ExecRequest {
                             command,
-                            workdir: args.get("workdir").and_then(|v| v.as_str()).map(String::from),
-                            env: args.get("env")
-                                .and_then(|v| serde_json::from_value::<HashMap<String, String>>(v.clone()).ok())
+                            workdir: args
+                                .get("workdir")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                            env: args
+                                .get("env")
+                                .and_then(|v| {
+                                    serde_json::from_value::<HashMap<String, String>>(v.clone())
+                                        .ok()
+                                })
                                 .unwrap_or_default(),
-                            timeout_secs: args.get("timeout")
-                                .and_then(|v| v.as_u64()),
-                            background: args.get("background")
+                            timeout_secs: args.get("timeout").and_then(|v| v.as_u64()),
+                            background: args
+                                .get("background")
                                 .and_then(|v| v.as_bool())
                                 .unwrap_or(false),
-                            pty: args.get("pty")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false),
-                            yield_ms: args.get("yieldMs")
-                                .and_then(|v| v.as_u64()),
+                            pty: args.get("pty").and_then(|v| v.as_bool()).unwrap_or(false),
+                            yield_ms: args.get("yieldMs").and_then(|v| v.as_u64()),
                         };
 
                         let exec_result = self.executor.exec(req).await;
@@ -1076,7 +1108,10 @@ impl Procedure for RunCommandProcedure {
                             } else {
                                 format!(
                                     "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
-                                    exec_result.exit_code.map(|c| c.to_string()).unwrap_or("signal".into()),
+                                    exec_result
+                                        .exit_code
+                                        .map(|c| c.to_string())
+                                        .unwrap_or("signal".into()),
                                     exec_result.stdout,
                                     exec_result.stderr
                                 )
@@ -1087,7 +1122,10 @@ impl Procedure for RunCommandProcedure {
                         } else {
                             format!(
                                 "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
-                                exec_result.exit_code.map(|c| c.to_string()).unwrap_or("signal".into()),
+                                exec_result
+                                    .exit_code
+                                    .map(|c| c.to_string())
+                                    .unwrap_or("signal".into()),
                                 exec_result.stdout,
                                 exec_result.stderr
                             )
@@ -1125,12 +1163,14 @@ impl Procedure for ProcessManageProcedure {
             Event::Message { id, content, .. } => {
                 let args = match parse_tool_args(content) {
                     Ok(a) => a,
-                    Err(e) => return vec![Event::ToolResult {
-                        tool_call_id: id.clone(),
-                        tool_name: "process".into(),
-                        content: e,
-                        is_error: true,
-                    }],
+                    Err(e) => {
+                        return vec![Event::ToolResult {
+                            tool_call_id: id.clone(),
+                            tool_name: "process".into(),
+                            content: e,
+                            is_error: true,
+                        }]
+                    }
                 };
 
                 let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("");
@@ -1142,33 +1182,44 @@ impl Procedure for ProcessManageProcedure {
                         if sessions.is_empty() {
                             "No active sessions.".to_string()
                         } else {
-                            sessions.iter().map(|s| {
-                                format!("{} | {} | {} | exit={:?} | {}s",
-                                    s.id,
-                                    if s.running { "running" } else { "exited" },
-                                    s.command.chars().take(60).collect::<String>(),
-                                    s.exit_code,
-                                    s.elapsed_secs
-                                )
-                            }).collect::<Vec<_>>().join("\n")
+                            sessions
+                                .iter()
+                                .map(|s| {
+                                    format!(
+                                        "{} | {} | {} | exit={:?} | {}s",
+                                        s.id,
+                                        if s.running { "running" } else { "exited" },
+                                        s.command.chars().take(60).collect::<String>(),
+                                        s.exit_code,
+                                        s.elapsed_secs
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n")
                         }
                     }
                     "poll" => {
                         let timeout_ms = args.get("timeout").and_then(|v| v.as_u64());
                         match self.executor.poll(session_id, timeout_ms).await {
                             Some(pr) => {
-                                let status = if pr.running { "running" } else {
-                                    "exited"
-                                };
-                                format!("Session {}: {}\nexit_code: {:?}\nnew output:\n{}",
-                                    pr.session_id, status, pr.exit_code, pr.new_output)
+                                let status = if pr.running { "running" } else { "exited" };
+                                format!(
+                                    "Session {}: {}\nexit_code: {:?}\nnew output:\n{}",
+                                    pr.session_id, status, pr.exit_code, pr.new_output
+                                )
                             }
                             None => format!("Session '{session_id}' not found."),
                         }
                     }
                     "log" => {
-                        let offset = args.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
-                        let limit = args.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+                        let offset = args
+                            .get("offset")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as usize);
+                        let limit = args
+                            .get("limit")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as usize);
                         match self.executor.log(session_id, offset, limit).await {
                             Some(log) => log,
                             None => format!("Session '{session_id}' not found."),
@@ -1181,13 +1232,13 @@ impl Procedure for ProcessManageProcedure {
                             Err(e) => format!("Write failed: {e}"),
                         }
                     }
-                    "kill" => {
-                        match self.executor.kill(session_id).await {
-                            Ok(()) => format!("Session '{session_id}' killed."),
-                            Err(e) => format!("Kill failed: {e}"),
-                        }
+                    "kill" => match self.executor.kill(session_id).await {
+                        Ok(()) => format!("Session '{session_id}' killed."),
+                        Err(e) => format!("Kill failed: {e}"),
+                    },
+                    other => {
+                        format!("Unknown process action: '{other}'. Use list/poll/log/write/kill.")
                     }
-                    other => format!("Unknown process action: '{other}'. Use list/poll/log/write/kill."),
                 };
 
                 vec![Event::ToolResult {
@@ -1336,10 +1387,10 @@ impl Procedure for WebFetchProcedure {
                 let result = match parse_tool_args(content) {
                     Ok(args) => match args.get("url").and_then(|v| v.as_str()) {
                         Some(url) => {
-                            let max_chars = args
-                                .get("max_chars")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(30_000) as usize;
+                            let max_chars =
+                                args.get("max_chars")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(30_000) as usize;
                             let extract_mode = args
                                 .get("extract_mode")
                                 .and_then(|v| v.as_str())
@@ -1360,7 +1411,9 @@ impl Procedure for WebFetchProcedure {
                                         .to_string();
                                     match response.text().await.map_err(|e| e.to_string()) {
                                         Ok(body) => {
-                                            let extracted = if content_type.contains("text/html") || body.trim_start().starts_with('<') {
+                                            let extracted = if content_type.contains("text/html")
+                                                || body.trim_start().starts_with('<')
+                                            {
                                                 // HTML → readable text extraction
                                                 let width = match extract_mode {
                                                     "text" => 80,
@@ -1372,7 +1425,8 @@ impl Procedure for WebFetchProcedure {
                                                 body
                                             };
                                             let truncated = if extracted.len() > max_chars {
-                                                let mut s: String = extracted.chars().take(max_chars).collect();
+                                                let mut s: String =
+                                                    extracted.chars().take(max_chars).collect();
                                                 s.push_str("\n\n[...truncated]");
                                                 s
                                             } else {
@@ -1512,10 +1566,8 @@ impl Procedure for MemorySearchProcedure {
                 let result = match parse_tool_args(content) {
                     Ok(args) => {
                         let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-                        let limit = args
-                            .get("limit")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(5) as usize;
+                        let limit =
+                            args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
 
                         if query.is_empty() {
                             Err("missing 'query' parameter".to_string())
@@ -1668,7 +1720,10 @@ impl Procedure for CronAddProcedure {
                 let result = match parse_tool_args(content) {
                     Ok(args) => {
                         let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                        let schedule_kind = args.get("schedule_kind").and_then(|v| v.as_str()).unwrap_or("");
+                        let schedule_kind = args
+                            .get("schedule_kind")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
                         let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
 
                         if command.is_empty() {
@@ -1676,30 +1731,47 @@ impl Procedure for CronAddProcedure {
                         } else {
                             let schedule = match schedule_kind {
                                 "interval" => {
-                                    let secs = args.get("every_secs").and_then(|v| v.as_u64()).unwrap_or(3600);
-                                    pares_agens_agenda::scheduler::Schedule::Interval { every_secs: secs }
+                                    let secs = args
+                                        .get("every_secs")
+                                        .and_then(|v| v.as_u64())
+                                        .unwrap_or(3600);
+                                    pares_agens_agenda::scheduler::Schedule::Interval {
+                                        every_secs: secs,
+                                    }
                                 }
                                 "cron" => {
-                                    let expr = args.get("cron_expr").and_then(|v| v.as_str()).unwrap_or("0 * * * *");
-                                    pares_agens_agenda::scheduler::Schedule::Cron { expr: expr.to_string() }
+                                    let expr = args
+                                        .get("cron_expr")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("0 * * * *");
+                                    pares_agens_agenda::scheduler::Schedule::Cron {
+                                        expr: expr.to_string(),
+                                    }
                                 }
                                 "once" => {
-                                    let at_str = args.get("at").and_then(|v| v.as_str()).unwrap_or("");
+                                    let at_str =
+                                        args.get("at").and_then(|v| v.as_str()).unwrap_or("");
                                     match chrono::DateTime::parse_from_rfc3339(at_str) {
-                                        Ok(dt) => pares_agens_agenda::scheduler::Schedule::Once { at: dt.with_timezone(&chrono::Utc) },
-                                        Err(e) => return vec![Event::ToolResult {
-                                            tool_call_id: id.clone(),
-                                            tool_name: "cron_add".into(),
-                                            content: format!("invalid 'at' timestamp: {e}"),
-                                            is_error: true,
-                                        }],
+                                        Ok(dt) => pares_agens_agenda::scheduler::Schedule::Once {
+                                            at: dt.with_timezone(&chrono::Utc),
+                                        },
+                                        Err(e) => {
+                                            return vec![Event::ToolResult {
+                                                tool_call_id: id.clone(),
+                                                tool_name: "cron_add".into(),
+                                                content: format!("invalid 'at' timestamp: {e}"),
+                                                is_error: true,
+                                            }]
+                                        }
                                     }
                                 }
                                 _ => {
                                     return vec![Event::ToolResult {
                                         tool_call_id: id.clone(),
                                         tool_name: "cron_add".into(),
-                                        content: "schedule_kind must be 'interval', 'cron', or 'once'".into(),
+                                        content:
+                                            "schedule_kind must be 'interval', 'cron', or 'once'"
+                                                .into(),
                                         is_error: true,
                                     }];
                                 }
@@ -1708,7 +1780,11 @@ impl Procedure for CronAddProcedure {
                             let task_id = format!("cron.{}", uuid::Uuid::new_v4());
                             let task = pares_agens_agenda::scheduler::Task {
                                 id: task_id.clone(),
-                                name: if name.is_empty() { command.to_string() } else { name.to_string() },
+                                name: if name.is_empty() {
+                                    command.to_string()
+                                } else {
+                                    name.to_string()
+                                },
                                 schedule,
                                 command: command.to_string(),
                                 enabled: true,
@@ -1789,7 +1865,10 @@ impl Procedure for CronToggleProcedure {
                 let result = match parse_tool_args(content) {
                     Ok(args) => {
                         let task_id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                        let enabled = args.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+                        let enabled = args
+                            .get("enabled")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true);
                         if task_id.is_empty() {
                             Err("missing 'id' parameter".to_string())
                         } else if self.scheduler.set_enabled(task_id, enabled).await {
@@ -2055,10 +2134,7 @@ impl PluginCrudProcedure {
                 let (plugin_name, entity_type) = entity_type_full
                     .split_once('/')
                     .ok_or("entity_type must be 'plugin/entity' format")?;
-                let fields = args
-                    .get("fields")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
+                let fields = args.get("fields").cloned().unwrap_or(serde_json::json!({}));
                 let id = self
                     .executor
                     .create(entity_type, plugin_name, fields)
@@ -2074,10 +2150,7 @@ impl PluginCrudProcedure {
                     .split_once('/')
                     .ok_or("entity_type must be 'plugin/entity' format")?;
                 let filters = args.get("filters");
-                let limit = args
-                    .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(50) as usize;
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
                 let items = self
                     .executor
                     .list(entity_type, plugin_name, filters, limit)
@@ -2089,10 +2162,7 @@ impl PluginCrudProcedure {
                     .get("entity_id")
                     .and_then(|v| v.as_str())
                     .ok_or("missing 'entity_id'")?;
-                let fields = args
-                    .get("fields")
-                    .cloned()
-                    .unwrap_or(serde_json::json!({}));
+                let fields = args.get("fields").cloned().unwrap_or(serde_json::json!({}));
                 self.executor
                     .update(entity_id, fields)
                     .map_err(|e| e.to_string())?;
@@ -2103,9 +2173,7 @@ impl PluginCrudProcedure {
                     .get("entity_id")
                     .and_then(|v| v.as_str())
                     .ok_or("missing 'entity_id'")?;
-                self.executor
-                    .delete(entity_id)
-                    .map_err(|e| e.to_string())?;
+                self.executor.delete(entity_id).map_err(|e| e.to_string())?;
                 Ok("deleted".into())
             }
             "plugin_move" => {
@@ -2132,10 +2200,7 @@ impl PluginCrudProcedure {
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("missing 'query'")?;
-                let limit = args
-                    .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(10) as usize;
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
                 // Extract plugin name from entity_types if available, otherwise search all
                 let entity_types = args
                     .get("entity_types")
@@ -2437,9 +2502,9 @@ fn build_system_prompt(path: Option<PathBuf>) -> Result<String, String> {
             .map_err(|e| format!("failed to read system prompt {}: {e}", path.display()));
     }
 
-    // Auto-discover: check $HOME/.pares-agens/SYSTEM-PROMPT.md
+    // Auto-discover: check $HOME/.pares-radix/SYSTEM-PROMPT.md
     if let Ok(home) = std::env::var("HOME") {
-        let home_prompt = PathBuf::from(&home).join(".pares-agens/SYSTEM-PROMPT.md");
+        let home_prompt = PathBuf::from(&home).join(".pares-radix/SYSTEM-PROMPT.md");
         if home_prompt.exists() {
             tracing::info!("Loading system prompt from {}", home_prompt.display());
             return std::fs::read_to_string(&home_prompt)
@@ -2458,7 +2523,7 @@ fn build_system_prompt(path: Option<PathBuf>) -> Result<String, String> {
     }
 
     // Built-in fallback
-    Ok("You are Pares Agens, an AI agent built on the plures technology stack. Be direct, use tools proactively, and push commits without asking.".to_string())
+    Ok("You are Pares Radix, an AI agent built on the plures technology stack. Be direct, use tools proactively, and push commits without asking.".to_string())
 }
 
 fn parse_sync_topic_key(raw: &str) -> Result<[u8; 32], String> {
@@ -2652,7 +2717,11 @@ fn spawn_memory_monitor() -> tokio::task::JoinHandle<()> {
         loop {
             interval.tick().await;
             if let Some(rss_kib) = current_process_rss_kib() {
-                tracing::info!(memory_rss_kib = rss_kib, commit = env!("GIT_COMMIT_HASH"), "process memory usage");
+                tracing::info!(
+                    memory_rss_kib = rss_kib,
+                    commit = env!("GIT_COMMIT_HASH"),
+                    "process memory usage"
+                );
             }
         }
     })
@@ -3006,7 +3075,6 @@ enum Commands {
         /// Path to a BitNet model file for cerebellum message classification.
         #[arg(long, env = "PARES_CEREBELLUM_MODEL_PATH", value_name = "PATH")]
         cerebellum_model_path: Option<PathBuf>,
-
     },
 
     /// Send a single prompt and print the response (non-interactive, for benchmarking).
@@ -3015,7 +3083,11 @@ enum Commands {
         prompt: String,
 
         /// OpenAI-compatible API URL.
-        #[arg(long, env = "PARES_MODEL_URL", default_value = "https://models.inference.ai.azure.com")]
+        #[arg(
+            long,
+            env = "PARES_MODEL_URL",
+            default_value = "https://models.inference.ai.azure.com"
+        )]
         model_url: String,
 
         /// Model name to use.
@@ -3101,16 +3173,37 @@ enum ClusterAction {
     Info,
 }
 
+/// Migrate data directory from `~/.pares-radix` to `~/.pares-radix`.
+///
+/// If the old directory exists and the new one does not, rename it.
+/// If both exist, leave them alone (user manages the conflict).
+fn migrate_data_dir(home: &str) {
+    let old = PathBuf::from(home).join(".pares-radix");
+    let new = PathBuf::from(home).join(".pares-radix");
+    if old.is_dir() && !new.exists() {
+        match std::fs::rename(&old, &new) {
+            Ok(()) => eprintln!("Migrated data directory: {old:?} → {new:?}"),
+            Err(e) => eprintln!("Warning: failed to migrate {old:?} → {new:?}: {e}"),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // Set up default log directory
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    let log_dir = PathBuf::from(&home).join(".pares-agens/logs");
+
+    // Migrate data directory from ~/.pares-radix to ~/.pares-radix if needed
+    migrate_data_dir(&home);
+
+    let log_dir = PathBuf::from(&home).join(".pares-radix/logs");
     let _ = std::fs::create_dir_all(&log_dir);
 
-    // Default Chronos JSONL to ~/.pares-agens/logs/chronos/
+    // Default Chronos JSONL to ~/.pares-radix/logs/chronos/
     if std::env::var("PARES_TELEMETRY_DIR").is_err() {
-        unsafe { std::env::set_var("PARES_TELEMETRY_DIR", log_dir.join("chronos")); }
+        unsafe {
+            std::env::set_var("PARES_TELEMETRY_DIR", log_dir.join("chronos"));
+        }
     }
 
     let initial_filter = build_env_filter("info").expect("default log level should be valid");
@@ -3175,19 +3268,21 @@ async fn main() {
                 ClusterAction::Info => {
                     println!("{}", cluster::format_node_info(&caps));
                 }
-                ClusterAction::Deploy { px_file } => {
-                    match std::fs::read_to_string(&px_file) {
-                        Ok(content) => println!("{}", cluster::format_deploy_result(&content, &nodes)),
-                        Err(e) => {
-                            eprintln!("Failed to read {px_file}: {e}");
-                            std::process::exit(1);
-                        }
+                ClusterAction::Deploy { px_file } => match std::fs::read_to_string(&px_file) {
+                    Ok(content) => println!("{}", cluster::format_deploy_result(&content, &nodes)),
+                    Err(e) => {
+                        eprintln!("Failed to read {px_file}: {e}");
+                        std::process::exit(1);
                     }
-                }
+                },
                 ClusterAction::Workloads => {
                     println!("No active workloads.");
                 }
-                ClusterAction::Join { topic_key, direct, lan } => {
+                ClusterAction::Join {
+                    topic_key,
+                    direct,
+                    lan,
+                } => {
                     println!("Joining cluster with topic key: {topic_key}");
                     if let Some(ref peers) = direct {
                         println!("Direct peers: {peers}");
@@ -3245,7 +3340,10 @@ async fn main() {
             bitnet_model_path,
             cerebellum_model_path,
         } => {
-            tracing::info!(commit = env!("GIT_COMMIT_HASH"), "Starting Pares Agens daemon");
+            tracing::info!(
+                commit = env!("GIT_COMMIT_HASH"),
+                "Starting Pares Radix daemon"
+            );
             let started_at = Instant::now();
             let sync_enabled = sync_topic_key.is_some();
 
@@ -3277,7 +3375,7 @@ async fn main() {
             }
 
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let runtime_state_dir = PathBuf::from(&home).join(".pares-agens/runtime-state");
+            let runtime_state_dir = PathBuf::from(&home).join(".pares-radix/runtime-state");
             let runtime_state_store: Arc<dyn StateStore> =
                 match PluresDbStateStore::open(&runtime_state_dir) {
                     Ok(store) => Arc::new(store),
@@ -3347,10 +3445,11 @@ async fn main() {
             let (model_client, deep_model_client): (Arc<dyn ModelClient>, Arc<dyn ModelClient>) =
                 if let Some(ref bitnet_path) = bitnet_model_path {
                     tracing::info!(path = %bitnet_path.display(), "using local BitNet model");
-                    let client: Arc<dyn ModelClient> = Arc::new(BitnetModelClient::new(bitnet_path));
+                    let client: Arc<dyn ModelClient> =
+                        Arc::new(BitnetModelClient::new(bitnet_path));
                     (Arc::clone(&client), client)
                 } else if copilot {
-                    let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
+                    let auth_path = PathBuf::from(&home).join(".pares-radix/copilot-auth.json");
                     let cached = std::fs::read_to_string(&auth_path)
                         .ok()
                         .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok())
@@ -3360,8 +3459,12 @@ async fn main() {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .unwrap_or_default()
                                 .as_secs();
-                            if cache.cached_at > 0 && now.saturating_sub(cache.cached_at) > 30 * 86400 {
-                                tracing::info!("Copilot OAuth token is >30 days old, forcing re-auth");
+                            if cache.cached_at > 0
+                                && now.saturating_sub(cache.cached_at) > 30 * 86400
+                            {
+                                tracing::info!(
+                                    "Copilot OAuth token is >30 days old, forcing re-auth"
+                                );
                                 let _ = std::fs::remove_file(&auth_path);
                                 return false;
                             }
@@ -3427,20 +3530,24 @@ async fn main() {
                     } else {
                         radix_config.model.fallbacks.clone()
                     };
-                    let deep_fallbacks = vec![
-                        "claude-sonnet-4.5".to_string(),
-                        "gpt-4o".to_string(),
-                    ];
+                    let deep_fallbacks =
+                        vec!["claude-sonnet-4.5".to_string(), "gpt-4o".to_string()];
 
                     (
-                        Arc::new(CopilotModelClient::new_with_model_handle(
-                            auth,
-                            Arc::clone(&model_name),
-                        ).with_fallbacks(conscious_fallbacks)),
-                        Arc::new(CopilotModelClient::new_with_model_handle(
-                            deep_auth,
-                            Arc::clone(&deep_model_name),
-                        ).with_fallbacks(deep_fallbacks)),
+                        Arc::new(
+                            CopilotModelClient::new_with_model_handle(
+                                auth,
+                                Arc::clone(&model_name),
+                            )
+                            .with_fallbacks(conscious_fallbacks),
+                        ),
+                        Arc::new(
+                            CopilotModelClient::new_with_model_handle(
+                                deep_auth,
+                                Arc::clone(&deep_model_name),
+                            )
+                            .with_fallbacks(deep_fallbacks),
+                        ),
                     )
                 } else {
                     // Set up model router
@@ -3486,7 +3593,7 @@ async fn main() {
             ));
 
             // Set up PluresDB memory store + PluresLM (native)
-            let memory_path = PathBuf::from(home).join(".pares-agens/memory");
+            let memory_path = PathBuf::from(home).join(".pares-radix/memory");
             let store = if let Some(topic_key_raw) = sync_topic_key {
                 let shared_key = match sync_shared_key {
                     Some(key) => key,
@@ -3514,14 +3621,15 @@ async fn main() {
                 }
             } else {
                 // Ensure fastembed cache is in a writable location
-                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH")
-                    .unwrap_or_else(|_| {
-                        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-                        format!("{home}/.cache/fastembed")
-                    });
+                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH").unwrap_or_else(|_| {
+                    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                    format!("{home}/.cache/fastembed")
+                });
                 std::fs::create_dir_all(&fastembed_cache).ok();
                 #[allow(unused_unsafe)]
-                unsafe { std::env::set_var("FASTEMBED_CACHE_PATH", &fastembed_cache); }
+                unsafe {
+                    std::env::set_var("FASTEMBED_CACHE_PATH", &fastembed_cache);
+                }
 
                 match PluresDbStore::open_with_embeddings(&memory_path) {
                     Ok(store) => {
@@ -3662,7 +3770,10 @@ async fn main() {
             {
                 let manifests = plugin_executor.load_persisted_manifests();
                 for manifest_json in manifests {
-                    if let Ok(manifest) = serde_json::from_value::<pares_agens_core::plugins::PluginManifest>(manifest_json) {
+                    if let Ok(manifest) = serde_json::from_value::<
+                        pares_agens_core::plugins::PluginManifest,
+                    >(manifest_json)
+                    {
                         let name = manifest.name.clone();
                         if let Err(e) = plugin_runtime.install(manifest).await {
                             tracing::warn!(plugin = %name, error = %e, "failed to restore persisted plugin");
@@ -3690,18 +3801,21 @@ async fn main() {
             }
 
             // Load .px procedures from praxis/ directory
-            let px_action_handler = Arc::new(
-                pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy(),
-            );
+            let px_action_handler =
+                Arc::new(pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy());
             {
                 let praxis_dir = std::path::Path::new("praxis");
                 if praxis_dir.is_dir() {
                     let adapters = pares_agens_core::px_adapter::load_px_directory(
                         praxis_dir,
-                        px_action_handler.clone() as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
+                        px_action_handler.clone()
+                            as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
                     );
                     if !adapters.is_empty() {
-                        tracing::info!(count = adapters.len(), "loaded .px procedures from praxis/");
+                        tracing::info!(
+                            count = adapters.len(),
+                            "loaded .px procedures from praxis/"
+                        );
                         for adapter in adapters {
                             procedure_registry.register(Box::new(adapter));
                         }
@@ -3709,31 +3823,32 @@ async fn main() {
                 }
             }
 
-
             // Create scheduler (shared via Arc for cron tools)
-            let scheduler = Arc::new(pares_agens_agenda::scheduler::Scheduler::new().with_executor(
-                std::sync::Arc::new(|cmd: String| {
-                    tokio::spawn(async move {
-                        match tokio::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&cmd)
-                            .output()
-                            .await
-                        {
-                            Ok(output) => {
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                if output.status.success() {
-                                    stdout.to_string()
-                                } else {
-                                    format!("EXIT {}: {}\n{}", output.status, stdout, stderr)
+            let scheduler = Arc::new(
+                pares_agens_agenda::scheduler::Scheduler::new().with_executor(std::sync::Arc::new(
+                    |cmd: String| {
+                        tokio::spawn(async move {
+                            match tokio::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&cmd)
+                                .output()
+                                .await
+                            {
+                                Ok(output) => {
+                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    if output.status.success() {
+                                        stdout.to_string()
+                                    } else {
+                                        format!("EXIT {}: {}\n{}", output.status, stdout, stderr)
+                                    }
                                 }
+                                Err(e) => format!("EXEC ERROR: {e}"),
                             }
-                            Err(e) => format!("EXEC ERROR: {e}"),
-                        }
-                    })
-                }),
-            ));
+                        })
+                    },
+                )),
+            );
 
             // Register cron tools
             procedure_registry.register(Box::new(CronListProcedure {
@@ -3779,7 +3894,9 @@ async fn main() {
                         Some(path)
                     }
                     Err(e) => {
-                        tracing::warn!("BitNet auto-download failed (will use heuristic classifier): {e}");
+                        tracing::warn!(
+                            "BitNet auto-download failed (will use heuristic classifier): {e}"
+                        );
                         None
                     }
                 }
@@ -3822,7 +3939,7 @@ async fn main() {
 
                 if !no_event_spine {
                     let crdt = store.crdt_store();
-                    let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-agens");
+                    let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-radix");
                     spine.seed_contracts();
                     spine.register_core_procedures();
                     tracing::info!("Event spine initialized");
@@ -3840,7 +3957,9 @@ async fn main() {
                 let hostname = current_hostname();
                 let _ = flush_pluresdb_on_shutdown(&store, &hostname, "").await;
                 memory_monitor.abort();
-                if let Some(h) = watchdog { h.abort(); }
+                if let Some(h) = watchdog {
+                    h.abort();
+                }
                 return;
             }
 
@@ -3859,14 +3978,14 @@ async fn main() {
                 state_store: Arc::clone(&runtime_state_store),
                 agent: Arc::clone(&agent_handle),
             }));
-            config = config.with_plugin_runtime(
-                Arc::clone(&plugin_runtime),
-                Arc::clone(&plugin_executor),
-            );
+            config = config
+                .with_plugin_runtime(Arc::clone(&plugin_runtime), Arc::clone(&plugin_executor));
             config.write_gate = Some(Arc::clone(&write_gate));
 
             // Task manager for /tasks and /task commands
-            let task_manager = Arc::new(pares_agens_core::task_manager::TaskManager::new(store.crdt_store_arc()));
+            let task_manager = Arc::new(pares_agens_core::task_manager::TaskManager::new(
+                store.crdt_store_arc(),
+            ));
             config = config.with_task_manager(Arc::clone(&task_manager));
 
             let adapter = TelegramAdapter::new(config);
@@ -3876,7 +3995,7 @@ async fn main() {
             // Initialize the event spine if enabled
             if !no_event_spine {
                 let crdt = store.crdt_store();
-                let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-agens");
+                let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-radix");
                 spine.seed_contracts();
                 spine.register_core_procedures();
                 tracing::info!("AgensRuntime event spine initialized with core procedures");
@@ -3890,7 +4009,10 @@ async fn main() {
             {
                 use pares_agens_core::personality::{PersonalityContract, PERSONALITY_STATE_KEY};
                 let existing = runtime_state_store.get(PERSONALITY_STATE_KEY).await;
-                if existing.and_then(|v| serde_json::from_value::<PersonalityContract>(v).ok()).is_none() {
+                if existing
+                    .and_then(|v| serde_json::from_value::<PersonalityContract>(v).ok())
+                    .is_none()
+                {
                     let default = PersonalityContract::default_contract(None);
                     if let Ok(value) = serde_json::to_value(&default) {
                         runtime_state_store.set(PERSONALITY_STATE_KEY, value).await;
@@ -3899,11 +4021,13 @@ async fn main() {
                 }
             }
 
-            // Seed personality documents from ~/.pares-agens/ directory
+            // Seed personality documents from ~/.pares-radix/ directory
             {
-                use pares_agens_core::personality::{seed_from_directory, get_all_documents, format_documents_for_prompt};
+                use pares_agens_core::personality::{
+                    format_documents_for_prompt, get_all_documents, seed_from_directory,
+                };
                 if let Ok(home) = std::env::var("HOME") {
-                    let config_dir = std::path::PathBuf::from(&home).join(".pares-agens");
+                    let config_dir = std::path::PathBuf::from(&home).join(".pares-radix");
                     if config_dir.exists() {
                         seed_from_directory(runtime_state_store.as_ref(), &config_dir).await;
                     }
@@ -3912,8 +4036,14 @@ async fn main() {
                 let docs = get_all_documents(runtime_state_store.as_ref()).await;
                 if !docs.is_empty() {
                     let formatted = format_documents_for_prompt(&docs);
-                    agent_handle.read().await.set_personality_documents(Some(formatted));
-                    tracing::info!(count = docs.len(), "loaded personality documents into agent");
+                    agent_handle
+                        .read()
+                        .await
+                        .set_personality_documents(Some(formatted));
+                    tracing::info!(
+                        count = docs.len(),
+                        "loaded personality documents into agent"
+                    );
                     for doc in &docs {
                         tracing::info!("  {} ({} chars)", doc.doc_type, doc.content.len());
                     }
@@ -3935,7 +4065,8 @@ async fn main() {
             {
                 let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
                     Arc::new(pares_agens_core::state::InMemoryStateStore::default());
-                let mut heartbeat = pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                let mut heartbeat =
+                    pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
                 heartbeat.load_config().await;
                 // Disable quiet hours if env var says so
                 if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
@@ -3991,9 +4122,12 @@ async fn main() {
             }
         }
 
-        Commands::McpServe { workdir, brave_api_key } => {
-            use mcp_server::{McpServer, RadixToolHandler};
+        Commands::McpServe {
+            workdir,
+            brave_api_key,
+        } => {
             use pares_agens_core::shell_executor::ShellExecutor;
+            use pares_radix_mcp_server::{McpServer, RadixToolHandler};
 
             let shell = Arc::new(ShellExecutor::new());
             let resolved_workdir = std::fs::canonicalize(&workdir).unwrap_or(workdir);
@@ -4022,11 +4156,13 @@ async fn main() {
             use crossterm::{
                 event::{self as ct_event, Event as CtEvent, KeyCode, KeyEventKind},
                 execute,
-                terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+                terminal::{
+                    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+                },
             };
+            use pares_radix_tui::app::{App, AppEvent};
             use ratatui::backend::CrosstermBackend;
             use ratatui::Terminal;
-            use pares_agens_tui::app::{App, AppEvent};
 
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
             let mut model = model;
@@ -4039,11 +4175,13 @@ async fn main() {
 
             // Build model client
             let model_name_handle = Arc::new(RwLock::new(model.clone()));
-            let model_client: Arc<dyn ModelClient> = if let Some(ref bitnet_path) = bitnet_model_path {
+            let model_client: Arc<dyn ModelClient> = if let Some(ref bitnet_path) =
+                bitnet_model_path
+            {
                 tracing::info!(path = %bitnet_path.display(), "using local BitNet model (TUI)");
                 Arc::new(BitnetModelClient::new(bitnet_path))
             } else if copilot {
-                let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
+                let auth_path = PathBuf::from(&home).join(".pares-radix/copilot-auth.json");
                 let cached = std::fs::read_to_string(&auth_path)
                     .ok()
                     .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok())
@@ -4072,7 +4210,9 @@ async fn main() {
                             }
                         };
 
-                    println!("Authorize Copilot: visit {verification_uri} and enter code {user_code}");
+                    println!(
+                        "Authorize Copilot: visit {verification_uri} and enter code {user_code}"
+                    );
 
                     let token = match CopilotAuth::device_flow_poll(&device_code).await {
                         Ok(token) => token,
@@ -4098,10 +4238,14 @@ async fn main() {
                 };
 
                 let auth = CopilotAuth::new(oauth_token);
-                Arc::new(CopilotModelClient::new_with_model_handle(
-                    auth,
-                    Arc::clone(&model_name_handle),
-                ).with_fallbacks(if radix_config.model.fallbacks.is_empty() { vec!["claude-sonnet-4.5".into(), "gpt-4o".into()] } else { radix_config.model.fallbacks.clone() }))
+                Arc::new(
+                    CopilotModelClient::new_with_model_handle(auth, Arc::clone(&model_name_handle))
+                        .with_fallbacks(if radix_config.model.fallbacks.is_empty() {
+                            vec!["claude-sonnet-4.5".into(), "gpt-4o".into()]
+                        } else {
+                            radix_config.model.fallbacks.clone()
+                        }),
+                )
             } else {
                 let provider_config = ProviderConfig::new(&model_url, api_key.clone());
                 let router_config = RouterConfig::single("default", provider_config);
@@ -4127,7 +4271,7 @@ async fn main() {
                 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
                 use ratatui::style::{Color, Style};
                 use ratatui::widgets::{Block, Borders, Paragraph};
-                
+
                 let area = f.area();
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
@@ -4137,26 +4281,28 @@ async fn main() {
                         Constraint::Percentage(40),
                     ])
                     .split(area);
-                
+
                 let block = Block::default()
                     .title(" pares-radix ")
                     .borders(Borders::ALL)
                     .style(Style::default().fg(Color::Cyan));
-                let text = Paragraph::new("Initializing...\n\n(First launch downloads 127MB embedding model)")
-                    .block(block)
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::White));
+                let text = Paragraph::new(
+                    "Initializing...\n\n(First launch downloads 127MB embedding model)",
+                )
+                .block(block)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::White));
                 f.render_widget(text, chunks[1]);
             });
 
             // Build memory + agent
-            let memory_path = PathBuf::from(&home).join(".pares-agens/memory");
+            let memory_path = PathBuf::from(&home).join(".pares-radix/memory");
             // Update loading screen: opening memory store
             let _ = terminal.draw(|f| {
                 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
                 use ratatui::style::{Color, Style};
                 use ratatui::widgets::{Block, Borders, Paragraph};
-                
+
                 let area = f.area();
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
@@ -4166,26 +4312,31 @@ async fn main() {
                         Constraint::Percentage(40),
                     ])
                     .split(area);
-                
+
                 let block = Block::default()
                     .title(" pares-radix ")
                     .borders(Borders::ALL)
                     .style(Style::default().fg(Color::Cyan));
-                let text = Paragraph::new("Loading memory store...\n\nBuilding vector index (this may take a moment)")
-                    .block(block)
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(Color::White));
+                let text = Paragraph::new(
+                    "Loading memory store...\n\nBuilding vector index (this may take a moment)",
+                )
+                .block(block)
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::White));
                 f.render_widget(text, chunks[1]);
             });
 
-            let store: Arc<PluresDbStore> = match PluresDbStore::open_with_embeddings(&memory_path) {
+            let store: Arc<PluresDbStore> = match PluresDbStore::open_with_embeddings(&memory_path)
+            {
                 Ok(store) => Arc::new(store),
                 Err(_) => match PluresDbStore::open(&memory_path) {
                     Ok(store) => Arc::new(store),
                     Err(e) => {
                         // DB locked by serve process — fall back to in-memory store
                         // so the TUI can still function for chat without persistent memory.
-                        tracing::warn!("Memory DB locked (serve running?), using ephemeral memory: {e}");
+                        tracing::warn!(
+                            "Memory DB locked (serve running?), using ephemeral memory: {e}"
+                        );
                         Arc::new(PluresDbStore::in_memory())
                     }
                 },
@@ -4222,18 +4373,21 @@ async fn main() {
             }));
 
             // Load .px procedures from praxis/ directory (TUI mode)
-            let px_action_handler = Arc::new(
-                pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy(),
-            );
+            let px_action_handler =
+                Arc::new(pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy());
             {
                 let praxis_dir = std::path::Path::new("praxis");
                 if praxis_dir.is_dir() {
                     let adapters = pares_agens_core::px_adapter::load_px_directory(
                         praxis_dir,
-                        px_action_handler.clone() as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
+                        px_action_handler.clone()
+                            as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
                     );
                     if !adapters.is_empty() {
-                        tracing::info!(count = adapters.len(), "loaded .px procedures from praxis/");
+                        tracing::info!(
+                            count = adapters.len(),
+                            "loaded .px procedures from praxis/"
+                        );
                         for adapter in adapters {
                             procedure_registry.register(Box::new(adapter));
                         }
@@ -4258,7 +4412,7 @@ async fn main() {
                 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
                 use ratatui::style::{Color, Style};
                 use ratatui::widgets::{Block, Borders, Paragraph};
-                
+
                 let area = f.area();
                 let chunks = Layout::default()
                     .direction(Direction::Vertical)
@@ -4268,7 +4422,7 @@ async fn main() {
                         Constraint::Percentage(40),
                     ])
                     .split(area);
-                
+
                 let block = Block::default()
                     .title(" pares-radix ")
                     .borders(Borders::ALL)
@@ -4291,7 +4445,9 @@ async fn main() {
                         Some(path)
                     }
                     Err(e) => {
-                        tracing::warn!("BitNet auto-download failed (will use heuristic classifier): {e}");
+                        tracing::warn!(
+                            "BitNet auto-download failed (will use heuristic classifier): {e}"
+                        );
                         None
                     }
                 }
@@ -4318,11 +4474,10 @@ async fn main() {
             } else {
                 cerebellum
             };
-            let system_prompt_text = build_system_prompt(system_prompt)
-                .unwrap_or_else(|e| {
-                    eprintln!("Warning: {e}");
-                    "You are Pares Agens, an AI assistant. Be direct and helpful.".to_string()
-                });
+            let system_prompt_text = build_system_prompt(system_prompt).unwrap_or_else(|e| {
+                eprintln!("Warning: {e}");
+                "You are Pares Radix, an AI assistant. Be direct and helpful.".to_string()
+            });
 
             let mut registry = pares_agens_core::delegation::registry::AgentRegistry::new();
             registry.register_builtins();
@@ -4334,11 +4489,14 @@ async fn main() {
                         Arc::clone(&tool_dispatcher),
                         system_prompt_text,
                     )
-                    .with_turn_store(Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>)
+                    .with_turn_store(
+                        Arc::clone(&store) as Arc<dyn pares_agens_core::memory::store::MemoryStore>
+                    )
                     .with_chronos({
-                        let chronos = pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
-                            store.crdt_store_arc()
-                        );
+                        let chronos =
+                            pares_agens_core::chronos::ChronosTimeline::with_jsonl_from_env(
+                                store.crdt_store_arc(),
+                            );
                         Arc::new(chronos)
                     }),
             );
@@ -4348,8 +4506,11 @@ async fn main() {
 
             // Main loop
             let result: Result<(), Box<dyn std::error::Error>> = 'main_loop: loop {
-                app.viewport_height = terminal.size().map(|r| r.height.saturating_sub(6)).unwrap_or(35);
-                match terminal.draw(|f| pares_agens_tui::ui::draw(f, &app)) {
+                app.viewport_height = terminal
+                    .size()
+                    .map(|r| r.height.saturating_sub(6))
+                    .unwrap_or(35);
+                match terminal.draw(|f| pares_radix_tui::ui::draw(f, &app)) {
                     Ok(_) => {}
                     Err(e) => break 'main_loop Err(e.into()),
                 }
@@ -4378,33 +4539,30 @@ async fn main() {
                                 app.input.insert(cursor, c);
                                 app.input_cursor = cursor + c.len_utf8();
                             }
-                            KeyCode::Backspace
-                                if app.input_cursor > 0 => {
-                                    // Find previous char boundary
-                                    let new_cursor = app.input[..app.input_cursor]
-                                        .char_indices()
-                                        .next_back()
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(0);
-                                    app.input.remove(new_cursor);
-                                    app.input_cursor = new_cursor;
-                                }
-                            KeyCode::Left
-                                if app.input_cursor > 0 => {
-                                    app.input_cursor = app.input[..app.input_cursor]
-                                        .char_indices()
-                                        .next_back()
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(0);
-                                }
-                            KeyCode::Right
-                                if app.input_cursor < app.input.len() => {
-                                    app.input_cursor = app.input[app.input_cursor..]
-                                        .char_indices()
-                                        .nth(1)
-                                        .map(|(i, _)| app.input_cursor + i)
-                                        .unwrap_or(app.input.len());
-                                }
+                            KeyCode::Backspace if app.input_cursor > 0 => {
+                                // Find previous char boundary
+                                let new_cursor = app.input[..app.input_cursor]
+                                    .char_indices()
+                                    .next_back()
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(0);
+                                app.input.remove(new_cursor);
+                                app.input_cursor = new_cursor;
+                            }
+                            KeyCode::Left if app.input_cursor > 0 => {
+                                app.input_cursor = app.input[..app.input_cursor]
+                                    .char_indices()
+                                    .next_back()
+                                    .map(|(i, _)| i)
+                                    .unwrap_or(0);
+                            }
+                            KeyCode::Right if app.input_cursor < app.input.len() => {
+                                app.input_cursor = app.input[app.input_cursor..]
+                                    .char_indices()
+                                    .nth(1)
+                                    .map(|(i, _)| app.input_cursor + i)
+                                    .unwrap_or(app.input.len());
+                            }
                             KeyCode::Home => {
                                 app.input_cursor = 0;
                             }
@@ -4493,28 +4651,51 @@ async fn main() {
 
             type CM = pares_agens_core::model::ChatMessage;
             let messages: Vec<CM> = vec![
-                CM { role: "system".into(), content: sys_prompt.clone(), tool_call_id: None, tool_calls: None },
-                CM { role: "user".into(), content: prompt.clone(), tool_call_id: None, tool_calls: None },
+                CM {
+                    role: "system".into(),
+                    content: sys_prompt.clone(),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
+                CM {
+                    role: "user".into(),
+                    content: prompt.clone(),
+                    tool_call_id: None,
+                    tool_calls: None,
+                },
             ];
 
             // Build model client
             if let Some(ref path) = bitnet_model_path {
                 let client = BitnetModelClient::new(path);
                 let mc: Arc<dyn ModelClient> = Arc::new(client);
-                match mc.complete(&messages[..], &[], &pares_agens_core::model::ChatOptions::default()).await {
+                match mc
+                    .complete(
+                        &messages[..],
+                        &[],
+                        &pares_agens_core::model::ChatOptions::default(),
+                    )
+                    .await
+                {
                     Ok(resp) => {
                         let elapsed = start.elapsed();
                         if format == "json" {
-                            println!("{}", serde_json::json!({"response": resp.content.unwrap_or_default(), "model": "bitnet", "latency_ms": elapsed.as_millis(), "prompt": prompt}));
+                            println!(
+                                "{}",
+                                serde_json::json!({"response": resp.content.unwrap_or_default(), "model": "bitnet", "latency_ms": elapsed.as_millis(), "prompt": prompt})
+                            );
                         } else {
                             print!("{}", resp.content.unwrap_or_default());
                             std::io::stdout().flush().ok();
                         }
                     }
-                    Err(e) => { eprintln!("ERROR: {e}"); std::process::exit(1); }
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        std::process::exit(1);
+                    }
                 }
             } else if copilot {
-                let auth_path = PathBuf::from(&home).join(".pares-agens/copilot-auth.json");
+                let auth_path = PathBuf::from(&home).join(".pares-radix/copilot-auth.json");
                 let cached = std::fs::read_to_string(&auth_path)
                     .ok()
                     .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok());
@@ -4528,17 +4709,30 @@ async fn main() {
                 let auth = CopilotAuth::new(oauth_token);
                 let client = CopilotModelClient::new(auth, model.clone());
                 let mc: Arc<dyn ModelClient> = Arc::new(client);
-                match mc.complete(&messages[..], &[], &pares_agens_core::model::ChatOptions::default()).await {
+                match mc
+                    .complete(
+                        &messages[..],
+                        &[],
+                        &pares_agens_core::model::ChatOptions::default(),
+                    )
+                    .await
+                {
                     Ok(resp) => {
                         let elapsed = start.elapsed();
                         if format == "json" {
-                            println!("{}", serde_json::json!({"response": resp.content.unwrap_or_default(), "model": model, "latency_ms": elapsed.as_millis(), "prompt": prompt}));
+                            println!(
+                                "{}",
+                                serde_json::json!({"response": resp.content.unwrap_or_default(), "model": model, "latency_ms": elapsed.as_millis(), "prompt": prompt})
+                            );
                         } else {
                             print!("{}", resp.content.unwrap_or_default());
                             std::io::stdout().flush().ok();
                         }
                     }
-                    Err(e) => { eprintln!("ERROR: {e}"); std::process::exit(1); }
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        std::process::exit(1);
+                    }
                 }
             } else {
                 eprintln!("ERROR: specify --copilot or --bitnet-model-path");
@@ -4547,7 +4741,10 @@ async fn main() {
         }
 
         #[cfg(feature = "bitnet-native")]
-        Commands::Classify { message, bitnet_model_path } => {
+        Commands::Classify {
+            message,
+            bitnet_model_path,
+        } => {
             use crate::bitnet_classifier::BitNetClassifier;
             use pares_agens_core::cerebellum::classifier::ClassifierBackend;
 
@@ -4580,7 +4777,10 @@ async fn main() {
 
         Commands::Config { action } => match action {
             ConfigAction::Show => {
-                println!("{}", toml::to_string_pretty(&radix_config).unwrap_or_default());
+                println!(
+                    "{}",
+                    toml::to_string_pretty(&radix_config).unwrap_or_default()
+                );
             }
             ConfigAction::Path => {
                 println!("{}", config::RadixConfig::config_path().display());
@@ -4729,7 +4929,7 @@ mod tests {
 
     #[test]
     fn parse_vm_rss_kib_extracts_numeric_value() {
-        let status = "Name:\tpares-agens\nVmRSS:\t   42104 kB\nThreads:\t6\n";
+        let status = "Name:\tpares-radix\nVmRSS:\t   42104 kB\nThreads:\t6\n";
         assert_eq!(parse_vm_rss_kib(status), Some(42104));
     }
 

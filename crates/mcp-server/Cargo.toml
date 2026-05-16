@@ -1,5 +1,5 @@
 [package]
-name = "mcp-server"
+name = "pares-radix-mcp-server"
 description = "MCP (Model Context Protocol) server — expose pares-radix tools to external agents"
 version.workspace = true
 edition.workspace = true
@@ -21,10 +21,10 @@ chrono.workspace = true
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 uuid = { version = "1", features = ["v4"] }
-mcp-client = { path = "../mcp-client" }
+pares-radix-mcp-client = { path = "../mcp-client" }
 pares-agens-core = { path = "../core" }
 pares-agens-agenda = { path = "../agenda" }
-pares-agens-praxis = { path = "../praxis" }
+pares-radix-praxis = { path = "../praxis" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

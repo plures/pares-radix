@@ -183,7 +183,7 @@ impl CorrectionEngine {
     ///
     /// The optional `constraint_id` is provided when the caller intends to
     /// compile the correction into a praxis constraint (via
-    /// [`pares_agens_praxis::db::procedures::compile_nl`]).
+    /// [`pares_radix_praxis::db::procedures::compile_nl`]).
     ///
     /// # Errors
     /// Propagates store errors.

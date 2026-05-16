@@ -70,7 +70,7 @@ pub enum Event {
     /// A praxis pre-action constraint blocked procedure execution.
     ///
     /// Emitted by [`Executor::dispatch`] when `on_action` returns
-    /// [`ActionBlocked`][pares_agens_praxis::db::procedures::ActionBlocked].
+    /// [`ActionBlocked`][pares_radix_praxis::db::procedures::ActionBlocked].
     /// The `fix` field surfaces the remediation instructions from all
     /// violated constraints so the caller or logs can act on them.
     ConstraintViolation {

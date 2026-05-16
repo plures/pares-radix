@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 use crate::cerebellum::{Cerebellum, Route};
 use crate::chronos::{ChronosAction, ChronosTimeline};
-use crate::pii_guard::PiiGuard;
 use crate::delegation::aggregator::ResultAggregator;
 use crate::delegation::broker::DelegationBroker;
 use crate::event::Event;
@@ -32,6 +31,7 @@ use crate::memory::entry::Exchange;
 use crate::memory::store::MemoryStore;
 use crate::memory::{passes_quality_gate, PluresLm};
 use crate::model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher};
+use crate::pii_guard::PiiGuard;
 use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
 use crate::procedure::ProcedureRegistry;
 use crate::session::{SessionManager, SessionMetadata};
@@ -286,7 +286,10 @@ impl Agent {
     }
 
     /// Attach a personality contract for dynamic prompt building.
-    pub fn with_personality(mut self, personality: crate::personality::PersonalityContract) -> Self {
+    pub fn with_personality(
+        mut self,
+        personality: crate::personality::PersonalityContract,
+    ) -> Self {
         self.personality = Some(personality);
         self
     }
@@ -449,14 +452,21 @@ impl Agent {
                     }
                 }
                 Route::Conscious | Route::Deep { .. } => {
-                    info!(id, channel, "handle_event: routing to Conscious/Deep, calling handle_model_message");
+                    info!(
+                        id,
+                        channel,
+                        "handle_event: routing to Conscious/Deep, calling handle_model_message"
+                    );
                     self.handle_model_message(id, channel, content, &learned_context, clear_history)
                         .await
                 }
                 Route::Drop => {
-                    info!(id, channel, "handle_event: Route::Drop — message suppressed");
+                    info!(
+                        id,
+                        channel, "handle_event: Route::Drop — message suppressed"
+                    );
                     None
-                },
+                }
             },
             Event::Timer { .. } | Event::StateChange { .. } => {
                 if matches!(route, Route::Procedural) {
@@ -628,7 +638,10 @@ impl Agent {
                     "model": model_label,
                 }),
                 vec![],
-                Some(format!("response to: {}", &content[..content.len().min(80)])),
+                Some(format!(
+                    "response to: {}",
+                    &content[..content.len().min(80)]
+                )),
             );
             chronos.record(&entry);
         }
@@ -763,10 +776,12 @@ impl Agent {
         // If a personality contract is set, use the dynamic prompt builder.
         if let Some(personality) = &self.personality {
             let channel = self.current_channel.lock().ok().and_then(|ch| ch.clone());
-            let docs_cache = self.personality_documents_cache.lock().ok()
+            let docs_cache = self
+                .personality_documents_cache
+                .lock()
+                .ok()
                 .and_then(|g| g.clone());
-            let plugin_cache = self.plugin_context.lock().ok()
-                .and_then(|g| g.clone());
+            let plugin_cache = self.plugin_context.lock().ok().and_then(|g| g.clone());
             let ctx = crate::prompt_builder::AgentContext {
                 channel: channel.as_deref(),
                 learned_context,
@@ -815,7 +830,9 @@ impl Agent {
             message_text: Some(content.to_string()),
             ..Default::default()
         };
-        if let HookAction::Block(reason) = self.hook_manager.fire(HookPoint::OnMessage, &mut msg_ctx) {
+        if let HookAction::Block(reason) =
+            self.hook_manager.fire(HookPoint::OnMessage, &mut msg_ctx)
+        {
             return Err(format!("Message blocked by hook: {reason}"));
         }
 
@@ -827,8 +844,13 @@ impl Agent {
                 model_prompt: messages.last().map(|m| m.content.clone()),
                 ..Default::default()
             };
-            match self.hook_manager.fire(HookPoint::PreModelCall, &mut pre_model_ctx) {
-                HookAction::Block(reason) => return Err(format!("Model call blocked by hook: {reason}")),
+            match self
+                .hook_manager
+                .fire(HookPoint::PreModelCall, &mut pre_model_ctx)
+            {
+                HookAction::Block(reason) => {
+                    return Err(format!("Model call blocked by hook: {reason}"))
+                }
                 HookAction::InjectContext(text) => {
                     // Prepend injected context to the system message.
                     if let Some(sys) = messages.first_mut() {
@@ -866,17 +888,30 @@ impl Agent {
             }).collect();
 
             let model_start = Instant::now();
-            info!(turn, message_count = messages_for_model.len(), tool_count = tools.len(), "ABOUT TO CALL model_client.complete");
-            let completion = model_client.complete(&messages_for_model, &tools, options).await?;
+            info!(
+                turn,
+                message_count = messages_for_model.len(),
+                tool_count = tools.len(),
+                "ABOUT TO CALL model_client.complete"
+            );
+            let completion = model_client
+                .complete(&messages_for_model, &tools, options)
+                .await?;
             let latency_ms = model_start.elapsed().as_millis();
-            info!(turn, latency_ms, tool_calls = completion.tool_calls.len(), "model completion received");
+            info!(
+                turn,
+                latency_ms,
+                tool_calls = completion.tool_calls.len(),
+                "model completion received"
+            );
 
             // Fire PostModelCall hook.
             let mut post_model_ctx = HookContext {
                 model_response: completion.content.clone(),
                 ..Default::default()
             };
-            self.hook_manager.fire(HookPoint::PostModelCall, &mut post_model_ctx);
+            self.hook_manager
+                .fire(HookPoint::PostModelCall, &mut post_model_ctx);
 
             if !completion.tool_calls.is_empty() {
                 let tool_calls = completion.tool_calls.clone();
@@ -916,12 +951,12 @@ impl Agent {
                                 chronos.record(&entry);
                             }
                             let tool_start = Instant::now();
-                            let tool_result = tool_dispatcher
-                                .call_tool(&tool_call.name, new_args)
-                                .await;
+                            let tool_result =
+                                tool_dispatcher.call_tool(&tool_call.name, new_args).await;
                             let elapsed_ms = tool_start.elapsed().as_millis();
                             if let Some(chronos) = &self.chronos {
-                                let success = !tool_result.starts_with("Error") && !tool_result.starts_with("⚠");
+                                let success = !tool_result.starts_with("Error")
+                                    && !tool_result.starts_with("⚠");
                                 let entry = chronos.build_entry(
                                     &format!("tool:result:{}", call_id),
                                     "agent",
@@ -938,17 +973,19 @@ impl Agent {
                                 tool_result: Some(tool_result.clone()),
                                 ..Default::default()
                             };
-                            self.hook_manager.fire(HookPoint::PostToolUse, &mut post_ctx);
+                            self.hook_manager
+                                .fire(HookPoint::PostToolUse, &mut post_ctx);
                             messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
                         }
                         _ => {
                             let call_id = Uuid::new_v4().to_string();
                             if let Some(chronos) = &self.chronos {
-                                let args_summary: String = serde_json::to_string(&tool_call.arguments)
-                                    .unwrap_or_default()
-                                    .chars()
-                                    .take(200)
-                                    .collect();
+                                let args_summary: String =
+                                    serde_json::to_string(&tool_call.arguments)
+                                        .unwrap_or_default()
+                                        .chars()
+                                        .take(200)
+                                        .collect();
                                 let entry = chronos.build_entry(
                                     &format!("tool:call:{}", call_id),
                                     "agent",
@@ -965,7 +1002,8 @@ impl Agent {
                                 .await;
                             let elapsed_ms = tool_start.elapsed().as_millis();
                             if let Some(chronos) = &self.chronos {
-                                let success = !tool_result.starts_with("Error") && !tool_result.starts_with("⚠");
+                                let success = !tool_result.starts_with("Error")
+                                    && !tool_result.starts_with("⚠");
                                 let entry = chronos.build_entry(
                                     &format!("tool:result:{}", call_id),
                                     "agent",
@@ -982,7 +1020,8 @@ impl Agent {
                                 tool_result: Some(tool_result.clone()),
                                 ..Default::default()
                             };
-                            self.hook_manager.fire(HookPoint::PostToolUse, &mut post_ctx);
+                            self.hook_manager
+                                .fire(HookPoint::PostToolUse, &mut post_ctx);
                             messages.push(ChatMessage::tool_result(tool_call.id, tool_result));
                         }
                     }
@@ -1043,7 +1082,10 @@ impl Agent {
     async fn load_history(&self, channel: &str) -> Vec<ChatMessage> {
         // Fast path: check in-memory cache first.
         {
-            let guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+            let guard = self
+                .conversation_history
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if let Some(cached) = guard.get(channel) {
                 if !cached.is_empty() {
                     return Self::trim_to_token_budget(cached);
@@ -1065,7 +1107,10 @@ impl Agent {
                         "hydrated conversation history from PluresDB"
                     );
                     // Cache for future calls.
-                    let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut guard = self
+                        .conversation_history
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     guard.insert(channel.to_string(), messages);
                     return trimmed;
                 }
@@ -1086,7 +1131,10 @@ impl Agent {
     async fn persist_turn(&self, channel: &str, session_id: &str, new_messages: &[ChatMessage]) {
         // Update in-memory cache.
         {
-            let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+            let mut guard = self
+                .conversation_history
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let history = guard.entry(channel.to_string()).or_default();
             history.extend(new_messages.iter().cloned());
             let compacted = Self::trim_to_token_budget(history);
@@ -1216,7 +1264,6 @@ impl Agent {
         last_response
     }
 
-
     /// Detect commitment language in agent responses and store as promises.
     ///
     /// Scans for patterns like "I'll", "I will", "Let me", "Going to",
@@ -1225,8 +1272,14 @@ impl Agent {
     async fn detect_and_store_promises(&self, _user_msg: &str, agent_reply: &str) {
         // Commitment patterns (case-insensitive)
         let commitment_patterns = [
-            "i'll ", "i will ", "let me ", "going to ", "i'm going to ",
-            "i am going to ", "i can ", "i'll go ahead",
+            "i'll ",
+            "i will ",
+            "let me ",
+            "going to ",
+            "i'm going to ",
+            "i am going to ",
+            "i can ",
+            "i'll go ahead",
             "want me to ", // user asks, agent implies yes by responding
         ];
 
@@ -1420,7 +1473,8 @@ impl Agent {
                         let requested_name = requested_name.trim();
 
                         let (new_branch, created) = {
-                            let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut guard =
+                                self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                             let state = guard.entry(channel.to_string()).or_default();
                             let branch = if requested_name.is_empty() {
                                 let mut idx = 1usize;
@@ -1443,7 +1497,10 @@ impl Agent {
                         let new_branch_channel = Self::scoped_channel(channel, &new_branch);
 
                         {
-                            let mut history = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut history = self
+                                .conversation_history
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
                             history.entry(new_branch_channel).or_default();
                         }
 
@@ -1456,7 +1513,8 @@ impl Agent {
                             request_id: id.to_string(),
                             model: "command".into(),
                             content: format!(
-                                "{} session '{}'. Previous session was archived.", action, new_branch
+                                "{} session '{}'. Previous session was archived.",
+                                action, new_branch
                             ),
                         })
                     }
@@ -1492,7 +1550,8 @@ impl Agent {
                         }
 
                         {
-                            let mut guard = self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut guard =
+                                self.branch_state.lock().unwrap_or_else(|e| e.into_inner());
                             let state = guard.entry(channel.to_string()).or_default();
                             state.branches.insert(target.clone());
                             state.active = target.clone();
@@ -1547,7 +1606,10 @@ impl Agent {
                 let new_branch_channel = Self::scoped_channel(channel, &new_branch);
 
                 {
-                    let mut history = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut history = self
+                        .conversation_history
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     history.insert(new_branch_channel, snapshot);
                 }
 
@@ -1559,7 +1621,10 @@ impl Agent {
                 Some(Event::ModelResponse {
                     request_id: id.to_string(),
                     model: "command".into(),
-                    content: format!("{} branch '{}' from '{}'.", action, new_branch, current_branch),
+                    content: format!(
+                        "{} branch '{}' from '{}'.",
+                        action, new_branch, current_branch
+                    ),
                 })
             }
             "branches" => {
@@ -1663,15 +1728,16 @@ impl Agent {
                                 let count = saved.messages.len();
                                 // Restore into conversation history.
                                 {
-                                    let mut guard = self.conversation_history.lock().unwrap_or_else(|e| e.into_inner());
+                                    let mut guard = self
+                                        .conversation_history
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner());
                                     guard.insert(channel.to_string(), saved.messages);
                                 }
                                 Some(Event::ModelResponse {
                                     request_id: id.to_string(),
                                     model: "command".into(),
-                                    content: format!(
-                                        "Resumed session with {count} messages."
-                                    ),
+                                    content: format!("Resumed session with {count} messages."),
                                 })
                             } else {
                                 Some(Event::ModelResponse {
@@ -1796,7 +1862,8 @@ impl Agent {
                     request_id: id.to_string(),
                     model: "command".into(),
                     content: format!(
-                        "Cleared conversation context. Started new session '{}'.", new_session
+                        "Cleared conversation context. Started new session '{}'.",
+                        new_session
                     ),
                 })
             }

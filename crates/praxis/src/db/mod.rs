@@ -15,9 +15,9 @@
 //! # Quick start
 //!
 //! ```rust
-//! use pares_agens_praxis::db::{AgentContext, SessionType};
-//! use pares_agens_praxis::db::procedures::on_action;
-//! use pares_agens_praxis::db::seed::default_store;
+//! use pares_radix_praxis::db::{AgentContext, SessionType};
+//! use pares_radix_praxis::db::procedures::on_action;
+//! use pares_radix_praxis::db::seed::default_store;
 //! use serde_json::json;
 //!
 //! let store = default_store();

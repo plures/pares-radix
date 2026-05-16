@@ -92,8 +92,11 @@ impl GitAdapter {
         let commits = match since_hash {
             Some(hash) => {
                 let range = format!("{hash}..HEAD");
-                Self::commits_from_log(path, &["log", &range, "--format=%H%n%s%n%an%n%aI%n", "--numstat"])
-                    .await?
+                Self::commits_from_log(
+                    path,
+                    &["log", &range, "--format=%H%n%s%n%an%n%aI%n", "--numstat"],
+                )
+                .await?
             }
             None => Self::recent_commits(path, 50).await?,
         };
@@ -131,8 +134,7 @@ impl GitAdapter {
     pub async fn status(repo_path: &str) -> Result<GitStatus, PluginError> {
         let branch = Self::current_branch(repo_path).await?;
 
-        let porcelain =
-            Self::run_git(repo_path, &["status", "--porcelain=v1"]).await?;
+        let porcelain = Self::run_git(repo_path, &["status", "--porcelain=v1"]).await?;
 
         let mut modified = Vec::new();
         let mut staged = Vec::new();
@@ -200,9 +202,11 @@ impl GitAdapter {
     }
 
     async fn ahead_behind(path: &str) -> Result<(usize, usize), PluginError> {
-        let output =
-            Self::run_git(path, &["rev-list", "--left-right", "--count", "HEAD...@{u}"])
-                .await?;
+        let output = Self::run_git(
+            path,
+            &["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+        )
+        .await?;
         let parts: Vec<&str> = output.trim().split('\t').collect();
         if parts.len() == 2 {
             let ahead = parts[0].parse().unwrap_or(0);
@@ -213,10 +217,7 @@ impl GitAdapter {
         }
     }
 
-    async fn recent_commits(
-        path: &str,
-        limit: usize,
-    ) -> Result<Vec<CommitEntry>, PluginError> {
+    async fn recent_commits(path: &str, limit: usize) -> Result<Vec<CommitEntry>, PluginError> {
         let n = format!("-{limit}");
         Self::commits_from_log(
             path,
@@ -225,10 +226,7 @@ impl GitAdapter {
         .await
     }
 
-    async fn commits_from_log(
-        path: &str,
-        args: &[&str],
-    ) -> Result<Vec<CommitEntry>, PluginError> {
+    async fn commits_from_log(path: &str, args: &[&str]) -> Result<Vec<CommitEntry>, PluginError> {
         let output = Self::run_git(path, args).await?;
         let mut commits = Vec::new();
         let mut lines = output.lines().peekable();
@@ -302,9 +300,7 @@ mod tests {
     async fn status_on_real_repo() {
         // This test only works when run inside a git repo.
         let path = env!("CARGO_MANIFEST_DIR");
-        if !Path::new(path).join(".git").exists()
-            && !Path::new(path).join("../../.git").exists()
-        {
+        if !Path::new(path).join(".git").exists() && !Path::new(path).join("../../.git").exists() {
             return; // skip if not in a git repo
         }
         // Use the workspace root

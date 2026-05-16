@@ -37,7 +37,7 @@ use crate::{
 /// # Example
 ///
 /// ```rust
-/// use pares_agens_sync::{SyncEngine, SyncTopic};
+/// use pares_radix_sync::{SyncEngine, SyncTopic};
 ///
 /// let mut engine = SyncEngine::new("Alice's MacBook");
 /// engine.subscribe_topic(SyncTopic::MemoryEntries);

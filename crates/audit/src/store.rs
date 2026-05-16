@@ -138,7 +138,7 @@ const AUDIT_ACTOR: &str = "pares-agens-audit";
 /// #     store::{AuditStore, PluresDbAuditStore},
 /// # };
 /// # #[tokio::main] async fn main() {
-/// let store = PluresDbAuditStore::open("/var/lib/pares-agens/audit").unwrap();
+/// let store = PluresDbAuditStore::open("/var/lib/pares-radix/audit").unwrap();
 /// store.append(AuditEvent::new(EventKind::ModelCall, "agent-1", "gpt-4o", "tokens: 512", false)).await;
 /// # }
 /// ```

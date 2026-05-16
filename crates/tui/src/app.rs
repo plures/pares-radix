@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use pares_agens_core::agent::Agent;
+use pares_agens_core::commands::{CommandContext, CommandRegistry, CommandResult};
 use pares_agens_core::Event;
-use pares_agens_core::commands::{CommandRegistry, CommandContext, CommandResult};
 
 /// A single chat message displayed in the TUI.
 #[derive(Clone, Debug)]
@@ -57,7 +57,7 @@ impl App {
         Self {
             messages: vec![ChatMessage {
                 role: Role::System,
-                content: format!("Pares Agens TUI — model: {model_name}. Type /help for commands."),
+                content: format!("Pares Radix TUI — model: {model_name}. Type /help for commands."),
                 timestamp: chrono::Utc::now(),
             }],
             input: String::new(),
@@ -84,14 +84,20 @@ impl App {
         };
         match registry.execute(input, &ctx) {
             CommandResult::NotACommand => false,
-            CommandResult::Response(text) => { self.push_system(&text); true }
+            CommandResult::Response(text) => {
+                self.push_system(&text);
+                true
+            }
             CommandResult::ClearHistory => {
                 self.messages.clear();
                 self.scroll_offset = 0;
                 self.push_system("Chat cleared.");
                 true
             }
-            CommandResult::Quit => { let _ = self.event_tx.send(AppEvent::Quit); true }
+            CommandResult::Quit => {
+                let _ = self.event_tx.send(AppEvent::Quit);
+                true
+            }
             CommandResult::SwitchModel(name) => {
                 self.current_model = name.clone();
                 self.push_system(&format!("Model switched to: {name}"));
@@ -135,10 +141,15 @@ impl App {
             match tokio::time::timeout(
                 std::time::Duration::from_secs(30),
                 agent.handle_event(event),
-            ).await {
+            )
+            .await
+            {
                 Ok(Some(Event::ModelResponse { content, .. })) => content,
                 Ok(Some(_other)) => "(unexpected response type)".to_string(),
-                Ok(None) => "(agent returned no response — check ~/.pares-agens/logs/pares-radix.log)".to_string(),
+                Ok(None) => {
+                    "(agent returned no response — check ~/.pares-radix/logs/pares-radix.log)"
+                        .to_string()
+                }
                 Err(_timeout) => "(timed out after 30s)".to_string(),
             }
         });
@@ -146,7 +157,9 @@ impl App {
         let tx2 = self.event_tx.clone();
         tokio::spawn(async move {
             match handle.await {
-                Ok(content) => { let _ = tx2.send(AppEvent::AgentResponse(content)); }
+                Ok(content) => {
+                    let _ = tx2.send(AppEvent::AgentResponse(content));
+                }
                 Err(join_err) => {
                     let msg = if join_err.is_panic() {
                         "(internal error — agent panicked, check logs)".to_string()
@@ -182,9 +195,12 @@ impl App {
         if self.user_scrolled {
             return; // Don't auto-scroll if user manually scrolled up
         }
-        let total_lines: u16 = self.messages.iter().map(|m| {
-            m.content.lines().count() as u16 + 2
-        }).sum::<u16>() + 2;
+        let total_lines: u16 = self
+            .messages
+            .iter()
+            .map(|m| m.content.lines().count() as u16 + 2)
+            .sum::<u16>()
+            + 2;
         self.scroll_offset = total_lines.saturating_sub(self.viewport_height);
     }
 }

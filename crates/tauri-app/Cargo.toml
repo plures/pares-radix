@@ -1,10 +1,10 @@
 [package]
-name = "pares-agens-tauri"
+name = "pares-radix-tauri"
 description = "Tauri desktop application for Pares Agens"
 version = "0.5.0"
 edition = "2021"
 license = "BSL-1.1"
-repository = "https://github.com/plures/pares-agens"
+repository = "https://github.com/plures/pares-radix"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -25,9 +25,9 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 pares-agens-core = { path = "../core" }
 async-trait = "0.1"
 pares-agens-channels = { path = "../channels" }
-pares-agens-migrate = { path = "../cli", package = "pares-agens-cli" }
+pares-radix-migrate = { path = "../cli", package = "pares-radix-cli" }
 pares-models = { path = "../models" }
-mcp-client = { path = "../mcp-client" }
+pares-radix-mcp-client = { path = "../mcp-client" }
 
 [dependencies.tauri-plugin-tui]
 git = "https://github.com/plures/svelte-ratatui.git"

@@ -10,7 +10,7 @@ use tracing::warn;
 
 use crate::cerebellum::bridge::PluresDbBridge;
 use crate::executor::PraxisGate;
-use pares_agens_praxis::db::{
+use pares_radix_praxis::db::{
     procedures::on_action,
     schema::{AgentContext, SessionType},
     store::PraxisStore,
@@ -38,7 +38,7 @@ impl PluresDbPraxisGate {
     /// Build a [`PraxisStore`] by merging seed constraints with any stored
     /// in PluresDB.
     fn build_store(&self) -> PraxisStore {
-        let mut store = pares_agens_praxis::db::seed::default_store();
+        let mut store = pares_radix_praxis::db::seed::default_store();
 
         match self.bridge.load_constraints() {
             Ok(constraints) => {

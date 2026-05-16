@@ -102,7 +102,7 @@ impl MemoryStore for InMemoryStore {
 // ---------------------------------------------------------------------------
 
 /// The PluresDB actor ID used for all write operations.
-const ACTOR: &str = "pares-agens";
+const ACTOR: &str = "pares-radix";
 
 /// The PluresDB key prefix for conversation turn entries.
 const TURN_PREFIX: &str = "turn:";
@@ -419,8 +419,9 @@ impl PluresDbStore {
         }
         let payload = HostInferenceCapabilityPayload { capability };
         let data = seal_value_for_storage(
-            serde_json::to_value(payload)
-                .map_err(|e| Error::Store(format!("serialise host inference capability failed: {e}")))?,
+            serde_json::to_value(payload).map_err(|e| {
+                Error::Store(format!("serialise host inference capability failed: {e}"))
+            })?,
             self.host_sea_key.as_ref(),
         )?;
         let key = format!("{HOST_PREFIX}{hostname}{INFERENCE_CAPABILITIES_SUFFIX}");

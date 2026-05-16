@@ -18,7 +18,7 @@
 
 use async_trait::async_trait;
 use pares_agens_core::Event;
-use pares_agens_marketplace::{installer::Installer, SkillCategory, SkillMetadata};
+use pares_radix_marketplace::{installer::Installer, SkillCategory, SkillMetadata};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,10 +35,10 @@ use uuid::Uuid;
 
 use crate::adapter::{ChannelAdapter, ChannelError};
 use crate::group_context::{GroupContextBuffer, GroupMessage};
+use pares_agens_agenda::scheduler::Scheduler;
 use pares_agens_core::channel_contract::{ChannelContract, GroupChatPolicy};
 use pares_agens_core::event_spine::EventSpineHandle;
 use pares_agens_core::renderers::telegram as html_renderer;
-use pares_agens_agenda::scheduler::Scheduler;
 use pares_agens_core::task_manager::TaskManager;
 
 const PARES_MODULUS_INDEX_URL: &str =
@@ -48,7 +48,7 @@ const MAX_INDEX_LISTING_ITEMS: usize = 10;
 const DEFAULT_NIX_FLAKE_DIR: &str = "nixos-config";
 const DEFAULT_NIX_HOST: &str = "praxisbot";
 /// Directory containing the pares-radix source for rebuilding the binary.
-const DEFAULT_PARES_AGENS_DIR: &str = "pares-radix";
+const DEFAULT_PARES_RADIX_DIR: &str = "pares-radix";
 /// Subdirectory under $HOME/projects for defaults, or override with env vars.
 const PROJECTS_SUBDIR: &str = "projects";
 const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
@@ -84,10 +84,7 @@ const TELEGRAM_HELP_COMMANDS: [(&str, &str); 32] = [
     ("/clear", "start a fresh conversation session"),
     ("/resume", "resume last session (or /resume list)"),
     ("/sessions", "list recent sessions (alias for /resume list)"),
-    (
-        "/version",
-        "show version and build info",
-    ),
+    ("/version", "show version and build info"),
     ("/logs [n]", "tail recent pares-radix service logs"),
     ("/tools", "show tool governance policies"),
     (
@@ -278,10 +275,9 @@ fn build_nixos_update_command(_flake_dir: &str, _host: &str) -> String {
     // Self-update = nixos-rebuild from the GitHub flake.
     // The flake input pares-radix is pinned; update it then rebuild.
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/kbristol".into());
-    let flake_dir = std::env::var("PARES_NIX_FLAKE_DIR")
-        .unwrap_or_else(|_| format!("{home}/nixos-config"));
-    let host = std::env::var("PARES_NIX_HOST")
-        .unwrap_or_else(|_| "praxisbot".into());
+    let flake_dir =
+        std::env::var("PARES_NIX_FLAKE_DIR").unwrap_or_else(|_| format!("{home}/nixos-config"));
+    let host = std::env::var("PARES_NIX_HOST").unwrap_or_else(|_| "praxisbot".into());
     let flake_dir = shell_single_quote(&flake_dir);
     let host_q = shell_single_quote(&host);
     format!(
@@ -372,7 +368,7 @@ fn format_update_command_output(output: &std::process::Output) -> String {
 }
 
 fn telegram_help_text() -> String {
-    let mut lines = vec!["Pares Agens commands:".to_string()];
+    let mut lines = vec!["Pares Radix commands:".to_string()];
     lines.extend(
         TELEGRAM_HELP_COMMANDS
             .iter()
@@ -520,7 +516,10 @@ impl TelegramConfig {
 
     /// Enable `/personality` runtime personality control.
     #[must_use]
-    pub fn with_personality_control(mut self, control: Arc<dyn TelegramPersonalityControl>) -> Self {
+    pub fn with_personality_control(
+        mut self,
+        control: Arc<dyn TelegramPersonalityControl>,
+    ) -> Self {
         self.personality_control = Some(control);
         self
     }
@@ -652,12 +651,18 @@ enum ConfigCommand {
 impl TelegramAdapter {
     /// Create a new [`TelegramAdapter`] with the given configuration.
     pub fn new(config: TelegramConfig) -> Self {
-        Self { config, event_spine: None }
+        Self {
+            config,
+            event_spine: None,
+        }
     }
 
     /// Create a new [`TelegramAdapter`] with an event spine handle.
     pub fn with_event_spine(config: TelegramConfig, spine: EventSpineHandle) -> Self {
-        Self { config, event_spine: Some(spine) }
+        Self {
+            config,
+            event_spine: Some(spine),
+        }
     }
 
     fn parse_model_command(args: Vec<&str>) -> Result<ModelCommand, &'static str> {
@@ -857,7 +862,8 @@ impl TelegramAdapter {
 
             // Find a split point: prefer double-newline (paragraph), then single newline, then space
             let search_range = &remaining[..max_len];
-            let split_at = search_range.rfind("\n\n")
+            let split_at = search_range
+                .rfind("\n\n")
                 .map(|i| i + 2)
                 .or_else(|| search_range.rfind('\n').map(|i| i + 1))
                 .or_else(|| search_range.rfind(' ').map(|i| i + 1))
@@ -924,7 +930,8 @@ impl TelegramAdapter {
 
         // Try editing placeholder with first HTML chunk
         let first_html = html_chunks.first()?;
-        let mut edit_req = bot.edit_message_text(chat_id, placeholder_id, first_html.clone())
+        let mut edit_req = bot
+            .edit_message_text(chat_id, placeholder_id, first_html.clone())
             .parse_mode(ParseMode::Html);
         if html_chunks.len() == 1 {
             if let Some(ref markup) = reply_markup {
@@ -935,7 +942,8 @@ impl TelegramAdapter {
             Ok(_) => {
                 // Send remaining HTML chunks as new messages
                 for (i, chunk) in html_chunks.iter().skip(1).enumerate() {
-                    let mut req = bot.send_message(chat_id, chunk.clone())
+                    let mut req = bot
+                        .send_message(chat_id, chunk.clone())
                         .parse_mode(ParseMode::Html);
                     if i == html_chunks.len() - 2 {
                         if let Some(ref markup) = reply_markup {
@@ -956,7 +964,8 @@ impl TelegramAdapter {
                 debug!(error = %e, "HTML edit of placeholder failed, trying plain text");
                 // Try plain text edit
                 let first_plain = plain_chunks.first()?;
-                let mut plain_edit = bot.edit_message_text(chat_id, placeholder_id, first_plain.clone());
+                let mut plain_edit =
+                    bot.edit_message_text(chat_id, placeholder_id, first_plain.clone());
                 if plain_chunks.len() == 1 {
                     if let Some(ref markup) = reply_markup {
                         plain_edit = plain_edit.reply_markup(markup.clone());
@@ -1161,11 +1170,7 @@ impl TelegramAdapter {
     #[allow(dead_code)]
     async fn react_contextually(bot: &Bot, msg: &Message) {
         let text = msg.text().unwrap_or_default().to_lowercase();
-        let emoji = if text.contains('?') {
-            "🤔"
-        } else {
-            "👀"
-        };
+        let emoji = if text.contains('?') { "🤔" } else { "👀" };
         if let Err(e) = bot
             .set_message_reaction(msg.chat.id, msg.id)
             .reaction(vec![ReactionType::Emoji {
@@ -1195,15 +1200,23 @@ impl ChannelAdapter for TelegramAdapter {
         let bot = Bot::new(self.config.token.clone());
 
         // Fetch bot username for group mention detection
-        let bot_me = bot.get_me().await.map_err(|e| ChannelError::Telegram(format!("failed to get bot info: {e}")))?;
+        let bot_me = bot
+            .get_me()
+            .await
+            .map_err(|e| ChannelError::Telegram(format!("failed to get bot info: {e}")))?;
         let bot_username: Arc<str> = Arc::from(
-            bot_me.username.as_deref().unwrap_or("bot").to_string().into_boxed_str()
+            bot_me
+                .username
+                .as_deref()
+                .unwrap_or("bot")
+                .to_string()
+                .into_boxed_str(),
         );
 
         let group_policy = Arc::new(self.config.group_chat_policy.clone());
-        let group_context = Arc::new(TokioMutex::new(
-            GroupContextBuffer::new(self.config.group_chat_policy.context_window),
-        ));
+        let group_context = Arc::new(TokioMutex::new(GroupContextBuffer::new(
+            self.config.group_chat_policy.context_window,
+        )));
 
         let index_url = self.config.marketplace_index_url.clone();
         let model_control = self.config.model_control.clone();
@@ -1311,7 +1324,7 @@ impl ChannelAdapter for TelegramAdapter {
                                     "Cerebellum: heuristic"
                                 };
                                 let status = format!(
-                                    "Pares Agens v{version} ({commit})\n\
+                                    "Pares Radix v{version} ({commit})\n\
                                      PID: {} | RSS: {memory} | Uptime: {uptime}\n\
                                      Model: {model_line}\n\
                                      {cerebellum_line}\n\

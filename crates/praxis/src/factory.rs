@@ -17,8 +17,8 @@ use crate::rule::{Rule, RuleCategory, RuleContext, RuleResult};
 /// # Usage
 ///
 /// ```rust
-/// use pares_agens_praxis::{RulesFactory, RuleCategory, RuleContext, RuleResult};
-/// use pares_agens_praxis::rule::Rule;
+/// use pares_radix_praxis::{RulesFactory, RuleCategory, RuleContext, RuleResult};
+/// use pares_radix_praxis::rule::Rule;
 /// use serde_json::json;
 ///
 /// struct AlwaysPass;

@@ -19,7 +19,7 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use pares_agens_praxis::px::async_executor::{AsyncActionHandler, execute_async};
+//! use pares_radix_praxis::px::async_executor::{AsyncActionHandler, execute_async};
 //!
 //! struct MyHandler;
 //!
@@ -32,17 +32,15 @@
 //! ```
 
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio::time::timeout;
 
-use super::executor::{
-    default_evaluate_condition, ExecutionError, ExecutionResult, StepResult,
-};
+use super::executor::{default_evaluate_condition, ExecutionError, ExecutionResult, StepResult};
 
 // ── Async Action Handler Trait ────────────────────────────────────────────────
 
@@ -298,10 +296,7 @@ async fn execute_loop_async(
         .and_then(|v| v.as_array())
         .ok_or_else(|| ExecutionError::InvalidStructure("loop step missing 'steps'".into()))?;
 
-    let item_var = step
-        .get("as")
-        .and_then(|v| v.as_str())
-        .unwrap_or("item");
+    let item_var = step.get("as").and_then(|v| v.as_str()).unwrap_or("item");
 
     let output_var = step.get("output_var").and_then(|v| v.as_str());
 
@@ -534,8 +529,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_simple_procedure() {
-        let handler = MockAsyncHandler::new()
-            .with_result("greet", json!("hello"));
+        let handler = MockAsyncHandler::new().with_result("greet", json!("hello"));
 
         let procedure = json!({
             "type": "procedure",
@@ -615,8 +609,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_try_catch_async() {
-        let handler = MockAsyncHandler::new()
-            .with_result("fallback", json!("recovered"));
+        let handler = MockAsyncHandler::new().with_result("fallback", json!("recovered"));
 
         let procedure = json!({
             "type": "procedure",
@@ -641,8 +634,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_when_condition() {
-        let handler = MockAsyncHandler::new()
-            .with_result("action_a", json!("a_result"));
+        let handler = MockAsyncHandler::new().with_result("action_a", json!("a_result"));
 
         let procedure = json!({
             "type": "procedure",
@@ -665,7 +657,9 @@ mod tests {
         // With the variable set — should execute
         let mut vars = HashMap::new();
         vars.insert("mode".to_string(), json!("fast"));
-        let result = execute_async_with_vars(&procedure, &handler, vars).await.unwrap();
+        let result = execute_async_with_vars(&procedure, &handler, vars)
+            .await
+            .unwrap();
         assert!(!result.step_results[0].skipped);
         assert_eq!(result.step_results[0].output, Some(json!("a_result")));
     }
@@ -701,8 +695,7 @@ mod tests {
 
     #[tokio::test]
     async fn loop_guard_prevents_excessive_iterations() {
-        let handler = MockAsyncHandler::new()
-            .with_result("noop", json!(null));
+        let handler = MockAsyncHandler::new().with_result("noop", json!(null));
 
         let procedure = json!({
             "type": "procedure",

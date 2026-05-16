@@ -11,8 +11,8 @@ use serde_json::{json, Value};
 use walkdir::WalkDir;
 
 use crate::content_store::ContentStore;
-use crate::plugins::executor::PluginCrudExecutor;
 use crate::plugins::error::PluginError;
+use crate::plugins::executor::PluginCrudExecutor;
 
 const PLUGIN_NAME: &str = "agent-console";
 
@@ -173,11 +173,7 @@ pub fn index_project_with_content(
             }
         }
 
-        let _ = executor.create(
-            "file_index",
-            PLUGIN_NAME,
-            entity,
-        );
+        let _ = executor.create("file_index", PLUGIN_NAME, entity);
     }
 
     let file_count = files.len();
@@ -258,10 +254,7 @@ pub fn record_task(
 }
 
 /// Tool-facing: execute project indexing and return a JSON summary.
-pub fn tool_project_index(
-    path: &str,
-    executor: &PluginCrudExecutor,
-) -> Result<Value, PluginError> {
+pub fn tool_project_index(path: &str, executor: &PluginCrudExecutor) -> Result<Value, PluginError> {
     let index = index_project(path, executor)?;
     Ok(json!({
         "path": index.path,

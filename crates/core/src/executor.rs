@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use pares_agens_praxis::db::{
+use pares_radix_praxis::db::{
     procedures::on_action,
     schema::{AgentContext, SessionType},
     store::PraxisStore,
@@ -18,7 +18,7 @@ use crate::{
 /// Checks praxis pre-action constraints before a procedure is executed.
 ///
 /// Implementors can plug in any constraint store (the default
-/// [`DefaultPraxisGate`] uses a seeded [`pares_agens_praxis::db::PraxisStore`]).
+/// [`DefaultPraxisGate`] uses a seeded [`pares_radix_praxis::db::PraxisStore`]).
 pub trait PraxisGate: Send + Sync {
     /// Return `Ok(())` when the action is permitted, or `Err(reason)` when a
     /// blocking constraint fires.
@@ -27,19 +27,19 @@ pub trait PraxisGate: Send + Sync {
 
 /// Default implementation backed by a seeded [`PraxisStore`].
 pub struct DefaultPraxisGate {
-    store: pares_agens_praxis::db::PraxisStore,
+    store: pares_radix_praxis::db::PraxisStore,
 }
 
 impl DefaultPraxisGate {
     /// Create a gate pre-loaded with the built-in seeded constraints.
     pub fn new() -> Self {
         Self {
-            store: pares_agens_praxis::db::seed::default_store(),
+            store: pares_radix_praxis::db::seed::default_store(),
         }
     }
 
     /// Create a gate backed by a custom [`PraxisStore`].
-    pub fn with_store(store: pares_agens_praxis::db::PraxisStore) -> Self {
+    pub fn with_store(store: pares_radix_praxis::db::PraxisStore) -> Self {
         Self { store }
     }
 }
@@ -52,8 +52,8 @@ impl Default for DefaultPraxisGate {
 
 impl PraxisGate for DefaultPraxisGate {
     fn check(&self, action: &str) -> Result<(), String> {
-        use pares_agens_praxis::db::procedures::on_action;
-        use pares_agens_praxis::db::{AgentContext, SessionType};
+        use pares_radix_praxis::db::procedures::on_action;
+        use pares_radix_praxis::db::{AgentContext, SessionType};
 
         // The second argument is the resource target; executor-level checks are
         // action-only and do not have a specific target resource.

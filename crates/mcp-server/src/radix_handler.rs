@@ -17,19 +17,19 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
-use mcp_client::protocol::{Tool, ToolInputSchema};
 use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
-use pares_agens_core::delegation::{SubAgentManager, SpawnOptions};
+use pares_agens_core::delegation::{SpawnOptions, SubAgentManager};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
+use pares_radix_mcp_client::protocol::{Tool, ToolInputSchema};
 
 use pares_agens_agenda::scheduler::Scheduler;
-use pares_agens_praxis::module::PraxisModule;
-use pares_agens_praxis::px;
-use pares_agens_praxis::px::async_executor::{self as px_async, AsyncActionHandler};
-use pares_agens_praxis::px::compiler;
-use pares_agens_praxis::rule::{RuleContext, RuleResult};
+use pares_radix_praxis::module::PraxisModule;
+use pares_radix_praxis::px;
+use pares_radix_praxis::px::async_executor::{self as px_async, AsyncActionHandler};
+use pares_radix_praxis::px::compiler;
+use pares_radix_praxis::rule::{RuleContext, RuleResult};
 
 use crate::browser::BrowserClient;
 use crate::handler::{ToolHandler, ToolResult};
@@ -113,7 +113,10 @@ impl RadixToolHandler {
     }
 
     /// Attach praxis modules for constraint evaluation.
-    pub fn with_praxis_modules(mut self, modules: Vec<Box<dyn PraxisModule + Send + Sync>>) -> Self {
+    pub fn with_praxis_modules(
+        mut self,
+        modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
+    ) -> Self {
         self.praxis_modules = modules;
         self
     }
@@ -177,7 +180,11 @@ impl RadixToolHandler {
         }
 
         match tokio::fs::write(&path, content).await {
-            Ok(()) => ToolResult::ok(format!("wrote {} bytes to {}", content.len(), path.display())),
+            Ok(()) => ToolResult::ok(format!(
+                "wrote {} bytes to {}",
+                content.len(),
+                path.display()
+            )),
             Err(e) => ToolResult::error(format!("failed to write {}: {e}", path.display())),
         }
     }
@@ -202,10 +209,7 @@ impl RadixToolHandler {
         };
 
         if !content.contains(old_text) {
-            return ToolResult::error(format!(
-                "old_text not found in {}",
-                path.display()
-            ));
+            return ToolResult::error(format!("old_text not found in {}", path.display()));
         }
 
         let new_content = content.replacen(old_text, new_text, 1);
@@ -265,7 +269,10 @@ impl RadixToolHandler {
             .map(|p| self.resolve_path(p).to_string_lossy().to_string())
             .or_else(|| Some(self.workdir.to_string_lossy().to_string()));
 
-        let background = args.get("background").and_then(|v| v.as_bool()).unwrap_or(false);
+        let background = args
+            .get("background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let pty = args.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let timeout_secs = args.get("timeout").and_then(|v| v.as_u64()).unwrap_or(30);
 
@@ -415,7 +422,9 @@ impl RadixToolHandler {
 
         match memory.capture_fact(content, tags).await {
             Ok(Some(id)) => ToolResult::ok(format!("stored memory: {id}")),
-            Ok(None) => ToolResult::ok("content rejected by quality gate (too short, duplicate, or noise)"),
+            Ok(None) => {
+                ToolResult::ok("content rejected by quality gate (too short, duplicate, or noise)")
+            }
             Err(e) => ToolResult::error(format!("memory store failed: {e}")),
         }
     }
@@ -514,9 +523,7 @@ impl RadixToolHandler {
                         })
                         .collect();
 
-                    ToolResult::ok(
-                        serde_json::to_string_pretty(&formatted).unwrap_or_default(),
-                    )
+                    ToolResult::ok(serde_json::to_string_pretty(&formatted).unwrap_or_default())
                 }
                 Err(e) => ToolResult::error(format!("failed to parse search results: {e}")),
             },
@@ -551,7 +558,7 @@ impl RadixToolHandler {
     }
 
     async fn cron_add(&self, args: &Value) -> ToolResult {
-        use pares_agens_agenda::scheduler::{Task, Schedule};
+        use pares_agens_agenda::scheduler::{Schedule, Task};
 
         let scheduler = match &self.scheduler {
             Some(s) => s,
@@ -568,7 +575,9 @@ impl RadixToolHandler {
         };
 
         let schedule = if let Some(expr) = args.get("cron").and_then(|v| v.as_str()) {
-            Schedule::Cron { expr: expr.to_string() }
+            Schedule::Cron {
+                expr: expr.to_string(),
+            }
         } else if let Some(secs) = args.get("interval_secs").and_then(|v| v.as_u64()) {
             Schedule::Interval { every_secs: secs }
         } else {
@@ -830,10 +839,7 @@ impl RadixToolHandler {
             None => return ToolResult::error("state store not configured"),
         };
 
-        let prefix = args
-            .get("prefix")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let prefix = args.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
 
         // Dynamically scan all config keys from the store
         let config_prefix = format!("config:{prefix}");
@@ -879,7 +885,9 @@ impl RadixToolHandler {
         store.set("config:__last_modified", json!(now)).await;
 
         match prev {
-            Some(v) if v != Value::Null => ToolResult::ok(format!("deleted config: {key} (was: {v})")),
+            Some(v) if v != Value::Null => {
+                ToolResult::ok(format!("deleted config: {key} (was: {v})"))
+            }
             _ => ToolResult::ok(format!("config key not found: {key}")),
         }
     }
@@ -958,18 +966,30 @@ impl RadixToolHandler {
             .unwrap_or(0);
 
         // Record restart request in state store for the process supervisor to pick up
-        store.set("runtime:restart_requested", json!({
-            "timestamp": now,
-            "reason": reason
-        })).await;
+        store
+            .set(
+                "runtime:restart_requested",
+                json!({
+                    "timestamp": now,
+                    "reason": reason
+                }),
+            )
+            .await;
 
         // Also record in restart history
-        store.set(&format!("runtime:restart_history:{now}"), json!({
-            "reason": reason,
-            "requested_at": now
-        })).await;
+        store
+            .set(
+                &format!("runtime:restart_history:{now}"),
+                json!({
+                    "reason": reason,
+                    "requested_at": now
+                }),
+            )
+            .await;
 
-        ToolResult::ok(format!("restart signaled (reason: {reason}). Process supervisor will handle the restart."))
+        ToolResult::ok(format!(
+            "restart signaled (reason: {reason}). Process supervisor will handle the restart."
+        ))
     }
 
     async fn config_schema(&self, args: &Value) -> ToolResult {
@@ -1031,7 +1051,10 @@ impl RadixToolHandler {
             None => return ToolResult::error("OpenAI API key not configured"),
         };
 
-        let prompt = args.get("prompt").and_then(|v| v.as_str()).unwrap_or("Describe this image in detail.");
+        let prompt = args
+            .get("prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Describe this image in detail.");
         let image_url = args.get("image_url").and_then(|v| v.as_str());
         let image_path = args.get("image_path").and_then(|v| v.as_str());
 
@@ -1043,10 +1066,15 @@ impl RadixToolHandler {
                 Ok(bytes) => {
                     use base64::Engine;
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                    let mime = if path.ends_with(".png") { "image/png" }
-                        else if path.ends_with(".gif") { "image/gif" }
-                        else if path.ends_with(".webp") { "image/webp" }
-                        else { "image/jpeg" };
+                    let mime = if path.ends_with(".png") {
+                        "image/png"
+                    } else if path.ends_with(".gif") {
+                        "image/gif"
+                    } else if path.ends_with(".webp") {
+                        "image/webp"
+                    } else {
+                        "image/jpeg"
+                    };
                     json!({"type": "image_url", "image_url": {"url": format!("data:{mime};base64,{b64}")}})
                 }
                 Err(e) => return ToolResult::error(format!("failed to read image: {e}")),
@@ -1055,7 +1083,10 @@ impl RadixToolHandler {
             return ToolResult::error("provide either image_url or image_path");
         };
 
-        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o");
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gpt-4o");
         let body = json!({
             "model": model,
             "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, image_content]}],
@@ -1063,7 +1094,13 @@ impl RadixToolHandler {
         });
 
         let client = reqwest::Client::new();
-        match client.post("https://api.openai.com/v1/chat/completions").bearer_auth(&api_key).json(&body).send().await {
+        match client
+            .post("https://api.openai.com/v1/chat/completions")
+            .bearer_auth(&api_key)
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     let status = resp.status();
@@ -1071,7 +1108,12 @@ impl RadixToolHandler {
                     return ToolResult::error(format!("API error {status}: {text}"));
                 }
                 match resp.json::<Value>().await {
-                    Ok(data) => ToolResult::ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("no response").to_string()),
+                    Ok(data) => ToolResult::ok(
+                        data["choices"][0]["message"]["content"]
+                            .as_str()
+                            .unwrap_or("no response")
+                            .to_string(),
+                    ),
                     Err(e) => ToolResult::error(format!("failed to parse response: {e}")),
                 }
             }
@@ -1088,13 +1130,29 @@ impl RadixToolHandler {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: prompt"),
         };
-        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-image-1");
-        let size = args.get("size").and_then(|v| v.as_str()).unwrap_or("1024x1024");
-        let quality = args.get("quality").and_then(|v| v.as_str()).unwrap_or("auto");
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gpt-image-1");
+        let size = args
+            .get("size")
+            .and_then(|v| v.as_str())
+            .unwrap_or("1024x1024");
+        let quality = args
+            .get("quality")
+            .and_then(|v| v.as_str())
+            .unwrap_or("auto");
 
-        let body = json!({"model": model, "prompt": prompt, "n": 1, "size": size, "quality": quality});
+        let body =
+            json!({"model": model, "prompt": prompt, "n": 1, "size": size, "quality": quality});
         let client = reqwest::Client::new();
-        match client.post("https://api.openai.com/v1/images/generations").bearer_auth(&api_key).json(&body).send().await {
+        match client
+            .post("https://api.openai.com/v1/images/generations")
+            .bearer_auth(&api_key)
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     let status = resp.status();
@@ -1111,11 +1169,15 @@ impl RadixToolHandler {
                             match base64::engine::general_purpose::STANDARD.decode(b64) {
                                 Ok(bytes) => {
                                     if let Err(e) = tokio::fs::write(&filepath, &bytes).await {
-                                        return ToolResult::error(format!("failed to save image: {e}"));
+                                        return ToolResult::error(format!(
+                                            "failed to save image: {e}"
+                                        ));
                                     }
                                     ToolResult::ok(json!({"path": filepath.display().to_string(), "size_bytes": bytes.len()}).to_string())
                                 }
-                                Err(e) => ToolResult::error(format!("failed to decode base64: {e}")),
+                                Err(e) => {
+                                    ToolResult::error(format!("failed to decode base64: {e}"))
+                                }
                             }
                         } else if let Some(url) = data["data"][0]["url"].as_str() {
                             ToolResult::ok(json!({"url": url}).to_string())
@@ -1139,12 +1201,24 @@ impl RadixToolHandler {
             Some(t) => t,
             None => return ToolResult::error("missing required parameter: text"),
         };
-        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o-mini-tts");
-        let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("alloy");
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gpt-4o-mini-tts");
+        let voice = args
+            .get("voice")
+            .and_then(|v| v.as_str())
+            .unwrap_or("alloy");
 
         let body = json!({"model": model, "input": text, "voice": voice});
         let client = reqwest::Client::new();
-        match client.post("https://api.openai.com/v1/audio/speech").bearer_auth(&api_key).json(&body).send().await {
+        match client
+            .post("https://api.openai.com/v1/audio/speech")
+            .bearer_auth(&api_key)
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     let status = resp.status();
@@ -1177,29 +1251,62 @@ impl RadixToolHandler {
             return ToolResult::error(format!("file not found: {}", path.display()));
         }
 
-        let output = tokio::process::Command::new("pdftotext").arg(path.to_string_lossy().as_ref()).arg("-").output().await;
+        let output = tokio::process::Command::new("pdftotext")
+            .arg(path.to_string_lossy().as_ref())
+            .arg("-")
+            .output()
+            .await;
         let text = match output {
             Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
-            Ok(out) => return ToolResult::error(format!("pdftotext failed: {}", String::from_utf8_lossy(&out.stderr))),
-            Err(e) => return ToolResult::error(format!("pdftotext not found or failed: {e}. Install poppler-utils.")),
+            Ok(out) => {
+                return ToolResult::error(format!(
+                    "pdftotext failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ))
+            }
+            Err(e) => {
+                return ToolResult::error(format!(
+                    "pdftotext not found or failed: {e}. Install poppler-utils."
+                ))
+            }
         };
 
         let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
             Some(p) => p,
             None => {
-                let truncated = if text.len() > 50_000 { format!("{}\n\n[truncated]", &text[..50_000]) } else { text };
+                let truncated = if text.len() > 50_000 {
+                    format!("{}\n\n[truncated]", &text[..50_000])
+                } else {
+                    text
+                };
                 return ToolResult::ok(truncated);
             }
         };
 
         let api_key = match &self.openai_api_key {
             Some(k) => k.clone(),
-            None => return ToolResult::ok(format!("[no API key for analysis]\n\n{}", if text.len() > 50_000 { &text[..50_000] } else { &text })),
+            None => {
+                return ToolResult::ok(format!(
+                    "[no API key for analysis]\n\n{}",
+                    if text.len() > 50_000 {
+                        &text[..50_000]
+                    } else {
+                        &text
+                    }
+                ))
+            }
         };
 
-        let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("gpt-4o-mini");
+        let model = args
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("gpt-4o-mini");
         let max_text = 100_000;
-        let pdf_text = if text.len() > max_text { &text[..max_text] } else { &text };
+        let pdf_text = if text.len() > max_text {
+            &text[..max_text]
+        } else {
+            &text
+        };
         let body = json!({
             "model": model,
             "messages": [
@@ -1210,7 +1317,13 @@ impl RadixToolHandler {
         });
 
         let client = reqwest::Client::new();
-        match client.post("https://api.openai.com/v1/chat/completions").bearer_auth(&api_key).json(&body).send().await {
+        match client
+            .post("https://api.openai.com/v1/chat/completions")
+            .bearer_auth(&api_key)
+            .json(&body)
+            .send()
+            .await
+        {
             Ok(resp) => {
                 if !resp.status().is_success() {
                     let status = resp.status();
@@ -1218,7 +1331,12 @@ impl RadixToolHandler {
                     return ToolResult::error(format!("API error {status}: {err_text}"));
                 }
                 match resp.json::<Value>().await {
-                    Ok(data) => ToolResult::ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("no response").to_string()),
+                    Ok(data) => ToolResult::ok(
+                        data["choices"][0]["message"]["content"]
+                            .as_str()
+                            .unwrap_or("no response")
+                            .to_string(),
+                    ),
                     Err(e) => ToolResult::error(format!("failed to parse response: {e}")),
                 }
             }
@@ -1238,7 +1356,7 @@ impl RadixToolHandler {
 
     /// Simple shell quoting: wrap in single quotes, escaping existing single quotes.
     fn shell_quote(s: &str) -> String {
-        format!("'{}'", s.replace('\'', "'\\''" ))
+        format!("'{}'", s.replace('\'', "'\\''"))
     }
 
     /// Resolve a node identifier (name/id/IP) to an SSH target.
@@ -1250,7 +1368,9 @@ impl RadixToolHandler {
             return Ok(node_id.to_string());
         }
         // Look up from state store
-        let store = self.state_store.as_ref()
+        let store = self
+            .state_store
+            .as_ref()
             .ok_or_else(|| "state store not configured".to_string())?;
         let key = format!("nodes:{node_id}");
         match store.get(&key).await {
@@ -1269,7 +1389,9 @@ impl RadixToolHandler {
     async fn node_file_read(&self, args: &Value) -> ToolResult {
         let _store = match &self.state_store {
             Some(s) => s,
-            None => return ToolResult::error("node operations require state store (not configured)"),
+            None => {
+                return ToolResult::error("node operations require state store (not configured)")
+            }
         };
         let node_id = match args.get("node").and_then(|v| v.as_str()) {
             Some(n) => n,
@@ -1284,9 +1406,11 @@ impl RadixToolHandler {
             Err(e) => return ToolResult::error(e),
         };
         // Use SSH to read the file
-        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} cat {}",
+        let cmd = format!(
+            "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} cat {}",
             Self::shell_quote(&host),
-            Self::shell_quote(path));
+            Self::shell_quote(path)
+        );
         use pares_agens_core::shell_executor::ExecRequest;
         let req = ExecRequest {
             command: cmd,
@@ -1310,7 +1434,9 @@ impl RadixToolHandler {
     async fn node_file_write(&self, args: &Value) -> ToolResult {
         let _store = match &self.state_store {
             Some(s) => s,
-            None => return ToolResult::error("node operations require state store (not configured)"),
+            None => {
+                return ToolResult::error("node operations require state store (not configured)")
+            }
         };
         let node_id = match args.get("node").and_then(|v| v.as_str()) {
             Some(n) => n,
@@ -1329,9 +1455,11 @@ impl RadixToolHandler {
             Err(e) => return ToolResult::error(e),
         };
         // Pipe content via SSH
-        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} 'cat > {}'",
+        let cmd = format!(
+            "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} 'cat > {}'",
             Self::shell_quote(&host),
-            Self::shell_quote(path));
+            Self::shell_quote(path)
+        );
         use pares_agens_core::shell_executor::ExecRequest;
         let req = ExecRequest {
             command: format!("echo {} | {}", Self::shell_quote(content), cmd),
@@ -1355,7 +1483,9 @@ impl RadixToolHandler {
     async fn node_dir_list(&self, args: &Value) -> ToolResult {
         let _store = match &self.state_store {
             Some(s) => s,
-            None => return ToolResult::error("node operations require state store (not configured)"),
+            None => {
+                return ToolResult::error("node operations require state store (not configured)")
+            }
         };
         let node_id = match args.get("node").and_then(|v| v.as_str()) {
             Some(n) => n,
@@ -1369,9 +1499,11 @@ impl RadixToolHandler {
             Ok(h) => h,
             Err(e) => return ToolResult::error(e),
         };
-        let cmd = format!("ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} ls -la {}",
+        let cmd = format!(
+            "ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {} ls -la {}",
             Self::shell_quote(&host),
-            Self::shell_quote(path));
+            Self::shell_quote(path)
+        );
         use pares_agens_core::shell_executor::ExecRequest;
         let req = ExecRequest {
             command: cmd,
@@ -1395,7 +1527,9 @@ impl RadixToolHandler {
     async fn node_dir_fetch(&self, args: &Value) -> ToolResult {
         let _store = match &self.state_store {
             Some(s) => s,
-            None => return ToolResult::error("node operations require state store (not configured)"),
+            None => {
+                return ToolResult::error("node operations require state store (not configured)")
+            }
         };
         let node_id = match args.get("node").and_then(|v| v.as_str()) {
             Some(n) => n,
@@ -1405,7 +1539,9 @@ impl RadixToolHandler {
             Some(p) => p,
             None => return ToolResult::error("missing required parameter: path"),
         };
-        let local_path = args.get("local_path").and_then(|v| v.as_str())
+        let local_path = args
+            .get("local_path")
+            .and_then(|v| v.as_str())
             .unwrap_or("/tmp/node-fetch");
         let host = match self.resolve_node(node_id).await {
             Ok(h) => h,
@@ -1442,7 +1578,9 @@ impl RadixToolHandler {
     async fn node_status(&self, _args: &Value) -> ToolResult {
         let store = match &self.state_store {
             Some(s) => s,
-            None => return ToolResult::error("node operations require state store (not configured)"),
+            None => {
+                return ToolResult::error("node operations require state store (not configured)")
+            }
         };
         // List all keys starting with "nodes:"
         let keys = store.keys_with_prefix("nodes:").await;
@@ -1453,11 +1591,18 @@ impl RadixToolHandler {
         for key in &keys {
             if let Some(val) = store.get(key).await {
                 let name = key.strip_prefix("nodes:").unwrap_or(key);
-                let host = val.get("host").and_then(|h| h.as_str()).unwrap_or("unknown");
+                let host = val
+                    .get("host")
+                    .and_then(|h| h.as_str())
+                    .unwrap_or("unknown");
                 status_lines.push(format!("• {name}: {host}"));
             }
         }
-        ToolResult::ok(format!("Configured nodes ({}):\n{}", keys.len(), status_lines.join("\n")))
+        ToolResult::ok(format!(
+            "Configured nodes ({}):\n{}",
+            keys.len(),
+            status_lines.join("\n")
+        ))
     }
 
     // ── Browser tools ─────────────────────────────────────────────────────────
@@ -1465,13 +1610,20 @@ impl RadixToolHandler {
     async fn browser_status(&self, _args: &Value) -> ToolResult {
         let browser = match &self.browser {
             Some(b) => b,
-            None => return ToolResult::error("browser not configured. Set CDP endpoint via config."),
+            None => {
+                return ToolResult::error("browser not configured. Set CDP endpoint via config.")
+            }
         };
         if !browser.is_available().await {
-            return ToolResult::ok(json!({"available": false, "message": "no browser reachable at CDP endpoint"}).to_string());
+            return ToolResult::ok(
+                json!({"available": false, "message": "no browser reachable at CDP endpoint"})
+                    .to_string(),
+            );
         }
         match browser.version().await {
-            Ok(version) => ToolResult::ok(json!({"available": true, "version": version}).to_string()),
+            Ok(version) => {
+                ToolResult::ok(json!({"available": true, "version": version}).to_string())
+            }
             Err(e) => ToolResult::ok(json!({"available": false, "error": e}).to_string()),
         }
     }
@@ -1511,17 +1663,27 @@ impl RadixToolHandler {
         match browser.screenshot(format).await {
             Ok(base64_data) => {
                 let ext = format.unwrap_or("png");
-                let filename = format!("screenshot-{}.{ext}", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+                let filename = format!(
+                    "screenshot-{}.{ext}",
+                    chrono::Utc::now().format("%Y%m%d-%H%M%S")
+                );
                 let path = self.media_dir.join(&filename);
                 if let Err(e) = tokio::fs::create_dir_all(&self.media_dir).await {
                     return ToolResult::error(format!("failed to create media dir: {e}"));
                 }
-                match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &base64_data) {
+                match base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &base64_data,
+                ) {
                     Ok(bytes) => {
                         if let Err(e) = tokio::fs::write(&path, &bytes).await {
                             return ToolResult::error(format!("failed to save screenshot: {e}"));
                         }
-                        ToolResult::ok(format!("screenshot saved: {} ({} bytes)", path.display(), bytes.len()))
+                        ToolResult::ok(format!(
+                            "screenshot saved: {} ({} bytes)",
+                            path.display(),
+                            bytes.len()
+                        ))
                     }
                     Err(e) => ToolResult::error(format!("failed to decode screenshot: {e}")),
                 }
@@ -1574,10 +1736,13 @@ impl RadixToolHandler {
         let module_filter = args.get("module").and_then(|v| v.as_str());
 
         if self.praxis_modules.is_empty() {
-            return ToolResult::ok(json!({
-                "warning": "no praxis modules loaded",
-                "results": []
-            }).to_string());
+            return ToolResult::ok(
+                json!({
+                    "warning": "no praxis modules loaded",
+                    "results": []
+                })
+                .to_string(),
+            );
         }
 
         let ctx = RuleContext::new(&action, payload);
@@ -1596,7 +1761,10 @@ impl RadixToolHandler {
                     RuleResult::Pass => ("pass", None),
                     RuleResult::Fail { reason } => ("fail", Some(reason.clone())),
                     RuleResult::Warning { message } => ("warning", Some(message.clone())),
-                    RuleResult::Gate { action: _, rationale } => ("gate", Some(rationale.clone())),
+                    RuleResult::Gate {
+                        action: _,
+                        rationale,
+                    } => ("gate", Some(rationale.clone())),
                 };
 
                 let mut entry = json!({
@@ -1611,32 +1779,40 @@ impl RadixToolHandler {
             }
         }
 
-        let failures = all_results.iter()
+        let failures = all_results
+            .iter()
             .filter(|r| r["status"] == "fail" || r["status"] == "gate")
             .count();
-        let warnings = all_results.iter()
+        let warnings = all_results
+            .iter()
             .filter(|r| r["status"] == "warning")
             .count();
 
-        ToolResult::ok(json!({
-            "action": action,
-            "total_rules": all_results.len(),
-            "failures": failures,
-            "warnings": warnings,
-            "passed": all_results.len() - failures - warnings,
-            "results": all_results
-        }).to_string())
+        ToolResult::ok(
+            json!({
+                "action": action,
+                "total_rules": all_results.len(),
+                "failures": failures,
+                "warnings": warnings,
+                "passed": all_results.len() - failures - warnings,
+                "results": all_results
+            })
+            .to_string(),
+        )
     }
 
     async fn praxis_list(&self, args: &Value) -> ToolResult {
         let module_filter = args.get("module").and_then(|v| v.as_str());
 
         if self.praxis_modules.is_empty() {
-            return ToolResult::ok(json!({
-                "modules": [],
-                "total_rules": 0,
-                "note": "no praxis modules loaded — use with_praxis_modules() to configure"
-            }).to_string());
+            return ToolResult::ok(
+                json!({
+                    "modules": [],
+                    "total_rules": 0,
+                    "note": "no praxis modules loaded — use with_praxis_modules() to configure"
+                })
+                .to_string(),
+            );
         }
 
         let mut modules_info: Vec<Value> = Vec::new();
@@ -1653,12 +1829,15 @@ impl RadixToolHandler {
             let audit = module.audit();
             total_rules += rules.len();
 
-            let rule_list: Vec<Value> = rules.iter().map(|r| {
-                json!({
-                    "name": r.name(),
-                    "category": format!("{:?}", r.category()),
+            let rule_list: Vec<Value> = rules
+                .iter()
+                .map(|r| {
+                    json!({
+                        "name": r.name(),
+                        "category": format!("{:?}", r.category()),
+                    })
                 })
-            }).collect();
+                .collect();
 
             modules_info.push(json!({
                 "name": module.name(),
@@ -1669,10 +1848,13 @@ impl RadixToolHandler {
             }));
         }
 
-        ToolResult::ok(json!({
-            "modules": modules_info,
-            "total_rules": total_rules
-        }).to_string())
+        ToolResult::ok(
+            json!({
+                "modules": modules_info,
+                "total_rules": total_rules
+            })
+            .to_string(),
+        )
     }
 
     /// Run a .px procedure by inline source or file path.
@@ -1718,9 +1900,10 @@ impl RadixToolHandler {
         // Select the target procedure
         let target_name = args.get("procedure").and_then(|v| v.as_str());
         let record = if let Some(name) = target_name {
-            match procedure_records.iter().find(|r| {
-                r.data.get("name").and_then(|v| v.as_str()) == Some(name)
-            }) {
+            match procedure_records
+                .iter()
+                .find(|r| r.data.get("name").and_then(|v| v.as_str()) == Some(name))
+            {
                 Some(r) => r,
                 None => {
                     let available: Vec<_> = procedure_records
@@ -1831,8 +2014,14 @@ impl RadixToolHandler {
             Some(k) => k,
             None => return ToolResult::error("missing required parameter: key"),
         };
-        let actor = args.get("actor").and_then(|v| v.as_str()).unwrap_or("agent");
-        let action_str = args.get("action").and_then(|v| v.as_str()).unwrap_or("Create");
+        let actor = args
+            .get("actor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("agent");
+        let action_str = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Create");
         let action = match action_str.to_lowercase().as_str() {
             "create" => ChronosAction::Create,
             "update" => ChronosAction::Update,
@@ -1847,20 +2036,31 @@ impl RadixToolHandler {
             _ => return ToolResult::error(format!("unknown action: {action_str}. Valid: create, update, delete, move, tool_invoked, message_received, response_generated, context_managed, model_called, outcome_recorded")),
         };
         let data = args.get("data").cloned().unwrap_or(json!({}));
-        let rationale = args.get("rationale").and_then(|v| v.as_str()).map(|s| s.to_string());
-        let constraints: Vec<String> = args.get("constraints")
+        let rationale = args
+            .get("rationale")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let constraints: Vec<String> = args
+            .get("constraints")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
 
         let entry = chronos.build_entry(key, actor, action, &data, constraints, rationale);
         chronos.record(&entry);
 
-        ToolResult::ok(json!({
-            "id": entry.id,
-            "key": entry.key,
-            "timestamp": entry.timestamp
-        }).to_string())
+        ToolResult::ok(
+            json!({
+                "id": entry.id,
+                "key": entry.key,
+                "timestamp": entry.timestamp
+            })
+            .to_string(),
+        )
     }
 
     // ── Sub-agent tools ──────────────────────────────────────────────────────────
@@ -1892,12 +2092,15 @@ impl RadixToolHandler {
 
         let session_id = manager.spawn(agent, task, options).await;
 
-        ToolResult::ok(json!({
-            "session_id": session_id,
-            "status": "running",
-            "agent": agent,
-            "task": task
-        }).to_string())
+        ToolResult::ok(
+            json!({
+                "session_id": session_id,
+                "status": "running",
+                "agent": agent,
+                "task": task
+            })
+            .to_string(),
+        )
     }
 
     async fn subagent_list(&self, _args: &Value) -> ToolResult {
@@ -1907,14 +2110,19 @@ impl RadixToolHandler {
         };
 
         let sessions = manager.list().await;
-        let output: Vec<Value> = sessions.iter().map(|s| json!({
-            "id": s.id,
-            "agent": s.agent_name,
-            "label": s.label,
-            "status": format!("{:?}", s.status),
-            "started_at": s.started_at.to_rfc3339(),
-            "completed_at": s.completed_at.map(|t| t.to_rfc3339()),
-        })).collect();
+        let output: Vec<Value> = sessions
+            .iter()
+            .map(|s| {
+                json!({
+                    "id": s.id,
+                    "agent": s.agent_name,
+                    "label": s.label,
+                    "status": format!("{:?}", s.status),
+                    "started_at": s.started_at.to_rfc3339(),
+                    "completed_at": s.completed_at.map(|t| t.to_rfc3339()),
+                })
+            })
+            .collect();
 
         ToolResult::ok(serde_json::to_string_pretty(&output).unwrap_or_default())
     }
@@ -1933,7 +2141,9 @@ impl RadixToolHandler {
         if killed {
             ToolResult::ok(json!({"killed": true, "session_id": session_id}).to_string())
         } else {
-            ToolResult::error(format!("session not found or already completed: {session_id}"))
+            ToolResult::error(format!(
+                "session not found or already completed: {session_id}"
+            ))
         }
     }
 
@@ -2655,9 +2865,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "subagent_list".into(),
-            description: Some(
-                "List all sub-agent sessions (running and completed).".into(),
-            ),
+            description: Some("List all sub-agent sessions (running and completed).".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({})),
@@ -2666,9 +2874,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "subagent_kill".into(),
-            description: Some(
-                "Kill a running sub-agent session by ID.".into(),
-            ),
+            description: Some("Kill a running sub-agent session by ID.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -2760,8 +2966,12 @@ struct ShellBackedProcedureHandler {
 
 #[async_trait]
 impl AsyncActionHandler for ShellBackedProcedureHandler {
-    async fn call(&self, name: &str, params: &Value) -> Result<Value, pares_agens_praxis::px::executor::ExecutionError> {
-        use pares_agens_praxis::px::executor::ExecutionError;
+    async fn call(
+        &self,
+        name: &str,
+        params: &Value,
+    ) -> Result<Value, pares_radix_praxis::px::executor::ExecutionError> {
+        use pares_radix_praxis::px::executor::ExecutionError;
 
         match name {
             // Built-in: run a shell command
@@ -2808,13 +3018,12 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
 
             // Built-in: read a file
             "read_file" | "read" => {
-                let path = params
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ExecutionError::ActionFailed {
+                let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
                         action: name.to_string(),
                         message: "missing 'path' parameter".into(),
-                    })?;
+                    }
+                })?;
 
                 let full_path = if std::path::Path::new(path).is_absolute() {
                     PathBuf::from(path)
@@ -2822,29 +3031,25 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     self.workdir.join(path)
                 };
 
-                let content = tokio::fs::read_to_string(&full_path)
-                    .await
-                    .map_err(|e| ExecutionError::ActionFailed {
+                let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
+                    ExecutionError::ActionFailed {
                         action: name.to_string(),
                         message: format!("read failed: {e}"),
-                    })?;
+                    }
+                })?;
 
                 Ok(Value::String(content))
             }
 
             // Built-in: write a file
             "write_file" | "write" => {
-                let path = params
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ExecutionError::ActionFailed {
+                let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
                         action: name.to_string(),
                         message: "missing 'path' parameter".into(),
-                    })?;
-                let content = params
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                    }
+                })?;
+                let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
                 let full_path = if std::path::Path::new(path).is_absolute() {
                     PathBuf::from(path)
@@ -2856,12 +3061,12 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     let _ = tokio::fs::create_dir_all(parent).await;
                 }
 
-                tokio::fs::write(&full_path, content)
-                    .await
-                    .map_err(|e| ExecutionError::ActionFailed {
+                tokio::fs::write(&full_path, content).await.map_err(|e| {
+                    ExecutionError::ActionFailed {
                         action: name.to_string(),
                         message: format!("write failed: {e}"),
-                    })?;
+                    }
+                })?;
 
                 Ok(json!({"status": "ok", "path": full_path.display().to_string()}))
             }
@@ -2893,7 +3098,11 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                 } else {
                     Err(ExecutionError::ActionFailed {
                         action: other.to_string(),
-                        message: format!("exit {}: {}", output.status.code().unwrap_or(-1), stderr.trim()),
+                        message: format!(
+                            "exit {}: {}",
+                            output.status.code().unwrap_or(-1),
+                            stderr.trim()
+                        ),
                     })
                 }
             }
@@ -2934,7 +3143,10 @@ mod tests {
     async fn read_file_nonexistent() {
         let handler = make_handler();
         let result = handler
-            .call_tool("read_file", json!({"path": "/tmp/nonexistent_radix_test_xyz"}))
+            .call_tool(
+                "read_file",
+                json!({"path": "/tmp/nonexistent_radix_test_xyz"}),
+            )
             .await;
         assert!(result.is_error);
     }
@@ -3021,7 +3233,10 @@ mod tests {
     async fn cron_add_without_scheduler_returns_error() {
         let handler = make_handler();
         let result = handler
-            .call_tool("cron_add", json!({"name": "test", "command": "echo hi", "interval_secs": 60}))
+            .call_tool(
+                "cron_add",
+                json!({"name": "test", "command": "echo hi", "interval_secs": 60}),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
@@ -3031,8 +3246,7 @@ mod tests {
     async fn cron_tools_with_scheduler() {
         let shell = Arc::new(ShellExecutor::new());
         let scheduler = Arc::new(Scheduler::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_scheduler(scheduler);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_scheduler(scheduler);
 
         // List starts empty
         let result = handler.call_tool("cron_list", json!({})).await;
@@ -3041,11 +3255,14 @@ mod tests {
 
         // Add a task
         let result = handler
-            .call_tool("cron_add", json!({
-                "name": "test_task",
-                "command": "echo hello",
-                "interval_secs": 300
-            }))
+            .call_tool(
+                "cron_add",
+                json!({
+                    "name": "test_task",
+                    "command": "echo hello",
+                    "interval_secs": 300
+                }),
+            )
             .await;
         assert!(!result.is_error);
         assert!(result.content.contains("added task:"));
@@ -3084,14 +3301,15 @@ mod tests {
     fn make_handler_with_state() -> RadixToolHandler {
         let shell = Arc::new(ShellExecutor::new());
         let state = Arc::new(pares_agens_core::InMemoryStateStore::new());
-        RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_state_store(state)
+        RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_state_store(state)
     }
 
     #[tokio::test]
     async fn db_get_missing_key_returns_null() {
         let handler = make_handler_with_state();
-        let result = handler.call_tool("db_get", json!({"key": "nonexistent"})).await;
+        let result = handler
+            .call_tool("db_get", json!({"key": "nonexistent"}))
+            .await;
         assert!(!result.is_error);
         assert_eq!(result.content, "null");
     }
@@ -3106,7 +3324,9 @@ mod tests {
         assert!(!result.is_error);
         assert!(result.content.contains("stored key: test:foo"));
 
-        let result = handler.call_tool("db_get", json!({"key": "test:foo"})).await;
+        let result = handler
+            .call_tool("db_get", json!({"key": "test:foo"}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("42"));
         assert!(result.content.contains("bar"));
@@ -3119,7 +3339,9 @@ mod tests {
         handler
             .call_tool("db_put", json!({"key": "del:me", "value": "hello"}))
             .await;
-        let result = handler.call_tool("db_delete", json!({"key": "del:me"})).await;
+        let result = handler
+            .call_tool("db_delete", json!({"key": "del:me"}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("deleted key: del:me"));
 
@@ -3182,7 +3404,10 @@ mod tests {
             .call_tool("config_set", json!({"key": "model", "value": "test-model"}))
             .await;
         handler
-            .call_tool("config_set", json!({"key": "endpoint", "value": "http://localhost"}))
+            .call_tool(
+                "config_set",
+                json!({"key": "endpoint", "value": "http://localhost"}),
+            )
             .await;
 
         let result = handler.call_tool("config_list", json!({})).await;
@@ -3195,7 +3420,10 @@ mod tests {
     async fn config_list_with_prefix_filter() {
         let handler = make_handler_with_state();
         handler
-            .call_tool("config_set", json!({"key": "routing.interactive", "value": "fast"}))
+            .call_tool(
+                "config_set",
+                json!({"key": "routing.interactive", "value": "fast"}),
+            )
             .await;
         handler
             .call_tool("config_set", json!({"key": "model", "value": "gpt-4"}))
@@ -3231,7 +3459,9 @@ mod tests {
     #[tokio::test]
     async fn config_get_without_state_store_returns_error() {
         let handler = make_handler(); // no state store
-        let result = handler.call_tool("config_get", json!({"key": "model"})).await;
+        let result = handler
+            .call_tool("config_get", json!({"key": "model"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
     }
@@ -3285,10 +3515,16 @@ mod tests {
         let handler = make_handler_with_state();
         // Set some custom keys not in any hardcoded list
         handler
-            .call_tool("config_set", json!({"key": "custom.setting", "value": "enabled"}))
+            .call_tool(
+                "config_set",
+                json!({"key": "custom.setting", "value": "enabled"}),
+            )
             .await;
         handler
-            .call_tool("config_set", json!({"key": "custom.threshold", "value": 42}))
+            .call_tool(
+                "config_set",
+                json!({"key": "custom.threshold", "value": 42}),
+            )
             .await;
 
         let result = handler
@@ -3314,7 +3550,10 @@ mod tests {
     async fn heartbeat_configure_updates_config() {
         let handler = make_handler_with_state();
         let result = handler
-            .call_tool("heartbeat_configure", json!({"enabled": false, "interval_secs": 60}))
+            .call_tool(
+                "heartbeat_configure",
+                json!({"enabled": false, "interval_secs": 60}),
+            )
             .await;
         assert!(!result.is_error);
         assert!(result.content.contains("false"));
@@ -3372,9 +3611,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_restart_default_reason() {
         let handler = make_handler_with_state();
-        let result = handler
-            .call_tool("runtime_restart", json!({}))
-            .await;
+        let result = handler.call_tool("runtime_restart", json!({})).await;
         assert!(!result.is_error);
         assert!(result.content.contains("manual restart requested"));
     }
@@ -3393,9 +3630,7 @@ mod tests {
     #[tokio::test]
     async fn config_schema_list_all() {
         let handler = make_handler();
-        let result = handler
-            .call_tool("config_schema", json!({"key": ""}))
-            .await;
+        let result = handler.call_tool("config_schema", json!({"key": ""})).await;
         assert!(!result.is_error);
         assert!(result.content.contains("keys"));
         assert!(result.content.contains("model"));
@@ -3441,7 +3676,9 @@ mod tests {
         assert!(result.is_error);
         assert!(result.content.contains("node"));
 
-        let result = handler.call_tool("node_file_read", json!({"node": "test"})).await;
+        let result = handler
+            .call_tool("node_file_read", json!({"node": "test"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("path"));
     }
@@ -3450,7 +3687,10 @@ mod tests {
     async fn node_file_read_unknown_node() {
         let handler = make_handler_with_state();
         let result = handler
-            .call_tool("node_file_read", json!({"node": "nonexistent", "path": "/etc/hostname"}))
+            .call_tool(
+                "node_file_read",
+                json!({"node": "nonexistent", "path": "/etc/hostname"}),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not found"));
@@ -3477,7 +3717,10 @@ mod tests {
         let handler = make_handler_with_state();
         // Direct host format should resolve without state store lookup
         let result = handler
-            .call_tool("node_file_read", json!({"node": "192.168.1.1", "path": "/etc/hostname"}))
+            .call_tool(
+                "node_file_read",
+                json!({"node": "192.168.1.1", "path": "/etc/hostname"}),
+            )
             .await;
         // Will fail SSH connection but should NOT fail on "node not found"
         assert!(result.is_error);
@@ -3503,7 +3746,10 @@ mod tests {
     async fn image_analyze_without_api_key_returns_error() {
         let handler = make_handler();
         let result = handler
-            .call_tool("image_analyze", json!({"image_url": "https://example.com/img.jpg"}))
+            .call_tool(
+                "image_analyze",
+                json!({"image_url": "https://example.com/img.jpg"}),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
@@ -3536,9 +3782,7 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
             .with_openai_api_key("sk-test".into());
-        let result = handler
-            .call_tool("image_generate", json!({}))
-            .await;
+        let result = handler.call_tool("image_generate", json!({})).await;
         assert!(result.is_error);
         assert!(result.content.contains("prompt"));
     }
@@ -3558,9 +3802,7 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
             .with_openai_api_key("sk-test".into());
-        let result = handler
-            .call_tool("tts_generate", json!({}))
-            .await;
+        let result = handler.call_tool("tts_generate", json!({})).await;
         assert!(result.is_error);
         assert!(result.content.contains("text"));
     }
@@ -3568,9 +3810,7 @@ mod tests {
     #[tokio::test]
     async fn pdf_analyze_missing_path_returns_error() {
         let handler = make_handler();
-        let result = handler
-            .call_tool("pdf_analyze", json!({}))
-            .await;
+        let result = handler.call_tool("pdf_analyze", json!({})).await;
         assert!(result.is_error);
         assert!(result.content.contains("path"));
     }
@@ -3579,7 +3819,10 @@ mod tests {
     async fn pdf_analyze_nonexistent_file_returns_error() {
         let handler = make_handler();
         let result = handler
-            .call_tool("pdf_analyze", json!({"path": "/tmp/nonexistent_radix_test.pdf"}))
+            .call_tool(
+                "pdf_analyze",
+                json!({"path": "/tmp/nonexistent_radix_test.pdf"}),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not found"));
@@ -3614,18 +3857,24 @@ mod tests {
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         assert_eq!(parsed["results"], json!([]));
-        assert!(parsed["warning"].as_str().unwrap().contains("no praxis modules"));
+        assert!(parsed["warning"]
+            .as_str()
+            .unwrap()
+            .contains("no praxis modules"));
     }
 
     #[tokio::test]
     async fn praxis_evaluate_with_safety_module() {
-        use pares_agens_praxis::modules::safety::SafetyModule;
+        use pares_radix_praxis::modules::safety::SafetyModule;
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
             .with_praxis_modules(vec![Box::new(SafetyModule::default())]);
 
         let result = handler
-            .call_tool("praxis_evaluate", json!({"action": "send_email", "payload": {"recipients": 50}}))
+            .call_tool(
+                "praxis_evaluate",
+                json!({"action": "send_email", "payload": {"recipients": 50}}),
+            )
             .await;
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
@@ -3636,9 +3885,7 @@ mod tests {
     #[tokio::test]
     async fn praxis_list_no_modules() {
         let handler = make_handler();
-        let result = handler
-            .call_tool("praxis_list", json!({}))
-            .await;
+        let result = handler.call_tool("praxis_list", json!({})).await;
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         assert_eq!(parsed["total_rules"], 0);
@@ -3646,14 +3893,12 @@ mod tests {
 
     #[tokio::test]
     async fn praxis_list_with_modules() {
-        use pares_agens_praxis::modules::safety::SafetyModule;
+        use pares_radix_praxis::modules::safety::SafetyModule;
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
             .with_praxis_modules(vec![Box::new(SafetyModule::default())]);
 
-        let result = handler
-            .call_tool("praxis_list", json!({}))
-            .await;
+        let result = handler.call_tool("praxis_list", json!({})).await;
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         assert!(parsed["total_rules"].as_u64().unwrap() > 0);
@@ -3665,9 +3910,7 @@ mod tests {
     #[tokio::test]
     async fn praxis_evaluate_missing_action() {
         let handler = make_handler();
-        let result = handler
-            .call_tool("praxis_evaluate", json!({}))
-            .await;
+        let result = handler.call_tool("praxis_evaluate", json!({})).await;
         assert!(result.is_error);
         assert!(result.content.contains("action"));
     }
@@ -3738,7 +3981,9 @@ mod tests {
     #[tokio::test]
     async fn chronos_history_without_timeline() {
         let handler = make_handler();
-        let result = handler.call_tool("chronos_history", json!({"key": "test:key"})).await;
+        let result = handler
+            .call_tool("chronos_history", json!({"key": "test:key"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
     }
@@ -3753,7 +3998,7 @@ mod tests {
 
     #[tokio::test]
     async fn chronos_history_with_timeline() {
-        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
         use pluresdb::CrdtStore;
 
         let store = Arc::new(CrdtStore::default());
@@ -3771,10 +4016,11 @@ mod tests {
         timeline.record(&entry);
 
         let shell = Arc::new(ShellExecutor::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(timeline);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(timeline);
 
-        let result = handler.call_tool("chronos_history", json!({"key": "test:key1"})).await;
+        let result = handler
+            .call_tool("chronos_history", json!({"key": "test:key1"}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("test-actor"));
         assert!(result.content.contains("test:key1"));
@@ -3782,7 +4028,7 @@ mod tests {
 
     #[tokio::test]
     async fn chronos_recent_with_timeline() {
-        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
         use pluresdb::CrdtStore;
 
         let store = Arc::new(CrdtStore::default());
@@ -3799,17 +4045,18 @@ mod tests {
         timeline.record(&entry);
 
         let shell = Arc::new(ShellExecutor::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(timeline);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(timeline);
 
-        let result = handler.call_tool("chronos_recent", json!({"limit": 5})).await;
+        let result = handler
+            .call_tool("chronos_recent", json!({"limit": 5}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("recent:test"));
     }
 
     #[tokio::test]
     async fn chronos_by_actor_with_timeline() {
-        use pares_agens_core::chronos::{ChronosTimeline, ChronosAction};
+        use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
         use pluresdb::CrdtStore;
 
         let store = Arc::new(CrdtStore::default());
@@ -3826,10 +4073,11 @@ mod tests {
         timeline.record(&entry);
 
         let shell = Arc::new(ShellExecutor::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(timeline);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(timeline);
 
-        let result = handler.call_tool("chronos_by_actor", json!({"actor": "special-actor"})).await;
+        let result = handler
+            .call_tool("chronos_by_actor", json!({"actor": "special-actor"}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("special-actor"));
         assert!(result.content.contains("ToolInvoked"));
@@ -3843,16 +4091,21 @@ mod tests {
         let timeline = Arc::new(ChronosTimeline::new(store));
 
         let shell = Arc::new(ShellExecutor::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(Arc::clone(&timeline));
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(Arc::clone(&timeline));
 
-        let result = handler.call_tool("chronos_record", json!({
-            "key": "test:record",
-            "actor": "test-agent",
-            "action": "create",
-            "data": {"foo": "bar"},
-            "rationale": "testing record"
-        })).await;
+        let result = handler
+            .call_tool(
+                "chronos_record",
+                json!({
+                    "key": "test:record",
+                    "actor": "test-agent",
+                    "action": "create",
+                    "data": {"foo": "bar"},
+                    "rationale": "testing record"
+                }),
+            )
+            .await;
         assert!(!result.is_error, "error: {}", result.content);
         assert!(result.content.contains("test:record"));
 
@@ -3867,7 +4120,9 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
 
-        let result = handler.call_tool("chronos_record", json!({"key": "x"})).await;
+        let result = handler
+            .call_tool("chronos_record", json!({"key": "x"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
     }
@@ -3887,10 +4142,15 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
 
-        let result = handler.call_tool("subagent_spawn", json!({
-            "agent": "researcher",
-            "task": "find info"
-        })).await;
+        let result = handler
+            .call_tool(
+                "subagent_spawn",
+                json!({
+                    "agent": "researcher",
+                    "task": "find info"
+                }),
+            )
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
     }
@@ -3900,7 +4160,9 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
 
-        let result = handler.call_tool("subagent_kill", json!({"session_id": "abc"})).await;
+        let result = handler
+            .call_tool("subagent_kill", json!({"session_id": "abc"}))
+            .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
     }

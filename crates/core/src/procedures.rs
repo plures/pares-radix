@@ -1,4 +1,4 @@
-//! Default PluresLM procedure library shipped with pares-agens.
+//! Default PluresLM procedure library shipped with pares-radix.
 //!
 //! These bundled JSON procedure groups are intended to be imported into
 //! PluresDB-backed deployments on first run. Consumers can apply

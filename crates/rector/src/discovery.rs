@@ -206,7 +206,10 @@ impl PeerAddress {
             if addr.is_empty() {
                 return None;
             }
-            Some(Self { address: addr, port })
+            Some(Self {
+                address: addr,
+                port,
+            })
         } else {
             None
         }
@@ -259,9 +262,10 @@ impl MultiDiscovery {
         for mode in &self.modes {
             let found = match mode {
                 DiscoveryMode::Direct(peers) => self.discover_direct(peers),
-                DiscoveryMode::Lan { multicast_group, port } => {
-                    self.discover_lan(multicast_group, *port)
-                }
+                DiscoveryMode::Lan {
+                    multicast_group,
+                    port,
+                } => self.discover_lan(multicast_group, *port),
                 DiscoveryMode::PluresDb => self.discover_pluresdb(),
             };
             for node in found {
@@ -528,8 +532,14 @@ mod tests {
         let local = test_node("local");
         let mut md = MultiDiscovery::new(Arc::clone(&store), local);
         md.add_direct_peers(vec![
-            PeerAddress { address: "10.0.0.5".into(), port: 7700 },
-            PeerAddress { address: "10.0.0.6".into(), port: 7700 },
+            PeerAddress {
+                address: "10.0.0.5".into(),
+                port: 7700,
+            },
+            PeerAddress {
+                address: "10.0.0.6".into(),
+                port: 7700,
+            },
         ]);
         let nodes = md.discover_all();
         // Should include direct peers (no PluresDB nodes stored)
@@ -553,7 +563,10 @@ mod tests {
         dup.last_seen = now_epoch_secs();
         store.put(key, "rector", serde_json::to_value(&dup).unwrap());
 
-        md.add_direct_peers(vec![PeerAddress { address: "10.0.0.5".into(), port: 7700 }]);
+        md.add_direct_peers(vec![PeerAddress {
+            address: "10.0.0.5".into(),
+            port: 7700,
+        }]);
 
         let nodes = md.discover_all();
         // PluresDB finds "local", direct finds "dup-node" — both unique
@@ -580,7 +593,10 @@ mod tests {
             serde_json::to_value(&rich_node).unwrap(),
         );
 
-        let results = md.discover_direct(&[PeerAddress { address: "10.0.0.99".into(), port: 7700 }]);
+        let results = md.discover_direct(&[PeerAddress {
+            address: "10.0.0.99".into(),
+            port: 7700,
+        }]);
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "rich-peer");
         assert_eq!(results[0].capabilities.cpu_cores, 32);

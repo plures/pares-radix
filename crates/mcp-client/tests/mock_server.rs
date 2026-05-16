@@ -4,7 +4,7 @@
 //! no real process or network is involved.
 
 use async_trait::async_trait;
-use mcp_client::{
+use pares_radix_mcp_client::{
     error::Result,
     protocol::{
         CallToolResult, InitializeResult, JsonRpcError, JsonRpcRequest, JsonRpcResponse,
@@ -291,7 +291,7 @@ async fn call_tool_returns_text_content() {
     assert!(!result.is_error);
     assert_eq!(result.content.len(), 1);
     match &result.content[0] {
-        mcp_client::protocol::ToolContent::Text { text } => {
+        pares_radix_mcp_client::protocol::ToolContent::Text { text } => {
             assert!(text.contains("rust programming"));
         }
         _ => panic!("expected text content"),
@@ -337,7 +337,10 @@ async fn openai_tool_not_found_returns_error() {
     client.initialize().await.unwrap();
 
     let err = client.openai_tool("nonexistent").await.unwrap_err();
-    assert!(matches!(err, mcp_client::McpError::ToolNotFound(_)));
+    assert!(matches!(
+        err,
+        pares_radix_mcp_client::McpError::ToolNotFound(_)
+    ));
 }
 
 #[tokio::test]
@@ -378,7 +381,7 @@ async fn jsonrpc_error_propagated_correctly() {
     let err = client.initialize().await.unwrap_err();
     assert!(matches!(
         err,
-        mcp_client::McpError::JsonRpc { code: -32602, .. }
+        pares_radix_mcp_client::McpError::JsonRpc { code: -32602, .. }
     ));
 }
 
@@ -393,7 +396,10 @@ async fn response_id_mismatch_returns_error() {
     }));
 
     let err = client.initialize().await.unwrap_err();
-    assert!(matches!(err, mcp_client::McpError::UnexpectedResponse(_)));
+    assert!(matches!(
+        err,
+        pares_radix_mcp_client::McpError::UnexpectedResponse(_)
+    ));
 }
 
 #[tokio::test]

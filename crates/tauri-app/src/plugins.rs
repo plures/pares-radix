@@ -112,7 +112,9 @@ pub async fn plugin_schema(name: String, state: State<'_, AppState>) -> Result<S
 
 // ── Entity CRUD commands ─────────────────────────────────────────────────────
 
-fn get_executor(state: &AppState) -> Result<&std::sync::Arc<pares_agens_core::plugins::PluginCrudExecutor>, String> {
+fn get_executor(
+    state: &AppState,
+) -> Result<&std::sync::Arc<pares_agens_core::plugins::PluginCrudExecutor>, String> {
     state
         .plugin_executor
         .as_ref()

@@ -1,4 +1,4 @@
-//! Event spine — bridges pares-agens to PluresDB's `AgensRuntime`.
+//! Event spine — bridges pares-radix to PluresDB's `AgensRuntime`.
 //!
 //! The spine initialises `AgensRuntime` from the existing `CrdtStore` that
 //! backs PluresDB memory and registers core lifecycle procedures for the
@@ -15,7 +15,7 @@
 //! ```rust,ignore
 //! use pares_agens_core::event_spine::EventSpine;
 //!
-//! let spine = EventSpine::new(store.crdt_store(), "pares-agens");
+//! let spine = EventSpine::new(store.crdt_store(), "pares-radix");
 //! spine.seed_contracts();            // write channel contracts to PluresDB
 //! spine.register_core_procedures();  // register lifecycle handlers
 //!
@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use crate::channel_contract::ChannelContract;
 
-/// The event spine wraps `AgensRuntime` and provides the pares-agens
+/// The event spine wraps `AgensRuntime` and provides the pares-radix
 /// message lifecycle on top of PluresDB's reactive procedure system.
 pub struct EventSpine<'a> {
     runtime: AgensRuntime<'a>,
@@ -53,11 +53,8 @@ impl<'a> EventSpine<'a> {
     /// will be added here.
     pub fn seed_contracts(&self) {
         let telegram = ChannelContract::telegram();
-        self.store.put(
-            "contract:telegram",
-            "event-spine",
-            telegram.to_json(),
-        );
+        self.store
+            .put("contract:telegram", "event-spine", telegram.to_json());
         info!("seeded Telegram channel contract into PluresDB");
     }
 
@@ -127,12 +124,7 @@ impl<'a> EventSpine<'a> {
     /// Emit an inbound message event from a channel adapter.
     ///
     /// Returns the CRDT node ID of the stored event.
-    pub fn emit_inbound_message(
-        &self,
-        chat_id: i64,
-        user: &str,
-        text: &str,
-    ) -> String {
+    pub fn emit_inbound_message(&self, chat_id: i64, user: &str, text: &str) -> String {
         let id = Uuid::new_v4().to_string();
         let event = AgensEvent::Message {
             id,
@@ -153,12 +145,7 @@ impl<'a> EventSpine<'a> {
     /// Emit a model response event (called after the LLM responds).
     ///
     /// Returns the CRDT node ID of the stored event.
-    pub fn emit_model_response(
-        &self,
-        chat_id: i64,
-        channel: &str,
-        content: &str,
-    ) -> String {
+    pub fn emit_model_response(&self, chat_id: i64, channel: &str, content: &str) -> String {
         let id = Uuid::new_v4().to_string();
         let event = AgensEvent::ModelResponse {
             id,
@@ -234,12 +221,7 @@ impl EventSpineHandle {
     }
 
     /// Emit an inbound message event. Returns the CRDT node ID.
-    pub fn emit_inbound_message(
-        &self,
-        chat_id: i64,
-        user: &str,
-        text: &str,
-    ) -> String {
+    pub fn emit_inbound_message(&self, chat_id: i64, user: &str, text: &str) -> String {
         let id = Uuid::new_v4().to_string();
         let node_id = format!("cmd:message:{id}");
         self.store.put(
@@ -259,12 +241,7 @@ impl EventSpineHandle {
     }
 
     /// Emit a model response event. Returns the CRDT node ID.
-    pub fn emit_model_response(
-        &self,
-        chat_id: i64,
-        channel: &str,
-        content: &str,
-    ) -> String {
+    pub fn emit_model_response(&self, chat_id: i64, channel: &str, content: &str) -> String {
         let id = Uuid::new_v4().to_string();
         let node_id = format!("cmd:model_response:{id}");
         self.store.put(
@@ -283,7 +260,13 @@ impl EventSpineHandle {
     }
 
     /// Emit a delivery success event.
-    pub fn emit_delivery_success(&self, chat_id: i64, channel: &str, message_id: i64, format_used: &str) {
+    pub fn emit_delivery_success(
+        &self,
+        chat_id: i64,
+        channel: &str,
+        message_id: i64,
+        format_used: &str,
+    ) {
         let id = Uuid::new_v4().to_string();
         let node_id = format!("cmd:delivery_success:{id}");
         self.store.put(
@@ -301,7 +284,13 @@ impl EventSpineHandle {
     }
 
     /// Emit a delivery failure event.
-    pub fn emit_delivery_failure(&self, chat_id: i64, channel: &str, error: &str, will_retry: bool) {
+    pub fn emit_delivery_failure(
+        &self,
+        chat_id: i64,
+        channel: &str,
+        error: &str,
+        will_retry: bool,
+    ) {
         let id = Uuid::new_v4().to_string();
         let node_id = format!("cmd:delivery_failure:{id}");
         self.store.put(
@@ -316,7 +305,10 @@ impl EventSpineHandle {
                 "will_retry": will_retry,
             }),
         );
-        warn!(chat_id, channel, error, will_retry, "event_spine_handle: delivery failure recorded");
+        warn!(
+            chat_id,
+            channel, error, will_retry, "event_spine_handle: delivery failure recorded"
+        );
     }
 
     /// Get a reference to the underlying CRDT store.
@@ -348,7 +340,9 @@ mod tests {
         let spine = EventSpine::new(&store, "test-actor");
         spine.seed_contracts();
 
-        let contract = spine.get_contract("telegram").expect("contract should exist");
+        let contract = spine
+            .get_contract("telegram")
+            .expect("contract should exist");
         assert_eq!(contract.max_message_len, 4096);
         assert_eq!(contract.preferred_format, "HTML");
     }

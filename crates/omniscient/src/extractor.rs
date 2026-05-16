@@ -50,16 +50,17 @@ fn extract_text(data: &[u8]) -> Extraction {
     };
     Extraction {
         text: Some(truncated),
-        metadata: vec![
-            ("lines".into(), data.iter().filter(|&&b| b == b'\n').count().to_string()),
-        ],
+        metadata: vec![(
+            "lines".into(),
+            data.iter().filter(|&&b| b == b'\n').count().to_string(),
+        )],
         security: None,
     }
 }
 
 fn extract_code(data: &[u8], language: &str) -> Extraction {
     let owned = String::from_utf8_lossy(data).into_owned();
-    
+
     // Compute line-derived stats before consuming owned
     let total_lines;
     let code_lines;
@@ -67,29 +68,35 @@ fn extract_code(data: &[u8], language: &str) -> Extraction {
     {
         let lines: Vec<&str> = owned.lines().collect();
         total_lines = lines.len();
-        code_lines = lines.iter().filter(|l| {
-            let trimmed = l.trim();
-            !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('#')
-        }).count();
-        signatures = lines.iter().filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("pub fn ")
-                || trimmed.starts_with("fn ")
-                || trimmed.starts_with("pub struct ")
-                || trimmed.starts_with("struct ")
-                || trimmed.starts_with("pub enum ")
-                || trimmed.starts_with("pub trait ")
-                || trimmed.starts_with("class ")
-                || trimmed.starts_with("def ")
-                || trimmed.starts_with("export function ")
-                || trimmed.starts_with("export const ")
-                || trimmed.starts_with("function ")
-            {
-                Some(trimmed.to_string())
-            } else {
-                None
-            }
-        }).collect::<Vec<_>>();
+        code_lines = lines
+            .iter()
+            .filter(|l| {
+                let trimmed = l.trim();
+                !trimmed.is_empty() && !trimmed.starts_with("//") && !trimmed.starts_with('#')
+            })
+            .count();
+        signatures = lines
+            .iter()
+            .filter_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("pub fn ")
+                    || trimmed.starts_with("fn ")
+                    || trimmed.starts_with("pub struct ")
+                    || trimmed.starts_with("struct ")
+                    || trimmed.starts_with("pub enum ")
+                    || trimmed.starts_with("pub trait ")
+                    || trimmed.starts_with("class ")
+                    || trimmed.starts_with("def ")
+                    || trimmed.starts_with("export function ")
+                    || trimmed.starts_with("export const ")
+                    || trimmed.starts_with("function ")
+                {
+                    Some(trimmed.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
     } // lines dropped here
 
     let sig_count = signatures.len();
@@ -121,13 +128,19 @@ fn extract_pdf(_data: &[u8], path: &str) -> Extraction {
     let text = match output {
         Ok(out) if out.status.success() => {
             let t = String::from_utf8_lossy(&out.stdout).into_owned();
-            if t.len() > MAX_TEXT_LEN { t[..MAX_TEXT_LEN].to_string() } else { t }
+            if t.len() > MAX_TEXT_LEN {
+                t[..MAX_TEXT_LEN].to_string()
+            } else {
+                t
+            }
         }
-        _ => return Extraction {
-            text: None,
-            metadata: vec![("error".into(), "pdftotext not available".into())],
-            security: None,
-        },
+        _ => {
+            return Extraction {
+                text: None,
+                metadata: vec![("error".into(), "pdftotext not available".into())],
+                security: None,
+            }
+        }
     };
 
     Extraction {
@@ -163,7 +176,11 @@ fn extract_office(_data: &[u8], path: &str) -> Extraction {
     let text = match output {
         Ok(out) if out.status.success() => {
             let t = String::from_utf8_lossy(&out.stdout).into_owned();
-            if t.trim().is_empty() { None } else { Some(t) }
+            if t.trim().is_empty() {
+                None
+            } else {
+                Some(t)
+            }
         }
         _ => None,
     };
@@ -184,7 +201,8 @@ fn extract_binary(data: &[u8], _path: &str) -> Extraction {
         freq[byte as usize] += 1;
     }
     let len = data.len() as f64;
-    let entropy: f64 = freq.iter()
+    let entropy: f64 = freq
+        .iter()
         .filter(|&&f| f > 0)
         .map(|&f| {
             let p = f as f64 / len;
@@ -195,7 +213,9 @@ fn extract_binary(data: &[u8], _path: &str) -> Extraction {
 
     // High entropy = packed/encrypted (normal code ~5-6, packed ~7.5+)
     if entropy > 7.5 {
-        security.anomalies.push("high-entropy: possibly packed or encrypted".into());
+        security
+            .anomalies
+            .push("high-entropy: possibly packed or encrypted".into());
         security.risk_score += 0.3;
     }
 
@@ -217,9 +237,28 @@ fn extract_binary(data: &[u8], _path: &str) -> Extraction {
     }
 
     // Detect imports/capabilities from strings
-    let network_indicators = ["socket", "connect", "bind", "listen", "send", "recv",
-        "http", "https", "curl", "wget", "dns", "getaddrinfo"];
-    let file_indicators = ["fopen", "fwrite", "readdir", "unlink", "chmod", "CreateFile"];
+    let network_indicators = [
+        "socket",
+        "connect",
+        "bind",
+        "listen",
+        "send",
+        "recv",
+        "http",
+        "https",
+        "curl",
+        "wget",
+        "dns",
+        "getaddrinfo",
+    ];
+    let file_indicators = [
+        "fopen",
+        "fwrite",
+        "readdir",
+        "unlink",
+        "chmod",
+        "CreateFile",
+    ];
     let crypto_indicators = ["aes", "rsa", "sha256", "encrypt", "decrypt", "private_key"];
     let exec_indicators = ["exec", "system", "popen", "CreateProcess", "ShellExecute"];
 
@@ -315,9 +354,7 @@ fn extract_archive(path: &str) -> Extraction {
         });
 
     let text = match output {
-        Ok(out) if out.status.success() => {
-            Some(String::from_utf8_lossy(&out.stdout).into_owned())
-        }
+        Ok(out) if out.status.success() => Some(String::from_utf8_lossy(&out.stdout).into_owned()),
         _ => None,
     };
 
@@ -347,7 +384,9 @@ mod tests {
         let text = result.text.unwrap();
         assert!(text.contains("pub fn main"));
         // Should detect 2 signatures (pub fn main, pub struct Config)
-        let sigs: usize = result.metadata.iter()
+        let sigs: usize = result
+            .metadata
+            .iter()
             .find(|(k, _)| k == "signatures")
             .map(|(_, v)| v.parse().unwrap_or(0))
             .unwrap_or(0);
@@ -369,7 +408,8 @@ mod tests {
 
     #[test]
     fn test_extract_binary_capabilities() {
-        let data = b"some code here socket connect bind listen network stuff and CreateProcess for exec";
+        let data =
+            b"some code here socket connect bind listen network stuff and CreateProcess for exec";
         let result = extract_binary(data, "test");
         let sec = result.security.unwrap();
         assert!(sec.capabilities.contains(&"network".to_string()));

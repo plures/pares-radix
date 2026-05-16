@@ -13,8 +13,8 @@
 //! stub weight encoding with real file reads and the `create_listing` stub
 //! with authenticated Polar.sh API calls.
 
-use crate::MarketplaceError;
 use crate::lora_types::LoRAAdapter;
+use crate::MarketplaceError;
 use serde::{Deserialize, Serialize};
 
 // ── Adapter metadata ──────────────────────────────────────────────────────────

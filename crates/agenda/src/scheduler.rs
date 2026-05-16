@@ -1,4 +1,4 @@
-//! `scheduler` — tokio-based task scheduler for pares-agens.
+//! `scheduler` — tokio-based task scheduler for pares-radix.
 //!
 //! Provides cron-expression and interval-based task scheduling, with
 //! tasks persisted in PluresDB so schedules survive process restarts.

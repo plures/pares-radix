@@ -155,9 +155,9 @@ pub fn strip_formatting(input: &str) -> String {
         if let Some(end) = s[start + 3..].find("```") {
             let block = &s[start + 3..start + 3 + end];
             // strip optional language tag
-            let block = block.strip_prefix(|c: char| c != '\n').map_or(block, |rest| {
-                rest.strip_prefix('\n').unwrap_or(rest)
-            });
+            let block = block
+                .strip_prefix(|c: char| c != '\n')
+                .map_or(block, |rest| rest.strip_prefix('\n').unwrap_or(rest));
             s = format!("{}{}{}", &s[..start], block, &s[start + 6 + end..]);
         } else {
             break;
@@ -165,9 +165,7 @@ pub fn strip_formatting(input: &str) -> String {
     }
     // Simple tag stripping for any remaining HTML
     let re_result = strip_html_tags(&s);
-    re_result
-        .replace("**", "")
-        .replace(['*', '`'], "")
+    re_result.replace("**", "").replace(['*', '`'], "")
 }
 
 fn strip_html_tags(input: &str) -> String {
@@ -253,26 +251,17 @@ mod tests {
 
     #[test]
     fn bold_conversion() {
-        assert_eq!(
-            markdown_to_telegram_html("**hello**"),
-            "<b>hello</b>"
-        );
+        assert_eq!(markdown_to_telegram_html("**hello**"), "<b>hello</b>");
     }
 
     #[test]
     fn italic_conversion() {
-        assert_eq!(
-            markdown_to_telegram_html("*world*"),
-            "<i>world</i>"
-        );
+        assert_eq!(markdown_to_telegram_html("*world*"), "<i>world</i>");
     }
 
     #[test]
     fn inline_code() {
-        assert_eq!(
-            markdown_to_telegram_html("`code`"),
-            "<code>code</code>"
-        );
+        assert_eq!(markdown_to_telegram_html("`code`"), "<code>code</code>");
     }
 
     #[test]

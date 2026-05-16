@@ -55,17 +55,27 @@ pub struct PersonalityContract {
     pub max_proactive_per_day: u8,
 }
 
-fn default_true() -> bool { true }
-fn default_heartbeat_interval() -> u32 { 30 }
-fn default_quiet_start() -> u8 { 23 }
-fn default_quiet_end() -> u8 { 8 }
-fn default_max_proactive() -> u8 { 6 }
+fn default_true() -> bool {
+    true
+}
+fn default_heartbeat_interval() -> u32 {
+    30
+}
+fn default_quiet_start() -> u8 {
+    23
+}
+fn default_quiet_end() -> u8 {
+    8
+}
+fn default_max_proactive() -> u8 {
+    6
+}
 
 impl PersonalityContract {
     /// Build the default personality contract seeded on first run.
     pub fn default_contract(name: Option<&str>) -> Self {
         Self {
-            name: name.unwrap_or("Pares Agens").to_string(),
+            name: name.unwrap_or("Pares Radix").to_string(),
             description: "An AI agent built on the plures technology stack.".to_string(),
             tone: "direct".to_string(),
             rules: vec![
@@ -235,7 +245,10 @@ impl PersonalityContract {
         }
         if let Some(ch) = channel {
             if let Some(overrides) = self.channel_overrides.get(ch) {
-                out.push_str(&format!("\n\nChannel overrides for '{ch}' ({}):", overrides.len()));
+                out.push_str(&format!(
+                    "\n\nChannel overrides for '{ch}' ({}):",
+                    overrides.len()
+                ));
                 for r in overrides {
                     let tag = if r.enforced { "enforced" } else { "guidance" };
                     out.push_str(&format!(
@@ -460,8 +473,16 @@ mod tests {
     #[test]
     fn format_documents_orders_correctly() {
         let docs = vec![
-            PersonalityDocument { doc_type: "soul".into(), content: "Soul text".into(), updated_at: 1 },
-            PersonalityDocument { doc_type: "identity".into(), content: "Id text".into(), updated_at: 1 },
+            PersonalityDocument {
+                doc_type: "soul".into(),
+                content: "Soul text".into(),
+                updated_at: 1,
+            },
+            PersonalityDocument {
+                doc_type: "identity".into(),
+                content: "Id text".into(),
+                updated_at: 1,
+            },
         ];
         let formatted = format_documents_for_prompt(&docs);
         let id_pos = formatted.find("## Identity").unwrap();

@@ -2,11 +2,11 @@
 //!
 //! This is loaded by pares-radix's plugin executor when the omniscient plugin is installed.
 
-use crate::file_node::NodeIdentity;
-use crate::scanner::{ScanConfig, Scanner, ScanEvent};
 use crate::enrichment::{EnrichmentPipeline, EnrichmentPriority};
-use crate::store::{OmniscientStore, MemoryStore, StoreStats};
+use crate::file_node::NodeIdentity;
 use crate::query::{QueryConfig, QueryResult};
+use crate::scanner::{ScanConfig, ScanEvent, Scanner};
+use crate::store::{MemoryStore, OmniscientStore, StoreStats};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -26,12 +26,14 @@ pub struct OmniscientConfig {
 impl Default for OmniscientConfig {
     fn default() -> Self {
         Self {
-            watch_paths: vec![
-                dirs::home_dir().unwrap_or_else(|| PathBuf::from("/")),
-            ],
+            watch_paths: vec![dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))],
             ignore_patterns: vec![
-                ".git".into(), "node_modules".into(), "target".into(),
-                ".cache".into(), "__pycache__".into(), "result".into(),
+                ".git".into(),
+                "node_modules".into(),
+                "target".into(),
+                ".cache".into(),
+                "__pycache__".into(),
+                "result".into(),
             ],
             max_file_size_mb: 100,
             enrichment_batch_size: 20,
