@@ -39,7 +39,6 @@
           cp -a onnxruntime-linux-x64-1.23.0/include/* $out/include/
         '';
       };
-      };
 
       # Shared build config
       mkRadixBuild = pkgs: extraAttrs:
