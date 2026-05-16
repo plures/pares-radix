@@ -1,3 +1,7 @@
+## [1.43.10] — 2026-05-16
+
+- fix: remove duplicate closing brace in flake.nix (9846e97)
+
 ## [1.43.9] — 2026-05-16
 
 - fix: autoPatchelfHook on onnxruntime to embed libstdc++ RPATH (d9cc0ce)
