@@ -440,14 +440,17 @@ const tools: ToolDef[] = [
         if (phase && c.phases?.length > 0 && !c.phases.includes(phase)) continue;
 
         // Evaluate `when` guard — if set, constraint only applies when condition holds
+        // Wrap context so expressions like `context.type` resolve correctly
+        const evalScope = { context } as Record<string, unknown>;
+
         if (c.when) {
-          const whenResult = simpleEval(c.when, context as Record<string, unknown>);
+          const whenResult = simpleEval(c.when, evalScope);
           if (!whenResult) continue;
         }
 
         // Evaluate `require` — if set, this must be true or it's a violation
         if (c.require) {
-          const requireResult = simpleEval(c.require, context as Record<string, unknown>);
+          const requireResult = simpleEval(c.require, evalScope);
           if (!requireResult) {
             violations.push({
               constraint: c.name,
