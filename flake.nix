@@ -34,10 +34,10 @@ tar.extractall(os.environ['out'] + '/lib')
         '';
       };
 
-      # CLI binary (pares-agens) — headless agent daemon
+      # CLI binary — headless agent daemon
       mkCliPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
-        pname = "pares-agens";
-        version = "1.12.1";
+        pname = "pares-radix";
+        version = "1.40.0";
         src = pkgs.lib.cleanSource ./.;
 
         cargoLock = {
@@ -61,17 +61,17 @@ tar.extractall(os.environ['out'] + '/lib')
         FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
 
         meta = {
-          description = "Pares Agens CLI — headless AI agent daemon";
+          description = "Pares Radix — headless AI agent daemon";
           homepage = "https://github.com/plures/pares-radix";
           license = pkgs.lib.licenses.bsl11;
-          mainProgram = "pares-agens";
+          mainProgram = "pares-radix";
         };
       };
 
       # Tauri desktop app — requires npm build for Svelte frontend first
       mkTauriPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
-        pname = "pares-radix";
-        version = "0.7.4";
+        pname = "pares-radix-desktop";
+        version = "1.40.0";
         src = pkgs.lib.cleanSource ./.;
 
         cargoLock = {
@@ -113,7 +113,7 @@ tar.extractall(os.environ['out'] + '/lib')
       in
       {
         packages.default = mkCliPkg pkgs;
-        packages.pares-agens = mkCliPkg pkgs;
+        packages.pares-radix-cli = mkCliPkg pkgs;
         packages.pares-radix = mkTauriPkg pkgs;
 
         devShells.default = pkgs.mkShell {
@@ -127,8 +127,8 @@ tar.extractall(os.environ['out'] + '/lib')
       }
     ) // {
       overlays.default = final: prev: {
-        pares-agens = mkCliPkg final;
-        pares-radix = mkTauriPkg final;
+        pares-radix = mkCliPkg final;
+        pares-radix-desktop = mkTauriPkg final;
       };
 
       # NixOS module — headless agent daemon service
@@ -219,15 +219,15 @@ tar.extractall(os.environ['out'] + '/lib')
               description = "Whether to create the service user.";
             };
 
-            extraFlags = lib.mkOption {
-              type = lib.types.listOf lib.types.str;
-              default = [];
-
             bitnetModelPath = lib.mkOption {
               type = lib.types.nullOr lib.types.path;
               default = null;
               description = "Path to a BitNet model file for local inference.";
             };
+
+            extraFlags = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
               description = "Additional command-line flags.";
             };
           };
@@ -314,7 +314,7 @@ tar.extractall(os.environ['out'] + '/lib')
                   ${braveApiKeyExport}
                   ${syncSharedKeyExport}
 
-                  exec ${cfg.package}/bin/pares-agens serve \
+                  exec ${cfg.package}/bin/pares-radix serve \
                     ${copilotArg} \
                     ${modelArg} \
                     ${promptArg} \
