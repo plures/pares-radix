@@ -214,6 +214,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_expr_with_symbolic_logic_ops() {
+        // && and || should work alongside 'and' and 'or'
+        let cases = [
+            "a == b && c == d",
+            "a == b || c == d",
+            "x > 1 && y < 10 || z == 0",
+            "a and b",
+            "a or b",
+        ];
+        for case in cases {
+            let result = PxParser::parse(Rule::expr, case);
+            assert!(result.is_ok(), "failed to parse expr: {case}");
+        }
+    }
+
+    #[test]
     fn parse_value_types() {
         assert!(PxParser::parse(Rule::value, "\"hello\"").is_ok());
         assert!(PxParser::parse(Rule::value, "42").is_ok());
@@ -296,6 +312,25 @@ constraint warmth:
         // when/require are optional for personality constraints
         assert!(c.when_expr.is_none());
         assert!(c.require_expr.is_none());
+    }
+
+    #[test]
+    fn parse_constraint_with_symbolic_operators() {
+        let source = r#"
+constraint deploy_gate:
+  when: ci.status == green && review.approved == true
+  require: deploy.target != production || deploy.canary_ok == true
+  severity: error
+  message: "Cannot deploy to production without canary pass"
+"#;
+
+        let doc = parse(source).expect("expected valid .px");
+        assert_eq!(doc.constraints.len(), 1);
+        let c = &doc.constraints[0];
+        assert_eq!(c.name, "deploy_gate");
+        assert!(c.when_expr.as_ref().unwrap().contains("&&"));
+        assert!(c.require_expr.as_ref().unwrap().contains("||"));
+        assert_eq!(c.severity, "error");
     }
 
     #[test]

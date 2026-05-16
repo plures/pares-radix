@@ -106,7 +106,7 @@ optional_type = { "optional[" ~ type_expr ~ "]" }
 // === Expressions ===
 expr = { comparison ~ (logic_op ~ comparison)* }
 comparison = { term ~ (comp_op ~ term)? }
-logic_op = { "and" | "or" }
+logic_op = { "&&" | "||" | "and" | "or" }
 comp_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
 term = { not_expr | call_expr | dotted_ident | value | "(" ~ expr ~ ")" }
 not_expr = { "NOT" ~ term }
