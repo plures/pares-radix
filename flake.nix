@@ -20,30 +20,30 @@
         raw = builtins.head lines;
       in builtins.head (builtins.match ''.*"(.*)".*'' raw);
 
-      # Official Microsoft ONNX Runtime release with shared library.
-      # autoPatchelfHook patches RPATH so libonnxruntime.so finds libstdc++
-      # without any LD_LIBRARY_PATH at runtime.
-      onnxruntime = { pkgs }: pkgs.stdenv.mkDerivation {
-        pname = "onnxruntime-prebuilt";
-        version = "1.23.0";
+      # Prefetch ONNX Runtime static library for ort-sys.
+      onnxruntimeLib = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
+        name = "onnxruntime-prebuilt-1.23.2";
         src = pkgs.fetchurl {
-          url = "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/onnxruntime-linux-x64-1.23.0.tgz";
-          hash = "sha256-tt7qfy4iwQwEMBnylKDqTSpsCuUqAJw0hHZA23XsVYA=";
+          url = "https://cdn.pyke.io/0/pyke:ort-rs/ms@1.23.2/x86_64-unknown-linux-gnu.tar.lzma2";
+          hash = "sha256-jFfQWaqu5AeBKlaY1nBseeCQrWnhoUIEMJ6ALcu6o18=";
         };
-        sourceRoot = ".";
-        nativeBuildInputs = [ pkgs.autoPatchelfHook ];
-        buildInputs = [ pkgs.stdenv.cc.cc.lib ];
+        nativeBuildInputs = [ pkgs.python3 ];
+        dontUnpack = true;
         installPhase = ''
-          mkdir -p $out/lib $out/include
-          cp -a onnxruntime-linux-x64-1.23.0/lib/* $out/lib/
-          cp -a onnxruntime-linux-x64-1.23.0/include/* $out/include/
+          mkdir -p $out/lib
+          python3 -c "
+import lzma, tarfile, io, sys, os
+with open(sys.argv[1], 'rb') as f:
+    raw = f.read()
+data = lzma.decompress(raw, format=lzma.FORMAT_RAW, filters=[{'id': lzma.FILTER_LZMA2, 'dict_size': 1 << 26}])
+tar = tarfile.open(fileobj=io.BytesIO(data))
+tar.extractall(os.environ['out'] + '/lib')
+" $src
         '';
       };
 
-      # Shared build config
-      mkRadixBuild = pkgs: extraAttrs:
-        let ort = onnxruntime { inherit pkgs; };
-        in pkgs.rustPlatform.buildRustPackage ({
+      # CLI binary — headless agent daemon
+      mkCliPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix";
         version = cargoVersion;
         src = pkgs.lib.cleanSource ./.;
@@ -53,33 +53,63 @@
           allowBuiltinFetchGit = true;
         };
 
-        __noChroot = true;
+        cargoBuildFlags = [ "-p" "pares-radix-cli" ];
+
+        # Skip tests — 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
+        # TODO: fix the tests properly and re-enable
         doCheck = false;
 
-        nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
+        nativeBuildInputs = with pkgs; [ pkg-config cmake ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
 
-        # Build: ort-sys finds the .so here and links dynamically
-        ORT_LIB_LOCATION = "${ort}/lib";
-        ORT_PREFER_DYNAMIC_LINK = "1";
-
-        # Runtime: set ORT_DYLIB_PATH so ort's dlopen finds the .so,
-        # and add ort lib to LD_LIBRARY_PATH as fallback
-        postInstall = ''
-          wrapProgram $out/bin/pares-radix \
-            --set ORT_DYLIB_PATH "${ort}/lib/libonnxruntime.so" \
-            --prefix LD_LIBRARY_PATH : "${ort}/lib"
-        '';
+        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
+        FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
 
         meta = {
+          description = "Pares Radix CLI — headless AI agent daemon";
           homepage = "https://github.com/plures/pares-radix";
           license = pkgs.lib.licenses.bsl11;
           mainProgram = "pares-radix";
         };
-      } // extraAttrs);
+      };
+
+      # Tauri desktop app — requires npm build for Svelte frontend first
+      mkTauriPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
+        pname = "pares-radix-desktop";
+        version = cargoVersion;
+        src = pkgs.lib.cleanSource ./.;
+
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+          allowBuiltinFetchGit = true;
+        };
+
+        cargoBuildFlags = [ "-p" "pares-radix" ];
+
+        nativeBuildInputs = with pkgs; [ pkg-config cmake nodejs_22 ];
+        buildInputs = with pkgs; [
+          openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
+          graphene webkitgtk_4_1 libsoup_3
+        ];
+
+        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
+        FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
+
+        preBuild = ''
+          npm ci --ignore-scripts
+          npm run build
+        '';
+
+        meta = {
+          description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
+          homepage = "https://github.com/plures/pares-radix";
+          license = pkgs.lib.licenses.bsl11;
+          mainProgram = "pares-radix";
+        };
+      };
     in
     flake-utils.lib.eachDefaultSystem (system:
       let
@@ -88,28 +118,11 @@
         rust = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" ];
         };
-
-        cliPkg = mkRadixBuild pkgs {
-          pname = "pares-radix";
-          cargoBuildFlags = [ "-p" "pares-radix-cli" ];
-          meta.description = "Pares Radix — headless AI agent daemon";
-        };
-
-        tauriPkg = mkRadixBuild pkgs {
-          pname = "pares-radix-desktop";
-          cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper nodejs_22 ];
-          meta.description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
-          preBuild = ''
-            npm ci --ignore-scripts
-            npm run build
-          '';
-        };
       in
       {
-        packages.default = cliPkg;
-        packages.cli = cliPkg;
-        packages.desktop = tauriPkg;
+        packages.default = mkCliPkg pkgs;
+        packages.cli = mkCliPkg pkgs;
+        packages.desktop = mkTauriPkg pkgs;
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -121,21 +134,9 @@
         };
       }
     ) // {
-      overlays.default = final: prev:
-        let ort = onnxruntime { pkgs = final; };
-        in {
-        pares-radix = (mkRadixBuild final {
-          cargoBuildFlags = [ "-p" "pares-radix-cli" ];
-        });
-        pares-radix-desktop = (mkRadixBuild final {
-          pname = "pares-radix-desktop";
-          cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with final; [ pkg-config cmake makeWrapper nodejs_22 ];
-          preBuild = ''
-            npm ci --ignore-scripts
-            npm run build
-          '';
-        });
+      overlays.default = final: prev: {
+        pares-radix = mkCliPkg final;
+        pares-radix-desktop = mkTauriPkg final;
       };
 
       # NixOS module — headless agent daemon service
@@ -261,7 +262,7 @@
             users.groups.${cfg.group} = lib.mkIf cfg.createUser {};
 
             systemd.services.pares-radix = {
-              description = "Pares Radix — AI Agent Daemon";
+              description = "Pares Agens — AI Agent Daemon";
               wantedBy = [ "multi-user.target" ];
               after = [ "network-online.target" ];
               wants = [ "network-online.target" ];
