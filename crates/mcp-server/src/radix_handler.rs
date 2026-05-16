@@ -245,13 +245,14 @@ impl RadixToolHandler {
 
         let config = PxWatcherConfig {
             watch_path: watch_path.clone(),
-            initial_scan: false, // Already loaded via with_px_dir
+            initial_scan: true, // Re-scan to persist all records to PluresDB
             debounce_ms: 150,
         };
 
         let watcher = PxWatcher::new(config);
         let mut rx = watcher.start().await?;
         let procedures = Arc::clone(&self.loaded_procedures);
+        let state_store = self.state_store.clone();
 
         tokio::spawn(async move {
             info!(path = %watch_path.display(), "PxWatcher hot-reload active for MCP server");
@@ -259,6 +260,18 @@ impl RadixToolHandler {
             while let Some(event) = rx.recv().await {
                 match event {
                     PxWatchEvent::Loaded { path, records } => {
+                        // Persist all compiled records to PluresDB as px:* keys
+                        if let Some(ref store) = state_store {
+                            for record in &records {
+                                store.set(&record.key, record.data.clone()).await;
+                            }
+                            debug!(
+                                path = %path.display(),
+                                keys = records.len(),
+                                "persisted px records to PluresDB"
+                            );
+                        }
+
                         let mut map = procedures.write().await;
                         // Remove old procedures from this file
                         map.retain(|_, proc| proc.source_file != path);
@@ -300,7 +313,19 @@ impl RadixToolHandler {
                             );
                         }
                     }
-                    PxWatchEvent::Removed { path, .. } => {
+                    PxWatchEvent::Removed { path, keys } => {
+                        // Remove px:* keys from PluresDB
+                        if let Some(ref store) = state_store {
+                            for key in &keys {
+                                store.delete(key).await;
+                            }
+                            debug!(
+                                path = %path.display(),
+                                keys_removed = keys.len(),
+                                "removed px records from PluresDB"
+                            );
+                        }
+
                         let mut map = procedures.write().await;
                         let before = map.len();
                         map.retain(|_, proc| proc.source_file != path);
@@ -4641,6 +4666,83 @@ mod tests {
                 procs.keys().collect::<Vec<_>>()
             );
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn px_watcher_persists_records_to_state_store() {
+        use std::io::Write;
+        use tokio::time::{sleep, Duration};
+
+        let dir = std::env::temp_dir().join("radix_test_px_db_persist");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        // Write a .px file BEFORE starting the watcher (tests initial_scan persistence)
+        let px_file = dir.join("persist_test.px");
+        {
+            let mut f = std::fs::File::create(&px_file).unwrap();
+            writeln!(f, "fact agent_state:\n  mood: string\n  energy: int").unwrap();
+            writeln!(f).unwrap();
+            writeln!(f, "rule mood_rule:\n  when:\n    - agent_state.mood == \"happy\"\n  then:\n    - action: celebrate").unwrap();
+        }
+
+        let shell = Arc::new(ShellExecutor::new());
+        let store = Arc::new(pares_agens_core::InMemoryStateStore::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_state_store(store.clone());
+
+        // Start watcher with initial_scan=true (our new default)
+        handler
+            .start_px_watcher(dir.clone())
+            .await
+            .expect("watcher should start");
+
+        // Wait for initial scan + persistence
+        sleep(Duration::from_millis(500)).await;
+
+        // Verify records were persisted to state store
+        let fact = store.get("px:fact/agent_state").await;
+        assert!(fact.is_some(), "px:fact/agent_state should be persisted to state store");
+        let fact_val = fact.unwrap();
+        assert_eq!(
+            fact_val.get("type").and_then(|v| v.as_str()),
+            Some("fact")
+        );
+
+        let rule = store.get("px:rule/mood_rule").await;
+        assert!(rule.is_some(), "px:rule/mood_rule should be persisted to state store");
+        let rule_val = rule.unwrap();
+        assert_eq!(
+            rule_val.get("type").and_then(|v| v.as_str()),
+            Some("rule")
+        );
+
+        // Now add a new file and check hot-reload also persists
+        let px_file2 = dir.join("extra.px");
+        {
+            let mut f = std::fs::File::create(&px_file2).unwrap();
+            writeln!(f, "constraint must_have_energy:\n  when: agent_state.energy < 0\n  require: false\n  severity: error\n  message: \"No energy\"").unwrap();
+        }
+        sleep(Duration::from_millis(500)).await;
+
+        let constraint = store.get("px:constraint/must_have_energy").await;
+        assert!(
+            constraint.is_some(),
+            "px:constraint/must_have_energy should be persisted after hot-reload"
+        );
+
+        // Remove and verify deletion
+        std::fs::remove_file(&px_file2).unwrap();
+        sleep(Duration::from_millis(500)).await;
+
+        let deleted = store.get("px:constraint/must_have_energy").await;
+        // After delete, value should be None or Null
+        assert!(
+            deleted.is_none() || deleted == Some(serde_json::Value::Null),
+            "px:constraint/must_have_energy should be removed from state store"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
