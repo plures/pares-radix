@@ -510,78 +510,259 @@ fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
 /// - Bare truthiness checks
 pub fn default_evaluate_condition(expr: &str, vars: &HashMap<String, Value>) -> bool {
     let expr = expr.trim();
+    eval_or(expr, vars)
+}
 
+// ── Expression Parser (recursive descent) ─────────────────────────────────────
+//
+// Grammar (lowest to highest precedence):
+//   or_expr   := and_expr ( "||" and_expr )*
+//   and_expr  := unary ( "&&" unary )*
+//   unary     := "!" unary | atom
+//   atom      := "(" or_expr ")" | comparison | literal | truthy_var
+//   comparison := var ("==" | "!=" | ">=" | "<=" | ">" | "<") value
+//
+// We split on logical operators first (outside parentheses), then evaluate atoms.
+
+/// Evaluate an OR expression: `a || b || c`
+fn eval_or(expr: &str, vars: &HashMap<String, Value>) -> bool {
+    let parts = split_logical(expr, "||");
+    if parts.len() > 1 {
+        return parts.iter().any(|part| eval_and(part.trim(), vars));
+    }
+    eval_and(expr, vars)
+}
+
+/// Evaluate an AND expression: `a && b && c`
+fn eval_and(expr: &str, vars: &HashMap<String, Value>) -> bool {
+    let parts = split_logical(expr, "&&");
+    if parts.len() > 1 {
+        return parts.iter().all(|part| eval_unary(part.trim(), vars));
+    }
+    eval_unary(expr, vars)
+}
+
+/// Evaluate a unary expression: `!expr` or just `atom`
+fn eval_unary(expr: &str, vars: &HashMap<String, Value>) -> bool {
+    let expr = expr.trim();
+    if let Some(rest) = expr.strip_prefix('!') {
+        let rest = rest.trim();
+        // Handle `!(...)` or `!var`
+        return !eval_unary(rest, vars);
+    }
+    eval_atom(expr, vars)
+}
+
+/// Evaluate an atom: parenthesized expression, comparison, literal, or truthy variable.
+fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
+    let expr = expr.trim();
+
+    // Parenthesized expression
+    if expr.starts_with('(') && matching_close_paren(expr) == Some(expr.len() - 1) {
+        return eval_or(&expr[1..expr.len() - 1], vars);
+    }
+
+    // Literals
     match expr {
         "true" | "_" | "default" | "else" => return true,
         "false" => return false,
         _ => {}
     }
 
-    // Try == comparison
-    if let Some((lhs, rhs)) = expr.split_once("==") {
-        let lhs = lhs.trim();
-        let rhs = rhs.trim().trim_matches('"');
-
-        if let Some(val) = vars.get(lhs) {
-            return match val {
-                Value::String(s) => s == rhs,
-                Value::Number(n) => n.to_string() == rhs,
-                Value::Bool(b) => b.to_string() == rhs,
-                Value::Null => rhs == "null",
-                _ => false,
-            };
-        }
-        // Also check dotted access (e.g., "result.status")
-        if let Some(val) = resolve_dotted(lhs, vars) {
-            return match &val {
-                Value::String(s) => s.as_str() == rhs,
-                Value::Number(n) => n.to_string() == rhs,
-                Value::Bool(b) => b.to_string() == rhs,
-                Value::Null => rhs == "null",
-                _ => false,
-            };
-        }
-        return false;
+    // Try comparison operators (order matters: >= before >, <= before <, == and != before others)
+    // == comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, "==") {
+        return compare_eq(lhs, rhs, vars);
     }
-
-    // Try != comparison
-    if let Some((lhs, rhs)) = expr.split_once("!=") {
-        let lhs = lhs.trim();
-        let rhs = rhs.trim().trim_matches('"');
-
-        if let Some(val) = vars.get(lhs) {
-            return match val {
-                Value::String(s) => s != rhs,
-                Value::Number(n) => n.to_string() != rhs,
-                Value::Bool(b) => b.to_string() != rhs,
-                Value::Null => rhs != "null",
-                _ => true,
-            };
-        }
-        if let Some(val) = resolve_dotted(lhs, vars) {
-            return match &val {
-                Value::String(s) => s.as_str() != rhs,
-                Value::Number(n) => n.to_string() != rhs,
-                Value::Bool(b) => b.to_string() != rhs,
-                Value::Null => rhs != "null",
-                _ => true,
-            };
-        }
-        return true; // unbound var != anything is true
+    // != comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, "!=") {
+        return !compare_eq(lhs, rhs, vars);
+    }
+    // >= comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, ">=") {
+        return compare_ord(lhs, rhs, vars, |a, b| a >= b);
+    }
+    // <= comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, "<=") {
+        return compare_ord(lhs, rhs, vars, |a, b| a <= b);
+    }
+    // > comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, ">") {
+        return compare_ord(lhs, rhs, vars, |a, b| a > b);
+    }
+    // < comparison
+    if let Some((lhs, rhs)) = split_comparison(expr, "<") {
+        return compare_ord(lhs, rhs, vars, |a, b| a < b);
     }
 
     // Bare variable name — truthy check
-    if let Some(val) = vars.get(expr) {
-        return match val {
-            Value::Bool(b) => *b,
-            Value::Null => false,
-            Value::String(s) => !s.is_empty(),
-            Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
-            _ => true,
-        };
+    if let Some(val) = resolve_var(expr, vars) {
+        return is_truthy(&val);
     }
 
     false
+}
+
+/// Split an expression on a logical operator (`&&` or `||`), respecting parentheses.
+fn split_logical<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut last = 0;
+    let bytes = expr.as_bytes();
+    let op_bytes = op.as_bytes();
+    let op_len = op_bytes.len();
+
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'"' => {
+                // Skip quoted strings
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            _ if depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
+                parts.push(&expr[last..i]);
+                i += op_len;
+                last = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    parts.push(&expr[last..]);
+    parts
+}
+
+/// Find the index of the matching close parenthesis for a leading `(`.
+fn matching_close_paren(expr: &str) -> Option<usize> {
+    if !expr.starts_with('(') {
+        return None;
+    }
+    let mut depth = 0i32;
+    for (i, ch) in expr.chars().enumerate() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Split a simple comparison expression on an operator, ensuring we don't confuse
+/// `>=` with `>` followed by `=`.
+fn split_comparison<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
+    // For multi-char ops, find the first occurrence outside parens
+    let bytes = expr.as_bytes();
+    let op_bytes = op.as_bytes();
+    let op_len = op_bytes.len();
+    let mut depth = 0i32;
+
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    }
+                    i += 1;
+                }
+            }
+            _ if depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
+                // For single-char ops (> or <), ensure they're not part of >= or <=
+                if op_len == 1 && i + 1 < bytes.len() && bytes[i + 1] == b'=' {
+                    i += 1;
+                    continue;
+                }
+                let lhs = expr[..i].trim();
+                let rhs = expr[i + op_len..].trim().trim_matches('"');
+                if !lhs.is_empty() && !rhs.is_empty() {
+                    return Some((lhs, rhs));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Resolve a variable (direct lookup or dotted path).
+fn resolve_var(name: &str, vars: &HashMap<String, Value>) -> Option<Value> {
+    if let Some(val) = vars.get(name) {
+        return Some(val.clone());
+    }
+    resolve_dotted(name, vars)
+}
+
+/// Compare for equality.
+fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
+    if let Some(val) = resolve_var(lhs, vars) {
+        return match &val {
+            Value::String(s) => s.as_str() == rhs,
+            Value::Number(n) => {
+                // Try numeric comparison first
+                if let (Some(a), Ok(b)) = (n.as_f64(), rhs.parse::<f64>()) {
+                    a == b
+                } else {
+                    n.to_string() == rhs
+                }
+            }
+            Value::Bool(b) => b.to_string() == rhs,
+            Value::Null => rhs == "null",
+            _ => false,
+        };
+    }
+    false
+}
+
+/// Compare using an ordering function.
+fn compare_ord(
+    lhs: &str,
+    rhs: &str,
+    vars: &HashMap<String, Value>,
+    cmp: impl Fn(f64, f64) -> bool,
+) -> bool {
+    let lhs_val = resolve_var(lhs, vars);
+    let lhs_num = lhs_val.as_ref().and_then(|v| match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.parse::<f64>().ok(),
+        _ => None,
+    });
+    let rhs_num = rhs.parse::<f64>().ok();
+
+    match (lhs_num, rhs_num) {
+        (Some(a), Some(b)) => cmp(a, b),
+        _ => false,
+    }
+}
+
+/// Check if a JSON value is truthy.
+fn is_truthy(val: &Value) -> bool {
+    match val {
+        Value::Bool(b) => *b,
+        Value::Null => false,
+        Value::String(s) => !s.is_empty(),
+        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+        _ => true,
+    }
 }
 
 /// Resolve dotted variable access (e.g., "result.status" looks up vars["result"]["status"]).
@@ -1115,5 +1296,148 @@ mod tests {
             result.variables.get("greeting"),
             Some(&json!("hello world"))
         );
+    }
+
+    // ── Logical operator tests ────────────────────────────────────────────────
+
+    #[test]
+    fn condition_and_operator() {
+        let vars = HashMap::from([
+            ("status".to_string(), json!("ok")),
+            ("count".to_string(), json!(5)),
+            ("flag".to_string(), json!(true)),
+        ]);
+
+        // Both true
+        assert!(default_evaluate_condition("status == ok && flag", &vars));
+        // First false
+        assert!(!default_evaluate_condition("status == error && flag", &vars));
+        // Second false
+        assert!(!default_evaluate_condition("flag && status == error", &vars));
+        // Triple AND
+        assert!(default_evaluate_condition(
+            "status == ok && flag && count == 5",
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            "status == ok && flag && count == 99",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn condition_or_operator() {
+        let vars = HashMap::from([
+            ("status".to_string(), json!("ok")),
+            ("flag".to_string(), json!(false)),
+        ]);
+
+        // First true
+        assert!(default_evaluate_condition("status == ok || flag", &vars));
+        // Second true (first false)
+        assert!(default_evaluate_condition("status == error || status == ok", &vars));
+        // Both false
+        assert!(!default_evaluate_condition(
+            "status == error || flag",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn condition_not_operator() {
+        let vars = HashMap::from([
+            ("flag".to_string(), json!(true)),
+            ("empty".to_string(), json!(false)),
+        ]);
+
+        assert!(!default_evaluate_condition("!flag", &vars));
+        assert!(default_evaluate_condition("!empty", &vars));
+        assert!(default_evaluate_condition("!nonexistent", &vars));
+        // Double negation
+        assert!(default_evaluate_condition("!!flag", &vars));
+    }
+
+    #[test]
+    fn condition_comparison_operators() {
+        let vars = HashMap::from([
+            ("count".to_string(), json!(5)),
+            ("score".to_string(), json!(85.5)),
+        ]);
+
+        // Greater than
+        assert!(default_evaluate_condition("count > 3", &vars));
+        assert!(!default_evaluate_condition("count > 5", &vars));
+        assert!(!default_evaluate_condition("count > 10", &vars));
+
+        // Less than
+        assert!(default_evaluate_condition("count < 10", &vars));
+        assert!(!default_evaluate_condition("count < 5", &vars));
+        assert!(!default_evaluate_condition("count < 3", &vars));
+
+        // Greater or equal
+        assert!(default_evaluate_condition("count >= 5", &vars));
+        assert!(default_evaluate_condition("count >= 4", &vars));
+        assert!(!default_evaluate_condition("count >= 6", &vars));
+
+        // Less or equal
+        assert!(default_evaluate_condition("count <= 5", &vars));
+        assert!(default_evaluate_condition("count <= 6", &vars));
+        assert!(!default_evaluate_condition("count <= 4", &vars));
+
+        // Float comparisons
+        assert!(default_evaluate_condition("score > 80", &vars));
+        assert!(default_evaluate_condition("score < 90", &vars));
+        assert!(default_evaluate_condition("score >= 85.5", &vars));
+    }
+
+    #[test]
+    fn condition_combined_logical_and_comparison() {
+        let vars = HashMap::from([
+            ("status".to_string(), json!("open")),
+            ("priority".to_string(), json!(3)),
+            ("assigned".to_string(), json!(true)),
+        ]);
+
+        // AND with comparison
+        assert!(default_evaluate_condition(
+            "status == open && priority > 2",
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            "status == open && priority > 5",
+            &vars
+        ));
+
+        // OR with comparison
+        assert!(default_evaluate_condition(
+            "priority > 10 || assigned",
+            &vars
+        ));
+
+        // Mixed
+        assert!(default_evaluate_condition(
+            "status == open && (priority > 2 || !assigned)",
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            "status == closed && (priority > 2 || assigned)",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn condition_parentheses() {
+        let vars = HashMap::from([
+            ("a".to_string(), json!(true)),
+            ("b".to_string(), json!(false)),
+            ("c".to_string(), json!(true)),
+        ]);
+
+        // Without parens: a && b || c => (a && b) || c => false || true => true
+        assert!(default_evaluate_condition("a && b || c", &vars));
+        // With parens: a && (b || c) => true && (false || true) => true && true => true
+        assert!(default_evaluate_condition("a && (b || c)", &vars));
+        // a && (b || !c) => true && (false || false) => false
+        assert!(!default_evaluate_condition("a && (b || !c)", &vars));
     }
 }
