@@ -12,6 +12,14 @@
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     let
+      # Read version from Cargo.toml workspace — single source of truth
+      cargoVersion = let
+        cargo = builtins.readFile ./Cargo.toml;
+        lines = builtins.filter (l: builtins.match ''version = ".*"'' l != null)
+          (nixpkgs.lib.splitString "\n" cargo);
+        raw = builtins.head lines;
+      in builtins.head (builtins.match ''.*"(.*)".*'' raw);
+
       # Prefetch ONNX Runtime static library for ort-sys.
       onnxruntimeLib = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
         name = "onnxruntime-prebuilt-1.23.2";
@@ -37,7 +45,7 @@ tar.extractall(os.environ['out'] + '/lib')
       # CLI binary — headless agent daemon
       mkCliPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix";
-        version = "1.40.0";
+        version = cargoVersion;
         src = pkgs.lib.cleanSource ./.;
 
         cargoLock = {
@@ -71,7 +79,7 @@ tar.extractall(os.environ['out'] + '/lib')
       # Tauri desktop app — requires npm build for Svelte frontend first
       mkTauriPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix-desktop";
-        version = "1.40.0";
+        version = cargoVersion;
         src = pkgs.lib.cleanSource ./.;
 
         cargoLock = {
