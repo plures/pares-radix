@@ -1,3 +1,7 @@
+## [1.44.1] — 2026-05-16
+
+- fix: proper ONNX Runtime for Nix build — no code changes (4a9e95f)
+
 ## [1.44.0] — 2026-05-16
 
 - feat(mcp): auto-load .px procedures on startup (468737c)
