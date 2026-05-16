@@ -1,3 +1,7 @@
+## [1.43.5] — 2026-05-16
+
+- fix: let ort-sys handle its own ONNX Runtime download (93f0c74)
+
 ## [1.43.4] — 2026-05-16
 
 - fix: use nixpkgs onnxruntime for build + runtime (9935435)
