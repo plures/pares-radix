@@ -559,7 +559,7 @@ pub(crate) fn register_builtins(
     config: &super::CerebellumConfig,
 ) {
     // Cerebellum itself handles messages first (lowest priority number = runs first)
-    registry.register(Box::new(super::CerebellumProcedure));
+    registry.register(Box::new(super::CerebellumProcedure::stub()));
     registry.set_priority("cerebellum", -200);
 
     // Autorecall runs next, injecting learned context

@@ -41,7 +41,7 @@ use crate::procedure::{Procedure, ProcedureRegistry};
 use async_trait::async_trait;
 use pares_agens_praxis::rule::{Rule, RuleContext, RuleResult};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, instrument, warn};
 
 // ── routing decision ─────────────────────────────────────────────────────────
@@ -445,7 +445,40 @@ pub enum CerebellumError {
 
 /// Adapter that lets the cerebellum participate in the procedure registry
 /// as a first-class procedure handling `"message"` events.
-pub struct CerebellumProcedure;
+///
+/// When constructed with [`CerebellumProcedure::with_cerebellum`], the procedure
+/// delegates to [`Cerebellum::preprocess`] for autorecall, topic detection, and
+/// context management.  The [`CerebellumProcedure::stub`] variant is available
+/// for registration and dispatch testing without a live memory system.
+pub struct CerebellumProcedure {
+    cerebellum: Option<Arc<Cerebellum>>,
+    memory: Option<Arc<PluresLm>>,
+    registry: Option<Arc<ProcedureRegistry>>,
+}
+
+impl CerebellumProcedure {
+    /// Create a stub procedure for registration and dispatch testing.
+    pub fn stub() -> Self {
+        Self {
+            cerebellum: None,
+            memory: None,
+            registry: None,
+        }
+    }
+
+    /// Create a fully-wired procedure that delegates to a live [`Cerebellum`].
+    pub fn with_cerebellum(
+        cerebellum: Arc<Cerebellum>,
+        memory: Arc<PluresLm>,
+        registry: Arc<ProcedureRegistry>,
+    ) -> Self {
+        Self {
+            cerebellum: Some(cerebellum),
+            memory: Some(memory),
+            registry: Some(registry),
+        }
+    }
+}
 
 #[async_trait]
 impl Procedure for CerebellumProcedure {
@@ -458,10 +491,40 @@ impl Procedure for CerebellumProcedure {
     }
 
     async fn execute(&self, event: &Event) -> Vec<Event> {
-        // In the full system, this is wired through Cerebellum::preprocess.
-        // This stub enables registration and dispatch testing.
-        debug!(event_kind = event.kind(), "cerebellum procedure stub");
-        vec![]
+        let (cerebellum, memory, registry) = match (&self.cerebellum, &self.memory, &self.registry) {
+            (Some(c), Some(m), Some(r)) => (c, m, r),
+            _ => {
+                debug!(event_kind = event.kind(), "cerebellum procedure stub (no live system)");
+                return vec![];
+            }
+        };
+
+        match cerebellum.preprocess(event, memory, registry).await {
+            Ok(ctx) => {
+                info!(
+                    context_len = ctx.learned_context.len(),
+                    clear_history = ctx.clear_history,
+                    route = ?ctx.route,
+                    "cerebellum preprocessed message"
+                );
+                // Emit a StateChange event with the cerebellum context so
+                // downstream procedures (conscious agent) can consume it.
+                vec![Event::StateChange {
+                    key: "cerebellum:context".to_string(),
+                    old_value: None,
+                    new_value: serde_json::json!({
+                        "learned_context": ctx.learned_context,
+                        "clear_history": ctx.clear_history,
+                        "route": format!("{:?}", ctx.route),
+                        "guidance": ctx.guidance,
+                    }),
+                }]
+            }
+            Err(e) => {
+                warn!(error = %e, "cerebellum preprocess failed");
+                vec![]
+            }
+        }
     }
 }
 
