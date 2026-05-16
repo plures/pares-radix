@@ -47,8 +47,8 @@ const DEFAULT_MARKETPLACE_INSTALL_DIR: &str = "/skills";
 const MAX_INDEX_LISTING_ITEMS: usize = 10;
 const DEFAULT_NIX_FLAKE_DIR: &str = "nixos-config";
 const DEFAULT_NIX_HOST: &str = "praxisbot";
-/// Directory containing the pares-agens source for rebuilding the binary.
-const DEFAULT_PARES_AGENS_DIR: &str = "pares-agens";
+/// Directory containing the pares-radix source for rebuilding the binary.
+const DEFAULT_PARES_AGENS_DIR: &str = "pares-radix";
 /// Subdirectory under $HOME/projects for defaults, or override with env vars.
 const PROJECTS_SUBDIR: &str = "projects";
 const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
@@ -88,11 +88,11 @@ const TELEGRAM_HELP_COMMANDS: [(&str, &str); 32] = [
         "/version",
         "show version and build info",
     ),
-    ("/logs [n]", "tail recent pares-agens service logs"),
+    ("/logs [n]", "tail recent pares-radix service logs"),
     ("/tools", "show tool governance policies"),
     (
         "/update",
-        "run NixOS self-update and rebuild if pares-agens changed",
+        "run NixOS self-update and rebuild if pares-radix changed",
     ),
     (
         "/personality",
@@ -275,24 +275,22 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn build_nixos_update_command(_flake_dir: &str, _host: &str) -> String {
-    // Resolve agens source dir: env var → $HOME/projects/pares-agens
+    // Self-update = nixos-rebuild from the GitHub flake.
+    // The flake input pares-radix is pinned; update it then rebuild.
     let home = std::env::var("HOME").unwrap_or_else(|_| "/home/kbristol".into());
-    let agens_dir = std::env::var("PARES_AGENS_DIR")
-        .unwrap_or_else(|_| format!("{home}/{PROJECTS_SUBDIR}/{DEFAULT_PARES_AGENS_DIR}"));
-    let agens_dir = shell_single_quote(&agens_dir);
-    let bin_dir = format!("{home}/.local/bin");
+    let flake_dir = std::env::var("PARES_NIX_FLAKE_DIR")
+        .unwrap_or_else(|_| format!("{home}/nixos-config"));
+    let host = std::env::var("PARES_NIX_HOST")
+        .unwrap_or_else(|_| "praxisbot".into());
+    let flake_dir = shell_single_quote(&flake_dir);
+    let host_q = shell_single_quote(&host);
     format!(
         "set -eu; \
-         echo 'Step 1: Pulling latest pares-agens source...'; \
-         cd {agens_dir} && git pull --ff-only; \
-         echo 'Step 2: Building pares-agens binary...'; \
-         nix develop --option substituters 'https://cache.nixos.org' -c cargo build --release -p pares-agens; \
-         echo 'Step 3: Installing binary...'; \
-         mkdir -p {bin_dir}; \
-         cp target/release/pares-agens {bin_dir}/pares-agens; \
-         echo 'Step 4: Restarting service...'; \
-         sudo systemctl restart pares-agens; \
-         echo 'Self-update complete. New binary installed and service restarted.'"
+         echo 'Step 1: Updating pares-radix flake input...'; \
+         cd {flake_dir} && sudo nix flake update pares-radix; \
+         echo 'Step 2: Rebuilding NixOS...'; \
+         sudo nixos-rebuild switch --flake .#{host_q}; \
+         echo 'Self-update complete. NixOS rebuilt with latest pares-radix.'"
     )
 }
 
@@ -1307,7 +1305,7 @@ impl ChannelAdapter for TelegramAdapter {
                                 } else {
                                     "Plugins: none".to_string()
                                 };
-                                let cerebellum_line = if std::path::Path::new(&format!("{home}/.pares-agens/models/bitnet")).exists() {
+                                let cerebellum_line = if std::path::Path::new(&format!("{home}/.pares-radix/models/bitnet")).exists() {
                                     "Cerebellum: BitNet (local)"
                                 } else {
                                     "Cerebellum: heuristic"
@@ -1319,7 +1317,7 @@ impl ChannelAdapter for TelegramAdapter {
                                      {cerebellum_line}\n\
                                      Event Spine: {event_spine_status}\n\
                                      {plugin_line}\n\
-                                     PluresDB: {home}/.pares-agens/memory/",
+                                     PluresDB: {home}/.pares-radix/memory/",
                                     std::process::id(),
                                 );
                                 let full_status = if let Some(health) = health_section {
@@ -1581,11 +1579,11 @@ impl ChannelAdapter for TelegramAdapter {
 
                                 info!(
                                     tail_lines,
-                                    "telegram /logs requested for pares-agens service"
+                                    "telegram /logs requested for pares-radix service"
                                 );
                                 let reply = match tokio::process::Command::new("journalctl")
                                     .arg("-u")
-                                    .arg("pares-agens")
+                                    .arg("pares-radix")
                                     .arg("-n")
                                     .arg(tail_lines.to_string())
                                     .arg("--no-pager")
@@ -1601,7 +1599,7 @@ impl ChannelAdapter for TelegramAdapter {
                                             "telegram /logs command completed"
                                         );
                                         truncate_telegram_message(format!(
-                                            "Recent pares-agens logs (last {tail_lines} lines):\n{}",
+                                            "Recent pares-radix logs (last {tail_lines} lines):\n{}",
                                             format_service_logs_output(&output)
                                         ))
                                     }
@@ -2624,8 +2622,8 @@ mod tests {
     fn build_nixos_update_command_contains_required_steps() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
         assert!(command.contains("git pull --ff-only"));
-        assert!(command.contains("cargo build --release -p pares-agens"));
-        assert!(command.contains("sudo systemctl restart pares-agens"));
+        assert!(command.contains("nix flake update pares-radix"));
+        assert!(command.contains("nixos-rebuild switch"));
     }
 
     #[test]
