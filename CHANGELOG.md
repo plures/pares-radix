@@ -1,3 +1,7 @@
+## [1.43.9] — 2026-05-16
+
+- fix: autoPatchelfHook on onnxruntime to embed libstdc++ RPATH (d9cc0ce)
+
 ## [1.43.8] — 2026-05-16
 
 - fix: add libstdc++ to LD_LIBRARY_PATH for onnxruntime (87f3641)
