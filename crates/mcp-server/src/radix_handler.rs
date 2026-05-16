@@ -1257,7 +1257,7 @@ impl RadixToolHandler {
     }
 
     async fn node_file_read(&self, args: &Value) -> ToolResult {
-        let store = match &self.state_store {
+        let _store = match &self.state_store {
             Some(s) => s,
             None => return ToolResult::error("node operations require state store (not configured)"),
         };
@@ -1552,7 +1552,6 @@ impl RadixToolHandler {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// Resolve a potentially relative path against the workdir.
     // ── Praxis tools ──────────────────────────────────────────────────────────
 
     async fn praxis_evaluate(&self, args: &Value) -> ToolResult {

@@ -182,7 +182,7 @@ impl PluginRuntime {
 
 /// Sort plugins in dependency order. Returns error on circular dependencies.
 fn topological_sort(manifests: &[PluginManifest]) -> Result<Vec<PluginManifest>, PluginError> {
-    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::collections::{HashMap, VecDeque};
 
     let name_map: HashMap<&str, &PluginManifest> = manifests.iter().map(|m| (m.name.as_str(), m)).collect();
 

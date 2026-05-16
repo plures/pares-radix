@@ -3,13 +3,12 @@
 //! Connects to a running Chrome/Chromium instance via its CDP HTTP and WebSocket
 //! endpoints. Provides navigate, snapshot, screenshot, click, type, and status.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// CDP connection state.
 pub struct BrowserClient {
@@ -24,8 +23,8 @@ pub struct BrowserClient {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct CdpTarget {
+#[allow(dead_code, missing_docs)]
+pub struct CdpTarget {
     id: String,
     #[serde(rename = "type")]
     target_type: String,

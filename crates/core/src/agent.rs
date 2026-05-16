@@ -356,10 +356,7 @@ impl Agent {
         self
     }
 
-    /// Attach a telemetry logger for interaction tracking.
-
-    /// Create and attach telemetry from PARES_TELEMETRY_DIR env var.
-    /// No-op if the env var is not set.
+    // Telemetry: attach from PARES_TELEMETRY_DIR env var (no-op if unset).
 
     /// Handle a single event and optionally return a response event.
     pub async fn handle_event(&self, event: Event) -> Option<Event> {
@@ -1233,7 +1230,7 @@ impl Agent {
             "want me to ", // user asks, agent implies yes by responding
         ];
 
-        let lower = agent_reply.to_lowercase();
+        let _lower = agent_reply.to_lowercase();
 
         // Find sentences containing commitment language
         let mut promises: Vec<String> = Vec::new();

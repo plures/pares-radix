@@ -251,7 +251,7 @@ impl TelemetryAggregate {
     pub fn snapshot(&self) -> TelemetrySnapshot {
         TelemetrySnapshot {
             total_model_calls: self.total_model_calls,
-            avg_latency_ms: if self.total_model_calls > 0 { self.total_latency_ms / self.total_model_calls } else { 0 },
+            avg_latency_ms: self.total_latency_ms.checked_div(self.total_model_calls).unwrap_or(0),
             top_tools: {
                 let mut tools: Vec<_> = self.tool_usage.iter().collect();
                 tools.sort_by(|a, b| b.1.cmp(a.1));

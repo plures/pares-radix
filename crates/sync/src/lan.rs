@@ -34,6 +34,7 @@ use tracing::{debug, info, warn};
 pub const LAN_DISCOVERY_PORT: u16 = 49737;
 
 /// How often to broadcast our presence (seconds).
+#[allow(dead_code)]
 const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
 
 /// How long before a peer is considered stale (seconds).
@@ -54,6 +55,7 @@ pub struct LanAnnounce {
 
 /// A discovered LAN peer.
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub struct LanPeer {
     pub device_id: String,
     pub addrs: Vec<IpAddr>,

@@ -169,6 +169,7 @@ struct RuntimeAgentFactory {
     embed_model: String,
     api_key: Option<String>,
     system_prompt_path: Option<PathBuf>,
+    #[allow(dead_code)]
     cerebellum_model_path: Option<PathBuf>,
 }
 
@@ -4280,7 +4281,7 @@ async fn main() {
             });
 
             // Auto-download BitNet for cerebellum if not explicitly provided
-            let cerebellum_model_path = if cerebellum_model_path.is_some() {
+            let _cerebellum_model_path = if cerebellum_model_path.is_some() {
                 cerebellum_model_path
             } else {
                 let model_manager = pares_agens_core::model_download::ModelManager::new();
@@ -4466,12 +4467,12 @@ async fn main() {
 
         Commands::Ask {
             prompt,
-            model_url,
+            model_url: _,
             model,
             copilot,
-            api_key,
+            api_key: _,
             bitnet_model_path,
-            cerebellum_model_path,
+            cerebellum_model_path: _,
             system_prompt,
             format,
         } => {

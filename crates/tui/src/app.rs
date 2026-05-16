@@ -124,7 +124,7 @@ impl App {
 
         // Spawn agent call with timeout
         let agent = Arc::clone(&self.agent);
-        let tx = self.event_tx.clone();
+        let _tx = self.event_tx.clone();
         let handle = tokio::spawn(async move {
             let event = Event::Message {
                 id: uuid::Uuid::new_v4().to_string(),

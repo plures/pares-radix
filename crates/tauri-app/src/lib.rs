@@ -310,7 +310,7 @@ impl ToolDispatcher for McpToolDispatcher {
 /// - Shared [`AppState`] exposed to every Tauri command
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -525,6 +525,7 @@ pub fn run() {
             let secret_store = Arc::new(InMemorySecretStore::new());
 
             // Pre-seed Copilot provider API key from `gh auth token` if available.
+            #[allow(clippy::let_underscore_future)]
             if let Ok(output) = std::process::Command::new("gh")
                 .args(["auth", "token"])
                 .output()
@@ -539,6 +540,7 @@ pub fn run() {
             }
 
             // Pre-seed Anthropic API key from ANTHROPIC_API_KEY env var.
+            #[allow(clippy::let_underscore_future)]
             if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
                 if !key.is_empty() {
                     let _ = secret_store.set(&provider_api_key("anthropic"), &key);
@@ -547,6 +549,7 @@ pub fn run() {
             }
 
             // Pre-seed OpenAI API key from OPENAI_API_KEY env var.
+            #[allow(clippy::let_underscore_future)]
             if let Ok(key) = std::env::var("OPENAI_API_KEY") {
                 if !key.is_empty() {
                     let _ = secret_store.set(&provider_api_key("openai"), &key);
