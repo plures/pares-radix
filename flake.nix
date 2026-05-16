@@ -20,9 +20,9 @@
         raw = builtins.head lines;
       in builtins.head (builtins.match ''.*"(.*)".*'' raw);
 
-      # Official Microsoft ONNX Runtime release — has both .so and headers.
-      # fetchurl is a fixed-output derivation so it ALWAYS gets network access
-      # regardless of sandbox settings. This is the correct Nix pattern.
+      # Official Microsoft ONNX Runtime release with shared library.
+      # autoPatchelfHook patches RPATH so libonnxruntime.so finds libstdc++
+      # without any LD_LIBRARY_PATH at runtime.
       onnxruntime = { pkgs }: pkgs.stdenv.mkDerivation {
         pname = "onnxruntime-prebuilt";
         version = "1.23.0";
@@ -32,7 +32,7 @@
         };
         sourceRoot = ".";
         nativeBuildInputs = [ pkgs.autoPatchelfHook ];
-        buildInputs = [ pkgs.stdenv.cc.cc.lib ];  # provides libstdc++.so.6
+        buildInputs = [ pkgs.stdenv.cc.cc.lib ];
         installPhase = ''
           mkdir -p $out/lib $out/include
           cp -a onnxruntime-linux-x64-1.23.0/lib/* $out/lib/
@@ -53,9 +53,7 @@
           allowBuiltinFetchGit = true;
         };
 
-        # Network for git deps
         __noChroot = true;
-
         doCheck = false;
 
         nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
@@ -64,17 +62,16 @@
           graphene webkitgtk_4_1 libsoup_3
         ];
 
-        # ort-sys links ONNX Runtime. With ORT_LIB_LOCATION it uses our
-        # prefetched .so. ORT_PREFER_DYNAMIC_LINK=1 tells it to link dynamically
-        # (default is static, which fails with .so files).
+        # Build: ort-sys finds the .so here and links dynamically
         ORT_LIB_LOCATION = "${ort}/lib";
         ORT_PREFER_DYNAMIC_LINK = "1";
 
-        # Runtime: ort dlopen needs the .so + its deps (libstdc++)
+        # Runtime: set ORT_DYLIB_PATH so ort's dlopen finds the .so,
+        # and add ort lib to LD_LIBRARY_PATH as fallback
         postInstall = ''
           wrapProgram $out/bin/pares-radix \
             --set ORT_DYLIB_PATH "${ort}/lib/libonnxruntime.so" \
-            --prefix LD_LIBRARY_PATH : "${ort}/lib:${pkgs.stdenv.cc.cc.lib}/lib"
+            --prefix LD_LIBRARY_PATH : "${ort}/lib"
         '';
 
         meta = {
@@ -103,7 +100,6 @@
           cargoBuildFlags = [ "-p" "pares-radix" ];
           nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper nodejs_22 ];
           meta.description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
-
           preBuild = ''
             npm ci --ignore-scripts
             npm run build
