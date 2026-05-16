@@ -1,3 +1,7 @@
+## [1.44.0] — 2026-05-16
+
+- feat(mcp): auto-load .px procedures on startup (468737c)
+
 ## [1.43.10] — 2026-05-16
 
 - fix: remove duplicate closing brace in flake.nix (9846e97)
