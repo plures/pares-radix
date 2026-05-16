@@ -154,12 +154,7 @@ impl<H: AsyncActionHandler + 'static> AsyncActionHandler for ComposableHandler<H
             match result {
                 Ok(exec_result) => {
                     // Return the procedure's variables as the call result
-                    Ok(Value::Object(
-                        exec_result
-                            .variables
-                            .into_iter()
-                            .collect(),
-                    ))
+                    Ok(Value::Object(exec_result.variables.into_iter().collect()))
                 }
                 Err(e) => Err(ExecutionError::ActionFailed {
                     action: name.to_string(),
@@ -213,31 +208,29 @@ pub async fn pipe(
     let mut current_input = initial_input;
 
     for &name in procedure_names {
-        let proc_data = registry.get(name).ok_or_else(|| {
-            ExecutionError::ActionFailed {
+        let proc_data = registry
+            .get(name)
+            .ok_or_else(|| ExecutionError::ActionFailed {
                 action: name.to_string(),
                 message: format!("procedure '{name}' not found in registry"),
-            }
-        })?;
+            })?;
 
         let mut vars = HashMap::new();
         vars.insert("input".to_string(), current_input);
 
-        let result = execute_async_with_vars(proc_data, handler, vars).await.map_err(|e| {
-            ExecutionError::ActionFailed {
+        let result = execute_async_with_vars(proc_data, handler, vars)
+            .await
+            .map_err(|e| ExecutionError::ActionFailed {
                 action: name.to_string(),
                 message: format!("pipe stage '{name}' failed: {e}"),
-            }
-        })?;
+            })?;
 
         // The output is either an explicit $output var, or all variables
         current_input = result
             .variables
             .get("output")
             .cloned()
-            .unwrap_or_else(|| {
-                Value::Object(result.variables.into_iter().collect())
-            });
+            .unwrap_or_else(|| Value::Object(result.variables.into_iter().collect()));
     }
 
     Ok(current_input)
@@ -471,14 +464,9 @@ mod tests {
             .with_result("do_fetch", json!({"raw": "data"}))
             .with_result("do_transform", json!("transformed_data"));
 
-        let result = pipe(
-            &["fetch", "transform"],
-            &registry,
-            &leaf,
-            json!(null),
-        )
-        .await
-        .unwrap();
+        let result = pipe(&["fetch", "transform"], &registry, &leaf, json!(null))
+            .await
+            .unwrap();
 
         assert_eq!(result, json!("transformed_data"));
     }

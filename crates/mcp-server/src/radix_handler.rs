@@ -29,8 +29,8 @@ use pares_agens_agenda::scheduler::Scheduler;
 use pares_radix_praxis::module::PraxisModule;
 use pares_radix_praxis::px;
 use pares_radix_praxis::px::async_executor::{self as px_async, AsyncActionHandler};
-use pares_radix_praxis::px::compose::{ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::px::compiler;
+use pares_radix_praxis::px::compose::{ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::rule::{RuleContext, RuleResult};
 
 use crate::browser::BrowserClient;
@@ -4441,7 +4441,11 @@ mod tests {
             .call_tool("praxis_run", json!({"procedure": "main_proc"}))
             .await;
         assert!(!result.is_error, "unexpected error: {}", result.content);
-        assert!(result.content.contains("sub_result"), "expected sub_result in output: {}", result.content);
+        assert!(
+            result.content.contains("sub_result"),
+            "expected sub_result in output: {}",
+            result.content
+        );
         assert!(result.content.contains("preloaded"));
 
         let _ = std::fs::remove_dir_all(&dir);

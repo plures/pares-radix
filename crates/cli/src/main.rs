@@ -2614,11 +2614,13 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn build_nixos_update_command(flake_dir: &str, host: &str) -> String {
-    let flake_dir = shell_single_quote(flake_dir);
+fn build_nixos_update_command(_flake_dir: &str, host: &str) -> String {
     let host = shell_single_quote(host);
+    let flake_uri = std::env::var("PARES_NIX_FLAKE_URI")
+        .unwrap_or_else(|_| "github:kayodebristol/nixos-config".into());
+    let flake_q = shell_single_quote(&flake_uri);
     format!(
-        "set -eu; cd {flake_dir}; lock_before=$(sha256sum flake.lock 2>/dev/null | cut -d' ' -f1 || true); sudo nix flake update pares-radix; lock_after=$(sha256sum flake.lock 2>/dev/null | cut -d' ' -f1 || true); if [ \"$lock_before\" != \"$lock_after\" ]; then sudo nixos-rebuild switch --flake .#{host}; echo \"Self-update applied\"; else echo \"No new pares-radix commits on main\"; fi"
+        "set -eu; nixos-rebuild switch --flake {flake_q}#{host} --refresh; echo 'Self-update applied'"
     )
 }
 
@@ -4924,9 +4926,9 @@ mod tests {
     #[test]
     fn build_nixos_update_command_includes_required_commands() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
-        assert!(command.contains("sudo nix flake update pares-radix"));
-        assert!(command.contains("sudo nixos-rebuild switch --flake .#'praxisbot'"));
-        assert!(command.contains("No new pares-radix commits on main"));
+        assert!(command.contains("nixos-rebuild switch --flake"));
+        assert!(command.contains("praxisbot"));
+        assert!(command.contains("--refresh"));
     }
 
     #[test]

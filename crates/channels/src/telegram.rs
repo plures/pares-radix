@@ -272,21 +272,18 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn build_nixos_update_command(_flake_dir: &str, _host: &str) -> String {
-    // Self-update = nixos-rebuild from the GitHub flake.
-    // The flake input pares-radix is pinned; update it then rebuild.
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/kbristol".into());
-    let flake_dir =
-        std::env::var("PARES_NIX_FLAKE_DIR").unwrap_or_else(|_| format!("{home}/nixos-config"));
+    // Self-update = nixos-rebuild from the GitHub flake URI directly.
+    // No local checkout needed, no sudo for nix commands.
     let host = std::env::var("PARES_NIX_HOST").unwrap_or_else(|_| "praxisbot".into());
-    let flake_dir = shell_single_quote(&flake_dir);
+    let flake_uri = std::env::var("PARES_NIX_FLAKE_URI")
+        .unwrap_or_else(|_| "github:kayodebristol/nixos-config".into());
     let host_q = shell_single_quote(&host);
+    let flake_q = shell_single_quote(&flake_uri);
     format!(
         "set -eu; \
-         echo 'Step 1: Updating pares-radix flake input...'; \
-         cd {flake_dir} && sudo nix flake update pares-radix; \
-         echo 'Step 2: Rebuilding NixOS...'; \
-         sudo nixos-rebuild switch --flake .#{host_q}; \
-         echo 'Self-update complete. NixOS rebuilt with latest pares-radix.'"
+         echo 'Rebuilding NixOS from {flake_q}#{host_q}...'; \
+         nixos-rebuild switch --flake {flake_q}#{host_q} --refresh; \
+         echo 'Self-update complete.'"
     )
 }
 
@@ -2637,9 +2634,8 @@ mod tests {
     #[test]
     fn build_nixos_update_command_contains_required_steps() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
-        assert!(command.contains("git pull --ff-only"));
-        assert!(command.contains("nix flake update pares-radix"));
-        assert!(command.contains("nixos-rebuild switch"));
+        assert!(command.contains("nixos-rebuild switch --flake"));
+        assert!(command.contains("--refresh"));
     }
 
     #[test]
