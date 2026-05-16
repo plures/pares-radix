@@ -5,6 +5,7 @@
 pub mod async_executor;
 pub mod builder;
 pub mod compiler;
+pub mod compose;
 pub mod executor;
 pub mod resolver;
 
@@ -399,7 +400,6 @@ constraint deploy_gate:
         use crate::px::compiler::compile;
         use crate::px::executor::{self, ActionHandler, ExecutionError};
         use serde_json::{json, Value};
-        use std::collections::HashMap;
 
         struct TestHandler;
         impl ActionHandler for TestHandler {
