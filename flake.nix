@@ -36,15 +36,15 @@
 
         doCheck = false;
 
-        nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
+        nativeBuildInputs = with pkgs; [ pkg-config cmake ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
-          onnxruntime  # Shared lib for ort crate runtime loading
         ];
 
-        # Build time: tell ort-sys where to find the library
-        ORT_LIB_LOCATION = "${pkgs.onnxruntime}/lib";
+        # ort-sys downloads its own ONNX Runtime binary at build time.
+        # __noChroot gives it network access. Do NOT set ORT_LIB_LOCATION —
+        # let ort-sys use its own download + bundling logic.
 
         meta = {
           homepage = "https://github.com/plures/pares-radix";
@@ -66,17 +66,12 @@
           cargoBuildFlags = [ "-p" "pares-radix-cli" ];
           meta.description = "Pares Radix — headless AI agent daemon";
 
-          # Runtime: wrap binary so ort can dlopen libonnxruntime.so
-          postInstall = ''
-            wrapProgram $out/bin/pares-radix \
-              --set ORT_DYLIB_PATH "${pkgs.onnxruntime}/lib/libonnxruntime.so"
-          '';
         };
 
         tauriPkg = mkRadixBuild pkgs {
           pname = "pares-radix-desktop";
           cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper nodejs_22 ];
+          nativeBuildInputs = with pkgs; [ pkg-config cmake nodejs_22 ];
           meta.description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
 
           preBuild = ''
@@ -84,10 +79,6 @@
             npm run build
           '';
 
-          postInstall = ''
-            wrapProgram $out/bin/pares-radix \
-              --set ORT_DYLIB_PATH "${pkgs.onnxruntime}/lib/libonnxruntime.so"
-          '';
         };
       in
       {
@@ -101,7 +92,6 @@
             glib pango cairo gdk-pixbuf atk gtk3 graphene
             webkitgtk_4_1 libsoup_3
             nodejs_22
-            onnxruntime
           ];
         };
       }
@@ -109,22 +99,14 @@
       overlays.default = final: prev: {
         pares-radix = (mkRadixBuild final {
           cargoBuildFlags = [ "-p" "pares-radix-cli" ];
-          postInstall = ''
-            wrapProgram $out/bin/pares-radix \
-              --set ORT_DYLIB_PATH "${final.onnxruntime}/lib/libonnxruntime.so"
-          '';
         });
         pares-radix-desktop = (mkRadixBuild final {
           pname = "pares-radix-desktop";
           cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with final; [ pkg-config cmake makeWrapper nodejs_22 ];
+          nativeBuildInputs = with final; [ pkg-config cmake nodejs_22 ];
           preBuild = ''
             npm ci --ignore-scripts
             npm run build
-          '';
-          postInstall = ''
-            wrapProgram $out/bin/pares-radix \
-              --set ORT_DYLIB_PATH "${final.onnxruntime}/lib/libonnxruntime.so"
           '';
         });
       };
