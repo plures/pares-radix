@@ -62,8 +62,11 @@
           graphene webkitgtk_4_1 libsoup_3
         ];
 
-        # Build: ort-sys finds libonnxruntime.so + headers here
+        # ort-sys links ONNX Runtime. With ORT_LIB_LOCATION it uses our
+        # prefetched .so. ORT_PREFER_DYNAMIC_LINK=1 tells it to link dynamically
+        # (default is static, which fails with .so files).
         ORT_LIB_LOCATION = "${ort}/lib";
+        ORT_PREFER_DYNAMIC_LINK = "1";
 
         # Runtime: ort dlopen needs to find the .so
         postInstall = ''
