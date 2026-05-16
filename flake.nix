@@ -20,8 +20,28 @@
         raw = builtins.head lines;
       in builtins.head (builtins.match ''.*"(.*)".*'' raw);
 
-      # Shared build config for both CLI and Tauri
-      mkRadixBuild = pkgs: extraAttrs: pkgs.rustPlatform.buildRustPackage ({
+      # Official Microsoft ONNX Runtime release — has both .so and headers.
+      # fetchurl is a fixed-output derivation so it ALWAYS gets network access
+      # regardless of sandbox settings. This is the correct Nix pattern.
+      onnxruntime = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
+        pname = "onnxruntime-prebuilt";
+        version = "1.23.0";
+        src = pkgs.fetchurl {
+          url = "https://github.com/microsoft/onnxruntime/releases/download/v1.23.0/onnxruntime-linux-x64-1.23.0.tgz";
+          hash = "sha256-tt7qfy4iwQwEMBnylKDqTSpsCuUqAJw0hHZA23XsVYA=";
+        };
+        sourceRoot = ".";
+        installPhase = ''
+          mkdir -p $out/lib $out/include
+          cp -a onnxruntime-linux-x64-1.23.0/lib/* $out/lib/
+          cp -a onnxruntime-linux-x64-1.23.0/include/* $out/include/
+        '';
+      };
+
+      # Shared build config
+      mkRadixBuild = pkgs: extraAttrs:
+        let ort = onnxruntime { inherit pkgs; };
+        in pkgs.rustPlatform.buildRustPackage ({
         pname = "pares-radix";
         version = cargoVersion;
         src = pkgs.lib.cleanSource ./.;
@@ -31,20 +51,25 @@
           allowBuiltinFetchGit = true;
         };
 
-        # Network access for git deps and ort-sys ONNX download
+        # Network for git deps
         __noChroot = true;
 
         doCheck = false;
 
-        nativeBuildInputs = with pkgs; [ pkg-config cmake ];
+        nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
 
-        # ort-sys downloads its own ONNX Runtime binary at build time.
-        # __noChroot gives it network access. Do NOT set ORT_LIB_LOCATION —
-        # let ort-sys use its own download + bundling logic.
+        # Build: ort-sys finds libonnxruntime.so + headers here
+        ORT_LIB_LOCATION = "${ort}/lib";
+
+        # Runtime: ort dlopen needs to find the .so
+        postInstall = ''
+          wrapProgram $out/bin/pares-radix \
+            --set ORT_DYLIB_PATH "${ort}/lib/libonnxruntime.so"
+        '';
 
         meta = {
           homepage = "https://github.com/plures/pares-radix";
@@ -65,20 +90,18 @@
           pname = "pares-radix";
           cargoBuildFlags = [ "-p" "pares-radix-cli" ];
           meta.description = "Pares Radix — headless AI agent daemon";
-
         };
 
         tauriPkg = mkRadixBuild pkgs {
           pname = "pares-radix-desktop";
           cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with pkgs; [ pkg-config cmake nodejs_22 ];
+          nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper nodejs_22 ];
           meta.description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
 
           preBuild = ''
             npm ci --ignore-scripts
             npm run build
           '';
-
         };
       in
       {
@@ -96,14 +119,16 @@
         };
       }
     ) // {
-      overlays.default = final: prev: {
+      overlays.default = final: prev:
+        let ort = onnxruntime { pkgs = final; };
+        in {
         pares-radix = (mkRadixBuild final {
           cargoBuildFlags = [ "-p" "pares-radix-cli" ];
         });
         pares-radix-desktop = (mkRadixBuild final {
           pname = "pares-radix-desktop";
           cargoBuildFlags = [ "-p" "pares-radix" ];
-          nativeBuildInputs = with final; [ pkg-config cmake nodejs_22 ];
+          nativeBuildInputs = with final; [ pkg-config cmake makeWrapper nodejs_22 ];
           preBuild = ''
             npm ci --ignore-scripts
             npm run build
