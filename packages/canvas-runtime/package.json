@@ -1,6 +1,6 @@
 {
   "name": "@plures/canvas-runtime",
-  "version": "1.44.2",
+  "version": "1.44.3",
   "description": "Runtime app creation engine — AI writes data, apps materialize. Component registry, layout engine, procedure bindings, export/share format.",
   "type": "module",
   "svelte": "./src/index.ts",

@@ -1,3 +1,7 @@
+## [1.44.3] — 2026-05-16
+
+- fix: pin fastembed 5.13.2 / ort rc.11 (static linking, no dlopen) (afba0d7)
+
 ## [1.44.2] — 2026-05-16
 
 - fix: revert flake.nix to working fb11189 base + naming only (6358498)
