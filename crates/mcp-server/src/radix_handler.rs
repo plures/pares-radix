@@ -16,7 +16,8 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tracing::{debug, warn};
+use tokio::sync::RwLock;
+use tracing::{debug, info, warn};
 
 use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
 use pares_agens_core::delegation::{SpawnOptions, SubAgentManager};
@@ -49,6 +50,9 @@ pub struct LoadedProcedure {
     pub description: Option<String>,
 }
 
+/// Shared, hot-reloadable procedure registry that the PxWatcher updates.
+pub type SharedProcedures = Arc<RwLock<HashMap<String, LoadedProcedure>>>;
+
 /// Production tool handler that connects MCP tool calls to real implementations.
 pub struct RadixToolHandler {
     /// Shell executor for run_command/process tools.
@@ -72,7 +76,8 @@ pub struct RadixToolHandler {
     /// Praxis modules for constraint evaluation.
     praxis_modules: Vec<Box<dyn PraxisModule + Send + Sync>>,
     /// Pre-loaded .px procedures (name → compiled record data).
-    loaded_procedures: HashMap<String, LoadedProcedure>,
+    /// Wrapped in Arc<RwLock> for hot-reload via PxWatcher.
+    loaded_procedures: SharedProcedures,
     /// Chronos version timeline for audit/history queries.
     chronos: Option<Arc<ChronosTimeline>>,
     /// Sub-agent manager for delegation tools.
@@ -94,7 +99,7 @@ impl RadixToolHandler {
             media_dir,
             browser: None,
             praxis_modules: Vec::new(),
-            loaded_procedures: HashMap::new(),
+            loaded_procedures: Arc::new(RwLock::new(HashMap::new())),
             chronos: None,
             subagent_manager: None,
         }
@@ -155,59 +160,176 @@ impl RadixToolHandler {
     ///
     /// Procedures are then available via `praxis_run` by name (without needing
     /// to specify a file path) and are listed in `praxis_list`.
+    ///
+    /// **Must be called during single-threaded construction** (before the handler
+    /// is wrapped in `Arc` and shared). Panics if the `Arc<RwLock>` is already shared.
     pub fn with_px_dir(mut self, dir: PathBuf) -> Self {
         if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("px") {
-                    if let Ok(source) = std::fs::read_to_string(&path) {
-                        match px::parse(&source) {
-                            Ok(doc) => {
-                                let records = compiler::compile(&doc);
-                                for record in &records {
-                                    if record.data.get("type").and_then(|v| v.as_str())
-                                        == Some("procedure")
-                                    {
-                                        let name = record
-                                            .data
-                                            .get("name")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("unknown")
-                                            .to_string();
-                                        let description = record
-                                            .data
-                                            .get("description")
-                                            .and_then(|v| v.as_str())
-                                            .map(|s| s.to_string());
-                                        tracing::info!(
-                                            "loaded .px procedure: {} from {:?}",
+            // Safe during construction: we're the sole owner of the Arc.
+            let map = Arc::get_mut(&mut self.loaded_procedures)
+                .expect("with_px_dir must be called before sharing the handler")
+                .get_mut();
+            Self::load_px_dir_into(map, &dir, entries);
+        }
+        self
+    }
+
+    /// Internal: recursively load .px procedures from a directory into the map.
+    fn load_px_dir_into(
+        procedures: &mut HashMap<String, LoadedProcedure>,
+        _dir: &PathBuf,
+        entries: std::fs::ReadDir,
+    ) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("px") {
+                if let Ok(source) = std::fs::read_to_string(&path) {
+                    match px::parse(&source) {
+                        Ok(doc) => {
+                            let records = compiler::compile(&doc);
+                            for record in &records {
+                                if record.data.get("type").and_then(|v| v.as_str())
+                                    == Some("procedure")
+                                {
+                                    let name = record
+                                        .data
+                                        .get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string();
+                                    let description = record
+                                        .data
+                                        .get("description")
+                                        .and_then(|v| v.as_str())
+                                        .map(|s| s.to_string());
+                                    tracing::info!(
+                                        "loaded .px procedure: {} from {:?}",
+                                        name,
+                                        path
+                                    );
+                                    procedures.insert(
+                                        name.clone(),
+                                        LoadedProcedure {
                                             name,
-                                            path
-                                        );
-                                        self.loaded_procedures.insert(
-                                            name.clone(),
-                                            LoadedProcedure {
-                                                name,
-                                                source_file: path.clone(),
-                                                data: record.data.clone(),
-                                                description,
-                                            },
-                                        );
-                                    }
+                                            source_file: path.clone(),
+                                            data: record.data.clone(),
+                                            description,
+                                        },
+                                    );
                                 }
                             }
-                            Err(e) => {
-                                tracing::warn!("failed to parse {:?}: {e}", path);
-                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("failed to parse {:?}: {e}", path);
                         }
                     }
-                } else if path.is_dir() {
-                    // Recurse into subdirectories
-                    self = self.with_px_dir(path);
+                }
+            } else if path.is_dir() {
+                if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                    Self::load_px_dir_into(procedures, &path, sub_entries);
                 }
             }
         }
-        self
+    }
+
+    /// Start a PxWatcher that hot-reloads `.px` files into the procedure registry.
+    ///
+    /// Returns a handle to the shared procedures map. The watcher runs in the
+    /// background and automatically updates procedures when files are
+    /// created, modified, or deleted.
+    pub async fn start_px_watcher(
+        &self,
+        watch_path: PathBuf,
+    ) -> Result<(), std::io::Error> {
+        use pares_radix_praxis::px::watcher::{PxWatcher, PxWatchEvent, PxWatcherConfig};
+
+        let config = PxWatcherConfig {
+            watch_path: watch_path.clone(),
+            initial_scan: false, // Already loaded via with_px_dir
+            debounce_ms: 150,
+        };
+
+        let watcher = PxWatcher::new(config);
+        let mut rx = watcher.start().await?;
+        let procedures = Arc::clone(&self.loaded_procedures);
+
+        tokio::spawn(async move {
+            info!(path = %watch_path.display(), "PxWatcher hot-reload active for MCP server");
+
+            while let Some(event) = rx.recv().await {
+                match event {
+                    PxWatchEvent::Loaded { path, records } => {
+                        let mut map = procedures.write().await;
+                        // Remove old procedures from this file
+                        map.retain(|_, proc| proc.source_file != path);
+                        // Add new procedures
+                        let mut count = 0;
+                        for record in &records {
+                            if record.data.get("type").and_then(|v| v.as_str())
+                                == Some("procedure")
+                            {
+                                let name = record
+                                    .data
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                let description = record
+                                    .data
+                                    .get("description")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
+                                map.insert(
+                                    name.clone(),
+                                    LoadedProcedure {
+                                        name,
+                                        source_file: path.clone(),
+                                        data: record.data.clone(),
+                                        description,
+                                    },
+                                );
+                                count += 1;
+                            }
+                        }
+                        if count > 0 {
+                            info!(
+                                path = %path.display(),
+                                procedures = count,
+                                total = map.len(),
+                                "hot-reloaded .px procedures"
+                            );
+                        }
+                    }
+                    PxWatchEvent::Removed { path, .. } => {
+                        let mut map = procedures.write().await;
+                        let before = map.len();
+                        map.retain(|_, proc| proc.source_file != path);
+                        let removed = before - map.len();
+                        if removed > 0 {
+                            info!(
+                                path = %path.display(),
+                                removed,
+                                remaining = map.len(),
+                                "removed .px procedures (file deleted)"
+                            );
+                        }
+                    }
+                    PxWatchEvent::Error { path, error } => {
+                        warn!(path = %path.display(), %error, "px hot-reload compile error");
+                    }
+                    PxWatchEvent::Ready { file_count, record_count } => {
+                        info!(file_count, record_count, "PxWatcher initial scan complete");
+                    }
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Get a reference to the shared procedures map (for external inspection).
+    pub fn shared_procedures(&self) -> &SharedProcedures {
+        &self.loaded_procedures
     }
 
     // ── File tools ────────────────────────────────────────────────────────────
@@ -1880,8 +2002,9 @@ impl RadixToolHandler {
 
     async fn praxis_list(&self, args: &Value) -> ToolResult {
         let module_filter = args.get("module").and_then(|v| v.as_str());
+        let procedures_guard = self.loaded_procedures.read().await;
 
-        if self.praxis_modules.is_empty() && self.loaded_procedures.is_empty() {
+        if self.praxis_modules.is_empty() && procedures_guard.is_empty() {
             return ToolResult::ok(
                 json!({
                     "modules": [],
@@ -1894,8 +2017,7 @@ impl RadixToolHandler {
         }
 
         if self.praxis_modules.is_empty() {
-            let procedures_info: Vec<Value> = self
-                .loaded_procedures
+            let procedures_info: Vec<Value> = procedures_guard
                 .iter()
                 .map(|(name, proc)| {
                     json!({
@@ -1950,7 +2072,7 @@ impl RadixToolHandler {
         }
 
         let mut procedures_info: Vec<Value> = Vec::new();
-        for (name, proc) in &self.loaded_procedures {
+        for (name, proc) in procedures_guard.iter() {
             procedures_info.push(json!({
                 "name": name,
                 "source_file": proc.source_file.display().to_string(),
@@ -1974,12 +2096,13 @@ impl RadixToolHandler {
 
         // Build a ProcedureRegistry from all loaded procedures so that
         // procedure-to-procedure calls resolve via ComposableHandler.
-        let mut registry = self.build_procedure_registry();
+        let mut registry = self.build_procedure_registry().await;
 
         // Check if requesting a pre-loaded procedure by name
         let target_name = args.get("procedure").and_then(|v| v.as_str());
         if let Some(name) = target_name {
-            if let Some(loaded) = self.loaded_procedures.get(name) {
+            let procedures_guard = self.loaded_procedures.read().await;
+            if let Some(loaded) = procedures_guard.get(name) {
                 // Execute the pre-loaded procedure directly
                 let mut initial_vars: HashMap<String, Value> = HashMap::new();
                 if let Some(vars) = args.get("vars").and_then(|v| v.as_object()) {
@@ -2320,9 +2443,10 @@ impl RadixToolHandler {
     }
 
     /// Build a ProcedureRegistry from all loaded procedures.
-    fn build_procedure_registry(&self) -> ProcedureRegistry {
+    async fn build_procedure_registry(&self) -> ProcedureRegistry {
         let mut registry = ProcedureRegistry::new();
-        for (name, loaded) in &self.loaded_procedures {
+        let procedures_guard = self.loaded_procedures.read().await;
+        for (name, loaded) in procedures_guard.iter() {
             registry.register_as(name.clone(), loaded.data.clone());
         }
         registry
@@ -4367,11 +4491,14 @@ mod tests {
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
 
         // Verify the procedure was loaded
-        assert!(
-            handler.loaded_procedures.contains_key("greet"),
-            "expected 'greet' procedure to be loaded, got: {:?}",
-            handler.loaded_procedures.keys().collect::<Vec<_>>()
-        );
+        {
+            let procs = handler.loaded_procedures.read().await;
+            assert!(
+                procs.contains_key("greet"),
+                "expected 'greet' procedure to be loaded, got: {:?}",
+                procs.keys().collect::<Vec<_>>()
+            );
+        }
 
         // Verify praxis_list shows it
         let result = handler.call_tool("praxis_list", json!({})).await;
@@ -4429,12 +4556,15 @@ mod tests {
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
 
         // Both procedures should be loaded
-        assert!(
-            handler.loaded_procedures.contains_key("helper"),
-            "expected 'helper' procedure, got: {:?}",
-            handler.loaded_procedures.keys().collect::<Vec<_>>()
-        );
-        assert!(handler.loaded_procedures.contains_key("main_proc"));
+        {
+            let procs = handler.loaded_procedures.read().await;
+            assert!(
+                procs.contains_key("helper"),
+                "expected 'helper' procedure, got: {:?}",
+                procs.keys().collect::<Vec<_>>()
+            );
+            assert!(procs.contains_key("main_proc"));
+        }
 
         // Run main_proc — it should call helper via ComposableHandler
         let result = handler
@@ -4447,6 +4577,70 @@ mod tests {
             result.content
         );
         assert!(result.content.contains("preloaded"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn px_watcher_hot_reloads_procedures() {
+        use std::io::Write;
+        use tokio::time::{sleep, Duration};
+
+        let dir = std::env::temp_dir().join("radix_test_px_hot_reload");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        // Start watcher (no initial files)
+        handler
+            .start_px_watcher(dir.clone())
+            .await
+            .expect("watcher should start");
+
+        // Give watcher time to initialize
+        sleep(Duration::from_millis(200)).await;
+
+        // Initially no procedures
+        {
+            let procs = handler.loaded_procedures.read().await;
+            assert!(procs.is_empty(), "expected empty, got {:?}", procs.keys().collect::<Vec<_>>());
+        }
+
+        // Create a .px file with a procedure
+        let px_file = dir.join("hot.px");
+        {
+            let mut f = std::fs::File::create(&px_file).unwrap();
+            writeln!(f, "procedure hot_proc:\n  trigger: manual\n  emit {{status: \"hot\"}}").unwrap();
+        }
+
+        // Wait for debounce + processing
+        sleep(Duration::from_millis(500)).await;
+
+        // Procedure should now be loaded
+        {
+            let procs = handler.loaded_procedures.read().await;
+            assert!(
+                procs.contains_key("hot_proc"),
+                "expected 'hot_proc' after hot-reload, got: {:?}",
+                procs.keys().collect::<Vec<_>>()
+            );
+        }
+
+        // Remove the file
+        std::fs::remove_file(&px_file).unwrap();
+        sleep(Duration::from_millis(500)).await;
+
+        // Procedure should be gone
+        {
+            let procs = handler.loaded_procedures.read().await;
+            assert!(
+                !procs.contains_key("hot_proc"),
+                "expected 'hot_proc' to be removed, got: {:?}",
+                procs.keys().collect::<Vec<_>>()
+            );
+        }
 
         let _ = std::fs::remove_dir_all(&dir);
     }

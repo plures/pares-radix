@@ -4148,13 +4148,32 @@ async fn main() {
             // Auto-load .px procedures from praxis/ directory if it exists
             let px_dir = resolved_workdir.join("praxis");
             if px_dir.is_dir() {
-                handler = handler.with_px_dir(px_dir);
+                handler = handler.with_px_dir(px_dir.clone());
             }
             // Also check ~/.radix/praxis/ for user-level procedures
-            if let Ok(home) = std::env::var("HOME") {
-                let user_px_dir = std::path::PathBuf::from(home).join(".radix").join("praxis");
-                if user_px_dir.is_dir() {
-                    handler = handler.with_px_dir(user_px_dir);
+            let user_px_dir = if let Ok(home) = std::env::var("HOME") {
+                let dir = std::path::PathBuf::from(home).join(".radix").join("praxis");
+                if dir.is_dir() {
+                    handler = handler.with_px_dir(dir.clone());
+                    Some(dir)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Start PxWatcher for hot-reload on praxis directories
+            let mut watch_dirs = Vec::new();
+            if px_dir.is_dir() {
+                watch_dirs.push(px_dir);
+            }
+            if let Some(dir) = user_px_dir {
+                watch_dirs.push(dir);
+            }
+            for dir in &watch_dirs {
+                if let Err(e) = handler.start_px_watcher(dir.clone()).await {
+                    tracing::warn!(path = %dir.display(), "failed to start PxWatcher: {e}");
                 }
             }
 

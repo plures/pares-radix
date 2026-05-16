@@ -4741,6 +4741,7 @@ version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
+ "notify",
  "pest",
  "pest_derive",
  "serde",
@@ -4748,7 +4749,9 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]
