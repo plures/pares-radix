@@ -59,7 +59,7 @@ tar.extractall(os.environ['out'] + '/lib')
         # TODO: fix the tests properly and re-enable
         doCheck = false;
 
-        nativeBuildInputs = with pkgs; [ pkg-config cmake ];
+        nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
@@ -67,6 +67,11 @@ tar.extractall(os.environ['out'] + '/lib')
 
         ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
         FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
+
+        postInstall = ''
+          wrapProgram $out/bin/pares-radix \
+            --set ORT_DYLIB_PATH "${onnxruntimeLib { inherit pkgs; }}/lib/libonnxruntime.so"
+        '';
 
         meta = {
           description = "Pares Radix — headless AI agent daemon";
