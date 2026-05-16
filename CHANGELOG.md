@@ -1,3 +1,7 @@
+## [1.42.2] — 2026-05-16
+
+- refactor: rename pares-agens platform crates to pares-radix (36a5621)
+
 ## [1.42.1] — 2026-05-16
 
 - fix: pin svelte-ratatui to rev for deterministic Nix builds (d8f604b)
