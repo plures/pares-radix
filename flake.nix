@@ -23,7 +23,7 @@
       # Official Microsoft ONNX Runtime release — has both .so and headers.
       # fetchurl is a fixed-output derivation so it ALWAYS gets network access
       # regardless of sandbox settings. This is the correct Nix pattern.
-      onnxruntime = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
+      onnxruntime = { pkgs }: pkgs.stdenv.mkDerivation {
         pname = "onnxruntime-prebuilt";
         version = "1.23.0";
         src = pkgs.fetchurl {
@@ -31,11 +31,14 @@
           hash = "sha256-tt7qfy4iwQwEMBnylKDqTSpsCuUqAJw0hHZA23XsVYA=";
         };
         sourceRoot = ".";
+        nativeBuildInputs = [ pkgs.autoPatchelfHook ];
+        buildInputs = [ pkgs.stdenv.cc.cc.lib ];  # provides libstdc++.so.6
         installPhase = ''
           mkdir -p $out/lib $out/include
           cp -a onnxruntime-linux-x64-1.23.0/lib/* $out/lib/
           cp -a onnxruntime-linux-x64-1.23.0/include/* $out/include/
         '';
+      };
       };
 
       # Shared build config
