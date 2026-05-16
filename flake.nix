@@ -21,6 +21,8 @@
       in builtins.head (builtins.match ''.*"(.*)".*'' raw);
 
       # Prefetch ONNX Runtime static library for ort-sys.
+      # NOTE: Only used by Tauri desktop build. CLI build uses __noChroot
+      # to let ort-sys download directly during build.
       onnxruntimeLib = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
         name = "onnxruntime-prebuilt-1.23.2";
         src = pkgs.fetchurl {
@@ -53,25 +55,17 @@ tar.extractall(os.environ['out'] + '/lib')
           allowBuiltinFetchGit = true;
         };
 
-        cargoBuildFlags = [ "-p" "pares-radix-cli" ];
+        # Let ort-sys download ONNX Runtime binaries during build
+        __noChroot = true;
 
-        # Skip tests — 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
-        # TODO: fix the tests properly and re-enable
+        cargoBuildFlags = [ "-p" "pares-radix-cli" ];
         doCheck = false;
 
-        nativeBuildInputs = with pkgs; [ pkg-config cmake makeWrapper ];
+        nativeBuildInputs = with pkgs; [ pkg-config cmake ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
-
-        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
-        FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
-
-        postInstall = ''
-          wrapProgram $out/bin/pares-radix \
-            --set ORT_DYLIB_PATH "${onnxruntimeLib { inherit pkgs; }}/lib/libonnxruntime.so"
-        '';
 
         meta = {
           description = "Pares Radix — headless AI agent daemon";
@@ -94,14 +88,14 @@ tar.extractall(os.environ['out'] + '/lib')
 
         cargoBuildFlags = [ "-p" "pares-radix" ];
 
+        # Let ort-sys download ONNX Runtime binaries during build
+        __noChroot = true;
+
         nativeBuildInputs = with pkgs; [ pkg-config cmake nodejs_22 ];
         buildInputs = with pkgs; [
           openssl stdenv.cc.cc.lib glib pango cairo gdk-pixbuf atk gtk3
           graphene webkitgtk_4_1 libsoup_3
         ];
-
-        ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
-        FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
 
         preBuild = ''
           npm ci --ignore-scripts
