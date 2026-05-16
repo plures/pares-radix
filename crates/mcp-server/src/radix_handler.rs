@@ -237,11 +237,8 @@ impl RadixToolHandler {
     /// Returns a handle to the shared procedures map. The watcher runs in the
     /// background and automatically updates procedures when files are
     /// created, modified, or deleted.
-    pub async fn start_px_watcher(
-        &self,
-        watch_path: PathBuf,
-    ) -> Result<(), std::io::Error> {
-        use pares_radix_praxis::px::watcher::{PxWatcher, PxWatchEvent, PxWatcherConfig};
+    pub async fn start_px_watcher(&self, watch_path: PathBuf) -> Result<(), std::io::Error> {
+        use pares_radix_praxis::px::watcher::{PxWatchEvent, PxWatcher, PxWatcherConfig};
 
         let config = PxWatcherConfig {
             watch_path: watch_path.clone(),
@@ -278,8 +275,7 @@ impl RadixToolHandler {
                         // Add new procedures
                         let mut count = 0;
                         for record in &records {
-                            if record.data.get("type").and_then(|v| v.as_str())
-                                == Some("procedure")
+                            if record.data.get("type").and_then(|v| v.as_str()) == Some("procedure")
                             {
                                 let name = record
                                     .data
@@ -342,7 +338,10 @@ impl RadixToolHandler {
                     PxWatchEvent::Error { path, error } => {
                         warn!(path = %path.display(), %error, "px hot-reload compile error");
                     }
-                    PxWatchEvent::Ready { file_count, record_count } => {
+                    PxWatchEvent::Ready {
+                        file_count,
+                        record_count,
+                    } => {
                         info!(file_count, record_count, "PxWatcher initial scan complete");
                     }
                 }
@@ -4630,14 +4629,22 @@ mod tests {
         // Initially no procedures
         {
             let procs = handler.loaded_procedures.read().await;
-            assert!(procs.is_empty(), "expected empty, got {:?}", procs.keys().collect::<Vec<_>>());
+            assert!(
+                procs.is_empty(),
+                "expected empty, got {:?}",
+                procs.keys().collect::<Vec<_>>()
+            );
         }
 
         // Create a .px file with a procedure
         let px_file = dir.join("hot.px");
         {
             let mut f = std::fs::File::create(&px_file).unwrap();
-            writeln!(f, "procedure hot_proc:\n  trigger: manual\n  emit {{status: \"hot\"}}").unwrap();
+            writeln!(
+                f,
+                "procedure hot_proc:\n  trigger: manual\n  emit {{status: \"hot\"}}"
+            )
+            .unwrap();
         }
 
         // Wait for debounce + processing

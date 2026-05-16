@@ -4140,7 +4140,28 @@ async fn main() {
             let shell = Arc::new(ShellExecutor::new());
             let resolved_workdir = std::fs::canonicalize(&workdir).unwrap_or(workdir);
 
-            let mut handler = RadixToolHandler::new(shell, resolved_workdir.clone());
+            // Set up PluresDB state store for db_get/db_put/db_delete
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let state_dir = std::path::PathBuf::from(&home)
+                .join(".pares-radix")
+                .join("mcp-state");
+            std::fs::create_dir_all(&state_dir).ok();
+            let state_store: Arc<dyn pares_agens_core::StateStore> = {
+                use pares_agens_core::state::PluresDbStateStore;
+                match PluresDbStateStore::open(&state_dir) {
+                    Ok(store) => {
+                        tracing::info!("MCP state store opened at {}", state_dir.display());
+                        Arc::new(store)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to open MCP state store: {e}, using in-memory");
+                        Arc::new(pares_agens_core::state::InMemoryStateStore::new())
+                    }
+                }
+            };
+
+            let mut handler = RadixToolHandler::new(shell, resolved_workdir.clone())
+                .with_state_store(state_store);
             if let Some(key) = brave_api_key {
                 handler = handler.with_brave_api_key(key);
             }
