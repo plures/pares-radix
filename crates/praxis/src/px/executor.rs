@@ -866,22 +866,118 @@ fn eval_contains(collection_expr: &str, item_expr: &str, vars: &HashMap<String, 
     }
 }
 
-/// Resolve dotted variable access with arbitrary depth.
+/// Resolve dotted variable access with arbitrary depth, including bracket indexing.
 ///
-/// Supports paths like `result.status`, `result.data.items`, or
-/// `response.headers.content_type`. Each segment indexes into nested
-/// JSON objects.
+/// Supports paths like:
+/// - `result.status` — nested object access
+/// - `items[0]` — array index
+/// - `items[0].name` — array index then object access
+/// - `data["key"]` — bracket key access on objects
+/// - `response.data.items[2].id` — mixed paths
 fn resolve_dotted(path: &str, vars: &HashMap<String, Value>) -> Option<Value> {
-    let (root_key, rest) = path.split_once('.')?;
+    let segments = parse_path_segments(path);
+    if segments.len() < 2 {
+        return None;
+    }
 
+    // First segment must be a key (root variable name)
+    let root_key = segments[0].as_str()?;
     let root = vars.get(root_key)?;
     let mut current = root;
 
-    for segment in rest.split('.') {
-        current = current.get(segment)?;
+    for segment in &segments[1..] {
+        current = resolve_segment(current, segment)?;
     }
 
     Some(current.clone())
+}
+
+/// A path segment: either a string key or a numeric index.
+#[derive(Debug, Clone, PartialEq)]
+enum PathSegment {
+    Key(String),
+    Index(usize),
+}
+
+impl PathSegment {
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            PathSegment::Key(s) => Some(s.as_str()),
+            PathSegment::Index(_) => None,
+        }
+    }
+}
+
+/// Parse a path string into segments.
+///
+/// Examples:
+/// - `"foo.bar"` → `[Key("foo"), Key("bar")]`
+/// - `"items[0]"` → `[Key("items"), Index(0)]`
+/// - `"items[0].name"` → `[Key("items"), Index(0), Key("name")]`
+/// - `"data[\"key\"]"` → `[Key("data"), Key("key")]`
+fn parse_path_segments(path: &str) -> Vec<PathSegment> {
+    let mut segments = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = path.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        match chars[i] {
+            '.' => {
+                if !current.is_empty() {
+                    segments.push(PathSegment::Key(current.clone()));
+                    current.clear();
+                }
+            }
+            '[' => {
+                if !current.is_empty() {
+                    segments.push(PathSegment::Key(current.clone()));
+                    current.clear();
+                }
+                // Parse bracket content
+                i += 1;
+                let mut bracket_content = String::new();
+                while i < chars.len() && chars[i] != ']' {
+                    bracket_content.push(chars[i]);
+                    i += 1;
+                }
+                // Determine if it's a numeric index or a string key
+                let trimmed = bracket_content.trim();
+                if let Ok(idx) = trimmed.parse::<usize>() {
+                    segments.push(PathSegment::Index(idx));
+                } else {
+                    // Strip quotes if present: ["key"] or ['key']
+                    let key = trimmed
+                        .trim_start_matches('"')
+                        .trim_end_matches('"')
+                        .trim_start_matches('\'')
+                        .trim_end_matches('\'');
+                    segments.push(PathSegment::Key(key.to_string()));
+                }
+            }
+            ']' => {
+                // Already consumed by '[' handler
+            }
+            c => {
+                current.push(c);
+            }
+        }
+        i += 1;
+    }
+
+    if !current.is_empty() {
+        segments.push(PathSegment::Key(current));
+    }
+
+    segments
+}
+
+/// Resolve a single segment against a JSON value.
+fn resolve_segment<'a>(value: &'a Value, segment: &PathSegment) -> Option<&'a Value> {
+    match segment {
+        PathSegment::Key(key) => value.get(key.as_str()),
+        PathSegment::Index(idx) => value.get(*idx),
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1651,5 +1747,141 @@ mod tests {
             "tags contains \"python\" || status == active",
             &vars
         ));
+    }
+
+    #[test]
+    fn bracket_array_indexing() {
+        let vars = HashMap::from([
+            ("items".to_string(), json!(["alpha", "beta", "gamma"])),
+            (
+                "users".to_string(),
+                json!([{"name": "alice", "age": 30}, {"name": "bob", "age": 25}]),
+            ),
+        ]);
+
+        // Simple array index
+        assert!(default_evaluate_condition("items[0] == alpha", &vars));
+        assert!(default_evaluate_condition("items[1] == beta", &vars));
+        assert!(default_evaluate_condition("items[2] == gamma", &vars));
+        assert!(!default_evaluate_condition("items[0] == beta", &vars));
+
+        // Array index with nested object access
+        assert!(default_evaluate_condition("users[0].name == alice", &vars));
+        assert!(default_evaluate_condition("users[1].name == bob", &vars));
+        assert!(default_evaluate_condition("users[0].age == 30", &vars));
+        assert!(default_evaluate_condition("users[1].age == 25", &vars));
+        assert!(!default_evaluate_condition("users[0].name == bob", &vars));
+    }
+
+    #[test]
+    fn bracket_object_key_access() {
+        let vars = HashMap::from([(
+            "headers".to_string(),
+            json!({"content-type": "application/json", "x-request-id": "abc123"}),
+        )]);
+
+        // Bracket key access (for keys with hyphens that can't use dot notation)
+        assert!(default_evaluate_condition(
+            "headers[\"content-type\"] == application/json",
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            "headers[\"x-request-id\"] == abc123",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn mixed_dot_and_bracket_paths() {
+        let vars = HashMap::from([(
+            "response".to_string(),
+            json!({
+                "data": {
+                    "items": [
+                        {"id": 1, "status": "active"},
+                        {"id": 2, "status": "inactive"}
+                    ],
+                    "meta": {"total": 2}
+                }
+            }),
+        )]);
+
+        // Deep mixed path: dot, bracket index, dot
+        assert!(default_evaluate_condition(
+            "response.data.items[0].status == active",
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            "response.data.items[1].status == inactive",
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            "response.data.items[0].id == 1",
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            "response.data.meta.total == 2",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn bracket_index_out_of_bounds() {
+        let vars = HashMap::from([("items".to_string(), json!(["a", "b"]))]);
+
+        // Out-of-bounds returns false (not found)
+        assert!(!default_evaluate_condition("items[5] == a", &vars));
+        // Truthy check on out-of-bounds
+        assert!(!default_evaluate_condition("items[99]", &vars));
+        // In-bounds truthy check
+        assert!(default_evaluate_condition("items[0]", &vars));
+    }
+
+    #[test]
+    fn bracket_indexing_with_operators() {
+        let vars = HashMap::from([(
+            "scores".to_string(),
+            json!([85, 92, 78, 95]),
+        )]);
+
+        // Comparison operators with bracket indexing
+        assert!(default_evaluate_condition("scores[0] > 80", &vars));
+        assert!(default_evaluate_condition("scores[1] >= 92", &vars));
+        assert!(default_evaluate_condition("scores[2] < 80", &vars));
+        assert!(default_evaluate_condition("scores[3] <= 95", &vars));
+        assert!(!default_evaluate_condition("scores[0] > 90", &vars));
+    }
+
+    #[test]
+    fn parse_path_segments_unit() {
+        use super::PathSegment::*;
+
+        assert_eq!(
+            super::parse_path_segments("foo.bar"),
+            vec![Key("foo".into()), Key("bar".into())]
+        );
+        assert_eq!(
+            super::parse_path_segments("items[0]"),
+            vec![Key("items".into()), Index(0)]
+        );
+        assert_eq!(
+            super::parse_path_segments("items[0].name"),
+            vec![Key("items".into()), Index(0), Key("name".into())]
+        );
+        assert_eq!(
+            super::parse_path_segments("data[\"key\"]"),
+            vec![Key("data".into()), Key("key".into())]
+        );
+        assert_eq!(
+            super::parse_path_segments("a.b[2].c.d[0]"),
+            vec![
+                Key("a".into()),
+                Key("b".into()),
+                Index(2),
+                Key("c".into()),
+                Key("d".into()),
+                Index(0)
+            ]
+        );
     }
 }
