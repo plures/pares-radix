@@ -882,15 +882,18 @@ fn format_numeric_result(result: f64) -> String {
 }
 
 /// Try to evaluate a ternary expression: `condition ? trueExpr : falseExpr`
+///
+/// Supports nested ternaries in both branches:
+///   `a > 0 ? b > 1 ? "deep" : "shallow" : "negative"`
+/// The `?` and `:` are matched by tracking nesting depth.
 fn try_ternary_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
-    // Find the ? that separates condition from branches
-    let q_idx = expr.find('?')?;
+    // Find the first top-level `?` (outside quotes)
+    let q_idx = find_top_level_char(expr, '?')?;
     let condition_str = expr[..q_idx].trim();
     let branches = &expr[q_idx + 1..];
 
-    // Find the : that separates true from false branch
-    // Must handle nested ternaries eventually, but for now find the first :
-    let colon_idx = branches.find(':')?;
+    // Find the matching `:` — for every nested `?` we see, skip one `:`.
+    let colon_idx = find_matching_colon(branches)?;
     let true_expr = branches[..colon_idx].trim();
     let false_expr = branches[colon_idx + 1..].trim();
 
@@ -898,6 +901,13 @@ fn try_ternary_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String>
     let condition_result = default_evaluate_condition(condition_str, vars);
 
     let chosen = if condition_result { true_expr } else { false_expr };
+
+    // Recursively evaluate if the chosen branch is itself a ternary
+    if chosen.contains('?') && chosen.contains(':') {
+        if let Some(nested) = try_ternary_expr(chosen, vars) {
+            return Some(nested);
+        }
+    }
 
     // The chosen branch can be: a quoted string, a variable reference, or a number
     if (chosen.starts_with('"') && chosen.ends_with('"'))
@@ -914,6 +924,44 @@ fn try_ternary_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String>
 
     // Return as literal
     Some(chosen.to_string())
+}
+
+/// Find the first occurrence of `ch` at the top level (not inside quotes).
+fn find_top_level_char(expr: &str, ch: char) -> Option<usize> {
+    let mut in_double = false;
+    let mut in_single = false;
+    for (i, c) in expr.char_indices() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            _ if c == ch && !in_double && !in_single => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Find the `:` that matches the outermost `?` in a branch string.
+/// For every nested `?` encountered (outside quotes), we must skip one `:`.
+fn find_matching_colon(branches: &str) -> Option<usize> {
+    let mut depth: usize = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+    for (i, c) in branches.char_indices() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '?' if !in_double && !in_single => depth += 1,
+            ':' if !in_double && !in_single => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Convert a Value to a string suitable for interpolation.
@@ -3323,5 +3371,75 @@ mod tests {
         vars.insert("premium".to_string(), json!(false));
         let result = interpolate_string("Limit: ${premium ? 100 : 10}", &vars);
         assert_eq!(result, "Limit: 10");
+    }
+
+    #[test]
+    fn test_interpolate_nested_ternary_inner_true() {
+        // a > 0 ? (b > 1 ? "deep" : "shallow") : "negative"
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(5));
+        vars.insert("b".to_string(), json!(10));
+        let result = interpolate_string("${a > 0 ? b > 1 ? \"deep\" : \"shallow\" : \"negative\"}", &vars);
+        assert_eq!(result, "deep");
+    }
+
+    #[test]
+    fn test_interpolate_nested_ternary_inner_false() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(5));
+        vars.insert("b".to_string(), json!(0));
+        let result = interpolate_string("${a > 0 ? b > 1 ? \"deep\" : \"shallow\" : \"negative\"}", &vars);
+        assert_eq!(result, "shallow");
+    }
+
+    #[test]
+    fn test_interpolate_nested_ternary_outer_false() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(-1));
+        vars.insert("b".to_string(), json!(10));
+        let result = interpolate_string("${a > 0 ? b > 1 ? \"deep\" : \"shallow\" : \"negative\"}", &vars);
+        assert_eq!(result, "negative");
+    }
+
+    #[test]
+    fn test_interpolate_nested_ternary_in_false_branch() {
+        // Nesting in the false branch: a > 0 ? "positive" : b > 5 ? "big-neg" : "small-neg"
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(-1));
+        vars.insert("b".to_string(), json!(10));
+        let result = interpolate_string("${a > 0 ? \"positive\" : b > 5 ? \"big-neg\" : \"small-neg\"}", &vars);
+        assert_eq!(result, "big-neg");
+    }
+
+    #[test]
+    fn test_interpolate_nested_ternary_false_branch_inner_false() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(-1));
+        vars.insert("b".to_string(), json!(2));
+        let result = interpolate_string("${a > 0 ? \"positive\" : b > 5 ? \"big-neg\" : \"small-neg\"}", &vars);
+        assert_eq!(result, "small-neg");
+    }
+
+    #[test]
+    fn test_ternary_with_quoted_colon_in_string() {
+        // Colons inside quoted strings should not confuse the parser
+        let mut vars = HashMap::new();
+        vars.insert("ok".to_string(), json!(true));
+        let result = interpolate_string("${ok ? \"time: now\" : \"time: later\"}", &vars);
+        assert_eq!(result, "time: now");
+    }
+
+    #[test]
+    fn test_find_matching_colon_simple() {
+        assert_eq!(find_matching_colon(" true : false"), Some(6));
+    }
+
+    #[test]
+    fn test_find_matching_colon_nested() {
+        // "b > 1 ? deep : shallow : negative" — first : is inside nested ternary
+        let branches = " b > 1 ? \"deep\" : \"shallow\" : \"negative\"";
+        let colon_idx = find_matching_colon(branches).unwrap();
+        let false_part = branches[colon_idx + 1..].trim();
+        assert_eq!(false_part, "\"negative\"");
     }
 }
