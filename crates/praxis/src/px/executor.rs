@@ -1458,6 +1458,10 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
     }
 
     // Bare variable name — truthy check
+    // Also support pipes: `name | trim` evaluates as truthy if result is non-empty
+    if let Some(filtered) = resolve_value_with_pipes(expr, vars) {
+        return !filtered.is_empty();
+    }
     if let Some(val) = resolve_var(expr, vars) {
         return is_truthy(&val);
     }
@@ -1577,8 +1581,50 @@ fn resolve_var(name: &str, vars: &HashMap<String, Value>) -> Option<Value> {
     resolve_dotted(name, vars)
 }
 
+/// Resolve a value expression that may contain pipe filters.
+/// Used in when-guard conditions to support syntax like:
+///   `name | uppercase == "HELLO"`
+///   `input | trim != ""`
+///   `path | lowercase | trim starts_with "/api"`
+///
+/// Returns the resolved string value after applying all filters,
+/// or None if the expression can't be resolved.
+fn resolve_value_with_pipes(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Check if there's a pipe operator in this expression
+    if let Some(pipe_idx) = find_pipe_operator(expr) {
+        let value_expr = expr[..pipe_idx].trim();
+        let filters_str = expr[pipe_idx + 1..].trim();
+
+        // Resolve the base value
+        let base_value = if let Some(val) = resolve_var(value_expr, vars) {
+            value_to_interpolation_string(&val)
+        } else if value_expr.starts_with('"') && value_expr.ends_with('"') {
+            value_expr[1..value_expr.len() - 1].to_string()
+        } else {
+            return None;
+        };
+
+        // Apply filters
+        let filters = split_pipe_filters(filters_str);
+        let mut result = base_value;
+        for filter in &filters {
+            result = apply_pipe_filter(filter.trim(), &result, vars)?;
+        }
+        return Some(result);
+    }
+    None
+}
+
 /// Compare for equality. Supports arithmetic expressions.
 fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try pipe filters on lhs: `name | uppercase == "HELLO"`
+    if let Some(filtered) = resolve_value_with_pipes(lhs, vars) {
+        // Also resolve rhs pipes if present
+        let rhs_val = resolve_value_with_pipes(rhs, vars)
+            .unwrap_or_else(|| rhs.trim_matches('"').to_string());
+        return filtered == rhs_val;
+    }
+
     // Try arithmetic on lhs first
     if let Some(lhs_num) = eval_numeric_expr(lhs, vars) {
         if let Ok(rhs_num) = rhs.parse::<f64>() {
@@ -1768,6 +1814,19 @@ fn find_keyword_outside_parens(expr: &str, keyword: &str) -> Option<usize> {
 /// - Arrays: checks if the array contains the value
 /// - Strings: checks if the string contains the substring
 fn eval_contains(collection_expr: &str, item_expr: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try pipe filters on collection_expr for string containment
+    if let Some(filtered_collection) = resolve_value_with_pipes(collection_expr, vars) {
+        let sub = if let Some(filtered_item) = resolve_value_with_pipes(item_expr, vars) {
+            filtered_item
+        } else {
+            match resolve_var(item_expr, vars) {
+                Some(Value::String(v)) => v,
+                _ => item_expr.to_string(),
+            }
+        };
+        return filtered_collection.contains(&sub);
+    }
+
     let collection = resolve_var(collection_expr, vars);
     match collection {
         Some(Value::Array(arr)) => {
@@ -1812,11 +1871,16 @@ fn split_keyword_op<'a>(expr: &'a str, keyword: &str) -> Option<(&'a str, &'a st
 
 /// Evaluate a `matches` (regex) check.
 fn eval_matches(var_expr: &str, pattern: &str, vars: &HashMap<String, Value>) -> bool {
-    let val = resolve_var(var_expr, vars);
-    let haystack = match &val {
-        Some(Value::String(s)) => s.as_str().to_owned(),
-        Some(Value::Number(n)) => n.to_string(),
-        _ => return false,
+    // Try pipe filters first
+    let haystack = if let Some(filtered) = resolve_value_with_pipes(var_expr, vars) {
+        filtered
+    } else {
+        let val = resolve_var(var_expr, vars);
+        match &val {
+            Some(Value::String(s)) => s.as_str().to_owned(),
+            Some(Value::Number(n)) => n.to_string(),
+            _ => return false,
+        }
     };
     match regex::Regex::new(pattern) {
         Ok(re) => re.is_match(&haystack),
@@ -1824,8 +1888,12 @@ fn eval_matches(var_expr: &str, pattern: &str, vars: &HashMap<String, Value>) ->
     }
 }
 
-/// Evaluate a `starts_with` check.
+/// Evaluate a `starts_with` check. Supports pipe filters: `name | trim starts_with "prefix"`
 fn eval_starts_with(var_expr: &str, prefix: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try pipe filters first
+    if let Some(filtered) = resolve_value_with_pipes(var_expr, vars) {
+        return filtered.starts_with(prefix);
+    }
     let val = resolve_var(var_expr, vars);
     match &val {
         Some(Value::String(s)) => s.starts_with(prefix),
@@ -1833,8 +1901,12 @@ fn eval_starts_with(var_expr: &str, prefix: &str, vars: &HashMap<String, Value>)
     }
 }
 
-/// Evaluate an `ends_with` check.
+/// Evaluate an `ends_with` check. Supports pipe filters: `name | trim ends_with "suffix"`
 fn eval_ends_with(var_expr: &str, suffix: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try pipe filters first
+    if let Some(filtered) = resolve_value_with_pipes(var_expr, vars) {
+        return filtered.ends_with(suffix);
+    }
     let val = resolve_var(var_expr, vars);
     match &val {
         Some(Value::String(s)) => s.ends_with(suffix),
@@ -3965,5 +4037,139 @@ mod tests {
         vars.insert("name".to_string(), json!("alice"));
         let result = interpolate_string("Hello, ${name | uppercase}!", &vars);
         assert_eq!(result, "Hello, ALICE!");
+    }
+
+    // ── Pipe filters in when-guard conditions ───────────────────────────────────
+
+    #[test]
+    fn test_condition_pipe_eq_uppercase() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        assert!(default_evaluate_condition("name | uppercase == HELLO", &vars));
+        assert!(!default_evaluate_condition("name | uppercase == hello", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_eq_lowercase() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("ACTIVE"));
+        assert!(default_evaluate_condition("status | lowercase == active", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_eq_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("input".to_string(), json!("  hello  "));
+        assert!(default_evaluate_condition("input | trim == hello", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_ne() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        assert!(default_evaluate_condition("name | uppercase != hello", &vars));
+        assert!(!default_evaluate_condition("name | uppercase != HELLO", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_chained() {
+        let mut vars = HashMap::new();
+        vars.insert("msg".to_string(), json!("  Hello World  "));
+        assert!(default_evaluate_condition(
+            "msg | trim | lowercase == hello world",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_starts_with() {
+        let mut vars = HashMap::new();
+        vars.insert("path".to_string(), json!("/API/v2/users"));
+        assert!(default_evaluate_condition(
+            r#"path | lowercase starts_with "/api""#,
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            r#"path | lowercase starts_with "/admin""#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_ends_with() {
+        let mut vars = HashMap::new();
+        vars.insert("file".to_string(), json!("README.MD"));
+        assert!(default_evaluate_condition(
+            r#"file | lowercase ends_with ".md""#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_contains() {
+        let mut vars = HashMap::new();
+        vars.insert("message".to_string(), json!("Hello World"));
+        assert!(default_evaluate_condition(
+            r#"message | lowercase contains "world""#,
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            r#"message | lowercase contains "WORLD""#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_matches() {
+        let mut vars = HashMap::new();
+        vars.insert("email".to_string(), json!("USER@Example.Com"));
+        assert!(default_evaluate_condition(
+            r#"email | lowercase matches ".*@example\.com""#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("input".to_string(), json!("  "));
+        // " " trimmed is empty → falsy
+        assert!(!default_evaluate_condition("input | trim", &vars));
+        vars.insert("input".to_string(), json!("  hi  "));
+        // "hi" is non-empty → truthy
+        assert!(default_evaluate_condition("input | trim", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_with_logical_ops() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        vars.insert("flag".to_string(), json!(true));
+        assert!(default_evaluate_condition(
+            "name | uppercase == HELLO && flag",
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            "name | uppercase == WORLD && flag",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_condition_pipe_capitalize() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        assert!(default_evaluate_condition("name | capitalize == Hello", &vars));
+    }
+
+    #[test]
+    fn test_condition_pipe_does_not_break_existing() {
+        // Ensure plain variable comparisons still work
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("ok"));
+        vars.insert("count".to_string(), json!(5));
+        assert!(default_evaluate_condition("status == ok", &vars));
+        assert!(default_evaluate_condition("count == 5", &vars));
+        assert!(default_evaluate_condition("count > 3", &vars));
     }
 }
