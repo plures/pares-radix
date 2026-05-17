@@ -2209,10 +2209,7 @@ impl RadixToolHandler {
                         .and_then(|v| v.as_str())
                         .unwrap_or(&key)
                         .to_string();
-                    let priority = record
-                        .get("priority")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
+                    let priority = record.get("priority").and_then(|v| v.as_u64()).unwrap_or(0);
                     let conditions: Vec<String> = record
                         .get("conditions")
                         .and_then(|v| v.as_array())
@@ -2222,10 +2219,7 @@ impl RadixToolHandler {
                                 .collect()
                         })
                         .unwrap_or_default();
-                    let actions = record
-                        .get("actions")
-                        .cloned()
-                        .unwrap_or(json!([]));
+                    let actions = record.get("actions").cloned().unwrap_or(json!([]));
                     persisted_rules.push(json!({
                         "key": key,
                         "name": name,
@@ -4474,8 +4468,7 @@ mod tests {
             )
             .await;
 
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_state_store(state);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_state_store(state);
 
         // Test 1: action=deploy without approved → should fail
         let result = handler
@@ -4490,7 +4483,10 @@ mod tests {
         assert_eq!(parsed["results"][0]["status"], "fail");
         assert_eq!(parsed["results"][0]["source"], "px");
         assert_eq!(parsed["results"][0]["constraint"], "require_approval");
-        assert_eq!(parsed["results"][0]["message"], "Deployment requires approval");
+        assert_eq!(
+            parsed["results"][0]["message"],
+            "Deployment requires approval"
+        );
 
         // Test 2: action=deploy with approved=true → should pass
         let result = handler
@@ -4506,10 +4502,7 @@ mod tests {
 
         // Test 3: action=build → when condition doesn't match, constraint skipped
         let result = handler
-            .call_tool(
-                "praxis_evaluate",
-                json!({"action": "build", "payload": {}}),
-            )
+            .call_tool("praxis_evaluate", json!({"action": "build", "payload": {}}))
             .await;
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
@@ -4536,8 +4529,7 @@ mod tests {
             )
             .await;
 
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_state_store(state);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_state_store(state);
 
         // Filter by pre-push phase → should skip the pre-commit constraint
         let result = handler

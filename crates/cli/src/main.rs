@@ -4166,6 +4166,42 @@ async fn main() {
                 handler = handler.with_brave_api_key(key);
             }
 
+            // Set up PluresLm memory for memory_search/memory_store
+            let memory_crdt_store = {
+                use pares_agens_core::memory::{
+                    embed::MockEmbedder, store::PluresDbStore, PluresLm,
+                };
+                let memory_dir = std::path::PathBuf::from(&home)
+                    .join(".pares-radix")
+                    .join("mcp-memory");
+                std::fs::create_dir_all(&memory_dir).ok();
+                let store = match PluresDbStore::open(&memory_dir) {
+                    Ok(s) => {
+                        tracing::info!("MCP memory store opened at {}", memory_dir.display());
+                        Arc::new(s)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to open memory store: {e}, using in-memory");
+                        Arc::new(PluresDbStore::in_memory())
+                    }
+                };
+                let crdt = store.crdt_store_arc();
+                let mem_store: Arc<dyn pares_agens_core::memory::store::MemoryStore> = store;
+                let embedder: Box<dyn pares_agens_core::memory::embed::EmbeddingProvider> =
+                    Box::new(MockEmbedder);
+                let plures_lm = Arc::new(PluresLm::new(mem_store, embedder, 128_000));
+                handler = handler.with_memory(plures_lm);
+                crdt
+            };
+
+            // Set up Chronos timeline (shares CrdtStore with memory)
+            {
+                use pares_agens_core::chronos::ChronosTimeline;
+                let chronos = ChronosTimeline::new(memory_crdt_store);
+                handler = handler.with_chronos(Arc::new(chronos));
+                tracing::info!("MCP Chronos timeline enabled");
+            }
+
             // Auto-load .px procedures from praxis/ directory if it exists
             let px_dir = resolved_workdir.join("praxis");
             if px_dir.is_dir() {
