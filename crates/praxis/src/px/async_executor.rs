@@ -459,6 +459,15 @@ async fn execute_try_async(
 /// is `Send + Sync`). Results are collected into a map keyed by branch name.
 /// All branches must complete (or fail) before the step returns.
 ///
+/// # Timeouts
+///
+/// - **Step-level** `timeout_ms`: applies as a global deadline for *all* branches.
+///   If any branch exceeds this, the entire parallel step fails with a timeout error.
+/// - **Per-branch** `timeout_ms`: each branch can specify its own timeout. If a branch
+///   exceeds its timeout, that branch returns an error. The `fail_strategy` field
+///   controls whether this aborts the entire step (`"fast"`, default) or other branches
+///   still report their results (`"complete"`).
+///
 /// This achieves real concurrency without requiring `'static` bounds — all
 /// futures share the parent task's lifetime through the borrowed handler.
 async fn execute_parallel_async(
@@ -478,6 +487,17 @@ async fn execute_parallel_async(
 
     let output_var = step.get("output_var").and_then(|v| v.as_str());
 
+    // Step-level timeout applies to all branches as a group.
+    let step_timeout_ms = step
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64());
+
+    // Fail strategy: "fast" (default) aborts on first error, "complete" collects all.
+    let fail_strategy = step
+        .get("fail_strategy")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fast");
+
     // Build concurrent futures for each branch.
     // Each branch gets its own vars clone (isolation) but shares the handler reference.
     let branch_futs: Vec<_> = branches
@@ -495,6 +515,10 @@ async fn execute_parallel_async(
                 .cloned()
                 .unwrap_or_default();
 
+            let branch_timeout_ms = branch
+                .get("timeout_ms")
+                .and_then(|v| v.as_u64());
+
             let mut branch_vars = vars.clone();
 
             async move {
@@ -510,27 +534,80 @@ async fn execute_parallel_async(
                     ));
                 }
 
-                let mut last_output = Value::Null;
-                for (i, nested) in branch_steps.iter().enumerate() {
-                    let result =
-                        execute_step_async(nested, i, &mut branch_vars, handler).await?;
-                    if let Some(output) = result.output {
-                        last_output = output;
+                // Inner execution logic
+                let execute_branch = async {
+                    let mut last_output = Value::Null;
+                    for (i, nested) in branch_steps.iter().enumerate() {
+                        let result =
+                            execute_step_async(nested, i, &mut branch_vars, handler).await?;
+                        if let Some(output) = result.output {
+                            last_output = output;
+                        }
                     }
+                    Ok::<(String, Value), ExecutionError>((branch_name.clone(), last_output))
+                };
+
+                // Apply per-branch timeout if specified
+                if let Some(ms) = branch_timeout_ms {
+                    match timeout(Duration::from_millis(ms), execute_branch).await {
+                        Ok(result) => result,
+                        Err(_elapsed) => Err(ExecutionError::ActionFailed {
+                            action: branch_name.clone(),
+                            message: format!(
+                                "parallel branch '{}' timed out after {}ms",
+                                branch_name, ms
+                            ),
+                        }),
+                    }
+                } else {
+                    execute_branch.await
                 }
-                Ok((branch_name, last_output))
             }
         })
         .collect();
 
-    // Execute all branches concurrently — true parallelism for async I/O.
-    let branch_results = join_all(branch_futs).await;
+    // Execute all branches concurrently, optionally with a step-level timeout.
+    let branch_results = if let Some(ms) = step_timeout_ms {
+        match timeout(Duration::from_millis(ms), join_all(branch_futs)).await {
+            Ok(results) => results,
+            Err(_elapsed) => {
+                return Err(ExecutionError::ActionFailed {
+                    action: "parallel".into(),
+                    message: format!("parallel step timed out after {ms}ms"),
+                });
+            }
+        }
+    } else {
+        join_all(branch_futs).await
+    };
 
-    // Collect results, propagating the first error.
+    // Collect results based on fail strategy.
     let mut results_map = serde_json::Map::new();
+    let mut first_error: Option<ExecutionError> = None;
+
     for result in branch_results {
-        let (name, output) = result?;
-        results_map.insert(name, output);
+        match result {
+            Ok((name, output)) => {
+                results_map.insert(name, output);
+            }
+            Err(e) => {
+                if fail_strategy == "fast" {
+                    return Err(e);
+                }
+                // "complete" strategy: record error as a value, continue collecting
+                if first_error.is_none() {
+                    first_error = Some(e.clone());
+                }
+                let error_name = match &e {
+                    ExecutionError::ActionFailed { action, .. } => action.clone(),
+                    _ => "unknown".to_string(),
+                };
+                results_map.insert(
+                    error_name,
+                    Value::String(format!("error: {}", e)),
+                );
+            }
+        }
     }
 
     let output = Value::Object(results_map);
@@ -996,6 +1073,144 @@ mod tests {
             ExecutionError::ActionFailed { action, message } => {
                 assert_eq!(action, "fail");
                 assert!(message.contains("intentional"));
+            }
+            other => panic!("expected ActionFailed, got: {:?}", other),
+        }
+    }
+
+    /// Per-branch timeout: a slow branch is killed while fast branches succeed.
+    #[tokio::test]
+    async fn parallel_branch_timeout() {
+        struct SlowOnName;
+
+        #[async_trait]
+        impl AsyncActionHandler for SlowOnName {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "slow" {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Ok(json!(format!("{}_done", name)))
+            }
+        }
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "branch_timeout_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "fast_branch",
+                            "steps": [{ "kind": "call", "name": "fast", "params": {} }]
+                        },
+                        {
+                            "name": "slow_branch",
+                            "timeout_ms": 50,
+                            "steps": [{ "kind": "call", "name": "slow", "params": {} }]
+                        }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        // Default fail_strategy is "fast" — the timeout error propagates
+        let result = execute_async(&procedure, &SlowOnName).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            ExecutionError::ActionFailed { action, message } => {
+                assert_eq!(action, "slow_branch");
+                assert!(message.contains("timed out after 50ms"), "msg: {}", message);
+            }
+            other => panic!("expected ActionFailed, got: {:?}", other),
+        }
+    }
+
+    /// Per-branch timeout with fail_strategy="complete" — timed-out branch is recorded
+    /// but other branches still return their results.
+    #[tokio::test]
+    async fn parallel_branch_timeout_complete_strategy() {
+        struct SlowOnName;
+
+        #[async_trait]
+        impl AsyncActionHandler for SlowOnName {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "slow" {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+                Ok(json!(format!("{}_done", name)))
+            }
+        }
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "branch_timeout_complete",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "fail_strategy": "complete",
+                    "branches": [
+                        {
+                            "name": "fast_branch",
+                            "steps": [{ "kind": "call", "name": "fast", "params": {} }]
+                        },
+                        {
+                            "name": "slow_branch",
+                            "timeout_ms": 50,
+                            "steps": [{ "kind": "call", "name": "slow", "params": {} }]
+                        }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        // "complete" strategy: step succeeds, timed-out branch recorded as error string
+        let result = execute_async(&procedure, &SlowOnName).await.unwrap();
+        assert!(result.success);
+        let results = result.variables.get("results").unwrap();
+        assert_eq!(results["fast_branch"], json!("fast_done"));
+        // slow_branch timed out — its error is keyed by the action name from the error
+        let slow_val = results["slow_branch"].as_str().unwrap();
+        assert!(slow_val.contains("timed out"), "val: {}", slow_val);
+    }
+
+    /// Step-level timeout on parallel: all branches are killed if step deadline exceeded.
+    #[tokio::test]
+    async fn parallel_step_timeout() {
+        struct AlwaysSlow;
+
+        #[async_trait]
+        impl AsyncActionHandler for AlwaysSlow {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                Ok(json!("done"))
+            }
+        }
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "step_timeout_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "timeout_ms": 50,
+                    "branches": [
+                        { "name": "a", "steps": [{ "kind": "call", "name": "x", "params": {} }] },
+                        { "name": "b", "steps": [{ "kind": "call", "name": "y", "params": {} }] }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &AlwaysSlow).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ExecutionError::ActionFailed { action, message } => {
+                assert_eq!(action, "parallel");
+                assert!(message.contains("timed out after 50ms"), "msg: {}", message);
             }
             other => panic!("expected ActionFailed, got: {:?}", other),
         }
