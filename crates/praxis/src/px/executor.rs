@@ -436,10 +436,37 @@ fn execute_try(
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
 
+    let retry_delay_ms = step
+        .get("retry_delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let retry_backoff = step
+        .get("retry_backoff")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fixed");
+
+    let retry_max_delay_ms = step
+        .get("retry_max_delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(u64::MAX);
+
     let mut last_err: Option<ExecutionError> = None;
 
     for attempt in 0..=max_retries {
         vars.insert("retry_count".to_string(), Value::Number(attempt.into()));
+
+        // Delay before retry (not before the first attempt)
+        if attempt > 0 && retry_delay_ms > 0 {
+            let delay = match retry_backoff {
+                "exponential" => {
+                    let exp_delay = retry_delay_ms.saturating_mul(1u64 << (attempt as u64 - 1));
+                    exp_delay.min(retry_max_delay_ms)
+                }
+                _ => retry_delay_ms.min(retry_max_delay_ms), // "fixed" or unknown
+            };
+            std::thread::sleep(std::time::Duration::from_millis(delay));
+        }
 
         // Attempt the try block
         let mut last_output = None;
@@ -2225,5 +2252,166 @@ mod tests {
         assert!(result.success);
         // Without retry field, catch runs immediately
         assert_eq!(result.step_results[0].output, Some(json!("immediate_catch")));
+    }
+
+    #[test]
+    fn try_retry_with_fixed_delay() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        impl ActionHandler for FlakeHandler {
+            fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if count < 2 {
+                    Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: format!("fail #{}", count),
+                    })
+                } else {
+                    Ok(json!("ok"))
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "fixed_delay_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 3,
+                    "retry_delay_ms": 10,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute(&procedure, &handler).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("ok")));
+        // Should have at least 20ms of delay (2 retries × 10ms each)
+        assert!(elapsed.as_millis() >= 18, "Expected >= 18ms, got {}ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn try_retry_with_exponential_backoff() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        impl ActionHandler for FlakeHandler {
+            fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if count < 3 {
+                    Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: format!("fail #{}", count),
+                    })
+                } else {
+                    Ok(json!("recovered"))
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "exp_backoff_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 4,
+                    "retry_delay_ms": 10,
+                    "retry_backoff": "exponential",
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute(&procedure, &handler).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("recovered")));
+        // Exponential: 10 + 20 + 40 = 70ms for 3 retries
+        assert!(elapsed.as_millis() >= 60, "Expected >= 60ms exponential delay, got {}ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn try_retry_exponential_backoff_with_max_delay() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        impl ActionHandler for FlakeHandler {
+            fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if count < 3 {
+                    Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: format!("fail #{}", count),
+                    })
+                } else {
+                    Ok(json!("capped"))
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "max_delay_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 4,
+                    "retry_delay_ms": 10,
+                    "retry_backoff": "exponential",
+                    "retry_max_delay_ms": 25,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute(&procedure, &handler).unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("capped")));
+        // Capped: 10 + 20 + 25 = 55ms (3rd would be 40 but capped at 25)
+        assert!(elapsed.as_millis() >= 45, "Expected >= 45ms capped delay, got {}ms", elapsed.as_millis());
+        // Should NOT be as long as uncapped (10 + 20 + 40 = 70ms)
+        assert!(elapsed.as_millis() < 100, "Delay too long ({}ms) — max cap not working?", elapsed.as_millis());
     }
 }

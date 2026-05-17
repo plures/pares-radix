@@ -428,6 +428,16 @@ async fn execute_try_async(
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
+    let retry_backoff = step
+        .get("retry_backoff")
+        .and_then(|v| v.as_str())
+        .unwrap_or("fixed");
+
+    let retry_max_delay_ms = step
+        .get("retry_max_delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(u64::MAX);
+
     let mut last_err: Option<ExecutionError> = None;
 
     for attempt in 0..=max_retries {
@@ -435,7 +445,14 @@ async fn execute_try_async(
 
         // Delay before retry (not before the first attempt)
         if attempt > 0 && retry_delay_ms > 0 {
-            tokio::time::sleep(Duration::from_millis(retry_delay_ms)).await;
+            let delay = match retry_backoff {
+                "exponential" => {
+                    let exp_delay = retry_delay_ms.saturating_mul(1u64 << (attempt as u64 - 1));
+                    exp_delay.min(retry_max_delay_ms)
+                }
+                _ => retry_delay_ms.min(retry_max_delay_ms), // "fixed" or unknown
+            };
+            tokio::time::sleep(Duration::from_millis(delay)).await;
         }
 
         let mut last_output = None;
@@ -1454,5 +1471,65 @@ mod tests {
             elapsed
         );
         assert_eq!(handler.call_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn try_retry_exponential_backoff_async() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for FlakeHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if count < 3 {
+                    Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: format!("fail #{}", count),
+                    })
+                } else {
+                    Ok(json!("recovered_async"))
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "exp_backoff_async_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 4,
+                    "retry_delay_ms": 10,
+                    "retry_backoff": "exponential",
+                    "retry_max_delay_ms": 30,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("recovered_async")));
+        // Exponential with cap: 10 + 20 + 30 = 60ms (3rd attempt would be 40 but capped at 30)
+        assert!(
+            elapsed >= Duration::from_millis(50),
+            "expected >= 50ms for exponential backoff, got {:?}",
+            elapsed
+        );
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 4);
     }
 }
