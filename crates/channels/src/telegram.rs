@@ -272,17 +272,22 @@ fn shell_single_quote(value: &str) -> String {
 }
 
 fn build_nixos_update_command(_flake_dir: &str, _host: &str) -> String {
-    // Self-update = nixos-rebuild from the GitHub flake URI directly.
-    // No local checkout needed, no sudo for nix commands.
+    // Self-update = pull latest config then nixos-rebuild from local checkout.
+    // Uses the local git repo (SSH access) instead of github: URI
+    // because the repo may be private (no GitHub API token for Nix).
     let host = std::env::var("PARES_NIX_HOST").unwrap_or_else(|_| "praxisbot".into());
-    let flake_uri = std::env::var("PARES_NIX_FLAKE_URI")
-        .unwrap_or_else(|_| "github:kayodebristol/nixos-config".into());
+    let flake_dir = std::env::var("PARES_NIX_FLAKE_DIR").unwrap_or_else(|_| "/etc/nixos".into());
+    let flake_dir_q = shell_single_quote(&flake_dir);
     let host_q = shell_single_quote(&host);
-    let flake_q = shell_single_quote(&flake_uri);
     format!(
         "set -eu; \
-         echo 'Rebuilding NixOS from {flake_q}#{host_q}...'; \
-         nixos-rebuild switch --flake {flake_q}#{host_q} --refresh; \
+         cd {flake_dir_q}; \
+         echo 'Pulling latest config...'; \
+         git fetch origin && git pull --ff-only; \
+         echo 'Updating flake inputs...'; \
+         nix flake update pares-radix pares-cache; \
+         echo 'Rebuilding NixOS...'; \
+         nixos-rebuild switch --flake .#{host_q} --refresh; \
          echo 'Self-update complete.'"
     )
 }
@@ -2634,8 +2639,13 @@ mod tests {
     #[test]
     fn build_nixos_update_command_contains_required_steps() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
-        assert!(command.contains("nixos-rebuild switch --flake"));
-        assert!(command.contains("--refresh"));
+        assert!(command.contains("git pull --ff-only"), "must pull latest");
+        assert!(command.contains("nix flake update"), "must update inputs");
+        assert!(
+            command.contains("nixos-rebuild switch --flake"),
+            "must rebuild"
+        );
+        assert!(command.contains("--refresh"), "must refresh");
     }
 
     #[test]

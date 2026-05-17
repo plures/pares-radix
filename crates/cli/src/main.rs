@@ -2614,13 +2614,11 @@ fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
-fn build_nixos_update_command(_flake_dir: &str, host: &str) -> String {
-    let host = shell_single_quote(host);
-    let flake_uri = std::env::var("PARES_NIX_FLAKE_URI")
-        .unwrap_or_else(|_| "github:kayodebristol/nixos-config".into());
-    let flake_q = shell_single_quote(&flake_uri);
+fn build_nixos_update_command(flake_dir: &str, host: &str) -> String {
+    let flake_dir_q = shell_single_quote(flake_dir);
+    let host_q = shell_single_quote(host);
     format!(
-        "set -eu; nixos-rebuild switch --flake {flake_q}#{host} --refresh; echo 'Self-update applied'"
+        "set -eu; cd {flake_dir_q}; git fetch origin && git pull --ff-only; nix flake update pares-radix pares-cache; nixos-rebuild switch --flake .#{host_q} --refresh; echo 'Self-update applied'"
     )
 }
 
@@ -5002,9 +5000,14 @@ mod tests {
     #[test]
     fn build_nixos_update_command_includes_required_commands() {
         let command = build_nixos_update_command("/etc/nixos", "praxisbot");
-        assert!(command.contains("nixos-rebuild switch --flake"));
-        assert!(command.contains("praxisbot"));
-        assert!(command.contains("--refresh"));
+        assert!(command.contains("git pull --ff-only"), "must pull latest");
+        assert!(command.contains("nix flake update"), "must update inputs");
+        assert!(
+            command.contains("nixos-rebuild switch --flake"),
+            "must rebuild"
+        );
+        assert!(command.contains("praxisbot"), "must target praxisbot");
+        assert!(command.contains("--refresh"), "must refresh");
     }
 
     #[test]
