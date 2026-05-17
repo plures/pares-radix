@@ -1,0 +1,105 @@
+# test-first.px — Test-First Development Constraints
+#
+# Enforces the principle that every product is designed for automated
+# testing from day one. Testing is a first-class engineering concern,
+# not an afterthought.
+#
+# Learned the hard way:
+# - Radix TUI couldn't be automated → MCP server built after the fact
+# - pares-arca sled bugs: 5 push cycles because we tested on production
+# - Once we wrote proper tests + integration smoke, fix was one cycle
+#
+# The loop: write .px → pares-radix runs it → results → iterate
+# pares-radix IS the test runner. .px IS the test format.
+
+# ═══════════════════════════════════════════════════════════════════════
+# DESIGN FOR TESTABILITY
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint automation_interface_required:
+  when: event.type == "architecture_review" or event.type == "new_product"
+  require: design.has_automation_interface == true
+  severity: error
+  message: "Every product must have an automation interface from day one — CLI, API, or MCP server. If it has a UI, the UI is a client of the API, not the product itself. The API is the product. The UI is a skin."
+
+constraint test_harness_required:
+  when: event.type == "architecture_review" or event.type == "new_product"
+  require: design.has_test_harness == true
+  severity: error
+  message: "Every automation interface must have a corresponding test harness — .px procedures or scripts that exercise it end-to-end. No 'manual verification required' steps."
+
+constraint testability_over_convenience:
+  when: event.type == "pr_audit"
+  require: NOT (change.removes_testability_for_convenience == true)
+  severity: error
+  message: "Never sacrifice testability for convenience. If a change makes something harder to test automatically, the change is wrong."
+
+# ═══════════════════════════════════════════════════════════════════════
+# TEST BEFORE PUSH
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint unit_tests_pass:
+  when: event.type == "pre_push"
+  require: tests.unit.passed == true
+  severity: error
+  message: "All unit tests must pass before pushing. Run: cargo test --workspace"
+
+constraint lint_clean:
+  when: event.type == "pre_push"
+  require: tests.lint.passed == true
+  severity: error
+  message: "No lint errors before pushing. Run: cargo clippy --workspace -- -D warnings"
+
+constraint binary_smoke:
+  when: event.type == "pre_push" and change.affects_binary == true
+  require: tests.smoke.passed == true
+  severity: error
+  message: "Build the release binary and run smoke tests. cargo test is necessary but not sufficient — start the service, hit the API, verify the response."
+
+# ═══════════════════════════════════════════════════════════════════════
+# RECOVERY PATH TESTING
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint recovery_paths_tested:
+  when: event.type == "pr_audit"
+  require: NOT (change.adds_error_recovery_without_test == true)
+  severity: error
+  message: "If code handles errors (retry, fallback, wipe-and-recreate), write a test that triggers the error. Untested recovery code is probably broken. The pares-arca sled recovery is the model: 3 unit tests + 6 integration tests."
+
+constraint no_testing_on_production:
+  when: event.type == "pr_audit"
+  require: NOT (change.requires_production_to_verify == true)
+  severity: error
+  message: "If the only way to verify a change is to deploy it to production, the design is broken. Add a local test, a container test, or a VM test."
+
+# ═══════════════════════════════════════════════════════════════════════
+# .px AS TEST FORMAT
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint px_test_procedures:
+  when: event.type == "new_test_suite"
+  require: tests.format == "px" or tests.format == "rust"
+  severity: warning
+  message: "Prefer .px procedures for integration and smoke tests. .px tests are executable, self-documenting, and run through pares-radix's procedure engine. Use Rust unit tests for per-function testing."
+
+constraint tests_are_not_prose:
+  when: event.type == "pr_audit"
+  require: NOT (change.adds_test_defined_only_in_prose == true)
+  severity: warning
+  message: "Test definitions must be machine-readable (.px procedures, Rust tests, scripts with assertions), not prose in documentation or cron job prompts. If a human has to interpret what 'passes' means, it's not a real test."
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONTINUOUS TESTING
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint regression_detection:
+  when: event.type == "baseline_test"
+  require: results.score >= baseline.previous_score
+  severity: error
+  message: "Baseline test score must not decrease. If it does, a regression was introduced. Fix before proceeding."
+
+constraint test_coverage_direction:
+  when: event.type == "release"
+  require: coverage.test_count >= coverage.previous_test_count
+  severity: warning
+  message: "Test count should never decrease across releases. More features = more tests."
