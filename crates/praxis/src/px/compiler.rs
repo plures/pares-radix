@@ -300,10 +300,28 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
         PxStep::Parallel { branches, output_var } => {
             let compiled_branches: Vec<serde_json::Value> = branches
                 .iter()
-                .map(|b| json!({
-                    "name": b.name,
-                    "steps": b.steps.iter().map(compile_step).collect::<Vec<_>>(),
-                }))
+                .map(|b| {
+                    let mut obj = json!({
+                        "name": b.name,
+                        "steps": b.steps.iter().map(compile_step).collect::<Vec<_>>(),
+                    });
+                    if let Some(retry) = b.retry {
+                        obj["retry"] = json!(retry);
+                    }
+                    if let Some(delay) = b.retry_delay_ms {
+                        obj["retry_delay_ms"] = json!(delay);
+                    }
+                    if let Some(ref backoff) = b.retry_backoff {
+                        obj["retry_backoff"] = json!(backoff);
+                    }
+                    if let Some(max_delay) = b.retry_max_delay_ms {
+                        obj["retry_max_delay_ms"] = json!(max_delay);
+                    }
+                    if let Some(jitter) = b.retry_jitter {
+                        obj["retry_jitter"] = json!(jitter);
+                    }
+                    obj
+                })
                 .collect();
             let mut obj = json!({
                 "kind": "parallel",

@@ -69,7 +69,14 @@ try_step_list = { (!("catch:" | "end") ~ step_decl ~ NEWLINE)+ }
 catch_clause = { "catch:" ~ NEWLINE ~ (!("end") ~ step_decl ~ NEWLINE)+ }
 step_parallel = { "parallel" ~ ("-" ~ ">" ~ "$" ~ ident)? ~ ":" ~ NEWLINE ~ parallel_branch_list ~ "end" }
 parallel_branch_list = { (parallel_branch ~ NEWLINE?)+ }
-parallel_branch = { "branch" ~ ident ~ ":" ~ NEWLINE ~ block_step_list ~ "end" }
+parallel_branch = { "branch" ~ ident ~ branch_retry_clause? ~ ":" ~ NEWLINE ~ block_step_list ~ "end" }
+branch_retry_clause = { "retry" ~ integer ~ branch_retry_opt* }
+branch_retry_opt = { retry_delay_opt | retry_backoff_opt | retry_max_delay_opt | retry_jitter_opt }
+retry_delay_opt = { "delay" ~ integer ~ "ms" }
+retry_backoff_opt = { "backoff" ~ backoff_strategy }
+backoff_strategy = { "exponential" | "fixed" }
+retry_max_delay_opt = { "max_delay" ~ integer ~ "ms" }
+retry_jitter_opt = { "jitter" }
 
 // === Contracts ===
 contract_decl = { "contract" ~ ident ~ ":" ~ NEWLINE ~ contract_body }

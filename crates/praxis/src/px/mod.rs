@@ -201,6 +201,16 @@ pub struct PxParallelBranch {
     pub name: String,
     /// Steps to execute within this branch.
     pub steps: Vec<PxStep>,
+    /// Retry count (0 = no retry, N = up to N additional attempts).
+    pub retry: Option<u64>,
+    /// Delay between retries in milliseconds.
+    pub retry_delay_ms: Option<u64>,
+    /// Backoff strategy: "fixed" or "exponential".
+    pub retry_backoff: Option<String>,
+    /// Maximum delay cap in milliseconds (for exponential backoff).
+    pub retry_max_delay_ms: Option<u64>,
+    /// Whether to add jitter to retry delays.
+    pub retry_jitter: Option<bool>,
 }
 
 /// Parse a .px source string into a document AST.
@@ -500,5 +510,80 @@ mod parse_step_tests {
         let doc = parse(source).expect("parse failed");
         assert_eq!(doc.procedures.len(), 1);
         assert_eq!(doc.procedures[0].steps.len(), 1);
+    }
+
+    #[test]
+    fn parse_parallel_branch_with_retry() {
+        let source = "procedure resilient_fan_out:\n  trigger: manual\n  parallel -> $results:\n    branch fetch_users retry 3 delay 500 ms backoff exponential max_delay 5000 ms jitter:\n      get_users {}\n    end\n    branch fetch_posts retry 2 delay 100 ms:\n      get_posts {}\n    end\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        match &doc.procedures[0].steps[0] {
+            PxStep::Parallel { branches, output_var } => {
+                assert_eq!(branches.len(), 2);
+                assert_eq!(output_var.as_deref(), Some("results"));
+
+                // First branch: full retry config
+                let b0 = &branches[0];
+                assert_eq!(b0.name, "fetch_users");
+                assert_eq!(b0.retry, Some(3));
+                assert_eq!(b0.retry_delay_ms, Some(500));
+                assert_eq!(b0.retry_backoff.as_deref(), Some("exponential"));
+                assert_eq!(b0.retry_max_delay_ms, Some(5000));
+                assert_eq!(b0.retry_jitter, Some(true));
+                assert_eq!(b0.steps.len(), 1);
+
+                // Second branch: partial retry config
+                let b1 = &branches[1];
+                assert_eq!(b1.name, "fetch_posts");
+                assert_eq!(b1.retry, Some(2));
+                assert_eq!(b1.retry_delay_ms, Some(100));
+                assert!(b1.retry_backoff.is_none());
+                assert!(b1.retry_max_delay_ms.is_none());
+                assert!(b1.retry_jitter.is_none());
+                assert_eq!(b1.steps.len(), 1);
+            }
+            other => panic!("expected Parallel step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_parallel_branch_without_retry() {
+        // Ensure backwards compat — branches without retry still parse
+        let source = "procedure simple:\n  trigger: manual\n  parallel:\n    branch a:\n      do_a {}\n    end\n    branch b:\n      do_b {}\n    end\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        match &doc.procedures[0].steps[0] {
+            PxStep::Parallel { branches, .. } => {
+                assert_eq!(branches.len(), 2);
+                assert!(branches[0].retry.is_none());
+                assert!(branches[1].retry.is_none());
+            }
+            other => panic!("expected Parallel step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_parallel_branch_retry_compiles_to_json() {
+        use crate::px::compiler::compile;
+
+        let source = "procedure with_retry:\n  trigger: manual\n  parallel -> $out:\n    branch api retry 2 delay 200 ms backoff fixed jitter:\n      call_api {}\n    end\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        let records = compile(&doc);
+        assert_eq!(records.len(), 1);
+
+        let data = &records[0].data;
+        let steps = data["steps"].as_array().unwrap();
+        let parallel = &steps[0];
+        assert_eq!(parallel["kind"], "parallel");
+
+        let branches = parallel["branches"].as_array().unwrap();
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0]["name"], "api");
+        assert_eq!(branches[0]["retry"], 2);
+        assert_eq!(branches[0]["retry_delay_ms"], 200);
+        assert_eq!(branches[0]["retry_backoff"], "fixed");
+        assert_eq!(branches[0]["retry_jitter"], true);
     }
 }

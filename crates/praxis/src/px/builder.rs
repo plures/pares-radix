@@ -785,16 +785,66 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
                                     .next()
                                     .map(|p| p.as_str().to_string())
                                     .unwrap_or_default();
-                                let steps = bi
-                                    .find(|p| p.as_rule() == Rule::block_step_list)
-                                    .map(|sl| {
-                                        sl.into_inner()
-                                            .filter(|p| p.as_rule() == Rule::step_decl)
-                                            .map(build_step)
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-                                branches.push(PxParallelBranch { name, steps });
+
+                                // Parse optional retry clause
+                                let mut retry = None;
+                                let mut retry_delay_ms = None;
+                                let mut retry_backoff = None;
+                                let mut retry_max_delay_ms = None;
+                                let mut retry_jitter = None;
+                                let mut steps = vec![];
+
+                                for part in bi {
+                                    match part.as_rule() {
+                                        Rule::branch_retry_clause => {
+                                            let mut rc = part.into_inner();
+                                            if let Some(count_pair) = rc.next() {
+                                                retry = count_pair.as_str().parse().ok();
+                                            }
+                                            for opt in rc {
+                                                if opt.as_rule() == Rule::branch_retry_opt {
+                                                    let inner_opt = opt.into_inner().next().unwrap();
+                                                    match inner_opt.as_rule() {
+                                                        Rule::retry_delay_opt => {
+                                                            let val = inner_opt.into_inner().next().unwrap();
+                                                            retry_delay_ms = val.as_str().parse().ok();
+                                                        }
+                                                        Rule::retry_backoff_opt => {
+                                                            let val = inner_opt.into_inner().next().unwrap();
+                                                            retry_backoff = Some(val.as_str().to_string());
+                                                        }
+                                                        Rule::retry_max_delay_opt => {
+                                                            let val = inner_opt.into_inner().next().unwrap();
+                                                            retry_max_delay_ms = val.as_str().parse().ok();
+                                                        }
+                                                        Rule::retry_jitter_opt => {
+                                                            retry_jitter = Some(true);
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Rule::block_step_list => {
+                                            steps = part
+                                                .into_inner()
+                                                .filter(|p| p.as_rule() == Rule::step_decl)
+                                                .map(build_step)
+                                                .collect();
+                                        }
+                                        _ => {}
+                                    }
+                                }
+
+                                branches.push(PxParallelBranch {
+                                    name,
+                                    steps,
+                                    retry,
+                                    retry_delay_ms,
+                                    retry_backoff,
+                                    retry_max_delay_ms,
+                                    retry_jitter,
+                                });
                             }
                         }
                     }
