@@ -5168,4 +5168,250 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // ── praxis_add_constraint tests ────────────────────────────────────────
+
+    #[tokio::test]
+    async fn praxis_add_constraint_missing_name() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("praxis_add_constraint", json!({"severity": "error"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("name"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_missing_severity() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("praxis_add_constraint", json!({"name": "test_constraint"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("severity"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_no_state_store() {
+        let handler = make_handler(); // no state store
+        let result = handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({"name": "test", "severity": "error"}),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("state store"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_minimal_fields() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({"name": "min_constraint", "severity": "warning"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("px:constraint/min_constraint"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_all_fields() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({
+                    "name": "full_constraint",
+                    "severity": "error",
+                    "when": "action == 'deploy'",
+                    "require": "tests_passing == true",
+                    "message": "Tests must pass before deploy",
+                    "phases": ["pre-push", "pre-deploy"]
+                }),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("px:constraint/full_constraint"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_roundtrip_via_db() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({
+                    "name": "roundtrip_c",
+                    "severity": "error",
+                    "when": "x > 10",
+                    "require": "y == true",
+                    "message": "y must be true when x > 10"
+                }),
+            )
+            .await;
+
+        let get_result = handler
+            .call_tool("db_get", json!({"key": "px:constraint/roundtrip_c"}))
+            .await;
+        assert!(!get_result.is_error);
+        let val: Value = serde_json::from_str(&get_result.content).unwrap();
+        assert_eq!(val["name"], "roundtrip_c");
+        assert_eq!(val["severity"], "error");
+        assert_eq!(val["when"], "x > 10");
+        assert_eq!(val["require"], "y == true");
+        assert_eq!(val["message"], "y must be true when x > 10");
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_duplicate_overwrites() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({"name": "dup", "severity": "warning", "message": "v1"}),
+            )
+            .await;
+        handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({"name": "dup", "severity": "error", "message": "v2"}),
+            )
+            .await;
+
+        let get_result = handler
+            .call_tool("db_get", json!({"key": "px:constraint/dup"}))
+            .await;
+        let val: Value = serde_json::from_str(&get_result.content).unwrap();
+        assert_eq!(val["severity"], "error");
+        assert_eq!(val["message"], "v2");
+    }
+
+    #[tokio::test]
+    async fn praxis_add_constraint_shows_in_praxis_list() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({"name": "listed_c", "severity": "error"}),
+            )
+            .await;
+
+        let list_result = handler.call_tool("praxis_list", json!({})).await;
+        assert!(!list_result.is_error);
+        assert!(list_result.content.contains("listed_c"));
+    }
+
+    // ── praxis_add_rule tests ──────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn praxis_add_rule_missing_name() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("praxis_add_rule", json!({"priority": 10}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("name"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_no_state_store() {
+        let handler = make_handler(); // no state store
+        let result = handler
+            .call_tool("praxis_add_rule", json!({"name": "test_rule"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("state store"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_minimal_fields() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool("praxis_add_rule", json!({"name": "min_rule"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("px:rule/min_rule"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_all_fields() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool(
+                "praxis_add_rule",
+                json!({
+                    "name": "full_rule",
+                    "priority": 100,
+                    "conditions": ["action == 'build'", "env == 'prod'"],
+                    "actions": [{"type": "notify", "target": "#ops"}]
+                }),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("px:rule/full_rule"));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_roundtrip_via_db() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool(
+                "praxis_add_rule",
+                json!({
+                    "name": "roundtrip_r",
+                    "priority": 50,
+                    "conditions": ["c1", "c2"],
+                    "actions": ["a1"]
+                }),
+            )
+            .await;
+
+        let get_result = handler
+            .call_tool("db_get", json!({"key": "px:rule/roundtrip_r"}))
+            .await;
+        assert!(!get_result.is_error);
+        let val: Value = serde_json::from_str(&get_result.content).unwrap();
+        assert_eq!(val["name"], "roundtrip_r");
+        assert_eq!(val["priority"], 50);
+        assert_eq!(val["conditions"], json!(["c1", "c2"]));
+        assert_eq!(val["actions"], json!(["a1"]));
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_duplicate_overwrites() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool(
+                "praxis_add_rule",
+                json!({"name": "dup_rule", "priority": 1}),
+            )
+            .await;
+        handler
+            .call_tool(
+                "praxis_add_rule",
+                json!({"name": "dup_rule", "priority": 99}),
+            )
+            .await;
+
+        let get_result = handler
+            .call_tool("db_get", json!({"key": "px:rule/dup_rule"}))
+            .await;
+        let val: Value = serde_json::from_str(&get_result.content).unwrap();
+        assert_eq!(val["priority"], 99);
+    }
+
+    #[tokio::test]
+    async fn praxis_add_rule_shows_in_praxis_list() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("praxis_add_rule", json!({"name": "listed_r"}))
+            .await;
+
+        let list_result = handler.call_tool("praxis_list", json!({})).await;
+        assert!(!list_result.is_error);
+        assert!(list_result.content.contains("listed_r"));
+    }
 }
