@@ -792,7 +792,14 @@ fn interpolate_string(s: &str, vars: &HashMap<String, Value>) -> String {
 /// - Simple variable: `name`
 /// - Dotted access: `result.status`
 /// - Arithmetic: `count + 1`, `total - 5`
+/// - Pipe filters: `name | uppercase`, `value | trim | lowercase`
 fn resolve_interpolation_expr(expr: &str, vars: &HashMap<String, Value>) -> String {
+    // Check for pipe operator: `value | filter`
+    // Must distinguish from logical OR `||` in ternary conditions
+    if let Some(result) = try_pipe_expr(expr, vars) {
+        return result;
+    }
+
     // Try arithmetic: var +/- literal
     if let Some(val) = try_arithmetic_expr(expr, vars) {
         return val;
@@ -805,6 +812,359 @@ fn resolve_interpolation_expr(expr: &str, vars: &HashMap<String, Value>) -> Stri
 
     // Unresolved — return original
     format!("${{{}}}", expr)
+}
+
+/// Apply pipe filters to a value expression.
+/// Syntax: `expr | filter1 | filter2 | filter3(arg)`
+/// Supported filters:
+/// - `uppercase` / `upper` — convert to UPPERCASE
+/// - `lowercase` / `lower` — convert to lowercase
+/// - `trim` — strip leading/trailing whitespace
+/// - `capitalize` — capitalize first character
+/// - `reverse` — reverse the string
+/// - `length` / `len` — return string length (or array length)
+/// - `default(value)` — use value if the expression is empty/null
+/// - `replace(old, new)` — replace occurrences
+/// - `truncate(n)` — truncate to n characters
+/// - `split(sep)` — split and return JSON array
+fn try_pipe_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Find the first single `|` that isn't part of `||`
+    let pipe_idx = find_pipe_operator(expr)?;
+
+    let value_expr = expr[..pipe_idx].trim();
+    let filters_str = expr[pipe_idx + 1..].trim();
+
+    // Resolve the base value
+    let base_value = if let Some(val) = try_arithmetic_expr(value_expr, vars) {
+        val
+    } else if let Some(val) = resolve_var(value_expr, vars) {
+        value_to_interpolation_string(&val)
+    } else if value_expr.starts_with('"') && value_expr.ends_with('"') {
+        // String literal
+        value_expr[1..value_expr.len() - 1].to_string()
+    } else {
+        // Can't resolve base — not a pipe expression we can handle
+        return None;
+    };
+
+    // Split remaining filters by `|` (again avoiding `||`)
+    let filters = split_pipe_filters(filters_str);
+
+    let mut result = base_value;
+    for filter in &filters {
+        result = apply_pipe_filter(filter.trim(), &result, vars)?;
+    }
+
+    Some(result)
+}
+
+/// Find the index of the first single `|` (not `||`) in the expression.
+/// Returns None if no pipe operator is found.
+fn find_pipe_operator(expr: &str) -> Option<usize> {
+    let bytes = expr.as_bytes();
+    let mut i = 0;
+    let mut depth = 0; // track parentheses depth
+    let mut in_string = false;
+    let mut string_char = b'\0';
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_string {
+            if b == string_char && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'"' | b'\'' => {
+                in_string = true;
+                string_char = b;
+            }
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            b'|' if depth == 0 => {
+                // Check it's not `||`
+                if i + 1 < bytes.len() && bytes[i + 1] == b'|' {
+                    i += 2; // skip `||`
+                    continue;
+                }
+                // Check it's not preceded by `|` (part of `||`)
+                if i > 0 && bytes[i - 1] == b'|' {
+                    i += 1;
+                    continue;
+                }
+                return Some(i);
+            }
+            b'?' => {
+                // If there's a ternary, pipe detection should not grab it
+                // Only detect pipes before any ternary operator
+                return None;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Split a filter chain by `|` separators (respecting parentheses).
+fn split_pipe_filters(s: &str) -> Vec<&str> {
+    let mut filters = Vec::new();
+    let mut start = 0;
+    let mut depth = 0;
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut in_string = false;
+    let mut string_char = b'\0';
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if in_string {
+            if b == string_char && (i == 0 || bytes[i - 1] != b'\\') {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match b {
+            b'"' | b'\'' => {
+                in_string = true;
+                string_char = b;
+            }
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            b'|' if depth == 0 => {
+                // Skip `||`
+                if i + 1 < bytes.len() && bytes[i + 1] == b'|' {
+                    i += 2;
+                    continue;
+                }
+                filters.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    filters.push(&s[start..]);
+    filters
+}
+
+/// Apply a single pipe filter to a string value.
+fn apply_pipe_filter(filter: &str, value: &str, _vars: &HashMap<String, Value>) -> Option<String> {
+    // Check for filter with arguments: filter(arg1, arg2)
+    if let Some(paren_idx) = filter.find('(') {
+        if filter.ends_with(')') {
+            let name = filter[..paren_idx].trim();
+            let args_str = &filter[paren_idx + 1..filter.len() - 1];
+            return apply_filter_with_args(name, value, args_str);
+        }
+    }
+
+    // Simple filters (no args)
+    match filter {
+        "uppercase" | "upper" => Some(value.to_uppercase()),
+        "lowercase" | "lower" => Some(value.to_lowercase()),
+        "trim" => Some(value.trim().to_string()),
+        "capitalize" | "cap" => {
+            let mut chars = value.chars();
+            match chars.next() {
+                None => Some(String::new()),
+                Some(first) => {
+                    let upper: String = first.to_uppercase().collect();
+                    Some(format!("{}{}", upper, chars.as_str()))
+                }
+            }
+        }
+        "reverse" | "rev" => Some(value.chars().rev().collect()),
+        "length" | "len" => Some(value.len().to_string()),
+        "snake_case" | "snake" => Some(to_snake_case(value)),
+        "camel_case" | "camel" => Some(to_camel_case(value)),
+        "kebab_case" | "kebab" => Some(to_kebab_case(value)),
+        _ => None, // Unknown filter — signal failure
+    }
+}
+
+/// Apply a filter that takes arguments.
+fn apply_filter_with_args(name: &str, value: &str, args_str: &str) -> Option<String> {
+    match name {
+        "default" | "fallback" => {
+            let default_val = args_str.trim().trim_matches('"').trim_matches('\'');
+            if value.is_empty() || value == "null" || value == "undefined" {
+                Some(default_val.to_string())
+            } else {
+                Some(value.to_string())
+            }
+        }
+        "truncate" | "trunc" => {
+            let n: usize = args_str.trim().parse().ok()?;
+            if value.len() <= n {
+                Some(value.to_string())
+            } else {
+                Some(value.chars().take(n).collect())
+            }
+        }
+        "replace" => {
+            // replace(old, new)
+            let parts = split_filter_args(args_str);
+            if parts.len() != 2 {
+                return None;
+            }
+            let old = parts[0].trim().trim_matches('"').trim_matches('\'');
+            let new = parts[1].trim().trim_matches('"').trim_matches('\'');
+            Some(value.replace(old, new))
+        }
+        "split" => {
+            let sep = args_str.trim().trim_matches('"').trim_matches('\'');
+            let parts: Vec<&str> = value.split(sep).collect();
+            // Return as JSON array
+            let json_parts: Vec<String> = parts.iter().map(|p| format!("\"{}\"" , p)).collect();
+            Some(format!("[{}]", json_parts.join(", ")))
+        }
+        "pad_left" | "pad_start" => {
+            let parts = split_filter_args(args_str);
+            let width: usize = parts.first()?.trim().parse().ok()?;
+            let pad_char = parts.get(1)
+                .map(|s| s.trim().trim_matches('"').trim_matches('\''))
+                .and_then(|s| s.chars().next())
+                .unwrap_or(' ');
+            if value.len() >= width {
+                Some(value.to_string())
+            } else {
+                let padding: String = std::iter::repeat_n(pad_char, width - value.len()).collect();
+                Some(format!("{}{}", padding, value))
+            }
+        }
+        "pad_right" | "pad_end" => {
+            let parts = split_filter_args(args_str);
+            let width: usize = parts.first()?.trim().parse().ok()?;
+            let pad_char = parts.get(1)
+                .map(|s| s.trim().trim_matches('"').trim_matches('\''))
+                .and_then(|s| s.chars().next())
+                .unwrap_or(' ');
+            if value.len() >= width {
+                Some(value.to_string())
+            } else {
+                let padding: String = std::iter::repeat_n(pad_char, width - value.len()).collect();
+                Some(format!("{}{}", value, padding))
+            }
+        }
+        "repeat" => {
+            let n: usize = args_str.trim().parse().ok()?;
+            Some(value.repeat(n))
+        }
+        "slice" => {
+            // slice(start, end) or slice(start)
+            let parts = split_filter_args(args_str);
+            let start: usize = parts.first()?.trim().parse().ok()?;
+            let chars: Vec<char> = value.chars().collect();
+            if start >= chars.len() {
+                return Some(String::new());
+            }
+            if let Some(end_str) = parts.get(1) {
+                let end: usize = end_str.trim().parse().ok()?;
+                let end = end.min(chars.len());
+                Some(chars[start..end].iter().collect())
+            } else {
+                Some(chars[start..].iter().collect())
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Split filter arguments by comma, respecting quotes.
+fn split_filter_args(s: &str) -> Vec<&str> {
+    let mut args = Vec::new();
+    let mut start = 0;
+    let mut in_string = false;
+    let mut string_char = '\0';
+    let chars: Vec<char> = s.chars().collect();
+
+    for (i, &c) in chars.iter().enumerate() {
+        if in_string {
+            if c == string_char && (i == 0 || chars[i - 1] != '\\') {
+                in_string = false;
+            }
+        } else {
+            match c {
+                '"' | '\'' => {
+                    in_string = true;
+                    string_char = c;
+                }
+                ',' => {
+                    let byte_start = s.char_indices().nth(start).map(|(idx, _)| idx).unwrap_or(0);
+                    let byte_end = s.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(s.len());
+                    args.push(&s[byte_start..byte_end]);
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    let byte_start = s.char_indices().nth(start).map(|(idx, _)| idx).unwrap_or(0);
+    args.push(&s[byte_start..]);
+    args
+}
+
+/// Convert a string to snake_case.
+fn to_snake_case(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('_');
+            }
+            result.extend(c.to_lowercase());
+        } else if c == ' ' || c == '-' {
+            result.push('_');
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Convert a string to camelCase.
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = false;
+    for (i, c) in s.chars().enumerate() {
+        if c == '_' || c == '-' || c == ' ' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.extend(c.to_uppercase());
+            capitalize_next = false;
+        } else if i == 0 {
+            result.extend(c.to_lowercase());
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Convert a string to kebab-case.
+fn to_kebab_case(s: &str) -> String {
+    let mut result = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if c.is_uppercase() {
+            if i > 0 {
+                result.push('-');
+            }
+            result.extend(c.to_lowercase());
+        } else if c == '_' || c == ' ' {
+            result.push('-');
+        } else {
+            result.push(c);
+        }
+    }
+    result
 }
 
 /// Attempt to evaluate simple arithmetic: `var + N` or `var - N`
@@ -3441,5 +3801,169 @@ mod tests {
         let colon_idx = find_matching_colon(branches).unwrap();
         let false_part = branches[colon_idx + 1..].trim();
         assert_eq!(false_part, "\"negative\"");
+    }
+
+    // === Pipe operator tests ===
+
+    #[test]
+    fn test_pipe_uppercase() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        let result = interpolate_string("${name | uppercase}", &vars);
+        assert_eq!(result, "HELLO");
+    }
+
+    #[test]
+    fn test_pipe_lowercase() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("WORLD"));
+        let result = interpolate_string("${name | lowercase}", &vars);
+        assert_eq!(result, "world");
+    }
+
+    #[test]
+    fn test_pipe_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("msg".to_string(), json!("  hello  "));
+        let result = interpolate_string("${msg | trim}", &vars);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_pipe_capitalize() {
+        let mut vars = HashMap::new();
+        vars.insert("word".to_string(), json!("hello world"));
+        let result = interpolate_string("${word | capitalize}", &vars);
+        assert_eq!(result, "Hello world");
+    }
+
+    #[test]
+    fn test_pipe_reverse() {
+        let mut vars = HashMap::new();
+        vars.insert("word".to_string(), json!("abc"));
+        let result = interpolate_string("${word | reverse}", &vars);
+        assert_eq!(result, "cba");
+    }
+
+    #[test]
+    fn test_pipe_length() {
+        let mut vars = HashMap::new();
+        vars.insert("word".to_string(), json!("hello"));
+        let result = interpolate_string("${word | length}", &vars);
+        assert_eq!(result, "5");
+    }
+
+    #[test]
+    fn test_pipe_chained_filters() {
+        let mut vars = HashMap::new();
+        vars.insert("msg".to_string(), json!("  Hello World  "));
+        let result = interpolate_string("${msg | trim | lowercase}", &vars);
+        assert_eq!(result, "hello world");
+    }
+
+    #[test]
+    fn test_pipe_default_empty() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(""));
+        let result = interpolate_string("${val | default('fallback')}", &vars);
+        assert_eq!(result, "fallback");
+    }
+
+    #[test]
+    fn test_pipe_default_nonempty() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!("exists"));
+        let result = interpolate_string("${val | default('fallback')}", &vars);
+        assert_eq!(result, "exists");
+    }
+
+    #[test]
+    fn test_pipe_truncate() {
+        let mut vars = HashMap::new();
+        vars.insert("text".to_string(), json!("hello world"));
+        let result = interpolate_string("${text | truncate(5)}", &vars);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_pipe_replace() {
+        let mut vars = HashMap::new();
+        vars.insert("text".to_string(), json!("foo bar foo"));
+        let result = interpolate_string("${text | replace('foo', 'baz')}", &vars);
+        assert_eq!(result, "baz bar baz");
+    }
+
+    #[test]
+    fn test_pipe_snake_case() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("HelloWorld"));
+        let result = interpolate_string("${name | snake_case}", &vars);
+        assert_eq!(result, "hello_world");
+    }
+
+    #[test]
+    fn test_pipe_camel_case() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello_world"));
+        let result = interpolate_string("${name | camel_case}", &vars);
+        assert_eq!(result, "helloWorld");
+    }
+
+    #[test]
+    fn test_pipe_kebab_case() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("HelloWorld"));
+        let result = interpolate_string("${name | kebab_case}", &vars);
+        assert_eq!(result, "hello-world");
+    }
+
+    #[test]
+    fn test_pipe_split() {
+        let mut vars = HashMap::new();
+        vars.insert("csv".to_string(), json!("a,b,c"));
+        let result = interpolate_string("${csv | split(',')}", &vars);
+        assert_eq!(result, r#"["a", "b", "c"]"#);
+    }
+
+    #[test]
+    fn test_pipe_pad_left() {
+        let mut vars = HashMap::new();
+        vars.insert("num".to_string(), json!("42"));
+        let result = interpolate_string("${num | pad_left(5, '0')}", &vars);
+        assert_eq!(result, "00042");
+    }
+
+    #[test]
+    fn test_pipe_repeat() {
+        let mut vars = HashMap::new();
+        vars.insert("s".to_string(), json!("ab"));
+        let result = interpolate_string("${s | repeat(3)}", &vars);
+        assert_eq!(result, "ababab");
+    }
+
+    #[test]
+    fn test_pipe_slice() {
+        let mut vars = HashMap::new();
+        vars.insert("text".to_string(), json!("hello world"));
+        let result = interpolate_string("${text | slice(0, 5)}", &vars);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_pipe_does_not_break_ternary() {
+        // Ternary expressions with || should still work
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(false));
+        vars.insert("b".to_string(), json!(true));
+        let result = interpolate_string("${a ? 'yes' : 'no'}", &vars);
+        assert_eq!(result, "no");
+    }
+
+    #[test]
+    fn test_pipe_with_surrounding_text() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("alice"));
+        let result = interpolate_string("Hello, ${name | uppercase}!", &vars);
+        assert_eq!(result, "Hello, ALICE!");
     }
 }
