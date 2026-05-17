@@ -613,6 +613,29 @@ async fn execute_parallel_async(
                 .get("timeout_ms")
                 .and_then(|v| v.as_u64());
 
+            // Per-branch retry configuration
+            let branch_retry = branch
+                .get("retry")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+            let branch_retry_delay_ms = branch
+                .get("retry_delay_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let branch_retry_backoff = branch
+                .get("retry_backoff")
+                .and_then(|v| v.as_str())
+                .unwrap_or("fixed")
+                .to_string();
+            let branch_retry_max_delay_ms = branch
+                .get("retry_max_delay_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30_000);
+            let branch_retry_jitter = branch
+                .get("retry_jitter")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             let mut branch_vars = vars.clone();
 
             async move {
@@ -628,22 +651,79 @@ async fn execute_parallel_async(
                     ));
                 }
 
-                // Inner execution logic
-                let execute_branch = async {
-                    let mut last_output = Value::Null;
-                    for (i, nested) in branch_steps.iter().enumerate() {
-                        let result =
-                            execute_step_async(nested, i, &mut branch_vars, handler).await?;
-                        if let Some(output) = result.output {
-                            last_output = output;
+                // Retry loop for this branch
+                let execute_with_retry = async {
+                    let mut last_err = None;
+                    for attempt in 0..=(branch_retry) {
+                        // Delay before retry (not before first attempt)
+                        if attempt > 0 && branch_retry_delay_ms > 0 {
+                            let base_delay = match branch_retry_backoff.as_str() {
+                                "exponential" => {
+                                    let exp_delay = branch_retry_delay_ms
+                                        .saturating_mul(1u64 << (attempt as u64 - 1));
+                                    exp_delay.min(branch_retry_max_delay_ms)
+                                }
+                                _ => branch_retry_delay_ms.min(branch_retry_max_delay_ms),
+                            };
+                            let delay = if branch_retry_jitter && base_delay > 0 {
+                                use std::collections::hash_map::DefaultHasher;
+                                use std::hash::{Hash, Hasher};
+                                let mut hasher = DefaultHasher::new();
+                                attempt.hash(&mut hasher);
+                                std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .subsec_nanos()
+                                    .hash(&mut hasher);
+                                let h = hasher.finish();
+                                h % (base_delay + 1)
+                            } else {
+                                base_delay
+                            };
+                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                        }
+
+                        branch_vars.insert(
+                            "retry_count".to_string(),
+                            Value::Number(attempt.into()),
+                        );
+
+                        let mut attempt_vars = branch_vars.clone();
+                        let mut last_output = Value::Null;
+                        let mut success = true;
+                        for (i, nested) in branch_steps.iter().enumerate() {
+                            match execute_step_async(nested, i, &mut attempt_vars, handler).await {
+                                Ok(result) => {
+                                    if let Some(output) = result.output {
+                                        last_output = output;
+                                    }
+                                }
+                                Err(e) => {
+                                    last_err = Some(e);
+                                    success = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if success {
+                            return Ok::<(String, Value), ExecutionError>((
+                                branch_name.clone(),
+                                last_output,
+                            ));
                         }
                     }
-                    Ok::<(String, Value), ExecutionError>((branch_name.clone(), last_output))
+
+                    // All retries exhausted
+                    Err(last_err.unwrap_or_else(|| ExecutionError::ActionFailed {
+                        action: branch_name.clone(),
+                        message: "branch failed after retries".into(),
+                    }))
                 };
 
                 // Apply per-branch timeout if specified
                 if let Some(ms) = branch_timeout_ms {
-                    match timeout(Duration::from_millis(ms), execute_branch).await {
+                    match timeout(Duration::from_millis(ms), execute_with_retry).await {
                         Ok(result) => result,
                         Err(_elapsed) => Err(ExecutionError::ActionFailed {
                             action: branch_name.clone(),
@@ -654,7 +734,7 @@ async fn execute_parallel_async(
                         }),
                     }
                 } else {
-                    execute_branch.await
+                    execute_with_retry.await
                 }
             }
         })
@@ -1601,5 +1681,190 @@ mod tests {
         let result = execute_async(&procedure, &handler).await.unwrap();
         assert!(result.success);
         assert_eq!(result.step_results[0].output, Some(json!("jittered_async")));
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_retry_succeeds_after_failures() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// Handler that fails the first N calls for a given name, then succeeds.
+        struct FailThenSucceedHandler {
+            fail_count: AtomicUsize,
+            fail_until: usize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for FailThenSucceedHandler {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "flaky" {
+                    let count = self.fail_count.fetch_add(1, Ordering::SeqCst);
+                    if count < self.fail_until {
+                        return Err(ExecutionError::ActionFailed {
+                            action: "flaky".into(),
+                            message: format!("attempt {} failed", count),
+                        });
+                    }
+                }
+                Ok(json!(format!("{}_ok", name)))
+            }
+        }
+
+        let handler = FailThenSucceedHandler {
+            fail_count: AtomicUsize::new(0),
+            fail_until: 2, // fail first 2, succeed on 3rd
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "branch_retry_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "reliable",
+                            "steps": [
+                                { "kind": "call", "name": "stable", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "flaky_branch",
+                            "retry": 3,
+                            "retry_delay_ms": 10,
+                            "steps": [
+                                { "kind": "call", "name": "flaky", "params": {} }
+                            ]
+                        }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        assert!(result.success);
+        let results = result.variables.get("results").unwrap();
+        assert_eq!(results["reliable"], json!("stable_ok"));
+        assert_eq!(results["flaky_branch"], json!("flaky_ok"));
+        // Confirm 3 calls to flaky (2 failures + 1 success)
+        assert_eq!(handler.fail_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_retry_exhausted_with_fail_fast() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        /// Handler that always fails for "always_fail".
+        struct AlwaysFailHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for AlwaysFailHandler {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "always_fail" {
+                    self.call_count.fetch_add(1, Ordering::SeqCst);
+                    return Err(ExecutionError::ActionFailed {
+                        action: "always_fail".into(),
+                        message: "permanent failure".into(),
+                    });
+                }
+                Ok(json!("ok"))
+            }
+        }
+
+        let handler = AlwaysFailHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "branch_retry_exhausted_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "ok_branch",
+                            "steps": [
+                                { "kind": "call", "name": "good", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "bad_branch",
+                            "retry": 2,
+                            "retry_delay_ms": 5,
+                            "retry_backoff": "exponential",
+                            "steps": [
+                                { "kind": "call", "name": "always_fail", "params": {} }
+                            ]
+                        }
+                    ],
+                    "output_var": "results",
+                    "fail_strategy": "fast"
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await;
+        assert!(result.is_err());
+        // 3 total calls: initial + 2 retries
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn parallel_branch_retry_with_jitter() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountHandler {
+            count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for CountHandler {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let c = self.count.fetch_add(1, Ordering::SeqCst);
+                if name == "flaky" && c < 1 {
+                    return Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: "transient".into(),
+                    });
+                }
+                Ok(json!("recovered"))
+            }
+        }
+
+        let handler = CountHandler {
+            count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "branch_jitter_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "jittery",
+                            "retry": 2,
+                            "retry_delay_ms": 50,
+                            "retry_backoff": "exponential",
+                            "retry_max_delay_ms": 200,
+                            "retry_jitter": true,
+                            "steps": [
+                                { "kind": "call", "name": "flaky", "params": {} }
+                            ]
+                        }
+                    ],
+                    "output_var": "out"
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        assert!(result.success);
+        let out = result.variables.get("out").unwrap();
+        assert_eq!(out["jittery"], json!("recovered"));
     }
 }

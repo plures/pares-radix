@@ -600,18 +600,99 @@ fn execute_parallel(
                 ExecutionError::InvalidStructure("parallel branch missing 'steps'".into())
             })?;
 
+        // Per-branch retry configuration
+        let branch_retry = branch
+            .get("retry")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        let branch_retry_delay_ms = branch
+            .get("retry_delay_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let branch_retry_backoff = branch
+            .get("retry_backoff")
+            .and_then(|v| v.as_str())
+            .unwrap_or("fixed");
+        let branch_retry_max_delay_ms = branch
+            .get("retry_max_delay_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30_000);
+        let branch_retry_jitter = branch
+            .get("retry_jitter")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         // Each branch gets a snapshot of vars (isolation)
         let mut branch_vars = vars.clone();
-        let mut last_output = Value::Null;
+        let mut last_err = None;
+        let mut branch_succeeded = false;
 
-        for (i, nested) in branch_steps.iter().enumerate() {
-            let result = execute_step(nested, i, &mut branch_vars, handler)?;
-            if let Some(output) = result.output {
-                last_output = output;
+        for attempt in 0..=(branch_retry) {
+            // Delay before retry (not before first attempt)
+            if attempt > 0 && branch_retry_delay_ms > 0 {
+                let base_delay = match branch_retry_backoff {
+                    "exponential" => {
+                        let exp_delay = branch_retry_delay_ms
+                            .saturating_mul(1u64 << (attempt as u64 - 1));
+                        exp_delay.min(branch_retry_max_delay_ms)
+                    }
+                    _ => branch_retry_delay_ms.min(branch_retry_max_delay_ms),
+                };
+                let delay = if branch_retry_jitter && base_delay > 0 {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = DefaultHasher::new();
+                    attempt.hash(&mut hasher);
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_nanos()
+                        .hash(&mut hasher);
+                    let h = hasher.finish();
+                    h % (base_delay + 1)
+                } else {
+                    base_delay
+                };
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+            }
+
+            branch_vars.insert(
+                "retry_count".to_string(),
+                Value::Number(attempt.into()),
+            );
+
+            let mut attempt_vars = branch_vars.clone();
+            let mut last_output = Value::Null;
+            let mut success = true;
+
+            for (i, nested) in branch_steps.iter().enumerate() {
+                match execute_step(nested, i, &mut attempt_vars, handler) {
+                    Ok(result) => {
+                        if let Some(output) = result.output {
+                            last_output = output;
+                        }
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                        success = false;
+                        break;
+                    }
+                }
+            }
+
+            if success {
+                results_map.insert(branch_name.to_string(), last_output);
+                branch_succeeded = true;
+                break;
             }
         }
 
-        results_map.insert(branch_name.to_string(), last_output);
+        if !branch_succeeded {
+            return Err(last_err.unwrap_or_else(|| ExecutionError::ActionFailed {
+                action: branch_name.to_string(),
+                message: "branch failed after retries".into(),
+            }));
+        }
     }
 
     let output = Value::Object(results_map);
@@ -2535,5 +2616,69 @@ mod tests {
         assert!(result.success);
         // Without jitter: 30 + 60 + 120 = 210ms. With jitter: [0,30] + [0,60] + [0,120] <= 210ms
         assert!(elapsed.as_millis() <= 250, "Jitter delay too long: {}ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn parallel_branch_retry_sync() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FlakySyncHandler {
+            fail_count: AtomicUsize,
+            fail_until: usize,
+        }
+
+        impl ActionHandler for FlakySyncHandler {
+            fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "flaky" {
+                    let count = self.fail_count.fetch_add(1, Ordering::SeqCst);
+                    if count < self.fail_until {
+                        return Err(ExecutionError::ActionFailed {
+                            action: "flaky".into(),
+                            message: format!("fail #{}", count),
+                        });
+                    }
+                }
+                Ok(json!(format!("{}_done", name)))
+            }
+        }
+
+        let handler = FlakySyncHandler {
+            fail_count: AtomicUsize::new(0),
+            fail_until: 2,
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "sync_branch_retry",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "stable",
+                            "steps": [
+                                { "kind": "call", "name": "ok", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "retried",
+                            "retry": 3,
+                            "retry_delay_ms": 1,
+                            "steps": [
+                                { "kind": "call", "name": "flaky", "params": {} }
+                            ]
+                        }
+                    ],
+                    "output_var": "out"
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        let out = result.variables.get("out").unwrap();
+        assert_eq!(out["stable"], json!("ok_done"));
+        assert_eq!(out["retried"], json!("flaky_done"));
+        assert_eq!(handler.fail_count.load(Ordering::SeqCst), 3);
     }
 }
