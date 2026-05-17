@@ -55,7 +55,7 @@ procedure_trigger_clause = { "trigger:" ~ procedure_trigger_kind ~ NEWLINE }
 procedure_trigger_kind = { "on_write" ~ map_val? | "before_response" | "after_response" | "cron" ~ map_val? | "manual" }
 step_list = { (step_decl ~ NEWLINE)+ }
 block_step_list = { (!("end" | "catch:") ~ step_decl ~ NEWLINE)+ }
-step_decl = { step_match | step_when | step_loop | step_emit | step_try | step_call }
+step_decl = { step_match | step_when | step_loop | step_emit | step_try | step_parallel | step_call }
 step_call = { ident ~ (map_val | param_pair*) ~ ("->" ~ "$" ~ ident)? }
 step_match = { "match:" ~ NEWLINE ~ match_arm_list }
 match_arm_list = { (match_arm ~ NEWLINE)+ }
@@ -67,6 +67,9 @@ step_emit = { "emit" ~ (map_val | param_pair+) }
 step_try = { "try:" ~ NEWLINE ~ try_step_list ~ catch_clause? ~ "end" }
 try_step_list = { (!("catch:" | "end") ~ step_decl ~ NEWLINE)+ }
 catch_clause = { "catch:" ~ NEWLINE ~ (!("end") ~ step_decl ~ NEWLINE)+ }
+step_parallel = { "parallel" ~ ("-" ~ ">" ~ "$" ~ ident)? ~ ":" ~ NEWLINE ~ parallel_branch_list ~ "end" }
+parallel_branch_list = { (parallel_branch ~ NEWLINE?)+ }
+parallel_branch = { "branch" ~ ident ~ ":" ~ NEWLINE ~ block_step_list ~ "end" }
 
 // === Contracts ===
 contract_decl = { "contract" ~ ident ~ ":" ~ NEWLINE ~ contract_body }

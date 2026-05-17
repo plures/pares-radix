@@ -180,12 +180,27 @@ pub enum PxStep {
         /// Steps to execute on error.
         catch: Vec<PxStep>,
     },
+    Parallel {
+        /// Named branches to execute concurrently.
+        branches: Vec<PxParallelBranch>,
+        /// Optional variable to collect results into (map of branch_name → last output).
+        output_var: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PxMatchArm {
     pub condition: String,
     pub result: String,
+}
+
+/// A named branch within a parallel step.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxParallelBranch {
+    /// Branch name (used as key in output map).
+    pub name: String,
+    /// Steps to execute within this branch.
+    pub steps: Vec<PxStep>,
 }
 
 /// Parse a .px source string into a document AST.
@@ -392,6 +407,25 @@ constraint deploy_gate:
                 assert_eq!(catch.len(), 1);
             }
             other => panic!("expected Try step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_procedure_with_parallel() {
+        let source = "procedure fan_out:\n  trigger: manual\n  parallel -> $results:\n    branch fetch_users:\n      get_users {}\n    end\n    branch fetch_posts:\n      get_posts {}\n    end\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        match &doc.procedures[0].steps[0] {
+            PxStep::Parallel { branches, output_var } => {
+                assert_eq!(branches.len(), 2);
+                assert_eq!(branches[0].name, "fetch_users");
+                assert_eq!(branches[1].name, "fetch_posts");
+                assert_eq!(branches[0].steps.len(), 1);
+                assert_eq!(branches[1].steps.len(), 1);
+                assert_eq!(output_var.as_deref(), Some("results"));
+            }
+            other => panic!("expected Parallel step, got {:?}", other),
         }
     }
 

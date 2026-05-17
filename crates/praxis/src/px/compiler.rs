@@ -297,6 +297,23 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
             "catch": catch.iter().map(compile_step).collect::<Vec<_>>(),
         }),
+        PxStep::Parallel { branches, output_var } => {
+            let compiled_branches: Vec<serde_json::Value> = branches
+                .iter()
+                .map(|b| json!({
+                    "name": b.name,
+                    "steps": b.steps.iter().map(compile_step).collect::<Vec<_>>(),
+                }))
+                .collect();
+            let mut obj = json!({
+                "kind": "parallel",
+                "branches": compiled_branches,
+            });
+            if let Some(out) = output_var {
+                obj["output_var"] = json!(out);
+            }
+            obj
+        }
     }
 }
 

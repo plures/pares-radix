@@ -4741,6 +4741,7 @@ version = "1.44.3"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures",
  "notify",
  "pest",
  "pest_derive",

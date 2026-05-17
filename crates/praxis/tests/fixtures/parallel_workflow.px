@@ -1,0 +1,15 @@
+procedure dashboard_refresh:
+  trigger: cron {interval: "5m"}
+  parallel -> $data:
+    branch metrics:
+      fetch_metrics {} -> $m
+      transform_metrics {raw: $m}
+    end
+    branch alerts:
+      fetch_alerts {}
+    end
+    branch status:
+      check_health {}
+    end
+  end
+  emit {type: "dashboard_updated", data: $data}

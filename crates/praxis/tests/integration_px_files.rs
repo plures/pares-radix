@@ -423,3 +423,70 @@ fn bracket_indexing_in_logical_combinations() {
         &vars
     ));
 }
+
+#[test]
+fn parse_parallel_workflow_px() {
+    let source = fs::read_to_string(fixtures_dir().join("parallel_workflow.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.procedures.len(), 1);
+    let proc = &doc.procedures[0];
+    assert_eq!(proc.name, "dashboard_refresh");
+
+    // Should have: parallel step followed by emit
+    assert_eq!(proc.steps.len(), 2);
+
+    match &proc.steps[0] {
+        pares_radix_praxis::px::PxStep::Parallel { branches, output_var } => {
+            assert_eq!(branches.len(), 3);
+            assert_eq!(branches[0].name, "metrics");
+            assert_eq!(branches[1].name, "alerts");
+            assert_eq!(branches[2].name, "status");
+            // metrics branch has 2 steps
+            assert_eq!(branches[0].steps.len(), 2);
+            // alerts and status have 1 step each
+            assert_eq!(branches[1].steps.len(), 1);
+            assert_eq!(branches[2].steps.len(), 1);
+            assert_eq!(output_var.as_deref(), Some("data"));
+        }
+        other => panic!("expected Parallel step, got {:?}", other),
+    }
+}
+
+#[test]
+fn compile_and_execute_parallel_workflow() {
+    use pares_radix_praxis::px::executor::{self, ActionHandler, ExecutionError};
+    use serde_json::Value;
+
+    struct DashHandler;
+    impl ActionHandler for DashHandler {
+        fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+            match name {
+                "fetch_metrics" => Ok(json!({"cpu": 42, "mem": 80})),
+                "transform_metrics" => Ok(json!({"cpu_pct": "42%", "mem_pct": "80%"})),
+                "fetch_alerts" => Ok(json!([{"id": 1, "msg": "disk low"}])),
+                "check_health" => Ok(json!("healthy")),
+                _ => Err(ExecutionError::UnknownAction(name.to_string())),
+            }
+        }
+    }
+
+    let source = fs::read_to_string(fixtures_dir().join("parallel_workflow.px")).unwrap();
+    let doc = parse(&source).unwrap();
+    let records = compile(&doc);
+    assert_eq!(records.len(), 1);
+
+    let result = executor::execute(&records[0].data, &DashHandler).unwrap();
+    assert!(result.success);
+
+    // Check parallel output is bound
+    let data = result.variables.get("data").unwrap();
+    assert_eq!(data["metrics"], json!({"cpu_pct": "42%", "mem_pct": "80%"}));
+    assert_eq!(data["alerts"], json!([{"id": 1, "msg": "disk low"}]));
+    assert_eq!(data["status"], json!("healthy"));
+
+    // Check emit captured the data
+    let emit = result.variables.get("emit").unwrap().as_array().unwrap();
+    assert_eq!(emit.len(), 1);
+    assert_eq!(emit[0]["type"], "dashboard_updated");
+}

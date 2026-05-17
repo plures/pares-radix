@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use super::{
     FunctionMode, PxAction, PxCapture, PxConstraint, PxContract, PxDocument, PxExample, PxFact,
-    PxField, PxFunction, PxImport, PxMatchArm, PxProcedure, PxProcedureTrigger, PxRule, PxStep,
-    PxTrigger, Rule,
+    PxField, PxFunction, PxImport, PxMatchArm, PxParallelBranch, PxProcedure, PxProcedureTrigger,
+    PxRule, PxStep, PxTrigger, Rule,
 };
 
 /// Build a PxDocument from parsed pest pairs.
@@ -766,6 +766,45 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
             PxStep::Try {
                 steps: try_steps,
                 catch: catch_steps,
+            }
+        }
+        Rule::step_parallel => {
+            let mut branches = vec![];
+            let mut output_var = None;
+
+            for child in inner.into_inner() {
+                match child.as_rule() {
+                    Rule::ident => {
+                        output_var = Some(child.as_str().to_string());
+                    }
+                    Rule::parallel_branch_list => {
+                        for branch_pair in child.into_inner() {
+                            if branch_pair.as_rule() == Rule::parallel_branch {
+                                let mut bi = branch_pair.into_inner();
+                                let name = bi
+                                    .next()
+                                    .map(|p| p.as_str().to_string())
+                                    .unwrap_or_default();
+                                let steps = bi
+                                    .find(|p| p.as_rule() == Rule::block_step_list)
+                                    .map(|sl| {
+                                        sl.into_inner()
+                                            .filter(|p| p.as_rule() == Rule::step_decl)
+                                            .map(build_step)
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                branches.push(PxParallelBranch { name, steps });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            PxStep::Parallel {
+                branches,
+                output_var,
             }
         }
         _ => PxStep::Call {

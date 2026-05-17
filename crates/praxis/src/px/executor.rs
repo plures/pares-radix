@@ -172,6 +172,7 @@ fn execute_step(
         "loop" => execute_loop(step, index, vars, handler),
         "emit" => execute_emit(step, index, vars, handler),
         "try" => execute_try(step, index, vars, handler),
+        "parallel" => execute_parallel(step, index, vars, handler),
         other => Err(ExecutionError::InvalidStructure(format!(
             "unknown step kind: {other}"
         ))),
@@ -472,6 +473,75 @@ fn execute_try(
         index,
         kind: "try".into(),
         output: last_output,
+        skipped: false,
+    })
+}
+
+/// Execute a `parallel` step: run named branches.
+///
+/// In the synchronous executor, branches are executed sequentially (no true
+/// parallelism). Each branch gets its own copy of the variables, and the
+/// results are collected into a map keyed by branch name.
+///
+/// The async executor provides true concurrent execution via `tokio::join!`.
+fn execute_parallel(
+    step: &Value,
+    index: usize,
+    vars: &mut HashMap<String, Value>,
+    handler: &dyn ActionHandler,
+) -> Result<StepResult, ExecutionError> {
+    let branches = step
+        .get("branches")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            ExecutionError::InvalidStructure("parallel step missing 'branches'".into())
+        })?;
+
+    let output_var = step.get("output_var").and_then(|v| v.as_str());
+
+    let mut results_map = serde_json::Map::new();
+
+    for branch in branches {
+        let branch_name = branch
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ExecutionError::InvalidStructure("parallel branch missing 'name'".into())
+            })?;
+
+        let branch_steps = branch
+            .get("steps")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                ExecutionError::InvalidStructure("parallel branch missing 'steps'".into())
+            })?;
+
+        // Each branch gets a snapshot of vars (isolation)
+        let mut branch_vars = vars.clone();
+        let mut last_output = Value::Null;
+
+        for (i, nested) in branch_steps.iter().enumerate() {
+            let result = execute_step(nested, i, &mut branch_vars, handler)?;
+            if let Some(output) = result.output {
+                last_output = output;
+            }
+        }
+
+        results_map.insert(branch_name.to_string(), last_output);
+    }
+
+    let output = Value::Object(results_map);
+
+    if let Some(out_var) = output_var {
+        if !out_var.is_empty() {
+            vars.insert(out_var.to_string(), output.clone());
+        }
+    }
+
+    Ok(StepResult {
+        index,
+        kind: "parallel".into(),
+        output: Some(output),
         skipped: false,
     })
 }
@@ -1886,5 +1956,124 @@ mod tests {
                 Index(0)
             ]
         );
+    }
+
+    #[test]
+    fn execute_parallel_branches() {
+        let handler = MockHandler::new()
+            .with_result("fetch_a", json!("result_a"))
+            .with_result("fetch_b", json!("result_b"))
+            .with_result("fetch_c", json!("result_c"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "parallel_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "alpha",
+                            "steps": [
+                                { "kind": "call", "name": "fetch_a", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "beta",
+                            "steps": [
+                                { "kind": "call", "name": "fetch_b", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "gamma",
+                            "steps": [
+                                { "kind": "call", "name": "fetch_c", "params": {} }
+                            ]
+                        }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        let results = result.variables.get("results").unwrap();
+        assert_eq!(results["alpha"], json!("result_a"));
+        assert_eq!(results["beta"], json!("result_b"));
+        assert_eq!(results["gamma"], json!("result_c"));
+    }
+
+    #[test]
+    fn execute_parallel_branch_isolation() {
+        // Branches should not see each other's variable mutations
+        let handler = MockHandler::new()
+            .with_result("set_val", json!("modified"))
+            .with_result("read_val", json!("original"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "isolation_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "writer",
+                            "steps": [
+                                { "kind": "call", "name": "set_val", "params": {}, "output_var": "shared" }
+                            ]
+                        },
+                        {
+                            "name": "reader",
+                            "steps": [
+                                { "kind": "call", "name": "read_val", "params": { "ref": "$shared" } }
+                            ]
+                        }
+                    ],
+                    "output_var": "par_results"
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        // The "shared" var set by writer should NOT be in the parent scope
+        assert!(result.variables.get("shared").is_none());
+        // But output_var should have the map
+        assert!(result.variables.get("par_results").is_some());
+    }
+
+    #[test]
+    fn execute_parallel_error_propagates() {
+        // If a branch fails, the whole parallel step fails
+        let handler = MockHandler::new().with_result("ok_action", json!("fine"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "error_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        {
+                            "name": "good",
+                            "steps": [
+                                { "kind": "call", "name": "ok_action", "params": {} }
+                            ]
+                        },
+                        {
+                            "name": "bad",
+                            "steps": [
+                                { "kind": "call", "name": "nonexistent", "params": {} }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler);
+        assert!(result.is_err());
     }
 }
