@@ -438,6 +438,11 @@ async fn execute_try_async(
         .and_then(|v| v.as_u64())
         .unwrap_or(u64::MAX);
 
+    let retry_jitter = step
+        .get("retry_jitter")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let mut last_err: Option<ExecutionError> = None;
 
     for attempt in 0..=max_retries {
@@ -445,12 +450,28 @@ async fn execute_try_async(
 
         // Delay before retry (not before the first attempt)
         if attempt > 0 && retry_delay_ms > 0 {
-            let delay = match retry_backoff {
+            let base_delay = match retry_backoff {
                 "exponential" => {
                     let exp_delay = retry_delay_ms.saturating_mul(1u64 << (attempt as u64 - 1));
                     exp_delay.min(retry_max_delay_ms)
                 }
                 _ => retry_delay_ms.min(retry_max_delay_ms), // "fixed" or unknown
+            };
+            let delay = if retry_jitter && base_delay > 0 {
+                // Full jitter: uniform random in [0, base_delay]
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+                let mut hasher = DefaultHasher::new();
+                attempt.hash(&mut hasher);
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .subsec_nanos()
+                    .hash(&mut hasher);
+                let h = hasher.finish();
+                h % (base_delay + 1)
+            } else {
+                base_delay
             };
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
@@ -1531,5 +1552,54 @@ mod tests {
             elapsed
         );
         assert_eq!(handler.call_count.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn try_retry_with_jitter_async() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl AsyncActionHandler for FlakeHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if count < 2 {
+                    Err(ExecutionError::ActionFailed {
+                        action: "flaky".into(),
+                        message: format!("fail #{}", count),
+                    })
+                } else {
+                    Ok(json!("jittered_async"))
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "jitter_async_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 3,
+                    "retry_delay_ms": 50,
+                    "retry_backoff": "exponential",
+                    "retry_jitter": true,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("jittered_async")));
     }
 }
