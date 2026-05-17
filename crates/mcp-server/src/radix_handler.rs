@@ -82,6 +82,8 @@ pub struct RadixToolHandler {
     chronos: Option<Arc<ChronosTimeline>>,
     /// Sub-agent manager for delegation tools.
     subagent_manager: Option<Arc<SubAgentManager>>,
+    /// Agent instance for agent_ask tool — full agent loop via any channel.
+    agent: Option<Arc<pares_agens_core::Agent>>,
 }
 
 impl RadixToolHandler {
@@ -102,6 +104,7 @@ impl RadixToolHandler {
             loaded_procedures: Arc::new(RwLock::new(HashMap::new())),
             chronos: None,
             subagent_manager: None,
+            agent: None,
         }
     }
 
@@ -153,6 +156,13 @@ impl RadixToolHandler {
     /// Attach a sub-agent manager for delegation tools.
     pub fn with_subagent_manager(mut self, manager: Arc<SubAgentManager>) -> Self {
         self.subagent_manager = Some(manager);
+        self
+    }
+
+    /// Attach an Agent instance for the `agent_ask` tool.
+    /// Enables channel-agnostic agent invocation through MCP.
+    pub fn with_agent(mut self, agent: Arc<pares_agens_core::Agent>) -> Self {
+        self.agent = Some(agent);
         self
     }
 
@@ -2663,6 +2673,40 @@ impl RadixToolHandler {
         }
     }
 
+    /// Full agent loop via MCP — channel-agnostic. Same as Telegram/TUI.
+    async fn agent_ask(&self, args: &Value) -> ToolResult {
+        let agent =
+            match &self.agent {
+                Some(a) => a,
+                None => return ToolResult::error(
+                    "Agent not configured for MCP. Start with --copilot to enable the agent loop.",
+                ),
+            };
+        let prompt = match args.get("prompt").and_then(|v| v.as_str()) {
+            Some(p) => p.to_string(),
+            None => return ToolResult::error("missing required parameter: prompt"),
+        };
+        let session = args
+            .get("session")
+            .and_then(|v| v.as_str())
+            .unwrap_or("mcp");
+
+        let event = pares_agens_core::event::Event::Message {
+            id: uuid::Uuid::new_v4().to_string(),
+            channel: session.to_string(),
+            sender: "mcp-client".to_string(),
+            content: prompt,
+        };
+
+        match agent.handle_event(event).await {
+            Some(pares_agens_core::event::Event::ModelResponse { content, .. }) => {
+                ToolResult::ok(content)
+            }
+            Some(other) => ToolResult::ok(format!("{:?}", other)),
+            None => ToolResult::ok("(no response from agent)".to_string()),
+        }
+    }
+
     /// Build a ProcedureRegistry from all loaded procedures.
     async fn build_procedure_registry(&self) -> ProcedureRegistry {
         let mut registry = ProcedureRegistry::new();
@@ -3447,6 +3491,19 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        tools.push(Tool {
+            name: "agent_ask".into(),
+            description: Some("Send a prompt through the full agent loop (model + tools + memory). Channel-agnostic — same result as Telegram or TUI.".into()),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "prompt": {"type": "string", "description": "The prompt to send to the agent"},
+                    "session": {"type": "string", "description": "Session ID for conversation continuity (default: mcp)"}
+                })),
+                required: Some(vec!["prompt".into()]),
+            },
+        });
+
         tools
     }
 
@@ -3509,6 +3566,7 @@ impl ToolHandler for RadixToolHandler {
             "subagent_spawn" => self.subagent_spawn(&arguments).await,
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
+            "agent_ask" => self.agent_ask(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
