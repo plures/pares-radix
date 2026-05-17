@@ -2276,6 +2276,7 @@ impl RadixToolHandler {
                 let shell_handler = ShellBackedProcedureHandler {
                     shell: Arc::clone(&self.shell),
                     workdir: self.workdir.clone(),
+                    children: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 };
                 let handler = ComposableHandler::new(registry, shell_handler);
                 return match px_async::execute_async_with_vars(&loaded.data, &handler, initial_vars)
@@ -2388,6 +2389,7 @@ impl RadixToolHandler {
         let shell_handler = ShellBackedProcedureHandler {
             shell: Arc::clone(&self.shell),
             workdir: self.workdir.clone(),
+            children: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         };
         let handler = ComposableHandler::new(registry, shell_handler);
 
@@ -3585,6 +3587,7 @@ struct ShellBackedProcedureHandler {
     #[allow(dead_code)]
     shell: Arc<ShellExecutor>,
     workdir: PathBuf,
+    children: Arc<tokio::sync::Mutex<std::collections::HashMap<u32, tokio::process::Child>>>,
 }
 
 #[async_trait]
@@ -3696,6 +3699,350 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
 
             // Built-in: echo/noop (useful for testing)
             "echo" | "noop" => Ok(params.clone()),
+
+            // Built-in: HTTP GET request
+            "http_get" | "http" | "fetch" => {
+                let url = params.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'url' parameter".into(),
+                    }
+                })?;
+                let timeout_secs = params
+                    .get("timeout_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10);
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(timeout_secs))
+                    .build()
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("client build failed: {e}"),
+                    })?;
+                let mut req = client.get(url);
+                if let Some(headers) = params.get("headers").and_then(|v| v.as_object()) {
+                    for (k, v) in headers {
+                        if let Some(v_str) = v.as_str() {
+                            req = req.header(k.as_str(), v_str);
+                        }
+                    }
+                }
+                let resp = req.send().await.map_err(|e| ExecutionError::ActionFailed {
+                    action: name.to_string(),
+                    message: format!("request failed: {e}"),
+                })?;
+                let status = resp.status().as_u16();
+                let resp_headers: serde_json::Map<String, Value> = resp
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| {
+                        (k.to_string(), Value::String(v.to_str().unwrap_or("").to_string()))
+                    })
+                    .collect();
+                let body = resp.text().await.unwrap_or_default();
+                Ok(json!({
+                    "status": status,
+                    "body": body,
+                    "headers": resp_headers
+                }))
+            }
+
+            // Built-in: HTTP POST request
+            "http_post" | "post" => {
+                let url = params.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'url' parameter".into(),
+                    }
+                })?;
+                let timeout_secs = params
+                    .get("timeout_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10);
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(timeout_secs))
+                    .build()
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("client build failed: {e}"),
+                    })?;
+                let mut req = client.post(url);
+                if let Some(headers) = params.get("headers").and_then(|v| v.as_object()) {
+                    for (k, v) in headers {
+                        if let Some(v_str) = v.as_str() {
+                            req = req.header(k.as_str(), v_str);
+                        }
+                    }
+                }
+                if let Some(json_body) = params.get("json") {
+                    req = req.json(json_body);
+                } else if let Some(body_str) = params.get("body").and_then(|v| v.as_str()) {
+                    req = req.body(body_str.to_string());
+                }
+                let resp = req.send().await.map_err(|e| ExecutionError::ActionFailed {
+                    action: name.to_string(),
+                    message: format!("request failed: {e}"),
+                })?;
+                let status = resp.status().as_u16();
+                let resp_headers: serde_json::Map<String, Value> = resp
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| {
+                        (k.to_string(), Value::String(v.to_str().unwrap_or("").to_string()))
+                    })
+                    .collect();
+                let body = resp.text().await.unwrap_or_default();
+                Ok(json!({
+                    "status": status,
+                    "body": body,
+                    "headers": resp_headers
+                }))
+            }
+
+            // Built-in: assert equality
+            "assert_eq" | "assert_equal" => {
+                let actual = params.get("actual");
+                let expected = params.get("expected");
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("assertion failed");
+                if actual == expected {
+                    Ok(json!({"status": "ok", "assertion": "eq"}))
+                } else {
+                    Err(ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!(
+                            "{message}: expected {:?}, got {:?}",
+                            expected, actual
+                        ),
+                    })
+                }
+            }
+
+            // Built-in: assert contains (substring or array element)
+            "assert_contains" | "assert_has" => {
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("assertion failed");
+                let contains = params.get("contains").ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'contains' parameter".into(),
+                    }
+                })?;
+                let value = params.get("value").ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'value' parameter".into(),
+                    }
+                })?;
+                let found = if let Some(s) = value.as_str() {
+                    if let Some(needle) = contains.as_str() {
+                        s.contains(needle)
+                    } else {
+                        false
+                    }
+                } else if let Some(arr) = value.as_array() {
+                    arr.contains(contains)
+                } else {
+                    false
+                };
+                if found {
+                    Ok(json!({"status": "ok", "assertion": "contains"}))
+                } else {
+                    Err(ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!(
+                            "{message}: {:?} does not contain {:?}",
+                            value, contains
+                        ),
+                    })
+                }
+            }
+
+            // Built-in: assert truthy
+            "assert_ok" | "assert_true" => {
+                let message = params
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("assertion failed: value is falsy");
+                let value = params.get("value").unwrap_or(&Value::Null);
+                let truthy = match value {
+                    Value::Null => false,
+                    Value::Bool(b) => *b,
+                    Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
+                    Value::String(s) => !s.is_empty(),
+                    Value::Array(a) => !a.is_empty(),
+                    Value::Object(_) => true,
+                };
+                if truthy {
+                    Ok(json!({"status": "ok", "assertion": "truthy"}))
+                } else {
+                    Err(ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: message.to_string(),
+                    })
+                }
+            }
+
+            // Built-in: start a background process
+            "start_process" | "start_server" => {
+                let cmd = params
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'command' parameter".into(),
+                    })?;
+                let child = tokio::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(cmd)
+                    .current_dir(&self.workdir)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("spawn failed: {e}"),
+                    })?;
+                let pid = child.id().unwrap_or(0);
+                self.children.lock().await.insert(pid, child);
+
+                // Optionally wait for a URL to become ready
+                if let Some(ready_url) = params.get("ready_url").and_then(|v| v.as_str()) {
+                    let timeout_secs = params
+                        .get("ready_timeout_secs")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(30);
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(2))
+                        .build()
+                        .unwrap_or_default();
+                    let deadline =
+                        tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+                    loop {
+                        if tokio::time::Instant::now() >= deadline {
+                            break;
+                        }
+                        if let Ok(resp) = client.get(ready_url).send().await {
+                            if resp.status().is_success() {
+                                break;
+                            }
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    }
+                }
+
+                Ok(json!({"pid": pid}))
+            }
+
+            // Built-in: stop a background process
+            "stop_process" | "stop_server" | "kill_process" => {
+                let pid = params
+                    .get("pid")
+                    .and_then(|v| v.as_u64())
+                    .map(|p| p as u32)
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'pid' parameter".into(),
+                    })?;
+                let mut children = self.children.lock().await;
+                if let Some(child) = children.get_mut(&pid) {
+                    // Try SIGTERM first via kill
+                    #[cfg(unix)]
+                    {
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGTERM);
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    }
+                    // Then force kill
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    children.remove(&pid);
+                    Ok(json!({"status": "ok", "pid": pid}))
+                } else {
+                    // Try killing by PID directly even if not tracked
+                    #[cfg(unix)]
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
+                    }
+                    Ok(json!({"status": "ok", "pid": pid, "note": "not tracked, sent SIGKILL"}))
+                }
+            }
+
+            // Built-in: wait for a URL to respond with 200
+            "wait_for_ready" | "wait_for_url" => {
+                let url = params.get("url").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'url' parameter".into(),
+                    }
+                })?;
+                let timeout_secs = params
+                    .get("timeout_secs")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(30);
+                let interval_ms = params
+                    .get("interval_ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(200);
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(2))
+                    .build()
+                    .unwrap_or_default();
+                let deadline =
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+                loop {
+                    if let Ok(resp) = client.get(url).send().await {
+                        if resp.status().is_success() {
+                            return Ok(json!({"status": "ok", "url": url}));
+                        }
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(ExecutionError::ActionFailed {
+                            action: name.to_string(),
+                            message: format!(
+                                "timeout after {timeout_secs}s waiting for {url}"
+                            ),
+                        });
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+                }
+            }
+
+            // Built-in: sleep/wait
+            "sleep" | "wait" => {
+                let ms = params.get("ms").and_then(|v| v.as_u64()).unwrap_or_else(|| {
+                    params
+                        .get("secs")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
+                        * 1000
+                });
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                Ok(json!({"status": "ok", "slept_ms": ms}))
+            }
+
+            // Built-in: parse JSON string into Value
+            "json_parse" | "parse_json" => {
+                let text = params
+                    .get("text")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'text' parameter".into(),
+                    })?;
+                let parsed: Value = serde_json::from_str(text).map_err(|e| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("parse failed: {e}"),
+                    }
+                })?;
+                Ok(parsed)
+            }
 
             // Default: treat the step name as a shell command with params as JSON env
             other => {
@@ -5463,5 +5810,137 @@ mod tests {
         let list_result = handler.call_tool("praxis_list", json!({})).await;
         assert!(!list_result.is_error);
         assert!(list_result.content.contains("listed_r"));
+    }
+
+    // --- Test-runner built-in action tests ---
+
+    fn make_shell_handler() -> ShellBackedProcedureHandler {
+        ShellBackedProcedureHandler {
+            shell: Arc::new(ShellExecutor::new()),
+            workdir: PathBuf::from("/tmp"),
+            children: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_px_assert_eq_pass() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h.call("assert_eq", &json!({"actual": 42, "expected": 42})).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_px_assert_eq_fail() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h.call("assert_eq", &json!({"actual": 1, "expected": 2})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_px_assert_contains_string() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h
+            .call("assert_contains", &json!({"value": "hello world", "contains": "world"}))
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_px_assert_contains_missing() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h
+            .call("assert_contains", &json!({"value": "hello", "contains": "xyz"}))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_px_json_parse() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h
+            .call("json_parse", &json!({"text": "{\"a\": 1, \"b\": [2,3]}"}))
+            .await
+            .unwrap();
+        assert_eq!(result["a"], 1);
+        assert_eq!(result["b"][0], 2);
+    }
+
+    #[tokio::test]
+    async fn test_px_sleep() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let start = std::time::Instant::now();
+        let result = h.call("sleep", &json!({"ms": 100})).await;
+        assert!(result.is_ok());
+        assert!(start.elapsed().as_millis() >= 80);
+    }
+
+    #[tokio::test]
+    async fn test_px_assert_ok_truthy() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        assert!(h.call("assert_ok", &json!({"value": true})).await.is_ok());
+        assert!(h.call("assert_ok", &json!({"value": "yes"})).await.is_ok());
+        assert!(h.call("assert_ok", &json!({"value": 1})).await.is_ok());
+        assert!(h.call("assert_ok", &json!({"value": null})).await.is_err());
+        assert!(h.call("assert_ok", &json!({"value": false})).await.is_err());
+        assert!(h.call("assert_ok", &json!({"value": ""})).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_px_start_and_stop_process() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h
+            .call("start_process", &json!({"command": "sleep 30"}))
+            .await
+            .unwrap();
+        let pid = result["pid"].as_u64().unwrap();
+        assert!(pid > 0);
+        // Stop it
+        let stop = h.call("stop_process", &json!({"pid": pid})).await;
+        assert!(stop.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_px_wait_for_ready_timeout() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        let result = h
+            .call(
+                "wait_for_ready",
+                &json!({"url": "http://127.0.0.1:19999", "timeout_secs": 1}),
+            )
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_px_http_get() {
+        use pares_radix_praxis::px::async_executor::AsyncActionHandler;
+        let h = make_shell_handler();
+        // Start a simple HTTP server
+        let start = h
+            .call(
+                "start_process",
+                &json!({"command": "python3 -m http.server 18321"}),
+            )
+            .await
+            .unwrap();
+        let pid = start["pid"].as_u64().unwrap();
+        // Wait a moment for it to start
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let result = h
+            .call("http_get", &json!({"url": "http://127.0.0.1:18321/", "timeout_secs": 5}))
+            .await;
+        // Clean up
+        let _ = h.call("stop_process", &json!({"pid": pid})).await;
+        let resp = result.unwrap();
+        assert_eq!(resp["status"], 200);
     }
 }
