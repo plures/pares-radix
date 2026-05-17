@@ -2266,3 +2266,103 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod history_persistence_tests {
+    use super::*;
+    use crate::model::ChatMessage;
+
+    struct NullMem;
+    #[async_trait::async_trait]
+    impl Memory for NullMem {
+        async fn capture(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn recall(&self, _: &str) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn arc_agent_shares_history() {
+        let agent = Arc::new(Agent::new(Arc::new(NullMem)));
+
+        // Turn 1
+        agent
+            .persist_turn(
+                "telegram",
+                "s1",
+                &[
+                    ChatMessage::user("Remember: the codename is FALCON.".to_string()),
+                    ChatMessage::assistant("Got it, codename FALCON.".to_string()),
+                ],
+            )
+            .await;
+
+        // Turn 2 via Arc clone
+        let a2 = Arc::clone(&agent);
+        a2.persist_turn(
+            "telegram",
+            "s1",
+            &[
+                ChatMessage::user("What's 2+2?".to_string()),
+                ChatMessage::assistant("4".to_string()),
+            ],
+        )
+        .await;
+
+        // Turn 3 via another Arc clone — must see all history
+        let a3 = Arc::clone(&agent);
+        let history = a3.load_history("telegram").await;
+
+        assert_eq!(
+            history.len(),
+            4,
+            "expected 4 messages, got {}",
+            history.len()
+        );
+        assert!(history[0].content.contains("FALCON"), "turn 1 missing");
+        assert!(history[2].content.contains("2+2"), "turn 2 missing");
+    }
+
+    #[tokio::test]
+    async fn history_survives_unrelated_turn() {
+        let agent = Arc::new(Agent::new(Arc::new(NullMem)));
+
+        // Give a task
+        agent
+            .persist_turn(
+                "telegram",
+                "s1",
+                &[
+                    ChatMessage::user("Deploy config to praxisbot".to_string()),
+                    ChatMessage::assistant("Done, deployed.".to_string()),
+                ],
+            )
+            .await;
+
+        // Unrelated question
+        let a2 = Arc::clone(&agent);
+        a2.persist_turn(
+            "telegram",
+            "s1",
+            &[
+                ChatMessage::user("What's the weather?".to_string()),
+                ChatMessage::assistant("I don't have weather data.".to_string()),
+            ],
+        )
+        .await;
+
+        // Ask about the task — history must include it
+        let a3 = Arc::clone(&agent);
+        let history = a3.load_history("telegram").await;
+
+        assert_eq!(history.len(), 4);
+        assert!(
+            history
+                .iter()
+                .any(|m| m.content.contains("Deploy") || m.content.contains("praxisbot")),
+            "task must be in history"
+        );
+    }
+}

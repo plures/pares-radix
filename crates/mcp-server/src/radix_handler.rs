@@ -5112,8 +5112,8 @@ mod tests {
 
         let shell = Arc::new(ShellExecutor::new());
         let store = Arc::new(pares_agens_core::InMemoryStateStore::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_state_store(store.clone());
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_state_store(store.clone());
 
         // Start watcher with initial_scan=true (our new default)
         handler
@@ -5126,20 +5126,20 @@ mod tests {
 
         // Verify records were persisted to state store
         let fact = store.get("px:fact/agent_state").await;
-        assert!(fact.is_some(), "px:fact/agent_state should be persisted to state store");
-        let fact_val = fact.unwrap();
-        assert_eq!(
-            fact_val.get("type").and_then(|v| v.as_str()),
-            Some("fact")
+        assert!(
+            fact.is_some(),
+            "px:fact/agent_state should be persisted to state store"
         );
+        let fact_val = fact.unwrap();
+        assert_eq!(fact_val.get("type").and_then(|v| v.as_str()), Some("fact"));
 
         let rule = store.get("px:rule/mood_rule").await;
-        assert!(rule.is_some(), "px:rule/mood_rule should be persisted to state store");
-        let rule_val = rule.unwrap();
-        assert_eq!(
-            rule_val.get("type").and_then(|v| v.as_str()),
-            Some("rule")
+        assert!(
+            rule.is_some(),
+            "px:rule/mood_rule should be persisted to state store"
         );
+        let rule_val = rule.unwrap();
+        assert_eq!(rule_val.get("type").and_then(|v| v.as_str()), Some("rule"));
 
         // Now add a new file and check hot-reload also persists
         let px_file2 = dir.join("extra.px");
