@@ -2112,40 +2112,6 @@ impl RadixToolHandler {
         let module_filter = args.get("module").and_then(|v| v.as_str());
         let procedures_guard = self.loaded_procedures.read().await;
 
-        if self.praxis_modules.is_empty() && procedures_guard.is_empty() {
-            return ToolResult::ok(
-                json!({
-                    "modules": [],
-                    "total_rules": 0,
-                    "loaded_procedures": [],
-                    "note": "no praxis modules or procedures loaded"
-                })
-                .to_string(),
-            );
-        }
-
-        if self.praxis_modules.is_empty() {
-            let procedures_info: Vec<Value> = procedures_guard
-                .iter()
-                .map(|(name, proc)| {
-                    json!({
-                        "name": name,
-                        "source_file": proc.source_file.display().to_string(),
-                        "description": proc.description,
-                    })
-                })
-                .collect();
-            return ToolResult::ok(
-                json!({
-                    "modules": [],
-                    "total_rules": 0,
-                    "loaded_procedures": procedures_info,
-                    "note": "no praxis modules loaded, but procedures available"
-                })
-                .to_string(),
-            );
-        }
-
         let mut modules_info: Vec<Value> = Vec::new();
         let mut total_rules = 0;
 
@@ -2188,11 +2154,96 @@ impl RadixToolHandler {
             }));
         }
 
+        // ── Enumerate persisted px:constraint/* and px:rule/* from PluresDB ──
+        let mut persisted_constraints: Vec<Value> = Vec::new();
+        let mut persisted_rules: Vec<Value> = Vec::new();
+
+        if let Some(ref store) = self.state_store {
+            let constraint_keys = store.keys_with_prefix("px:constraint/").await;
+            for key in constraint_keys {
+                if let Some(record) = store.get(&key).await {
+                    let name = record
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&key)
+                        .to_string();
+                    let severity = record
+                        .get("severity")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("error")
+                        .to_string();
+                    let phases: Vec<String> = record
+                        .get("phases")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let message = record
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let mut entry = json!({
+                        "key": key,
+                        "name": name,
+                        "severity": severity,
+                    });
+                    if !phases.is_empty() {
+                        entry["phases"] = json!(phases);
+                    }
+                    if !message.is_empty() {
+                        entry["message"] = Value::String(message);
+                    }
+                    persisted_constraints.push(entry);
+                }
+            }
+
+            let rule_keys = store.keys_with_prefix("px:rule/").await;
+            for key in rule_keys {
+                if let Some(record) = store.get(&key).await {
+                    let name = record
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(&key)
+                        .to_string();
+                    let priority = record
+                        .get("priority")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let conditions: Vec<String> = record
+                        .get("conditions")
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let actions = record
+                        .get("actions")
+                        .cloned()
+                        .unwrap_or(json!([]));
+                    persisted_rules.push(json!({
+                        "key": key,
+                        "name": name,
+                        "priority": priority,
+                        "conditions": conditions,
+                        "actions": actions,
+                    }));
+                }
+            }
+        }
+
         ToolResult::ok(
             json!({
                 "modules": modules_info,
                 "total_rules": total_rules,
                 "loaded_procedures": procedures_info,
+                "persisted_constraints": persisted_constraints,
+                "persisted_rules": persisted_rules,
             })
             .to_string(),
         )
@@ -2364,6 +2415,74 @@ impl RadixToolHandler {
             }
             Err(e) => ToolResult::error(format!("execution error: {e}")),
         }
+    }
+
+    // ── Praxis persistence tools ────────────────────────────────────────────
+
+    async fn praxis_add_constraint(&self, args: &Value) -> ToolResult {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required field: name"),
+        };
+        let severity = match args.get("severity").and_then(|v| v.as_str()) {
+            Some(s) => s,
+            None => return ToolResult::error("missing required field: severity"),
+        };
+
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("no state store available for persistence"),
+        };
+
+        let mut record = json!({
+            "name": name,
+            "severity": severity,
+        });
+        if let Some(when) = args.get("when").and_then(|v| v.as_str()) {
+            record["when"] = Value::String(when.to_string());
+        }
+        if let Some(require) = args.get("require").and_then(|v| v.as_str()) {
+            record["require"] = Value::String(require.to_string());
+        }
+        if let Some(message) = args.get("message").and_then(|v| v.as_str()) {
+            record["message"] = Value::String(message.to_string());
+        }
+        if let Some(phases) = args.get("phases").and_then(|v| v.as_array()) {
+            record["phases"] = Value::Array(phases.clone());
+        }
+
+        let key = format!("px:constraint/{}", name);
+        store.set(&key, record).await;
+
+        ToolResult::ok(json!({"stored": key}).to_string())
+    }
+
+    async fn praxis_add_rule(&self, args: &Value) -> ToolResult {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required field: name"),
+        };
+
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("no state store available for persistence"),
+        };
+
+        let mut record = json!({ "name": name });
+        if let Some(priority) = args.get("priority").and_then(|v| v.as_u64()) {
+            record["priority"] = json!(priority);
+        }
+        if let Some(conditions) = args.get("conditions").and_then(|v| v.as_array()) {
+            record["conditions"] = Value::Array(conditions.clone());
+        }
+        if let Some(actions) = args.get("actions") {
+            record["actions"] = actions.clone();
+        }
+
+        let key = format!("px:rule/{}", name);
+        store.set(&key, record).await;
+
+        ToolResult::ok(json!({"stored": key}).to_string())
     }
 
     // ── Chronos tools ─────────────────────────────────────────────────────────
@@ -3198,6 +3317,42 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Praxis add tools (persist constraints/rules to PluresDB) ────────────
+        tools.push(Tool {
+            name: "praxis_add_constraint".into(),
+            description: Some(
+                "Add a Praxis constraint to PluresDB. Constraints are evaluated by praxis_evaluate.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Unique constraint name"},
+                    "severity": {"type": "string", "description": "Severity: error, warning, or info"},
+                    "when": {"type": "string", "description": "Condition expression (evaluated against context)"},
+                    "require": {"type": "string", "description": "Requirement expression that must be true when 'when' matches"},
+                    "message": {"type": "string", "description": "Human-readable violation message"},
+                    "phases": {"type": "array", "items": {"type": "string"}, "description": "Optional phases this constraint applies to"}
+                })),
+                required: Some(vec!["name".into(), "severity".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "praxis_add_rule".into(),
+            description: Some(
+                "Add a Praxis rule to PluresDB. Rules define conditions and actions for the behavior engine.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Unique rule name"},
+                    "priority": {"type": "integer", "description": "Rule priority (higher = evaluated first)"},
+                    "conditions": {"type": "array", "items": {"type": "string"}, "description": "Condition expressions"},
+                    "actions": {"type": "array", "description": "Actions to execute when conditions match"}
+                })),
+                required: Some(vec!["name".into()]),
+            },
+        });
+
         // ── Chronos tools (always available) ────────────────────────────────────────
         tools.push(Tool {
             name: "chronos_history".into(),
@@ -3351,6 +3506,8 @@ impl ToolHandler for RadixToolHandler {
             "praxis_evaluate" => self.praxis_evaluate(&arguments).await,
             "praxis_list" => self.praxis_list(&arguments).await,
             "praxis_run" => self.praxis_run(&arguments).await,
+            "praxis_add_constraint" => self.praxis_add_constraint(&arguments).await,
+            "praxis_add_rule" => self.praxis_add_rule(&arguments).await,
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
@@ -4430,6 +4587,68 @@ mod tests {
         let modules = parsed["modules"].as_array().unwrap();
         assert_eq!(modules.len(), 1);
         assert_eq!(modules[0]["name"], "safety");
+    }
+
+    #[tokio::test]
+    async fn praxis_list_includes_persisted_constraints_and_rules() {
+        let handler = make_handler_with_state();
+
+        // Persist a constraint and a rule into PluresDB
+        handler
+            .call_tool(
+                "praxis_add_constraint",
+                json!({
+                    "name": "test_constraint",
+                    "severity": "warning",
+                    "when": "action == 'deploy'",
+                    "require": "approved == true",
+                    "message": "Deployment requires approval",
+                    "phases": ["pre-deploy"]
+                }),
+            )
+            .await;
+        handler
+            .call_tool(
+                "praxis_add_rule",
+                json!({
+                    "name": "test_rule",
+                    "priority": 10,
+                    "conditions": ["mood == 'happy'"],
+                    "actions": [{"type": "log", "message": "All good"}]
+                }),
+            )
+            .await;
+
+        // Now list should include both
+        let result = handler.call_tool("praxis_list", json!({})).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+
+        let constraints = parsed["persisted_constraints"].as_array().unwrap();
+        assert_eq!(constraints.len(), 1);
+        assert_eq!(constraints[0]["name"], "test_constraint");
+        assert_eq!(constraints[0]["severity"], "warning");
+        let phases = constraints[0]["phases"].as_array().unwrap();
+        assert_eq!(phases.len(), 1);
+        assert_eq!(phases[0], "pre-deploy");
+
+        let rules = parsed["persisted_rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0]["name"], "test_rule");
+        assert_eq!(rules[0]["priority"], 10);
+    }
+
+    #[tokio::test]
+    async fn praxis_list_empty_persisted_without_state_store() {
+        let handler = make_handler(); // No state store
+        let result = handler.call_tool("praxis_list", json!({})).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        // Without state store, persisted arrays should be empty
+        let constraints = parsed["persisted_constraints"].as_array().unwrap();
+        assert!(constraints.is_empty());
+        let rules = parsed["persisted_rules"].as_array().unwrap();
+        assert!(rules.is_empty());
     }
 
     #[tokio::test]
