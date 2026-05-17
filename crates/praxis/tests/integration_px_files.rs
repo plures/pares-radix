@@ -490,3 +490,76 @@ fn compile_and_execute_parallel_workflow() {
     assert_eq!(emit.len(), 1);
     assert_eq!(emit[0]["type"], "dashboard_updated");
 }
+
+// ─── Example Files Validation ─────────────────────────────────────────────────
+
+fn examples_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/px")
+}
+
+#[test]
+fn parse_example_ci_pipeline() {
+    let source = fs::read_to_string(examples_dir().join("ci-pipeline.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.facts.len(), 1);
+    assert_eq!(doc.facts[0].name, "BuildConfig");
+    assert_eq!(doc.constraints.len(), 1);
+    assert_eq!(doc.procedures.len(), 1);
+    assert_eq!(doc.procedures[0].name, "ci_pipeline");
+
+    let compiled = compile(&doc);
+    assert!(!compiled.is_empty());
+}
+
+#[test]
+fn parse_example_incident_response() {
+    let source = fs::read_to_string(examples_dir().join("incident-response.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.facts.len(), 2);
+    assert_eq!(doc.rules.len(), 1);
+    assert_eq!(doc.procedures.len(), 4); // respond + handle_p1..p3
+
+    let compiled = compile(&doc);
+    assert!(!compiled.is_empty());
+}
+
+#[test]
+fn parse_example_data_sync() {
+    let source = fs::read_to_string(examples_dir().join("data-sync.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.facts.len(), 2);
+    assert_eq!(doc.procedures.len(), 2); // nightly_data_sync + resync_source
+
+    let compiled = compile(&doc);
+    assert!(!compiled.is_empty());
+}
+
+#[test]
+fn parse_example_pr_review_bot() {
+    let source = fs::read_to_string(examples_dir().join("pr-review-bot.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.facts.len(), 2);
+    assert_eq!(doc.constraints.len(), 2);
+    assert_eq!(doc.rules.len(), 3);
+    assert_eq!(doc.procedures.len(), 1);
+    assert_eq!(doc.procedures[0].name, "review_pr");
+
+    let compiled = compile(&doc);
+    assert!(!compiled.is_empty());
+}
+
+#[test]
+fn parse_example_memory_maintenance() {
+    let source = fs::read_to_string(examples_dir().join("memory-maintenance.px")).unwrap();
+    let doc = parse(&source).unwrap();
+
+    assert_eq!(doc.facts.len(), 1);
+    assert_eq!(doc.procedures.len(), 2); // memory_maintenance + cleanup_category
+
+    let compiled = compile(&doc);
+    assert!(!compiled.is_empty());
+}

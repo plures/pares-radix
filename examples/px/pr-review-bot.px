@@ -1,0 +1,84 @@
+# pr-review-bot.px — Automated PR review with facts, rules, constraints, and procedures
+#
+# Demonstrates:
+# - Facts as structured schemas
+# - Rules for reactive automation
+# - Constraints for invariant enforcement
+# - Procedures for multi-step review workflow
+# - The full .px ecosystem working together
+
+fact PullRequest:
+  number: int
+  title: string
+  author: string
+  additions: int
+  deletions: int
+  draft: bool
+  base_branch: string
+
+fact ReviewResult:
+  approved: bool
+  auto_mergeable: bool
+
+constraint pr_size_limit:
+  when: pr.draft == false
+  require: pr.additions <= 1000
+  severity: warning
+  message: "Large PRs should be split for easier review"
+
+constraint require_description:
+  require: pr.description != ""
+  severity: error
+  message: "PRs must have a description"
+
+rule auto_label_docs:
+  priority: 5
+  when:
+    - pr.files_changed == "docs"
+  then:
+    - action: add_label label: "documentation"
+
+rule auto_label_breaking:
+  priority: 10
+  when:
+    - pr.breaking == true
+  then:
+    - action: add_label label: "breaking"
+    - action: request_review team: "api_owners"
+
+rule auto_assign_reviewer:
+  priority: 3
+  when:
+    - pr.area == "praxis"
+  then:
+    - action: request_review user: "praxis_maintainer"
+  capture:
+    - fact: "Auto-assigned praxis reviewer" category: audit tags: ["pr", "review"]
+
+procedure review_pr:
+  trigger: on_write {event: "pr.opened"}
+  given: "Perform automated review checks on a new PR"
+  get_pull_request {number: 42} -> $pr
+  when pr.draft == true:
+    add_comment {pr: 42, message: "Draft PR — skipping review"}
+    emit {event: "pr.review.skipped", reason: "draft"}
+  end
+  parallel -> $analysis:
+    branch code_review:
+      analyze_diff {pr: 42} -> $diff_analysis
+    end
+    branch test_coverage:
+      check_coverage {pr: 42} -> $coverage
+    end
+    branch changelog:
+      check_changelog_entry {pr: 42}
+    end
+  end
+  when analysis.test_coverage.delta < 0:
+    add_comment {pr: 42, message: "Test coverage decreased"}
+  end
+  when pr.additions < 50 && analysis.code_review.risk == "low":
+    approve_pr {pr: 42, message: "Auto-approved: small low-risk change"}
+    emit {event: "pr.auto_approved", pr: 42}
+  end
+  emit {event: "pr.reviewed", pr: 42}

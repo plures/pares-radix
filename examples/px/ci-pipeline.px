@@ -1,0 +1,53 @@
+# ci-pipeline.px — CI/CD pipeline with parallel test stages and canary deploy
+#
+# Demonstrates:
+# - Parallel branches with per-branch retry + exponential backoff
+# - Try/catch wrapping a deployment sequence
+# - Emit for observability events
+# - Variable threading between steps
+# - When guards for conditional logic
+
+fact BuildConfig:
+  service: string
+  version: string
+  image: string
+  replicas: int
+  health_endpoint: string
+
+constraint minimum_replicas:
+  require: config.replicas >= 2
+  severity: error
+  message: "Production requires at least 2 replicas"
+
+procedure ci_pipeline:
+  trigger: on_write {event: "push.main"}
+  given: "Run CI checks, build, and deploy on push to main"
+  resolve_build_config {} -> $config
+  parallel -> $checks:
+    branch unit_tests retry 2 delay 3000 ms backoff exponential max_delay 15000 ms jitter:
+      run_tests {suite: "unit", service: "api"}
+    end
+    branch integration_tests retry 1 delay 5000 ms:
+      run_tests {suite: "integration", service: "api"}
+    end
+    branch lint:
+      run_linter {service: "api"}
+    end
+    branch security_scan:
+      scan_dependencies {image: "api"} -> $vuln_report
+    end
+  end
+  when checks.security_scan.critical_count > 0:
+    emit {event: "ci.blocked", reason: "security"}
+  end
+  build_container {image: "api", version: "1.0.0"} -> $artifact
+  push_to_registry {artifact: "latest"}
+  try:
+    deploy_canary {service: "api", version: "1.0.0", replicas: 1} -> $canary
+    wait_for_health {endpoint: "/health", timeout: 300}
+    promote_canary {replicas: 3}
+  catch:
+    rollback_canary {deployment: "canary"}
+    emit {event: "deploy.failed", service: "api"}
+  end
+  emit {event: "deploy.success", service: "api", version: "1.0.0"}

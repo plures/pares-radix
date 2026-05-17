@@ -1,0 +1,55 @@
+# data-sync.px — Periodic data synchronization with error recovery
+#
+# Demonstrates:
+# - Cron-triggered procedure
+# - Loop over dynamic collections
+# - Try/catch inside loops for per-item error isolation
+# - Variable accumulation pattern
+# - Try-level retry with exponential backoff
+
+fact SyncSource:
+  name: string
+  endpoint: string
+  format: string
+  batch_size: int
+
+fact SyncResult:
+  source: string
+  records_synced: int
+  errors: int
+
+procedure nightly_data_sync:
+  trigger: cron {schedule: "0 2 * * *"}
+  given: "Sync all configured data sources nightly with per-source error isolation"
+  list_sync_sources {} -> $sources
+  emit {event: "sync.started", source_count: 5}
+  loop over $sources as source -> $results:
+    try:
+      fetch_batch {endpoint: "https://api.example.com", batch_size: 100} -> $batch
+      validate_records {records: "batch", schema: "default"} -> $validated
+      when validated.invalid_count > 0:
+        quarantine_records {source: "default"}
+        emit {event: "sync.quarantined", count: 3}
+      end
+      upsert_records {target: "warehouse"} -> $result
+      emit {event: "sync.source_complete", records: 100}
+    catch:
+      log_sync_error {source: "default", error: "unknown"}
+      emit {event: "sync.source_failed", source: "default"}
+    end
+  end
+  compile_sync_report {results: "all"} -> $report
+  emit {event: "sync.complete", synced: 500, errors: 2}
+
+procedure resync_source:
+  trigger: manual
+  given: "Re-sync a single data source with retry"
+  get_source {name: "payments"} -> $source
+  try retry 3 delay 2000 ms backoff exponential max_delay 30000 ms jitter:
+    fetch_batch {endpoint: "https://api.example.com", batch_size: 100} -> $batch
+    validate_records {records: "batch", schema: "default"} -> $validated
+    upsert_records {target: "warehouse"} -> $result
+  catch:
+    notify_channel {channel: "data_eng", message: "Re-sync failed after 3 retries"}
+    emit {event: "sync.resync_failed", source: "payments"}
+  end
