@@ -720,9 +720,14 @@ fn execute_parallel(
 /// in params for forward-compatible use).
 fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
     match value {
-        Value::String(s) if s.starts_with('$') => {
+        Value::String(s) if s.starts_with('$') && !s.contains("${") => {
+            // Whole-string variable reference: "$name" → value of name
             let var_name = &s[1..];
             vars.get(var_name).cloned().unwrap_or_else(|| value.clone())
+        }
+        Value::String(s) if s.contains("${") => {
+            // String interpolation: "Hello, ${name}!" → "Hello, world!"
+            Value::String(interpolate_string(s, vars))
         }
         Value::Object(map) => {
             let resolved: serde_json::Map<String, Value> = map
@@ -733,6 +738,111 @@ fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
         }
         Value::Array(arr) => Value::Array(arr.iter().map(|v| resolve_vars(v, vars)).collect()),
         other => other.clone(),
+    }
+}
+
+/// Interpolate `${var}` and `${var.field}` references within a string.
+///
+/// Supports:
+/// - `${name}` — simple variable lookup
+/// - `${result.field}` — dotted path access
+/// - `${count + 1}` — simple arithmetic (add/subtract with integer literals)
+/// - Unresolved references are left as-is
+fn interpolate_string(s: &str, vars: &HashMap<String, Value>) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '$' && chars.peek() == Some(&'{') {
+            chars.next(); // consume '{'
+            let mut expr = String::new();
+            let mut depth = 1;
+            for c in chars.by_ref() {
+                if c == '{' {
+                    depth += 1;
+                    expr.push(c);
+                } else if c == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                    expr.push(c);
+                } else {
+                    expr.push(c);
+                }
+            }
+            if depth != 0 {
+                // Unterminated — emit raw
+                result.push('$');
+                result.push('{');
+                result.push_str(&expr);
+            } else {
+                // Try to resolve the expression
+                let resolved = resolve_interpolation_expr(expr.trim(), vars);
+                result.push_str(&resolved);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Resolve an expression inside `${}`. Supports:
+/// - Simple variable: `name`
+/// - Dotted access: `result.status`
+/// - Arithmetic: `count + 1`, `total - 5`
+fn resolve_interpolation_expr(expr: &str, vars: &HashMap<String, Value>) -> String {
+    // Try arithmetic: var +/- literal
+    if let Some(val) = try_arithmetic_expr(expr, vars) {
+        return val;
+    }
+
+    // Try variable/dotted resolution
+    if let Some(val) = resolve_var(expr, vars) {
+        return value_to_interpolation_string(&val);
+    }
+
+    // Unresolved — return original
+    format!("${{{}}}", expr)
+}
+
+/// Attempt to evaluate simple arithmetic: `var + N` or `var - N`
+fn try_arithmetic_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Look for + or - that's not at the start
+    for op in ['+', '-'] {
+        if let Some(idx) = expr[1..].find(op).map(|i| i + 1) {
+            let lhs = expr[..idx].trim();
+            let rhs = expr[idx + 1..].trim();
+
+            let lhs_val = resolve_var(lhs, vars)?;
+            let lhs_num = lhs_val.as_f64()?;
+            let rhs_num: f64 = rhs.parse().ok()?;
+
+            let result = match op {
+                '+' => lhs_num + rhs_num,
+                '-' => lhs_num - rhs_num,
+                _ => return None,
+            };
+
+            // Return as integer if it's a whole number
+            if result.fract() == 0.0 && result.abs() < i64::MAX as f64 {
+                return Some((result as i64).to_string());
+            }
+            return Some(result.to_string());
+        }
+    }
+    None
+}
+
+/// Convert a Value to a string suitable for interpolation.
+fn value_to_interpolation_string(val: &Value) -> String {
+    match val {
+        Value::String(s) => s.clone(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -978,8 +1088,20 @@ fn resolve_var(name: &str, vars: &HashMap<String, Value>) -> Option<Value> {
     resolve_dotted(name, vars)
 }
 
-/// Compare for equality.
+/// Compare for equality. Supports arithmetic expressions.
 fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try arithmetic on lhs first
+    if let Some(lhs_num) = eval_numeric_expr(lhs, vars) {
+        if let Ok(rhs_num) = rhs.parse::<f64>() {
+            return lhs_num == rhs_num;
+        }
+        // lhs is numeric but rhs isn't — compare as strings
+        if lhs_num.fract() == 0.0 {
+            return (lhs_num as i64).to_string() == rhs;
+        }
+        return lhs_num.to_string() == rhs;
+    }
+
     if let Some(val) = resolve_var(lhs, vars) {
         return match &val {
             Value::String(s) => s.as_str() == rhs,
@@ -1000,24 +1122,83 @@ fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
 }
 
 /// Compare using an ordering function.
+/// Supports arithmetic expressions on either side: `count + 1 > threshold`
 fn compare_ord(
     lhs: &str,
     rhs: &str,
     vars: &HashMap<String, Value>,
     cmp: impl Fn(f64, f64) -> bool,
 ) -> bool {
-    let lhs_val = resolve_var(lhs, vars);
-    let lhs_num = lhs_val.as_ref().and_then(|v| match v {
-        Value::Number(n) => n.as_f64(),
-        Value::String(s) => s.parse::<f64>().ok(),
-        _ => None,
-    });
-    let rhs_num = rhs.parse::<f64>().ok();
+    let lhs_num = eval_numeric_expr(lhs, vars);
+    let rhs_num = eval_numeric_expr(rhs, vars);
 
     match (lhs_num, rhs_num) {
         (Some(a), Some(b)) => cmp(a, b),
         _ => false,
     }
+}
+
+/// Evaluate a numeric expression that may contain simple arithmetic.
+/// Supports: literal numbers, variable references, and `var +/- N` or `N +/- var`.
+fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
+    let expr = expr.trim();
+
+    // Try as a plain number literal first
+    if let Ok(n) = expr.parse::<f64>() {
+        return Some(n);
+    }
+
+    // Try as a variable reference
+    if let Some(val) = resolve_var(expr, vars) {
+        return match &val {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.parse::<f64>().ok(),
+            _ => None,
+        };
+    }
+
+    // Try arithmetic: look for + or - (not at position 0, which could be a negative sign)
+    for op in ['+', '-'] {
+        // Find operator outside any leading negative sign
+        if let Some(idx) = expr[1..].find(op).map(|i| i + 1) {
+            let lhs_part = expr[..idx].trim();
+            let rhs_part = expr[idx + 1..].trim();
+
+            // Recursively evaluate both sides (handles var + var, N + var, var + N)
+            let a = eval_numeric_expr(lhs_part, vars)?;
+            let b = eval_numeric_expr(rhs_part, vars)?;
+
+            return Some(match op {
+                '+' => a + b,
+                '-' => a - b,
+                _ => unreachable!(),
+            });
+        }
+    }
+
+    // Try multiplication and division
+    for op in ['*', '/'] {
+        if let Some(idx) = expr.find(op) {
+            let lhs_part = expr[..idx].trim();
+            let rhs_part = expr[idx + 1..].trim();
+
+            let a = eval_numeric_expr(lhs_part, vars)?;
+            let b = eval_numeric_expr(rhs_part, vars)?;
+
+            return Some(match op {
+                '*' => a * b,
+                '/' => {
+                    if b == 0.0 {
+                        return None;
+                    }
+                    a / b
+                }
+                _ => unreachable!(),
+            });
+        }
+    }
+
+    None
 }
 
 /// Check if a JSON value is truthy.
@@ -2831,5 +3012,143 @@ mod tests {
         assert_eq!(out["stable"], json!("ok_done"));
         assert_eq!(out["retried"], json!("flaky_done"));
         assert_eq!(handler.fail_count.load(Ordering::SeqCst), 3);
+    }
+
+    // ── String Interpolation Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_interpolate_simple_variable() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("world"));
+        let result = interpolate_string("Hello, ${name}!", &vars);
+        assert_eq!(result, "Hello, world!");
+    }
+
+    #[test]
+    fn test_interpolate_multiple_variables() {
+        let mut vars = HashMap::new();
+        vars.insert("first".to_string(), json!("Alice"));
+        vars.insert("last".to_string(), json!("Smith"));
+        let result = interpolate_string("${first} ${last}", &vars);
+        assert_eq!(result, "Alice Smith");
+    }
+
+    #[test]
+    fn test_interpolate_numeric_variable() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(42));
+        let result = interpolate_string("There are ${count} items", &vars);
+        assert_eq!(result, "There are 42 items");
+    }
+
+    #[test]
+    fn test_interpolate_dotted_path() {
+        let mut vars = HashMap::new();
+        vars.insert("result".to_string(), json!({"status": "ok", "code": 200}));
+        let result = interpolate_string("Status: ${result.status} (${result.code})", &vars);
+        assert_eq!(result, "Status: ok (200)");
+    }
+
+    #[test]
+    fn test_interpolate_arithmetic() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(5));
+        let result = interpolate_string("Next: ${count + 1}, Prev: ${count - 1}", &vars);
+        assert_eq!(result, "Next: 6, Prev: 4");
+    }
+
+    #[test]
+    fn test_interpolate_unresolved_kept_as_is() {
+        let vars = HashMap::new();
+        let result = interpolate_string("Hello, ${unknown}!", &vars);
+        assert_eq!(result, "Hello, ${unknown}!");
+    }
+
+    #[test]
+    fn test_interpolate_no_placeholders() {
+        let vars = HashMap::new();
+        let result = interpolate_string("plain text", &vars);
+        assert_eq!(result, "plain text");
+    }
+
+    #[test]
+    fn test_resolve_vars_interpolation_in_params() {
+        let mut vars = HashMap::new();
+        vars.insert("user".to_string(), json!("alice"));
+        vars.insert("host".to_string(), json!("example.com"));
+
+        let params = json!({"url": "https://${host}/api/users/${user}"});
+        let resolved = resolve_vars(&params, &vars);
+        assert_eq!(resolved["url"], "https://example.com/api/users/alice");
+    }
+
+    #[test]
+    fn test_resolve_vars_whole_string_still_works() {
+        let mut vars = HashMap::new();
+        vars.insert("data".to_string(), json!({"nested": true}));
+
+        // Whole-string $var should return the actual value (object), not a string
+        let params = json!({"payload": "$data"});
+        let resolved = resolve_vars(&params, &vars);
+        assert_eq!(resolved["payload"], json!({"nested": true}));
+    }
+
+    // ── Arithmetic in When-Guards Tests ───────────────────────────────────────
+
+    #[test]
+    fn test_arithmetic_in_comparison_add() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(5));
+        // count + 1 > 5 → 6 > 5 → true
+        assert!(default_evaluate_condition("count + 1 > 5", &vars));
+        // count + 1 > 6 → 6 > 6 → false
+        assert!(!default_evaluate_condition("count + 1 > 6", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_in_comparison_subtract() {
+        let mut vars = HashMap::new();
+        vars.insert("total".to_string(), json!(10));
+        // total - 3 >= 7 → 7 >= 7 → true
+        assert!(default_evaluate_condition("total - 3 >= 7", &vars));
+        // total - 3 >= 8 → 7 >= 8 → false
+        assert!(!default_evaluate_condition("total - 3 >= 8", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_equality() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!(4));
+        // x + 1 == 5 → true
+        assert!(default_evaluate_condition("x + 1 == 5", &vars));
+        // x + 1 == 6 → false
+        assert!(!default_evaluate_condition("x + 1 == 6", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_both_sides() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(3));
+        vars.insert("b".to_string(), json!(5));
+        // a + 2 >= b → 5 >= 5 → true
+        assert!(default_evaluate_condition("a + 2 >= b", &vars));
+        // a > b - 3 → 3 > 2 → true
+        assert!(default_evaluate_condition("a > b - 3", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_multiply() {
+        let mut vars = HashMap::new();
+        vars.insert("rate".to_string(), json!(10));
+        // rate * 2 == 20 → true
+        assert!(default_evaluate_condition("rate * 2 == 20", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_divide() {
+        let mut vars = HashMap::new();
+        vars.insert("total".to_string(), json!(100));
+        // total / 4 == 25 → true
+        assert!(default_evaluate_condition("total / 4 == 25", &vars));
     }
 }
