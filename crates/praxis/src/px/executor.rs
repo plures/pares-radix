@@ -430,49 +430,85 @@ fn execute_try(
 
     let catch_steps = step.get("catch").and_then(|v| v.as_array());
 
-    // Attempt the try block
-    let mut last_output = None;
-    for (i, nested) in try_steps.iter().enumerate() {
-        match execute_step(nested, i, vars, handler) {
-            Ok(result) => {
-                last_output = result.output;
-            }
-            Err(err) => {
-                // Bind the error for catch steps
-                vars.insert("error".to_string(), Value::String(err.to_string()));
+    // Retry configuration: retry=N means up to N additional attempts after the first.
+    let max_retries = step
+        .get("retry")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
 
-                // Execute catch steps if they exist
-                if let Some(catch) = catch_steps {
-                    let mut catch_output = None;
-                    for (j, catch_step) in catch.iter().enumerate() {
-                        let result = execute_step(catch_step, j, vars, handler)?;
-                        catch_output = result.output;
-                    }
-                    return Ok(StepResult {
-                        index,
-                        kind: "try".into(),
-                        output: catch_output,
-                        skipped: false,
-                    });
+    let mut last_err: Option<ExecutionError> = None;
+
+    for attempt in 0..=max_retries {
+        vars.insert("retry_count".to_string(), Value::Number(attempt.into()));
+
+        // Attempt the try block
+        let mut last_output = None;
+        let mut failed = false;
+
+        for (i, nested) in try_steps.iter().enumerate() {
+            match execute_step(nested, i, vars, handler) {
+                Ok(result) => {
+                    last_output = result.output;
                 }
-
-                // No catch block — return error info but don't propagate
-                return Ok(StepResult {
-                    index,
-                    kind: "try".into(),
-                    output: Some(Value::String(err.to_string())),
-                    skipped: false,
-                });
+                Err(err) => {
+                    last_err = Some(err);
+                    failed = true;
+                    break;
+                }
             }
         }
+
+        if !failed {
+            // All try steps succeeded
+            vars.remove("error");
+            vars.remove("retry_count");
+            return Ok(StepResult {
+                index,
+                kind: "try".into(),
+                output: last_output,
+                skipped: false,
+            });
+        }
+
+        // If we have retries left, continue the loop
+        if attempt < max_retries {
+            continue;
+        }
+
+        // All retries exhausted — run catch or return error
+        let err = last_err.take().unwrap();
+        vars.insert("error".to_string(), Value::String(err.to_string()));
+
+        if let Some(catch) = catch_steps {
+            let mut catch_output = None;
+            for (j, catch_step) in catch.iter().enumerate() {
+                let result = execute_step(catch_step, j, vars, handler)?;
+                catch_output = result.output;
+            }
+            vars.remove("retry_count");
+            return Ok(StepResult {
+                index,
+                kind: "try".into(),
+                output: catch_output,
+                skipped: false,
+            });
+        }
+
+        vars.remove("retry_count");
+        return Ok(StepResult {
+            index,
+            kind: "try".into(),
+            output: Some(Value::String(err.to_string())),
+            skipped: false,
+        });
     }
 
-    // All try steps succeeded — return the last step's output
-    vars.remove("error");
+    // Unreachable but satisfies the compiler
+    vars.remove("retry_count");
     Ok(StepResult {
         index,
         kind: "try".into(),
-        output: last_output,
+        output: None,
         skipped: false,
     })
 }
@@ -2075,5 +2111,119 @@ mod tests {
 
         let result = execute(&procedure, &handler);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn try_retry_succeeds_on_second_attempt() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FlakeHandler {
+            call_count: AtomicUsize,
+        }
+
+        impl ActionHandler for FlakeHandler {
+            fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                match name {
+                    "flaky" => {
+                        if count == 0 {
+                            Err(ExecutionError::ActionFailed {
+                                action: "flaky".into(),
+                                message: "transient error".into(),
+                            })
+                        } else {
+                            Ok(json!("success_on_retry"))
+                        }
+                    }
+                    _ => Err(ExecutionError::UnknownAction(name.into())),
+                }
+            }
+        }
+
+        let handler = FlakeHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "retry_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 2,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {}, "output_var": "result" }
+                    ],
+                    "catch": [
+                        { "kind": "emit", "event": "should_not_reach" }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        // Succeeded on retry — catch was not reached
+        assert_eq!(result.variables.get("result"), Some(&json!("success_on_retry")));
+        // retry_count cleaned up
+        assert!(result.variables.get("retry_count").is_none());
+        // error cleared
+        assert!(result.variables.get("error").is_none());
+        // Was called exactly 2 times (first fail + second success)
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn try_retry_exhausted_runs_catch() {
+        let handler = MockHandler::new().with_result("fallback", json!("caught_after_retries"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "retry_exhausted",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 3,
+                    "steps": [
+                        { "kind": "call", "name": "always_fails", "params": {} }
+                    ],
+                    "catch": [
+                        { "kind": "call", "name": "fallback", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("caught_after_retries")));
+        // error variable was set before catch ran
+        assert!(result.variables.get("error").is_some());
+    }
+
+    #[test]
+    fn try_retry_zero_is_default_no_retry() {
+        let handler = MockHandler::new().with_result("fallback", json!("immediate_catch"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "no_retry",
+            "steps": [
+                {
+                    "kind": "try",
+                    "steps": [
+                        { "kind": "call", "name": "always_fails", "params": {} }
+                    ],
+                    "catch": [
+                        { "kind": "call", "name": "fallback", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute(&procedure, &handler).unwrap();
+        assert!(result.success);
+        // Without retry field, catch runs immediately
+        assert_eq!(result.step_results[0].output, Some(json!("immediate_catch")));
     }
 }

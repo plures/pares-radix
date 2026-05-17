@@ -399,7 +399,12 @@ fn execute_emit_async(
     })
 }
 
-/// Execute a `try` step asynchronously with error recovery.
+/// Execute a `try` step asynchronously with error recovery and optional retry.
+///
+/// Retry fields:
+/// - `retry`: max number of additional attempts after the first failure (default 0).
+/// - `retry_delay_ms`: milliseconds to sleep between retry attempts (default 0).
+/// - `$retry_count` variable is injected so steps/catch can inspect the attempt number.
 async fn execute_try_async(
     step: &Value,
     index: usize,
@@ -413,37 +418,88 @@ async fn execute_try_async(
 
     let catch_steps = step.get("catch").and_then(|v| v.as_array());
 
-    for (i, nested) in try_steps.iter().enumerate() {
-        match execute_step_async(nested, i, vars, handler).await {
-            Ok(_result) => { /* continue */ }
-            Err(err) => {
-                vars.insert("error".to_string(), Value::String(err.to_string()));
+    let max_retries = step
+        .get("retry")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
 
-                if let Some(catch) = catch_steps {
-                    let mut last_output = None;
-                    for (j, catch_step) in catch.iter().enumerate() {
-                        let result = execute_step_async(catch_step, j, vars, handler).await?;
-                        last_output = result.output;
-                    }
-                    return Ok(StepResult {
-                        index,
-                        kind: "try".into(),
-                        output: last_output,
-                        skipped: false,
-                    });
+    let retry_delay_ms = step
+        .get("retry_delay_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut last_err: Option<ExecutionError> = None;
+
+    for attempt in 0..=max_retries {
+        vars.insert("retry_count".to_string(), Value::Number(attempt.into()));
+
+        // Delay before retry (not before the first attempt)
+        if attempt > 0 && retry_delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(retry_delay_ms)).await;
+        }
+
+        let mut last_output = None;
+        let mut failed = false;
+
+        for (i, nested) in try_steps.iter().enumerate() {
+            match execute_step_async(nested, i, vars, handler).await {
+                Ok(result) => {
+                    last_output = result.output;
                 }
-
-                return Ok(StepResult {
-                    index,
-                    kind: "try".into(),
-                    output: Some(Value::String(err.to_string())),
-                    skipped: false,
-                });
+                Err(err) => {
+                    last_err = Some(err);
+                    failed = true;
+                    break;
+                }
             }
         }
+
+        if !failed {
+            vars.remove("error");
+            vars.remove("retry_count");
+            return Ok(StepResult {
+                index,
+                kind: "try".into(),
+                output: last_output,
+                skipped: false,
+            });
+        }
+
+        // If we have retries left, try again
+        if attempt < max_retries {
+            continue;
+        }
+
+        // All retries exhausted — run catch or return error
+        let err = last_err.take().unwrap();
+        vars.insert("error".to_string(), Value::String(err.to_string()));
+
+        if let Some(catch) = catch_steps {
+            let mut catch_output = None;
+            for (j, catch_step) in catch.iter().enumerate() {
+                let result = execute_step_async(catch_step, j, vars, handler).await?;
+                catch_output = result.output;
+            }
+            vars.remove("retry_count");
+            return Ok(StepResult {
+                index,
+                kind: "try".into(),
+                output: catch_output,
+                skipped: false,
+            });
+        }
+
+        vars.remove("retry_count");
+        return Ok(StepResult {
+            index,
+            kind: "try".into(),
+            output: Some(Value::String(err.to_string())),
+            skipped: false,
+        });
     }
 
-    vars.remove("error");
+    // Unreachable but satisfies the compiler
+    vars.remove("retry_count");
     Ok(StepResult {
         index,
         kind: "try".into(),
@@ -1259,5 +1315,144 @@ mod tests {
         assert!(result.success);
         assert_eq!(handler.start_count.load(Ordering::SeqCst), 3);
         assert_eq!(handler.complete_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn try_retry_succeeds_on_second_attempt_async() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct FlakeAsyncHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for FlakeAsyncHandler {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                let count = self.call_count.fetch_add(1, Ordering::SeqCst);
+                match name {
+                    "flaky" => {
+                        if count == 0 {
+                            Err(ExecutionError::ActionFailed {
+                                action: "flaky".into(),
+                                message: "transient error".into(),
+                            })
+                        } else {
+                            Ok(json!("success_on_retry"))
+                        }
+                    }
+                    _ => Err(ExecutionError::UnknownAction(name.into())),
+                }
+            }
+        }
+
+        let handler = FlakeAsyncHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "retry_async_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 2,
+                    "retry_delay_ms": 10,
+                    "steps": [
+                        { "kind": "call", "name": "flaky", "params": {}, "output_var": "result" }
+                    ],
+                    "catch": [
+                        { "kind": "emit", "event": "should_not_reach" }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.variables.get("result"), Some(&json!("success_on_retry")));
+        assert!(result.variables.get("retry_count").is_none());
+        assert!(result.variables.get("error").is_none());
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn try_retry_exhausted_runs_catch_async() {
+        let handler = MockAsyncHandler::new().with_result("fallback", json!("caught_after_retries"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "retry_exhausted_async",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 3,
+                    "retry_delay_ms": 5,
+                    "steps": [
+                        { "kind": "call", "name": "nonexistent", "params": {} }
+                    ],
+                    "catch": [
+                        { "kind": "call", "name": "fallback", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.step_results[0].output, Some(json!("caught_after_retries")));
+        assert!(result.variables.get("error").is_some());
+    }
+
+    #[tokio::test]
+    async fn try_retry_with_delay_is_observable() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct AlwaysFailHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for AlwaysFailHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                Err(ExecutionError::ActionFailed {
+                    action: "fail".into(),
+                    message: "always fails".into(),
+                })
+            }
+        }
+
+        let handler = AlwaysFailHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "delay_test",
+            "steps": [
+                {
+                    "kind": "try",
+                    "retry": 2,
+                    "retry_delay_ms": 50,
+                    "steps": [
+                        { "kind": "call", "name": "fail_action", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success); // try swallows the error
+        // 3 attempts total (1 initial + 2 retries), 2 delays of 50ms each = ~100ms minimum
+        assert!(
+            elapsed >= Duration::from_millis(80),
+            "expected >= 80ms for retry delays, got {:?}",
+            elapsed
+        );
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 3);
     }
 }
