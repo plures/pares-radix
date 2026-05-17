@@ -1,0 +1,38 @@
+# pipeline_workflow.px — Complex procedure with loops, bracket paths, try/catch, match
+#
+# Tests the full executor pipeline with real-world patterns:
+# - Loop over array with bracket-indexed conditions
+# - Nested when guards using bracket paths
+# - Match with bracket-path comparisons
+# - Try/catch around fallible actions
+# - Variable threading through multiple steps
+
+fact pipeline:
+  stages: list[string]
+
+constraint all_stages_named:
+  require: pipeline.stages[0].name != ""
+  severity: error
+  message: "Every pipeline stage must have a name"
+
+constraint prod_stage_requires_approval:
+  when: pipeline.stages[2].env == "production"
+  require: pipeline.stages[2].requires_approval == true
+  severity: error
+  message: "Production stages must require approval"
+
+procedure run_pipeline:
+  trigger: manual
+  check_stage_health {stage: "first"} -> $health
+  when health.status == "degraded":
+    emit {event: "pipeline_warning", reason: "degraded"}
+  end
+  when health.status == "down":
+    emit {event: "pipeline_blocked", reason: "down"}
+  end
+  try:
+    deploy_stage {name: "prod"}
+  catch:
+    rollback_stage {name: "prod"} -> $rollback
+    emit {event: "stage_failed", rollback: "true"}
+  end

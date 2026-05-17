@@ -430,24 +430,27 @@ fn execute_try(
     let catch_steps = step.get("catch").and_then(|v| v.as_array());
 
     // Attempt the try block
+    let mut last_output = None;
     for (i, nested) in try_steps.iter().enumerate() {
         match execute_step(nested, i, vars, handler) {
-            Ok(_result) => { /* continue */ }
+            Ok(result) => {
+                last_output = result.output;
+            }
             Err(err) => {
                 // Bind the error for catch steps
                 vars.insert("error".to_string(), Value::String(err.to_string()));
 
                 // Execute catch steps if they exist
                 if let Some(catch) = catch_steps {
-                    let mut last_output = None;
+                    let mut catch_output = None;
                     for (j, catch_step) in catch.iter().enumerate() {
                         let result = execute_step(catch_step, j, vars, handler)?;
-                        last_output = result.output;
+                        catch_output = result.output;
                     }
                     return Ok(StepResult {
                         index,
                         kind: "try".into(),
-                        output: last_output,
+                        output: catch_output,
                         skipped: false,
                     });
                 }
@@ -463,12 +466,12 @@ fn execute_try(
         }
     }
 
-    // All try steps succeeded
+    // All try steps succeeded — return the last step's output
     vars.remove("error");
     Ok(StepResult {
         index,
         kind: "try".into(),
-        output: None,
+        output: last_output,
         skipped: false,
     })
 }
