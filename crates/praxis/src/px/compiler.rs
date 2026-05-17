@@ -292,11 +292,29 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             "kind": "emit",
             "event": event,
         }),
-        PxStep::Try { steps, catch } => json!({
-            "kind": "try",
-            "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
-            "catch": catch.iter().map(compile_step).collect::<Vec<_>>(),
-        }),
+        PxStep::Try { steps, catch, retry, retry_delay_ms, retry_backoff, retry_max_delay_ms, retry_jitter } => {
+            let mut obj = json!({
+                "kind": "try",
+                "steps": steps.iter().map(compile_step).collect::<Vec<_>>(),
+                "catch": catch.iter().map(compile_step).collect::<Vec<_>>(),
+            });
+            if let Some(r) = retry {
+                obj["retry"] = json!(r);
+            }
+            if let Some(d) = retry_delay_ms {
+                obj["retry_delay_ms"] = json!(d);
+            }
+            if let Some(ref b) = retry_backoff {
+                obj["retry_backoff"] = json!(b);
+            }
+            if let Some(m) = retry_max_delay_ms {
+                obj["retry_max_delay_ms"] = json!(m);
+            }
+            if let Some(j) = retry_jitter {
+                obj["retry_jitter"] = json!(j);
+            }
+            obj
+        }
         PxStep::Parallel { branches, output_var } => {
             let compiled_branches: Vec<serde_json::Value> = branches
                 .iter()

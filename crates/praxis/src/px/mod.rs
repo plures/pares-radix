@@ -179,6 +179,16 @@ pub enum PxStep {
         steps: Vec<PxStep>,
         /// Steps to execute on error.
         catch: Vec<PxStep>,
+        /// Retry count (0 = no retry, N = up to N additional attempts).
+        retry: Option<u64>,
+        /// Delay between retries in milliseconds.
+        retry_delay_ms: Option<u64>,
+        /// Backoff strategy: "fixed" or "exponential".
+        retry_backoff: Option<String>,
+        /// Maximum delay cap in milliseconds (for exponential backoff).
+        retry_max_delay_ms: Option<u64>,
+        /// Whether to add jitter to retry delays.
+        retry_jitter: Option<bool>,
     },
     Parallel {
         /// Named branches to execute concurrently.
@@ -412,12 +422,66 @@ constraint deploy_gate:
         let doc = parse(source).expect("parse failed");
         assert_eq!(doc.procedures.len(), 1);
         match &doc.procedures[0].steps[0] {
-            PxStep::Try { steps, catch } => {
+            PxStep::Try { steps, catch, .. } => {
                 assert_eq!(steps.len(), 1);
                 assert_eq!(catch.len(), 1);
             }
             other => panic!("expected Try step, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_try_with_retry() {
+        let source = "procedure resilient:\n  trigger: manual\n  try retry 3 delay 1000 ms backoff exponential max_delay 10000 ms jitter:\n    risky_action {}\n  catch:\n    fallback {}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        match &doc.procedures[0].steps[0] {
+            PxStep::Try { steps, catch, retry, retry_delay_ms, retry_backoff, retry_max_delay_ms, retry_jitter } => {
+                assert_eq!(steps.len(), 1);
+                assert_eq!(catch.len(), 1);
+                assert_eq!(*retry, Some(3));
+                assert_eq!(*retry_delay_ms, Some(1000));
+                assert_eq!(retry_backoff.as_deref(), Some("exponential"));
+                assert_eq!(*retry_max_delay_ms, Some(10000));
+                assert_eq!(*retry_jitter, Some(true));
+            }
+            other => panic!("expected Try step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_try_retry_no_options() {
+        let source = "procedure simple_retry:\n  trigger: manual\n  try retry 2:\n    flaky_call {}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        match &doc.procedures[0].steps[0] {
+            PxStep::Try { retry, retry_delay_ms, retry_backoff, .. } => {
+                assert_eq!(*retry, Some(2));
+                assert!(retry_delay_ms.is_none());
+                assert!(retry_backoff.is_none());
+            }
+            other => panic!("expected Try step, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_try_retry_compiles_to_json() {
+        use crate::px::compiler::compile;
+
+        let source = "procedure with_retry:\n  trigger: manual\n  try retry 2 delay 500 ms backoff fixed:\n    call_api {}\n  catch:\n    handle_error {}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        let records = compile(&doc);
+        let data = &records[0].data;
+        let steps = data["steps"].as_array().unwrap();
+        let try_step = &steps[0];
+        assert_eq!(try_step["kind"], "try");
+        assert_eq!(try_step["retry"], 2);
+        assert_eq!(try_step["retry_delay_ms"], 500);
+        assert_eq!(try_step["retry_backoff"], "fixed");
+        assert!(try_step.get("retry_max_delay_ms").is_none() || try_step["retry_max_delay_ms"].is_null());
+        assert!(try_step.get("retry_jitter").is_none() || try_step["retry_jitter"].is_null());
     }
 
     #[test]

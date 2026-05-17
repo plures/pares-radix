@@ -742,9 +742,45 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
         Rule::step_try => {
             let mut try_steps = vec![];
             let mut catch_steps = vec![];
+            let mut retry: Option<u64> = None;
+            let mut retry_delay_ms: Option<u64> = None;
+            let mut retry_backoff: Option<String> = None;
+            let mut retry_max_delay_ms: Option<u64> = None;
+            let mut retry_jitter: Option<bool> = None;
 
             for child in inner.into_inner() {
                 match child.as_rule() {
+                    Rule::try_retry_clause => {
+                        for rc in child.into_inner() {
+                            match rc.as_rule() {
+                                Rule::integer => {
+                                    retry = Some(rc.as_str().parse().unwrap_or(0));
+                                }
+                                Rule::branch_retry_opt => {
+                                    let opt = rc.into_inner().next().unwrap();
+                                    match opt.as_rule() {
+                                        Rule::retry_delay_opt => {
+                                            let val = opt.into_inner().next().unwrap();
+                                            retry_delay_ms = Some(val.as_str().parse().unwrap_or(0));
+                                        }
+                                        Rule::retry_backoff_opt => {
+                                            let strategy = opt.into_inner().next().unwrap();
+                                            retry_backoff = Some(strategy.as_str().to_string());
+                                        }
+                                        Rule::retry_max_delay_opt => {
+                                            let val = opt.into_inner().next().unwrap();
+                                            retry_max_delay_ms = Some(val.as_str().parse().unwrap_or(0));
+                                        }
+                                        Rule::retry_jitter_opt => {
+                                            retry_jitter = Some(true);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     Rule::try_step_list => {
                         try_steps = child
                             .into_inner()
@@ -766,6 +802,11 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
             PxStep::Try {
                 steps: try_steps,
                 catch: catch_steps,
+                retry,
+                retry_delay_ms,
+                retry_backoff,
+                retry_max_delay_ms,
+                retry_jitter,
             }
         }
         Rule::step_parallel => {
