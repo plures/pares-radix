@@ -595,6 +595,16 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
         return compare_ord(lhs, rhs, vars, |a, b| a < b);
     }
 
+    // `contains` operator: `list contains "value"` or `str contains "sub"`
+    if let Some((lhs, rhs)) = split_contains(expr) {
+        return eval_contains(lhs, rhs, vars);
+    }
+
+    // `in` operator: `"value" in list`
+    if let Some((item, collection)) = split_in(expr) {
+        return eval_contains(collection, item, vars);
+    }
+
     // Bare variable name — truthy check
     if let Some(val) = resolve_var(expr, vars) {
         return is_truthy(&val);
@@ -765,14 +775,113 @@ fn is_truthy(val: &Value) -> bool {
     }
 }
 
-/// Resolve dotted variable access (e.g., "result.status" looks up vars["result"]["status"]).
-fn resolve_dotted(path: &str, vars: &HashMap<String, Value>) -> Option<Value> {
-    let parts: Vec<&str> = path.splitn(2, '.').collect();
-    if parts.len() != 2 {
-        return None;
+/// Split a `contains` expression: `lhs contains rhs`
+fn split_contains(expr: &str) -> Option<(&str, &str)> {
+    // Find " contains " token outside parens/quotes
+    let needle = " contains ";
+    let idx = find_keyword_outside_parens(expr, needle)?;
+    let lhs = expr[..idx].trim();
+    let rhs = expr[idx + needle.len()..].trim().trim_matches('"');
+    if !lhs.is_empty() && !rhs.is_empty() {
+        Some((lhs, rhs))
+    } else {
+        None
     }
-    let root = vars.get(parts[0])?;
-    root.get(parts[1]).cloned()
+}
+
+/// Split an `in` expression: `item in collection`
+fn split_in(expr: &str) -> Option<(&str, &str)> {
+    let needle = " in ";
+    let idx = find_keyword_outside_parens(expr, needle)?;
+    let item = expr[..idx].trim().trim_matches('"');
+    let collection = expr[idx + needle.len()..].trim();
+    if !item.is_empty() && !collection.is_empty() {
+        Some((item, collection))
+    } else {
+        None
+    }
+}
+
+/// Find the position of a keyword token in an expression, respecting parens and quotes.
+fn find_keyword_outside_parens(expr: &str, keyword: &str) -> Option<usize> {
+    let bytes = expr.as_bytes();
+    let kw_bytes = keyword.as_bytes();
+    let kw_len = kw_bytes.len();
+    let mut depth = 0i32;
+    let mut in_quotes = false;
+
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            in_quotes = !in_quotes;
+        } else if !in_quotes {
+            match bytes[i] {
+                b'(' => depth += 1,
+                b')' => depth -= 1,
+                _ if depth == 0
+                    && i + kw_len <= bytes.len()
+                    && &bytes[i..i + kw_len] == kw_bytes =>
+                {
+                    return Some(i);
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Evaluate a `contains` check. Works for:
+/// - Arrays: checks if the array contains the value
+/// - Strings: checks if the string contains the substring
+fn eval_contains(collection_expr: &str, item_expr: &str, vars: &HashMap<String, Value>) -> bool {
+    let collection = resolve_var(collection_expr, vars);
+    match collection {
+        Some(Value::Array(arr)) => {
+            // Check if any element matches the item
+            let item_val = resolve_var(item_expr, vars);
+            match item_val {
+                Some(val) => arr.contains(&val),
+                None => {
+                    // Treat as literal string
+                    let item_as_value = Value::String(item_expr.to_string());
+                    arr.contains(&item_as_value)
+                        || arr.iter().any(|el| match el {
+                            Value::Number(n) => n.to_string() == item_expr,
+                            _ => false,
+                        })
+                }
+            }
+        }
+        Some(Value::String(s)) => {
+            // String containment
+            let sub = match resolve_var(item_expr, vars) {
+                Some(Value::String(v)) => v,
+                _ => item_expr.to_string(),
+            };
+            s.contains(&sub)
+        }
+        _ => false,
+    }
+}
+
+/// Resolve dotted variable access with arbitrary depth.
+///
+/// Supports paths like `result.status`, `result.data.items`, or
+/// `response.headers.content_type`. Each segment indexes into nested
+/// JSON objects.
+fn resolve_dotted(path: &str, vars: &HashMap<String, Value>) -> Option<Value> {
+    let (root_key, rest) = path.split_once('.')?;
+
+    let root = vars.get(root_key)?;
+    let mut current = root;
+
+    for segment in rest.split('.') {
+        current = current.get(segment)?;
+    }
+
+    Some(current.clone())
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1448,5 +1557,99 @@ mod tests {
         assert!(default_evaluate_condition("a && (b || c)", &vars));
         // a && (b || !c) => true && (false || false) => false
         assert!(!default_evaluate_condition("a && (b || !c)", &vars));
+    }
+
+    #[test]
+    fn deep_dotted_path_resolution() {
+        let vars = HashMap::from([
+            ("response".to_string(), json!({
+                "data": {
+                    "items": [1, 2, 3],
+                    "meta": {
+                        "count": 3,
+                        "status": "ok"
+                    }
+                },
+                "status": 200
+            })),
+        ]);
+
+        // Two levels deep
+        assert!(default_evaluate_condition("response.data.meta.status == ok", &vars));
+        assert!(default_evaluate_condition("response.data.meta.count == 3", &vars));
+        assert!(default_evaluate_condition("response.status == 200", &vars));
+        assert!(!default_evaluate_condition("response.data.meta.status == error", &vars));
+    }
+
+    #[test]
+    fn contains_operator_array() {
+        let vars = HashMap::from([
+            ("tags".to_string(), json!(["rust", "wasm", "praxis"])),
+            ("numbers".to_string(), json!([1, 2, 3, 5, 8])),
+            ("needle".to_string(), json!("rust")),
+        ]);
+
+        // Array contains string literal
+        assert!(default_evaluate_condition("tags contains \"rust\"", &vars));
+        assert!(default_evaluate_condition("tags contains \"praxis\"", &vars));
+        assert!(!default_evaluate_condition("tags contains \"python\"", &vars));
+
+        // Array contains via variable reference
+        assert!(default_evaluate_condition("tags contains needle", &vars));
+
+        // Array contains number
+        assert!(default_evaluate_condition("numbers contains 3", &vars));
+        assert!(!default_evaluate_condition("numbers contains 4", &vars));
+    }
+
+    #[test]
+    fn contains_operator_string() {
+        let vars = HashMap::from([
+            ("message".to_string(), json!("hello world, welcome!")),
+            ("sub".to_string(), json!("world")),
+        ]);
+
+        assert!(default_evaluate_condition("message contains \"world\"", &vars));
+        assert!(default_evaluate_condition("message contains \"hello\"", &vars));
+        assert!(!default_evaluate_condition("message contains \"goodbye\"", &vars));
+
+        // Contains with variable as substring
+        assert!(default_evaluate_condition("message contains sub", &vars));
+    }
+
+    #[test]
+    fn in_operator() {
+        let vars = HashMap::from([
+            ("roles".to_string(), json!(["admin", "editor", "viewer"])),
+            ("role".to_string(), json!("editor")),
+        ]);
+
+        // "value" in collection
+        assert!(default_evaluate_condition("\"admin\" in roles", &vars));
+        assert!(!default_evaluate_condition("\"superuser\" in roles", &vars));
+
+        // Variable in collection
+        assert!(default_evaluate_condition("role in roles", &vars));
+    }
+
+    #[test]
+    fn contains_with_logical_operators() {
+        let vars = HashMap::from([
+            ("tags".to_string(), json!(["rust", "async"])),
+            ("status".to_string(), json!("active")),
+        ]);
+
+        assert!(default_evaluate_condition(
+            "tags contains \"rust\" && status == active",
+            &vars
+        ));
+        assert!(!default_evaluate_condition(
+            "tags contains \"python\" && status == active",
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            "tags contains \"python\" || status == active",
+            &vars
+        ));
     }
 }
