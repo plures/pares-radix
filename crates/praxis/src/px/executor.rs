@@ -809,15 +809,20 @@ fn resolve_interpolation_expr(expr: &str, vars: &HashMap<String, Value>) -> Stri
 
 /// Attempt to evaluate simple arithmetic: `var + N` or `var - N`
 fn try_arithmetic_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
-    // Look for + or - that's not at the start
+    // Try ternary: condition ? trueVal : falseVal
+    if let Some(result) = try_ternary_expr(expr, vars) {
+        return Some(result);
+    }
+
+    // Look for +, -, *, /, % operators (not at position 0 for - which could be negative)
+    // Lower precedence ops first: + and -
     for op in ['+', '-'] {
         if let Some(idx) = expr[1..].find(op).map(|i| i + 1) {
             let lhs = expr[..idx].trim();
             let rhs = expr[idx + 1..].trim();
 
-            let lhs_val = resolve_var(lhs, vars)?;
-            let lhs_num = lhs_val.as_f64()?;
-            let rhs_num: f64 = rhs.parse().ok()?;
+            let lhs_num = interp_eval_numeric(lhs, vars)?;
+            let rhs_num = interp_eval_numeric(rhs, vars)?;
 
             let result = match op {
                 '+' => lhs_num + rhs_num,
@@ -825,14 +830,90 @@ fn try_arithmetic_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<Stri
                 _ => return None,
             };
 
-            // Return as integer if it's a whole number
-            if result.fract() == 0.0 && result.abs() < i64::MAX as f64 {
-                return Some((result as i64).to_string());
-            }
-            return Some(result.to_string());
+            return Some(format_numeric_result(result));
         }
     }
+
+    // Higher precedence: *, /, %
+    for op in ['*', '/', '%'] {
+        if let Some(idx) = expr.find(op) {
+            let lhs = expr[..idx].trim();
+            let rhs = expr[idx + 1..].trim();
+
+            let lhs_num = interp_eval_numeric(lhs, vars)?;
+            let rhs_num = interp_eval_numeric(rhs, vars)?;
+
+            if (op == '/' || op == '%') && rhs_num == 0.0 {
+                return None;
+            }
+
+            let result = match op {
+                '*' => lhs_num * rhs_num,
+                '/' => lhs_num / rhs_num,
+                '%' => lhs_num % rhs_num,
+                _ => return None,
+            };
+
+            return Some(format_numeric_result(result));
+        }
+    }
+
     None
+}
+
+/// Evaluate a numeric value for interpolation arithmetic (variable or literal).
+fn interp_eval_numeric(s: &str, vars: &HashMap<String, Value>) -> Option<f64> {
+    // Try as literal number first
+    if let Ok(n) = s.parse::<f64>() {
+        return Some(n);
+    }
+    // Try as variable reference
+    let val = resolve_var(s, vars)?;
+    val.as_f64()
+}
+
+/// Format a numeric result: integer if whole, float otherwise.
+fn format_numeric_result(result: f64) -> String {
+    if result.fract() == 0.0 && result.abs() < i64::MAX as f64 {
+        (result as i64).to_string()
+    } else {
+        result.to_string()
+    }
+}
+
+/// Try to evaluate a ternary expression: `condition ? trueExpr : falseExpr`
+fn try_ternary_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Find the ? that separates condition from branches
+    let q_idx = expr.find('?')?;
+    let condition_str = expr[..q_idx].trim();
+    let branches = &expr[q_idx + 1..];
+
+    // Find the : that separates true from false branch
+    // Must handle nested ternaries eventually, but for now find the first :
+    let colon_idx = branches.find(':')?;
+    let true_expr = branches[..colon_idx].trim();
+    let false_expr = branches[colon_idx + 1..].trim();
+
+    // Evaluate the condition using the same condition evaluator
+    let condition_result = default_evaluate_condition(condition_str, vars);
+
+    let chosen = if condition_result { true_expr } else { false_expr };
+
+    // The chosen branch can be: a quoted string, a variable reference, or a number
+    if (chosen.starts_with('"') && chosen.ends_with('"'))
+        || (chosen.starts_with('\'') && chosen.ends_with('\''))
+    {
+        // Quoted string literal — strip quotes
+        return Some(chosen[1..chosen.len() - 1].to_string());
+    }
+
+    // Try as a variable
+    if let Some(val) = resolve_var(chosen, vars) {
+        return Some(value_to_interpolation_string(&val));
+    }
+
+    // Return as literal
+    Some(chosen.to_string())
 }
 
 /// Convert a Value to a string suitable for interpolation.
@@ -1176,8 +1257,8 @@ fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
         }
     }
 
-    // Try multiplication and division
-    for op in ['*', '/'] {
+    // Try multiplication, division, and modulo
+    for op in ['*', '/', '%'] {
         if let Some(idx) = expr.find(op) {
             let lhs_part = expr[..idx].trim();
             let rhs_part = expr[idx + 1..].trim();
@@ -1192,6 +1273,12 @@ fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
                         return None;
                     }
                     a / b
+                }
+                '%' => {
+                    if b == 0.0 {
+                        return None;
+                    }
+                    a % b
                 }
                 _ => unreachable!(),
             });
@@ -3150,5 +3237,91 @@ mod tests {
         vars.insert("total".to_string(), json!(100));
         // total / 4 == 25 → true
         assert!(default_evaluate_condition("total / 4 == 25", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_modulo_comparison() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(10));
+        // 10 % 3 == 1
+        assert!(default_evaluate_condition("count % 3 == 1", &vars));
+        // 10 % 5 == 0
+        assert!(default_evaluate_condition("count % 5 == 0", &vars));
+        // 10 % 4 != 0
+        assert!(default_evaluate_condition("count % 4 != 0", &vars));
+    }
+
+    #[test]
+    fn test_arithmetic_modulo_division_by_zero() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(10));
+        // Division by zero should not crash, condition should be false
+        assert!(!default_evaluate_condition("count % 0 == 0", &vars));
+        assert!(!default_evaluate_condition("count / 0 == 0", &vars));
+    }
+
+    #[test]
+    fn test_interpolate_modulo() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(17));
+        let result = interpolate_string("Remainder: ${count % 5}", &vars);
+        assert_eq!(result, "Remainder: 2");
+    }
+
+    #[test]
+    fn test_interpolate_multiply() {
+        let mut vars = HashMap::new();
+        vars.insert("price".to_string(), json!(5));
+        let result = interpolate_string("Total: ${price * 3}", &vars);
+        assert_eq!(result, "Total: 15");
+    }
+
+    #[test]
+    fn test_interpolate_divide() {
+        let mut vars = HashMap::new();
+        vars.insert("total".to_string(), json!(100));
+        let result = interpolate_string("Half: ${total / 2}", &vars);
+        assert_eq!(result, "Half: 50");
+    }
+
+    #[test]
+    fn test_interpolate_ternary_true() {
+        let mut vars = HashMap::new();
+        vars.insert("enabled".to_string(), json!(true));
+        let result = interpolate_string("Status: ${enabled ? 'on' : 'off'}", &vars);
+        assert_eq!(result, "Status: on");
+    }
+
+    #[test]
+    fn test_interpolate_ternary_false() {
+        let mut vars = HashMap::new();
+        vars.insert("enabled".to_string(), json!(false));
+        let result = interpolate_string("Status: ${enabled ? 'on' : 'off'}", &vars);
+        assert_eq!(result, "Status: off");
+    }
+
+    #[test]
+    fn test_interpolate_ternary_with_comparison() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(5));
+        let result = interpolate_string("${count > 3 ? 'many' : 'few'}", &vars);
+        assert_eq!(result, "many");
+    }
+
+    #[test]
+    fn test_interpolate_ternary_with_variable_branch() {
+        let mut vars = HashMap::new();
+        vars.insert("active".to_string(), json!(true));
+        vars.insert("name".to_string(), json!("Alice"));
+        let result = interpolate_string("User: ${active ? name : 'unknown'}", &vars);
+        assert_eq!(result, "User: Alice");
+    }
+
+    #[test]
+    fn test_interpolate_ternary_numeric_branch() {
+        let mut vars = HashMap::new();
+        vars.insert("premium".to_string(), json!(false));
+        let result = interpolate_string("Limit: ${premium ? 100 : 10}", &vars);
+        assert_eq!(result, "Limit: 10");
     }
 }
