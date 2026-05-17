@@ -843,6 +843,21 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
         return eval_contains(collection, item, vars);
     }
 
+    // `matches` operator: `var matches "pattern"` (regex)
+    if let Some((lhs, rhs)) = split_keyword_op(expr, " matches ") {
+        return eval_matches(lhs, rhs, vars);
+    }
+
+    // `starts_with` operator: `var starts_with "prefix"`
+    if let Some((lhs, rhs)) = split_keyword_op(expr, " starts_with ") {
+        return eval_starts_with(lhs, rhs, vars);
+    }
+
+    // `ends_with` operator: `var ends_with "suffix"`
+    if let Some((lhs, rhs)) = split_keyword_op(expr, " ends_with ") {
+        return eval_ends_with(lhs, rhs, vars);
+    }
+
     // Bare variable name — truthy check
     if let Some(val) = resolve_var(expr, vars) {
         return is_truthy(&val);
@@ -953,7 +968,10 @@ fn split_comparison<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
 }
 
 /// Resolve a variable (direct lookup or dotted path).
+/// Supports `$variable` prefix notation — the `$` is stripped before lookup.
 fn resolve_var(name: &str, vars: &HashMap<String, Value>) -> Option<Value> {
+    // Strip leading `$` if present (common in .px procedure expressions)
+    let name = name.strip_prefix('$').unwrap_or(name);
     if let Some(val) = vars.get(name) {
         return Some(val.clone());
     }
@@ -1104,7 +1122,49 @@ fn eval_contains(collection_expr: &str, item_expr: &str, vars: &HashMap<String, 
     }
 }
 
-/// Resolve dotted variable access with arbitrary depth, including bracket indexing.
+/// Split a keyword operator expression generically.
+fn split_keyword_op<'a>(expr: &'a str, keyword: &str) -> Option<(&'a str, &'a str)> {
+    let idx = find_keyword_outside_parens(expr, keyword)?;
+    let lhs = expr[..idx].trim();
+    let rhs = expr[idx + keyword.len()..].trim().trim_matches('"');
+    if !lhs.is_empty() && !rhs.is_empty() {
+        Some((lhs, rhs))
+    } else {
+        None
+    }
+}
+
+/// Evaluate a `matches` (regex) check.
+fn eval_matches(var_expr: &str, pattern: &str, vars: &HashMap<String, Value>) -> bool {
+    let val = resolve_var(var_expr, vars);
+    let haystack = match &val {
+        Some(Value::String(s)) => s.as_str().to_owned(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => return false,
+    };
+    match regex::Regex::new(pattern) {
+        Ok(re) => re.is_match(&haystack),
+        Err(_) => false,
+    }
+}
+
+/// Evaluate a `starts_with` check.
+fn eval_starts_with(var_expr: &str, prefix: &str, vars: &HashMap<String, Value>) -> bool {
+    let val = resolve_var(var_expr, vars);
+    match &val {
+        Some(Value::String(s)) => s.starts_with(prefix),
+        _ => false,
+    }
+}
+
+/// Evaluate an `ends_with` check.
+fn eval_ends_with(var_expr: &str, suffix: &str, vars: &HashMap<String, Value>) -> bool {
+    let val = resolve_var(var_expr, vars);
+    match &val {
+        Some(Value::String(s)) => s.ends_with(suffix),
+        _ => false,
+    }
+}
 ///
 /// Supports paths like:
 /// - `result.status` — nested object access
@@ -1983,6 +2043,97 @@ mod tests {
         ));
         assert!(default_evaluate_condition(
             "tags contains \"python\" || status == active",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn dollar_prefix_variable_resolution() {
+        let vars = HashMap::from([
+            ("status".to_string(), json!("ok")),
+            ("count".to_string(), json!(42)),
+            ("result".to_string(), json!({"code": 200})),
+        ]);
+
+        // $variable resolves to same as bare variable
+        assert!(default_evaluate_condition("$status == ok", &vars));
+        assert!(!default_evaluate_condition("$status == error", &vars));
+        assert!(default_evaluate_condition("$count == 42", &vars));
+        assert!(default_evaluate_condition("$count > 10", &vars));
+        // Truthy check with $prefix
+        assert!(default_evaluate_condition("$status", &vars));
+        assert!(!default_evaluate_condition("$nonexistent", &vars));
+        // Dotted access with $prefix
+        assert!(default_evaluate_condition("$result.code == 200", &vars));
+    }
+
+    #[test]
+    fn matches_operator_regex() {
+        let vars = HashMap::from([
+            ("email".to_string(), json!("user@example.com")),
+            ("version".to_string(), json!("2.14.3")),
+            ("name".to_string(), json!("hello-world")),
+        ]);
+
+        // Basic regex match
+        assert!(default_evaluate_condition(r#"email matches ".*@example\.com""#, &vars));
+        assert!(!default_evaluate_condition(r#"email matches ".*@other\.com""#, &vars));
+        // Version pattern
+        assert!(default_evaluate_condition(r#"version matches "^\d+\.\d+\.\d+$""#, &vars));
+        // Character class
+        assert!(default_evaluate_condition(r#"name matches "^[a-z-]+$""#, &vars));
+        // Invalid regex returns false (no panic)
+        assert!(!default_evaluate_condition(r#"name matches "[invalid""#, &vars));
+    }
+
+    #[test]
+    fn starts_with_operator() {
+        let vars = HashMap::from([
+            ("path".to_string(), json!("/api/v2/users")),
+            ("status".to_string(), json!("error_timeout")),
+        ]);
+
+        assert!(default_evaluate_condition(r#"path starts_with "/api/v2""#, &vars));
+        assert!(!default_evaluate_condition(r#"path starts_with "/admin""#, &vars));
+        assert!(default_evaluate_condition(r#"status starts_with "error""#, &vars));
+    }
+
+    #[test]
+    fn ends_with_operator() {
+        let vars = HashMap::from([
+            ("filename".to_string(), json!("report.pdf")),
+            ("url".to_string(), json!("https://example.com/api")),
+        ]);
+
+        assert!(default_evaluate_condition(r#"filename ends_with ".pdf""#, &vars));
+        assert!(!default_evaluate_condition(r#"filename ends_with ".txt""#, &vars));
+        assert!(default_evaluate_condition(r#"url ends_with "/api""#, &vars));
+    }
+
+    #[test]
+    fn combined_new_operators_with_logic() {
+        let vars = HashMap::from([
+            ("path".to_string(), json!("/api/v2/users")),
+            ("method".to_string(), json!("POST")),
+            ("tags".to_string(), json!(["auth", "rate-limited"])),
+        ]);
+
+        // Combined with && and ||
+        assert!(default_evaluate_condition(
+            r#"path starts_with "/api" && method == POST"#,
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            r#"path ends_with "/users" || method == GET"#,
+            &vars
+        ));
+        // $prefix with new operators
+        assert!(default_evaluate_condition(
+            r#"$path starts_with "/api""#,
+            &vars
+        ));
+        assert!(default_evaluate_condition(
+            r#"$tags contains "auth" && $method == POST"#,
             &vars
         ));
     }
