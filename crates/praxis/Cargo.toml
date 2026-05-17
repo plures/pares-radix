@@ -19,6 +19,7 @@ pest_derive = "2"
 notify = "8"
 walkdir = "2"
 tracing = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
 futures = "0.3"

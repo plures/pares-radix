@@ -452,17 +452,23 @@ async fn execute_try_async(
     })
 }
 
-/// Execute a `parallel` step asynchronously with true concurrent execution.
+/// Execute a `parallel` step with true concurrent execution via `futures::future::join_all`.
 ///
-/// Each branch runs as a separate tokio task with its own copy of the
-/// variable bindings. Results are collected into a map keyed by branch name.
+/// Each branch runs as a concurrent future with its own isolated copy of the
+/// variable bindings. The handler is shared immutably (`&dyn AsyncActionHandler`
+/// is `Send + Sync`). Results are collected into a map keyed by branch name.
 /// All branches must complete (or fail) before the step returns.
+///
+/// This achieves real concurrency without requiring `'static` bounds — all
+/// futures share the parent task's lifetime through the borrowed handler.
 async fn execute_parallel_async(
     step: &Value,
     index: usize,
     vars: &mut HashMap<String, Value>,
     handler: &dyn AsyncActionHandler,
 ) -> Result<StepResult, ExecutionError> {
+    use futures::future::join_all;
+
     let branches = step
         .get("branches")
         .and_then(|v| v.as_array())
@@ -472,55 +478,59 @@ async fn execute_parallel_async(
 
     let output_var = step.get("output_var").and_then(|v| v.as_str());
 
-    // Build futures for each branch
-    let mut branch_futures = Vec::new();
+    // Build concurrent futures for each branch.
+    // Each branch gets its own vars clone (isolation) but shares the handler reference.
+    let branch_futs: Vec<_> = branches
+        .iter()
+        .map(|branch| {
+            let branch_name = branch
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unnamed")
+                .to_string();
 
-    for branch in branches {
-        let branch_name = branch
-            .get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                ExecutionError::InvalidStructure("parallel branch missing 'name'".into())
-            })?
-            .to_string();
+            let branch_steps = branch
+                .get("steps")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
 
-        let branch_steps = branch
-            .get("steps")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| {
-                ExecutionError::InvalidStructure("parallel branch missing 'steps'".into())
-            })?
-            .clone();
+            let mut branch_vars = vars.clone();
 
-        let branch_vars = vars.clone();
+            async move {
+                // Validate structure
+                if branch.get("name").and_then(|v| v.as_str()).is_none() {
+                    return Err(ExecutionError::InvalidStructure(
+                        "parallel branch missing 'name'".into(),
+                    ));
+                }
+                if branch.get("steps").and_then(|v| v.as_array()).is_none() {
+                    return Err(ExecutionError::InvalidStructure(
+                        "parallel branch missing 'steps'".into(),
+                    ));
+                }
 
-        branch_futures.push((branch_name, branch_steps, branch_vars));
-    }
-
-    // Execute all branches concurrently using join_all.
-    // We can't spawn tasks because the handler reference isn't 'static,
-    // but we can use futures concurrently via join_all with async blocks.
-    let mut results_map = serde_json::Map::new();
-
-    // For true parallelism with a non-'static handler, we execute branches
-    // concurrently using a FuturesUnordered-like pattern.
-    // However since execute_step_async borrows vars mutably, we run each
-    // branch with its own isolated vars sequentially but truly concurrently
-    // would require Send + 'static bounds we don't have here.
-    // Compromise: run branches sequentially in async context (still respects
-    // async I/O within each branch). True concurrency is achieved at the
-    // async_executor stress test level via the concurrent procedure spawning.
-    for (branch_name, branch_steps, mut branch_vars) in branch_futures {
-        let mut last_output = Value::Null;
-
-        for (i, nested) in branch_steps.iter().enumerate() {
-            let result = execute_step_async(nested, i, &mut branch_vars, handler).await?;
-            if let Some(output) = result.output {
-                last_output = output;
+                let mut last_output = Value::Null;
+                for (i, nested) in branch_steps.iter().enumerate() {
+                    let result =
+                        execute_step_async(nested, i, &mut branch_vars, handler).await?;
+                    if let Some(output) = result.output {
+                        last_output = output;
+                    }
+                }
+                Ok((branch_name, last_output))
             }
-        }
+        })
+        .collect();
 
-        results_map.insert(branch_name, last_output);
+    // Execute all branches concurrently — true parallelism for async I/O.
+    let branch_results = join_all(branch_futs).await;
+
+    // Collect results, propagating the first error.
+    let mut results_map = serde_json::Map::new();
+    for result in branch_results {
+        let (name, output) = result?;
+        results_map.insert(name, output);
     }
 
     let output = Value::Object(results_map);
@@ -887,6 +897,108 @@ mod tests {
         // pipeline_a: last output is step2's result
         assert_eq!(results["pipeline_a"], json!("s2"));
         assert_eq!(results["pipeline_b"], json!("s3"));
+    }
+
+    /// Proves that parallel branches execute concurrently (not sequentially).
+    /// If branches ran sequentially, 3 branches each sleeping 100ms would take ~300ms.
+    /// With true concurrency via join_all, they complete in ~100ms.
+    #[tokio::test]
+    async fn parallel_branches_run_concurrently() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        struct TimedHandler {
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for TimedHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                self.call_count.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                Ok(json!("done"))
+            }
+        }
+
+        let handler = TimedHandler {
+            call_count: AtomicUsize::new(0),
+        };
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "concurrency_proof",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        { "name": "a", "steps": [{ "kind": "call", "name": "slow", "params": {} }] },
+                        { "name": "b", "steps": [{ "kind": "call", "name": "slow", "params": {} }] },
+                        { "name": "c", "steps": [{ "kind": "call", "name": "slow", "params": {} }] }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        let start = Instant::now();
+        let result = execute_async(&procedure, &handler).await.unwrap();
+        let elapsed = start.elapsed();
+
+        assert!(result.success);
+        assert_eq!(handler.call_count.load(Ordering::SeqCst), 3);
+
+        // If sequential: ~300ms. If concurrent: ~100ms.
+        // Allow generous margin (200ms) but reject sequential timing.
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "parallel branches took {:?} — expected < 200ms for concurrent execution",
+            elapsed
+        );
+    }
+
+    /// Verifies that a failing branch in parallel propagates its error.
+    #[tokio::test]
+    async fn parallel_branch_error_propagates() {
+        struct FailOnB;
+
+        #[async_trait]
+        impl AsyncActionHandler for FailOnB {
+            async fn call(&self, name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                if name == "fail" {
+                    Err(ExecutionError::ActionFailed {
+                        action: "fail".into(),
+                        message: "intentional failure".into(),
+                    })
+                } else {
+                    Ok(json!("ok"))
+                }
+            }
+        }
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "error_test",
+            "steps": [
+                {
+                    "kind": "parallel",
+                    "branches": [
+                        { "name": "good", "steps": [{ "kind": "call", "name": "ok_action", "params": {} }] },
+                        { "name": "bad", "steps": [{ "kind": "call", "name": "fail", "params": {} }] }
+                    ],
+                    "output_var": "results"
+                }
+            ]
+        });
+
+        let result = execute_async(&procedure, &FailOnB).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ExecutionError::ActionFailed { action, message } => {
+                assert_eq!(action, "fail");
+                assert!(message.contains("intentional"));
+            }
+            other => panic!("expected ActionFailed, got: {:?}", other),
+        }
     }
 
     #[tokio::test]
