@@ -1,0 +1,25 @@
+# array_workflow.px — Tests bracket-indexing-aware constraints
+#
+# Facts define schemas; the actual data is provided at evaluation time.
+# Bracket indexing is evaluated against runtime JSON vars.
+
+fact deployment_targets:
+  environments: list[string]
+
+constraint first_env_healthy:
+  when: deployment_targets.environments[0].healthy == true
+  require: deployment_targets.environments[0].name != ""
+  severity: error
+  message: "First environment must have a name when healthy"
+
+constraint prod_replica_minimum:
+  when: deployment_targets.environments[2].name == "production"
+  require: deployment_targets.environments[2].replicas >= 3
+  severity: error
+  message: "Production must have at least 3 replicas"
+
+procedure deploy_check:
+  trigger: manual
+  when deployment_targets.environments[0].healthy:
+    emit {event: "deploy_ok", target: "dev"}
+  end

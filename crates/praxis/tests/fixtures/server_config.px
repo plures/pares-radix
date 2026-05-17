@@ -1,0 +1,11 @@
+# server_config.px — Tests bracket-key access in constraints
+
+fact config:
+  servers: list[string]
+  name: string
+
+constraint primary_server_port:
+  when: config.servers[0].port > 0
+  require: config.servers[0].host != ""
+  severity: error
+  message: "Primary server must have a hostname"

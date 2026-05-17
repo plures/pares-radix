@@ -111,7 +111,8 @@ comp_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
 term = { not_expr | call_expr | dotted_ident | value | "(" ~ expr ~ ")" }
 not_expr = { "NOT" ~ term }
 call_expr = { ident ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
-dotted_ident = @{ ident ~ ("." ~ ident)* }
+dotted_ident = @{ ident ~ (("." ~ ident) | bracket_segment)* }
+bracket_segment = @{ "[" ~ (ASCII_DIGIT+ | ("\"" ~ (!"\"" ~ ANY)* ~ "\"") | ("'" ~ (!("'") ~ ANY)* ~ "'")) ~ "]" }
 
 // === Values ===
 value = { string | float | integer | boolean | list_val | map_val | var_ref | ident }
