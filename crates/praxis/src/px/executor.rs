@@ -1169,6 +1169,11 @@ fn to_kebab_case(s: &str) -> String {
 
 /// Attempt to evaluate simple arithmetic: `var + N` or `var - N`
 fn try_arithmetic_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Try match expression: match var { "a" => expr1, "b" => expr2, _ => default }
+    if let Some(result) = try_match_expr(expr, vars) {
+        return Some(result);
+    }
+
     // Try ternary: condition ? trueVal : falseVal
     if let Some(result) = try_ternary_expr(expr, vars) {
         return Some(result);
@@ -1239,6 +1244,152 @@ fn format_numeric_result(result: f64) -> String {
     } else {
         result.to_string()
     }
+}
+
+/// Try to evaluate a match expression: `match expr { "val1" => result1, "val2" => result2, _ => default }`
+///
+/// Provides inline pattern matching similar to Rust's match.
+/// Arms are separated by commas. The wildcard `_` matches anything.
+/// Values and results can be quoted strings, numbers, variables, or booleans.
+fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
+    // Must start with `match `
+    let trimmed = expr.trim();
+    if !trimmed.starts_with("match ") {
+        return None;
+    }
+
+    // Find the opening `{`
+    let brace_start = trimmed.find('{')?;
+    let subject_str = trimmed[6..brace_start].trim(); // between "match " and "{"
+
+    // Find the closing `}` — track nesting
+    let inner = &trimmed[brace_start + 1..];
+    let brace_end = find_matching_brace(inner)?;
+    let arms_str = inner[..brace_end].trim();
+
+    // Resolve the subject value
+    let subject_val = if (subject_str.starts_with('"') && subject_str.ends_with('"'))
+        || (subject_str.starts_with('\'') && subject_str.ends_with('\''))
+    {
+        subject_str[1..subject_str.len() - 1].to_string()
+    } else if let Some(val) = resolve_var(subject_str, vars) {
+        value_to_interpolation_string(&val)
+    } else {
+        subject_str.to_string()
+    };
+
+    // Parse arms: split by top-level commas
+    let arms = split_match_arms(arms_str);
+    let mut default_result: Option<String> = None;
+
+    for arm in &arms {
+        let arm = arm.trim();
+        if arm.is_empty() {
+            continue;
+        }
+
+        // Split on `=>`
+        let arrow_idx = arm.find("=>")?;
+        let pattern = arm[..arrow_idx].trim();
+        let result_expr = arm[arrow_idx + 2..].trim();
+
+        if pattern == "_" {
+            default_result = Some(resolve_match_result(result_expr, vars));
+            continue;
+        }
+
+        // Pattern can be a quoted string, number, or variable
+        let pattern_val = if (pattern.starts_with('"') && pattern.ends_with('"'))
+            || (pattern.starts_with('\'') && pattern.ends_with('\''))
+        {
+            pattern[1..pattern.len() - 1].to_string()
+        } else if let Some(val) = resolve_var(pattern, vars) {
+            value_to_interpolation_string(&val)
+        } else {
+            pattern.to_string()
+        };
+
+        if subject_val == pattern_val {
+            return Some(resolve_match_result(result_expr, vars));
+        }
+    }
+
+    // No arm matched — use default or return None
+    default_result
+}
+
+/// Split match arms by top-level commas (respecting braces and quotes)
+fn split_match_arms(s: &str) -> Vec<&str> {
+    let mut arms = Vec::new();
+    let mut depth = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut start = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '{' if !in_double && !in_single => depth += 1,
+            '}' if !in_double && !in_single => depth -= 1,
+            ',' if !in_double && !in_single && depth == 0 => {
+                arms.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < s.len() {
+        arms.push(&s[start..]);
+    }
+    arms
+}
+
+/// Find the matching closing `}` from position 0, tracking nesting
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut in_double = false;
+    let mut in_single = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '{' if !in_double && !in_single => depth += 1,
+            '}' if !in_double && !in_single => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Resolve a match arm result: could be a quoted string, variable, number, or nested expression
+fn resolve_match_result(expr: &str, vars: &HashMap<String, Value>) -> String {
+    let expr = expr.trim();
+
+    // Quoted string
+    if (expr.starts_with('"') && expr.ends_with('"'))
+        || (expr.starts_with('\'') && expr.ends_with('\''))
+    {
+        return expr[1..expr.len() - 1].to_string();
+    }
+
+    // Variable reference
+    if let Some(val) = resolve_var(expr, vars) {
+        return value_to_interpolation_string(&val);
+    }
+
+    // Try nested arithmetic/ternary
+    if let Some(val) = try_arithmetic_expr(expr, vars) {
+        return val;
+    }
+
+    // Return as literal
+    expr.to_string()
 }
 
 /// Try to evaluate a ternary expression: `condition ? trueExpr : falseExpr`
@@ -5176,5 +5327,115 @@ mod tests {
             r#"one_of(event_type, "push", "pull_request", "release")"#,
             &vars
         ));
+    }
+
+    // === Match Expression Tests ===
+
+    #[test]
+    fn test_match_expr_string_match() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        let result = try_match_expr(
+            r#"match status { "active" => "green", "inactive" => "red", _ => "grey" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("green".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_second_arm() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("inactive"));
+        let result = try_match_expr(
+            r#"match status { "active" => "green", "inactive" => "red", _ => "grey" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("red".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_default_arm() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("unknown"));
+        let result = try_match_expr(
+            r#"match status { "active" => "green", "inactive" => "red", _ => "grey" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("grey".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_no_default_no_match() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("unknown"));
+        let result = try_match_expr(
+            r#"match status { "active" => "green", "inactive" => "red" }"#,
+            &vars,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_match_expr_numeric_patterns() {
+        let mut vars = HashMap::new();
+        vars.insert("level".to_string(), json!("3"));
+        let result = try_match_expr(
+            r#"match level { "1" => "low", "2" => "medium", "3" => "high", _ => "unknown" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_variable_result() {
+        let mut vars = HashMap::new();
+        vars.insert("mode".to_string(), json!("prod"));
+        vars.insert("prod_url".to_string(), json!("https://api.prod.com"));
+        let result = try_match_expr(
+            r#"match mode { "prod" => prod_url, "dev" => "http://localhost", _ => "" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("https://api.prod.com".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_in_interpolation() {
+        let mut vars = HashMap::new();
+        vars.insert("env".to_string(), json!("staging"));
+        let result = resolve_interpolation_expr(
+            r#"match env { "prod" => "production", "staging" => "stage", _ => "dev" }"#,
+            &vars,
+        );
+        assert_eq!(result, "stage");
+    }
+
+    #[test]
+    fn test_match_expr_single_quotes() {
+        let mut vars = HashMap::new();
+        vars.insert("color".to_string(), json!("blue"));
+        let result = try_match_expr(
+            "match color { 'red' => 'stop', 'blue' => 'go', _ => 'wait' }",
+            &vars,
+        );
+        assert_eq!(result, Some("go".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_not_a_match() {
+        let vars = HashMap::new();
+        // Should return None for non-match expressions
+        let result = try_match_expr("status == \"active\"", &vars);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_match_expr_integer_subject() {
+        let mut vars = HashMap::new();
+        vars.insert("code".to_string(), json!(200));
+        let result = try_match_expr(
+            r#"match code { "200" => "ok", "404" => "not_found", "500" => "error", _ => "unknown" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("ok".to_string()));
     }
 }
