@@ -269,6 +269,7 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             over,
             times,
             item_var,
+            key_var,
             steps,
             output_var,
         } => {
@@ -282,6 +283,9 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             }
             if let Some(n) = times {
                 obj["times"] = json!(n);
+            }
+            if let Some(kv) = key_var {
+                obj["key_as"] = json!(kv);
             }
             if let Some(out) = output_var {
                 obj["output_var"] = json!(out);

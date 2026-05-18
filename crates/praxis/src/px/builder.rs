@@ -714,6 +714,7 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
                 over,
                 times,
                 item_var,
+                key_var: None,
                 steps,
                 output_var,
             }

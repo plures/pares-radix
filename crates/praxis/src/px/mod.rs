@@ -165,6 +165,8 @@ pub enum PxStep {
         times: Option<u64>,
         /// Variable name for the current item (default: "item").
         item_var: String,
+        /// Variable name for the current key during map iteration (default: "key").
+        key_var: Option<String>,
         /// Nested steps executed per iteration.
         steps: Vec<PxStep>,
         /// Optional variable to collect results into.
@@ -386,6 +388,7 @@ constraint deploy_gate:
                 over,
                 times,
                 item_var,
+                key_var: _,
                 steps,
                 output_var,
             } => {
