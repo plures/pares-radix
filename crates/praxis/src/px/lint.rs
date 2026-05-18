@@ -75,6 +75,9 @@ fn lint_procedure(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
 
     // L005: Unused output variables (procedure-level analysis)
     lint_unused_output_vars(proc, diags);
+
+    // L008: Shadowed output variables (same name bound by multiple steps)
+    lint_shadowed_output_vars(proc, diags);
 }
 
 /// Lint a single step (recursing into nested structures).
@@ -410,6 +413,34 @@ fn lint_match_unreachable(
         }
         if cond == "_" || cond.starts_with("_ ") {
             wildcard_seen = true;
+        }
+    }
+}
+
+/// PX-L008: Shadowed output variables — multiple steps bind to the same output_var name.
+///
+/// The later binding overwrites the earlier one, making the first call's output
+/// inaccessible. This is usually a copy-paste bug.
+fn lint_shadowed_output_vars(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+
+    for (idx, step) in proc.steps.iter().enumerate() {
+        if let Some(var) = step_output_var(step) {
+            if let Some(&first_idx) = seen.get(var) {
+                diags.push(LintDiagnostic {
+                    code: "PX-L008",
+                    message: format!(
+                        "output variable `${}` is already bound by step {} — this binding shadows it",
+                        var,
+                        first_idx + 1
+                    ),
+                    severity: LintSeverity::Warning,
+                    procedure: Some(proc.name.clone()),
+                    step_index: Some(idx),
+                });
+            } else {
+                seen.insert(var, idx);
+            }
         }
     }
 }
@@ -916,5 +947,85 @@ mod tests {
 
         let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L007").collect();
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l008_shadowed_output_var() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "fetch_data".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("result".to_string()),
+                },
+                PxStep::Call {
+                    name: "transform_data".to_string(),
+                    params: serde_json::json!({"input": "$result"}),
+                    output_var: Some("result".to_string()),
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L008").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$result"));
+        assert!(diags[0].message.contains("step 1"));
+        assert_eq!(diags[0].step_index, Some(1));
+    }
+
+    #[test]
+    fn l008_no_warning_for_unique_output_vars() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "fetch_data".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("data".to_string()),
+                },
+                PxStep::Call {
+                    name: "transform".to_string(),
+                    params: serde_json::json!({"input": "$data"}),
+                    output_var: Some("transformed".to_string()),
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L008").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l008_multiple_shadows() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "step1".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("x".to_string()),
+                },
+                PxStep::Call {
+                    name: "step2".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("x".to_string()),
+                },
+                PxStep::Call {
+                    name: "step3".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("x".to_string()),
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L008").collect();
+        // Two shadows: step 2 shadows step 1, step 3 shadows step 1
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].step_index, Some(1));
+        assert_eq!(diags[1].step_index, Some(2));
     }
 }
