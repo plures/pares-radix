@@ -319,7 +319,7 @@ pub fn run_scenario(
     }
 
     // 2. Execute the run procedure (if specified)
-    if let Some(run_info) = scenario_data.get("run") {
+    if let Some(run_info) = scenario_data.get("run").filter(|v| !v.is_null()) {
         let proc_name = if let Some(name_str) = run_info.as_str() {
             name_str.to_string()
         } else if let Some(n) = run_info.get("procedure").and_then(|v| v.as_str()) {
