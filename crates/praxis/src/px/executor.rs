@@ -315,6 +315,10 @@ fn execute_match_subject(
             if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
                 return tuple_match;
             }
+            // Struct pattern: {kind: "error", code: 500}
+            if let Some(struct_match) = try_struct_pattern(alt, &subject_raw, vars) {
+                return struct_match;
+            }
             // Range pattern
             if let Some(range_match) = try_range_pattern(alt, &subject_val) {
                 return range_match;
@@ -1454,6 +1458,10 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
             if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
                 return tuple_match;
             }
+            // Struct pattern: {kind: "error", code: 500}
+            if let Some(struct_match) = try_struct_pattern(alt, &subject_raw, vars) {
+                return struct_match;
+            }
             // Range pattern: 1..5 (exclusive end) or 1..=5 (inclusive end)
             if let Some(range_match) = try_range_pattern(alt, &subject_val) {
                 return range_match;
@@ -1679,6 +1687,203 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
     }
 
     Some(true)
+}
+
+/// Try to match a struct pattern like `{kind: "error", code: 500}` against a JSON object subject.
+/// Returns `Some(true)` if the pattern matches, `Some(false)` if it's a valid struct pattern
+/// that doesn't match, or `None` if the pattern is not a struct pattern.
+///
+/// Field matching rules:
+/// - `_` is a wildcard (matches any value for that field)
+/// - Quoted strings compare as strings
+/// - Numbers compare as numbers
+/// - Booleans and null compare as their types
+/// - Variables (`$name` or bare `ident` starting with `$`) are resolved from vars
+/// - The pattern does NOT require exhaustive fields — unmentioned fields are ignored
+/// - All mentioned fields must exist in the subject and match their patterns
+fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<bool> {
+    let trimmed = pattern.trim();
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
+        return None;
+    }
+
+    // Extract the subject as a JSON object
+    let subject_obj = match subject_val {
+        Value::Object(obj) => obj,
+        _ => return Some(false), // Struct pattern against non-object = no match
+    };
+
+    // Parse the field patterns (split by top-level commas within the braces)
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let inner_trimmed = inner.trim();
+    if inner_trimmed.is_empty() {
+        // Empty struct pattern `{}` matches any object
+        return Some(true);
+    }
+
+    let fields = split_struct_fields(inner);
+
+    // Check each field pattern against the subject
+    for field_pat in &fields {
+        let field_pat = field_pat.trim();
+        if field_pat.is_empty() {
+            continue;
+        }
+
+        // Split on first `:` to get field_name: value_pattern
+        let colon_idx = match find_field_colon(field_pat) {
+            Some(idx) => idx,
+            None => {
+                // No colon — could be a shorthand like `{active}` meaning field must exist and be truthy
+                // For now, check field exists in subject
+                let field_name = field_pat.trim();
+                if !subject_obj.contains_key(field_name) {
+                    return Some(false);
+                }
+                continue;
+            }
+        };
+
+        let field_name = field_pat[..colon_idx].trim();
+        let value_pattern = field_pat[colon_idx + 1..].trim();
+
+        // Look up the field in the subject
+        let subject_field = match subject_obj.get(field_name) {
+            Some(val) => val,
+            None => return Some(false), // Required field missing
+        };
+
+        // Match the value pattern against the subject field
+        if !struct_field_matches(value_pattern, subject_field, vars) {
+            return Some(false);
+        }
+    }
+
+    Some(true)
+}
+
+/// Check if a single struct field value matches the expected pattern.
+fn struct_field_matches(pattern: &str, subject: &Value, vars: &HashMap<String, Value>) -> bool {
+    let pat = pattern.trim();
+
+    // Wildcard
+    if pat == "_" {
+        return true;
+    }
+
+    // Quoted string
+    if (pat.starts_with('"') && pat.ends_with('"'))
+        || (pat.starts_with('\'') && pat.ends_with('\''))
+    {
+        let pat_str = &pat[1..pat.len() - 1];
+        return matches!(subject, Value::String(s) if s == pat_str);
+    }
+
+    // Boolean
+    if pat == "true" {
+        return subject == &Value::Bool(true);
+    }
+    if pat == "false" {
+        return subject == &Value::Bool(false);
+    }
+
+    // Null
+    if pat == "null" {
+        return subject.is_null();
+    }
+
+    // Nested struct pattern
+    if pat.starts_with('{') && pat.ends_with('}') {
+        if let Some(result) = try_struct_pattern(pat, subject, vars) {
+            return result;
+        }
+    }
+
+    // Nested tuple pattern
+    if pat.starts_with('(') && pat.ends_with(')') {
+        if let Some(result) = try_tuple_pattern(pat, subject, vars) {
+            return result;
+        }
+    }
+
+    // Number
+    if let Ok(n) = pat.parse::<f64>() {
+        if let Some(sv) = subject.as_f64() {
+            return (sv - n).abs() < f64::EPSILON;
+        }
+        return false;
+    }
+
+    // Variable reference ($name)
+    if let Some(resolved) = resolve_var(pat, vars) {
+        let subject_str = value_to_interpolation_string(subject);
+        let resolved_str = value_to_interpolation_string(&resolved);
+        return subject_str == resolved_str;
+    }
+
+    // Bare string comparison (unquoted literal)
+    let subject_str = value_to_interpolation_string(subject);
+    subject_str == pat
+}
+
+/// Split struct fields by top-level commas (respecting nested braces, parens, and quotes).
+fn split_struct_fields(s: &str) -> Vec<&str> {
+    let mut elements = Vec::new();
+    let mut brace_depth = 0;
+    let mut paren_depth = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut start = 0;
+    let bytes = s.as_bytes();
+
+    for i in 0..bytes.len() {
+        match bytes[i] {
+            b'"' if !in_single => in_double = !in_double,
+            b'\'' if !in_double => in_single = !in_single,
+            b'{' if !in_double && !in_single => brace_depth += 1,
+            b'}' if !in_double && !in_single => brace_depth -= 1,
+            b'(' if !in_double && !in_single => paren_depth += 1,
+            b')' if !in_double && !in_single => paren_depth -= 1,
+            b',' if !in_double && !in_single && brace_depth == 0 && paren_depth == 0 => {
+                elements.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        let last = s[start..].trim();
+        if !last.is_empty() {
+            elements.push(&s[start..]);
+        }
+    }
+    elements
+}
+
+/// Find the first colon in a field pattern that separates field name from value pattern.
+/// Respects nested structures and quotes.
+fn find_field_colon(s: &str) -> Option<usize> {
+    let mut brace_depth = 0;
+    let mut paren_depth = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+    let bytes = s.as_bytes();
+
+    for (i, &byte) in bytes.iter().enumerate() {
+        match byte {
+            b'"' if !in_single => in_double = !in_double,
+            b'\'' if !in_double => in_single = !in_single,
+            b'{' if !in_double && !in_single => brace_depth += 1,
+            b'}' if !in_double && !in_single => brace_depth -= 1,
+            b'(' if !in_double && !in_single => paren_depth += 1,
+            b')' if !in_double && !in_single => paren_depth -= 1,
+            b':' if !in_double && !in_single && brace_depth == 0 && paren_depth == 0 => {
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Split tuple elements by top-level commas (respecting nested parens and quotes).
@@ -6578,5 +6783,135 @@ mod tests {
         let expr = r#"match $triple { ("deploy", "prod", 3) => "full_prod", ("deploy", "staging", _) => "staging", _ => "other" }"#;
         let result = try_match_expr(expr, &vars);
         assert_eq!(result, Some("full_prod".to_string()));
+    }
+
+    // ── Struct Destructuring Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_struct_pattern_basic_match() {
+        let subject = json!({"kind": "error", "code": 500});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_struct_pattern_no_match() {
+        let subject = json!({"kind": "error", "code": 404});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_wildcard() {
+        let subject = json!({"kind": "error", "code": 500, "msg": "internal"});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: _}"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_struct_pattern_missing_field() {
+        let subject = json!({"kind": "error"});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_partial_match() {
+        // Pattern doesn't need to cover all fields
+        let subject = json!({"kind": "error", "code": 500, "msg": "internal", "retryable": true});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_struct_pattern_empty() {
+        // Empty struct pattern matches any object
+        let subject = json!({"anything": 42});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern("{}", &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_struct_pattern_not_an_object() {
+        let subject = json!([1, 2, 3]);
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_not_a_struct_pattern() {
+        let subject = json!({"kind": "error"});
+        let vars = HashMap::new();
+        // A quoted string is not a struct pattern
+        assert_eq!(try_struct_pattern(r#""hello""#, &subject, &vars), None);
+    }
+
+    #[test]
+    fn test_struct_pattern_boolean_and_null() {
+        let subject = json!({"active": true, "deleted": null});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern("{active: true, deleted: null}", &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern("{active: false}", &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_variable() {
+        let subject = json!({"status": "active"});
+        let mut vars = HashMap::new();
+        vars.insert("expected_status".into(), Value::String("active".into()));
+        assert_eq!(try_struct_pattern("{status: $expected_status}", &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_struct_pattern_nested_struct() {
+        let subject = json!({"outer": {"inner": "deep"}});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern(r#"{outer: {inner: "deep"}}"#, &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern(r#"{outer: {inner: "wrong"}}"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_nested_tuple() {
+        let subject = json!({"coords": [1, 2]});
+        let vars = HashMap::new();
+        assert_eq!(try_struct_pattern("{coords: (1, 2)}", &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern("{coords: (1, 9)}", &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_struct_pattern_in_match_expr() {
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500}));
+        let expr = r#"match $event { {kind: "error", code: 500} => "server_error", {kind: "error", code: 404} => "not_found", _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("server_error".to_string()));
+    }
+
+    #[test]
+    fn test_struct_pattern_in_match_expr_second_arm() {
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 404}));
+        let expr = r#"match $event { {kind: "error", code: 500} => "server_error", {kind: "error", code: 404} => "not_found", _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("not_found".to_string()));
+    }
+
+    #[test]
+    fn test_struct_pattern_in_match_expr_default() {
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "info", "msg": "hello"}));
+        let expr = r#"match $event { {kind: "error", code: 500} => "server_error", _ => "other" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("other".to_string()));
+    }
+
+    #[test]
+    fn test_struct_pattern_with_guard() {
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500, "retryable": true}));
+        vars.insert("should_retry".into(), Value::Bool(true));
+        let expr = r#"match $event { {kind: "error"} if $should_retry => "retry", {kind: "error"} => "fail", _ => "ok" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("retry".to_string()));
     }
 }
