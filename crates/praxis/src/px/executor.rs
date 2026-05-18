@@ -282,12 +282,21 @@ fn execute_match_subject(
     };
 
     for arm in arms {
-        let pattern = arm
+        let raw_pattern = arm
             .get("pattern")
             .and_then(|v| v.as_str())
             .unwrap_or("_");
 
+        // Extract optional guard: `"active" if score > 50` → ("active", Some("score > 50"))
+        let (pattern, guard) = extract_guard(raw_pattern);
+
         if pattern == "_" {
+            // Default arm: check guard if present
+            if let Some(guard_expr) = guard {
+                if !default_evaluate_condition(guard_expr, vars) {
+                    continue;
+                }
+            }
             let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
             return Ok(StepResult {
                 index,
@@ -318,6 +327,12 @@ fn execute_match_subject(
         });
 
         if matched {
+            // If there's a guard, evaluate it
+            if let Some(guard_expr) = guard {
+                if !default_evaluate_condition(guard_expr, vars) {
+                    continue; // Pattern matched but guard failed
+                }
+            }
             let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
             return Ok(StepResult {
                 index,
@@ -1374,10 +1389,19 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
 
         // Split on `=>`
         let arrow_idx = arm.find("=>")?;
-        let pattern = arm[..arrow_idx].trim();
+        let pattern_with_guard = arm[..arrow_idx].trim();
         let result_expr = arm[arrow_idx + 2..].trim();
 
+        // Extract optional guard: `pattern if condition` → (pattern, Some(condition))
+        let (pattern, guard) = extract_guard(pattern_with_guard);
+
         if pattern == "_" {
+            // Default arm: guard still applies if present
+            if let Some(guard_expr) = &guard {
+                if !default_evaluate_condition(guard_expr, vars) {
+                    continue;
+                }
+            }
             default_result = Some(resolve_match_result(result_expr, vars));
             continue;
         }
@@ -1403,12 +1427,46 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
         });
 
         if matched {
+            // If there's a guard, evaluate it — only match if guard passes
+            if let Some(guard_expr) = &guard {
+                if !default_evaluate_condition(guard_expr, vars) {
+                    continue; // Pattern matched but guard failed, try next arm
+                }
+            }
             return Some(resolve_match_result(result_expr, vars));
         }
     }
 
     // No arm matched — use default or return None
     default_result
+}
+
+/// Extract an optional guard from a pattern string.
+/// `"active" if score > 50` → (`"active"`, Some("score > 50"))
+/// `"active"` → (`"active"`, None)
+/// Handles quoted strings: won't split on `if` inside quotes.
+fn extract_guard(pattern_with_guard: &str) -> (&str, Option<&str>) {
+    // Find ` if ` that's not inside quotes
+    let bytes = pattern_with_guard.as_bytes();
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' if !in_single => in_double = !in_double,
+            b'\'' if !in_double => in_single = !in_single,
+            b' ' if !in_double && !in_single && i + 3 < bytes.len() && bytes[i + 1] == b'i' && bytes[i + 2] == b'f' && bytes[i + 3] == b' ' => {
+                let pattern = pattern_with_guard[..i].trim();
+                let guard = pattern_with_guard[i + 4..].trim();
+                if !guard.is_empty() {
+                    return (pattern, Some(guard));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (pattern_with_guard, None)
 }
 
 /// Split multi-pattern alternatives by top-level `|` (respecting quotes)
@@ -5966,5 +6024,178 @@ mod tests {
         let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
         assert!(result.skipped);
         assert_eq!(result.output, None);
+    }
+
+    // ── Guard Patterns in Match Arms ─────────────────────────────────────────────
+
+    #[test]
+    fn test_match_guard_passes() {
+        // match x { "active" if score > 50 => "high", _ => "low" }
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("active"));
+        vars.insert("score".to_string(), json!(80));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "x",
+            "arms": [
+                { "pattern": "\"active\" if score > 50", "result": "high" },
+                { "pattern": "_", "result": "low" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("high")));
+    }
+
+    #[test]
+    fn test_match_guard_fails_falls_through() {
+        // match x { "active" if score > 50 => "high", "active" => "normal", _ => "low" }
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("active"));
+        vars.insert("score".to_string(), json!(30));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "x",
+            "arms": [
+                { "pattern": "\"active\" if score > 50", "result": "high" },
+                { "pattern": "\"active\"", "result": "normal" },
+                { "pattern": "_", "result": "low" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("normal")));
+    }
+
+    #[test]
+    fn test_match_guard_on_default_arm() {
+        // match x { _ if enabled == "true" => "on", _ => "off" }
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("anything"));
+        vars.insert("enabled".to_string(), json!("false"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "x",
+            "arms": [
+                { "pattern": "_ if enabled == \"true\"", "result": "on" },
+                { "pattern": "_", "result": "off" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("off")));
+    }
+
+    #[test]
+    fn test_match_guard_with_range_pattern() {
+        // match score { 1..=100 if premium == "true" => "vip", 1..=100 => "standard", _ => "invalid" }
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("score".to_string(), json!("75"));
+        vars.insert("premium".to_string(), json!("true"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "score",
+            "arms": [
+                { "pattern": "1..=100 if premium == \"true\"", "result": "vip" },
+                { "pattern": "1..=100", "result": "standard" },
+                { "pattern": "_", "result": "invalid" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("vip")));
+    }
+
+    #[test]
+    fn test_match_guard_with_multi_pattern() {
+        // match status { "active" | "pending" if role == "admin" => "allowed", _ => "denied" }
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("pending"));
+        vars.insert("role".to_string(), json!("admin"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "status",
+            "arms": [
+                { "pattern": "\"active\" | \"pending\" if role == \"admin\"", "result": "allowed" },
+                { "pattern": "_", "result": "denied" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("allowed")));
+    }
+
+    #[test]
+    fn test_match_guard_multi_pattern_guard_fails() {
+        // Pattern matches but guard fails → falls through
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        vars.insert("role".to_string(), json!("viewer"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "status",
+            "arms": [
+                { "pattern": "\"active\" | \"pending\" if role == \"admin\"", "result": "allowed" },
+                { "pattern": "_", "result": "denied" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("denied")));
+    }
+
+    #[test]
+    fn test_match_guard_no_false_positive_on_if_in_string() {
+        // Pattern with "if" inside a quoted string should NOT be treated as a guard
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("check if ready"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "x",
+            "arms": [
+                { "pattern": "\"check if ready\"", "result": "found" },
+                { "pattern": "_", "result": "not found" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(!result.skipped);
+        assert_eq!(result.output, Some(json!("found")));
+    }
+
+    #[test]
+    fn test_extract_guard_helper() {
+        // Direct unit tests for extract_guard
+        assert_eq!(extract_guard("\"active\""), ("\"active\"", None));
+        assert_eq!(
+            extract_guard("\"active\" if score > 50"),
+            ("\"active\"", Some("score > 50"))
+        );
+        assert_eq!(
+            extract_guard("_ if enabled == \"true\""),
+            ("_", Some("enabled == \"true\""))
+        );
+        // "if" inside quotes should NOT be detected as guard
+        assert_eq!(extract_guard("\"check if ready\""), ("\"check if ready\"", None));
     }
 }
