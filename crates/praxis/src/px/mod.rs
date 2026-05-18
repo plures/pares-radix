@@ -9,6 +9,7 @@ pub mod compose;
 pub mod executor;
 pub mod lint;
 pub mod resolver;
+pub mod scenario_runner;
 pub mod watcher;
 
 use pest::Parser;
@@ -30,6 +31,7 @@ pub struct PxDocument {
     pub functions: Vec<PxFunction>,
     pub triggers: Vec<PxTrigger>,
     pub procedures: Vec<PxProcedure>,
+    pub scenarios: Vec<PxScenario>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -232,6 +234,41 @@ pub struct PxParallelBranch {
     pub retry_max_delay_ms: Option<u64>,
     /// Whether to add jitter to retry delays.
     pub retry_jitter: Option<bool>,
+}
+
+/// A test scenario — setup, run a procedure, check expectations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxScenario {
+    /// Scenario name.
+    pub name: String,
+    /// Human-readable description of the precondition.
+    pub given: String,
+    /// Setup steps to populate state before execution.
+    pub setup: Vec<PxStep>,
+    /// Optional procedure to run after setup.
+    pub run: Option<PxScenarioRun>,
+    /// Expectations to verify after execution.
+    pub expectations: Vec<PxExpectation>,
+}
+
+/// Which procedure to execute in a scenario.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxScenarioRun {
+    /// Name of the procedure to invoke.
+    pub procedure: String,
+    /// Optional parameters to pass.
+    pub params: Option<serde_json::Value>,
+}
+
+/// A single expectation check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PxExpectation {
+    /// Whether this expectation is negated (NOT).
+    pub negated: bool,
+    /// The check function name (e.g. "has_entry", "event_emitted").
+    pub check: String,
+    /// Parameters for the check.
+    pub params: Option<serde_json::Value>,
 }
 
 /// Parse a .px source string into a document AST.
@@ -834,5 +871,94 @@ mod parse_step_tests {
             }
             other => panic!("expected Abort, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn parse_scenario_basic() {
+        let source = r#"
+scenario expired_entries_removed:
+  given: "Cache has expired entries"
+  setup:
+    put_entry {key: "old", ttl_secs: 1}
+    advance_time {secs: 10}
+  run: invalidate_expired
+  expect:
+    - NOT has_entry {key: "old"}
+    - has_entry {key: "fresh"}
+    - event_emitted {event: "cache.invalidated", key: "old"}
+"#;
+        let doc = parse(source).expect("failed to parse scenario");
+        assert_eq!(doc.scenarios.len(), 1);
+        let s = &doc.scenarios[0];
+        assert_eq!(s.name, "expired_entries_removed");
+        assert_eq!(s.given, "Cache has expired entries");
+        assert_eq!(s.setup.len(), 2);
+        assert!(s.run.is_some());
+        assert_eq!(s.run.as_ref().unwrap().procedure, "invalidate_expired");
+        assert_eq!(s.expectations.len(), 3);
+        assert!(s.expectations[0].negated);
+        assert_eq!(s.expectations[0].check, "has_entry");
+        assert!(!s.expectations[1].negated);
+        assert_eq!(s.expectations[1].check, "has_entry");
+        assert!(!s.expectations[2].negated);
+        assert_eq!(s.expectations[2].check, "event_emitted");
+    }
+
+    #[test]
+    fn parse_scenario_without_run() {
+        let source = r#"
+scenario negative_ttl_rejected:
+  given: "Attempting to create an entry with negative TTL"
+  setup:
+    put_entry {key: "bad", value: "x", ttl_secs: 0}
+  expect:
+    - constraint_violated {name: "ttl_positive"}
+"#;
+        let doc = parse(source).expect("failed to parse scenario without run");
+        assert_eq!(doc.scenarios.len(), 1);
+        let s = &doc.scenarios[0];
+        assert_eq!(s.name, "negative_ttl_rejected");
+        assert!(s.run.is_none());
+        assert_eq!(s.setup.len(), 1);
+        assert_eq!(s.expectations.len(), 1);
+        assert!(!s.expectations[0].negated);
+        assert_eq!(s.expectations[0].check, "constraint_violated");
+    }
+
+    #[test]
+    fn parse_scenario_without_setup() {
+        let source = r#"
+scenario simple_check:
+  given: "System is in default state"
+  run: check_health
+  expect:
+    - is_healthy {}
+"#;
+        let doc = parse(source).expect("failed to parse scenario without setup");
+        assert_eq!(doc.scenarios.len(), 1);
+        let s = &doc.scenarios[0];
+        assert_eq!(s.name, "simple_check");
+        assert!(s.setup.is_empty());
+        assert!(s.run.is_some());
+        assert_eq!(s.expectations.len(), 1);
+    }
+
+    #[test]
+    fn parse_document_with_scenario_and_constraint() {
+        let source = r#"
+constraint ttl_positive:
+  require: entry.ttl_secs > 0
+  severity: error
+
+scenario ttl_enforced:
+  given: "Testing TTL constraint"
+  setup:
+    put_entry {key: "test", ttl_secs: 5}
+  expect:
+    - NOT constraint_violated {name: "ttl_positive"}
+"#;
+        let doc = parse(source).expect("failed to parse mixed doc");
+        assert_eq!(doc.constraints.len(), 1);
+        assert_eq!(doc.scenarios.len(), 1);
     }
 }

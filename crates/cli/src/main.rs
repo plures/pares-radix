@@ -3135,6 +3135,26 @@ enum Commands {
         #[command(subcommand)]
         action: ConfigAction,
     },
+
+    /// Praxis .px file tools (check, test).
+    Px {
+        #[command(subcommand)]
+        action: PxAction,
+    },
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum PxAction {
+    /// Check .px files for syntax errors.
+    Check {
+        /// .px files or directories to check.
+        files: Vec<String>,
+    },
+    /// Run scenario tests in .px files.
+    Test {
+        /// .px files or directories to test.
+        files: Vec<String>,
+    },
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -4881,6 +4901,159 @@ async fn main() {
                 println!("{}", config::RadixConfig::config_path().display());
             }
         },
+        Commands::Px { action } => match action {
+            PxAction::Check { files } => {
+                let mut errors = 0;
+                let paths = collect_px_files(&files);
+                if paths.is_empty() {
+                    eprintln!("No .px files found");
+                    std::process::exit(1);
+                }
+                for path in &paths {
+                    match std::fs::read_to_string(path) {
+                        Ok(source) => match pares_radix_praxis::px::parse(&source) {
+                            Ok(_) => println!("  \x1b[32m\u{2713}\x1b[0m {}", path.display()),
+                            Err(e) => {
+                                eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} {}", path.display(), e);
+                                errors += 1;
+                            }
+                        },
+                        Err(e) => {
+                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}", path.display(), e);
+                            errors += 1;
+                        }
+                    }
+                }
+                println!("\n{} file(s) checked, {} error(s)", paths.len(), errors);
+                if errors > 0 {
+                    std::process::exit(1);
+                }
+            }
+            PxAction::Test { files } => {
+                use pares_radix_praxis::px::compiler::compile;
+                use pares_radix_praxis::px::scenario_runner::{run_scenarios, BuiltinChecker};
+
+                let paths = collect_px_files(&files);
+                if paths.is_empty() {
+                    eprintln!("No .px files found");
+                    std::process::exit(1);
+                }
+
+                let mut total_scenarios = 0;
+                let mut total_passed = 0;
+                let mut total_failed = 0;
+
+                for path in &paths {
+                    let source = match std::fs::read_to_string(path) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}", path.display(), e);
+                            total_failed += 1;
+                            continue;
+                        }
+                    };
+
+                    let doc = match pares_radix_praxis::px::parse(&source) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} parse error: {}", path.display(), e);
+                            total_failed += 1;
+                            continue;
+                        }
+                    };
+
+                    if doc.scenarios.is_empty() {
+                        continue;
+                    }
+
+                    let records = compile(&doc);
+
+                    let mut procedures = std::collections::HashMap::new();
+                    for record in &records {
+                        if record.key.starts_with("px:procedure/") {
+                            let name = record.key.strip_prefix("px:procedure/").unwrap_or("");
+                            procedures.insert(name.to_string(), record.data.clone());
+                        }
+                    }
+
+                    let scenario_data: Vec<serde_json::Value> = records
+                        .iter()
+                        .filter(|r| r.key.starts_with("px:scenario/"))
+                        .map(|r| r.data.clone())
+                        .collect();
+
+                    let suite = run_scenarios(&scenario_data, &procedures, &BuiltinChecker);
+
+                    println!("\n\x1b[1m{}\x1b[0m", path.display());
+                    for result in &suite.results {
+                        if result.passed {
+                            println!("  \x1b[32m\u{2713}\x1b[0m {}", result.name);
+                        } else {
+                            println!("  \x1b[31m\u{2717}\x1b[0m {}", result.name);
+                            if let Some(err) = &result.error {
+                                println!("    error: {}", err);
+                            }
+                            for exp in &result.expectations {
+                                if !exp.passed {
+                                    let neg = if exp.negated { "NOT " } else { "" };
+                                    println!("    - {}{}: {}",
+                                        neg,
+                                        exp.check,
+                                        exp.reason.as_deref().unwrap_or("failed")
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    total_scenarios += suite.total;
+                    total_passed += suite.passed;
+                    total_failed += suite.failed;
+                }
+
+                println!();
+                if total_failed == 0 {
+                    println!("\x1b[32m\u{2713} {} scenario(s) passed\x1b[0m", total_passed);
+                } else {
+                    println!("\x1b[31m\u{2717} {}/{} scenario(s) failed\x1b[0m", total_failed, total_scenarios);
+                }
+                if total_failed > 0 {
+                    std::process::exit(1);
+                }
+            }
+        },
+    }
+}
+
+/// Collect .px file paths from arguments (files or directories, up to 2 levels deep).
+fn collect_px_files(args: &[String]) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for arg in args {
+        let p = PathBuf::from(arg);
+        if p.is_file() {
+            paths.push(p);
+        } else if p.is_dir() {
+            collect_px_in_dir(&p, &mut paths, 2);
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn collect_px_in_dir(dir: &std::path::Path, paths: &mut Vec<PathBuf>, depth: usize) {
+    if depth == 0 {
+        return;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let ep = entry.path();
+            if ep.is_file() && ep.extension().map(|e| e == "px").unwrap_or(false) {
+                paths.push(ep);
+            } else if ep.is_dir() {
+                collect_px_in_dir(&ep, paths, depth - 1);
+            }
+        }
     }
 }
 

@@ -1,0 +1,34 @@
+# cache-invalidation.px — Feature + its own test scenarios
+
+fact CacheEntry:
+  key: string
+  value: string
+  ttl_secs: int
+
+constraint ttl_positive:
+  require: entry.ttl_secs > 0
+  severity: error
+  message: "Cache TTL must be positive"
+
+procedure invalidate_expired:
+  trigger: manual
+  given: "Remove cache entries that have exceeded their TTL"
+  delete_entry {key: "old"}
+  emit {event: "cache.invalidated", key: "old"}
+
+scenario expired_entries_removed:
+  given: "Cache has entries with expired TTLs"
+  setup:
+    put_entry {key: "old", value: "stale", ttl_secs: 1}
+    put_entry {key: "fresh", value: "good", ttl_secs: 3600}
+    advance_time {secs: 10}
+  run: invalidate_expired
+  expect:
+    - NOT has_entry {key: "old"}
+    - has_entry {key: "fresh"}
+    - event_emitted {event: "cache.invalidated", key: "old"}
+
+scenario no_entries_when_empty:
+  given: "No entries in the cache"
+  expect:
+    - NOT has_entry {key: "anything"}

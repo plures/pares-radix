@@ -4669,6 +4669,7 @@ dependencies = [
  "pares-agens-core",
  "pares-models",
  "pares-radix-mcp-server",
+ "pares-radix-praxis",
  "pares-radix-tui",
  "pares-rector",
  "ratatui",
