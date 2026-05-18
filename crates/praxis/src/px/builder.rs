@@ -906,6 +906,14 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
                 output_var,
             }
         }
+        Rule::step_return => {
+            let value = inner.into_inner().next().map(|p| parse_value(p));
+            PxStep::Return { value }
+        }
+        Rule::step_abort => {
+            let value = inner.into_inner().next().map(|p| parse_value(p));
+            PxStep::Abort { value }
+        }
         _ => PxStep::Call {
             name: "unknown".into(),
             params: serde_json::Value::Null,

@@ -78,6 +78,9 @@ fn lint_procedure(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
 
     // L008: Shadowed output variables (same name bound by multiple steps)
     lint_shadowed_output_vars(proc, diags);
+
+    // L009: Unreachable steps after return/abort
+    lint_unreachable_after_terminal(proc, diags);
 }
 
 /// Lint a single step (recursing into nested structures).
@@ -274,6 +277,16 @@ fn collect_var_references(step: &PxStep, refs: &mut std::collections::HashSet<St
                 }
             }
         }
+        PxStep::Return { value } => {
+            if let Some(v) = value {
+                collect_refs_from_value(v, refs);
+            }
+        }
+        PxStep::Abort { value } => {
+            if let Some(v) = value {
+                collect_refs_from_value(v, refs);
+            }
+        }
     }
 }
 
@@ -441,6 +454,66 @@ fn lint_shadowed_output_vars(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>
             } else {
                 seen.insert(var, idx);
             }
+        }
+    }
+}
+
+/// PX-L009: Detect unreachable steps after return/abort in procedure body.
+///
+/// A `return` or `abort` step unconditionally terminates execution.
+/// Any subsequent steps at the same nesting level are unreachable.
+fn lint_unreachable_after_terminal(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
+    check_steps_for_unreachable(&proc.steps, &proc.name, diags);
+}
+
+/// Check a step list for terminal steps followed by unreachable code.
+fn check_steps_for_unreachable(
+    steps: &[PxStep],
+    proc_name: &str,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    let mut found_terminal: Option<(usize, &'static str)> = None;
+
+    for (idx, step) in steps.iter().enumerate() {
+        if let Some((term_idx, term_kind)) = found_terminal {
+            diags.push(LintDiagnostic {
+                code: "PX-L009",
+                message: format!(
+                    "unreachable step after `{}` at step {}",
+                    term_kind,
+                    term_idx + 1
+                ),
+                severity: LintSeverity::Warning,
+                procedure: Some(proc_name.to_string()),
+                step_index: Some(idx),
+            });
+            continue;
+        }
+
+        match step {
+            PxStep::Return { .. } => {
+                found_terminal = Some((idx, "return"));
+            }
+            PxStep::Abort { .. } => {
+                found_terminal = Some((idx, "abort"));
+            }
+            // Recurse into nested blocks
+            PxStep::When { steps: inner, .. } => {
+                check_steps_for_unreachable(inner, proc_name, diags);
+            }
+            PxStep::Loop { steps: inner, .. } => {
+                check_steps_for_unreachable(inner, proc_name, diags);
+            }
+            PxStep::Try { steps: try_steps, catch, .. } => {
+                check_steps_for_unreachable(try_steps, proc_name, diags);
+                check_steps_for_unreachable(catch, proc_name, diags);
+            }
+            PxStep::Parallel { branches, .. } => {
+                for branch in branches {
+                    check_steps_for_unreachable(&branch.steps, proc_name, diags);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -1027,5 +1100,102 @@ mod tests {
         assert_eq!(diags.len(), 2);
         assert_eq!(diags[0].step_index, Some(1));
         assert_eq!(diags[1].step_index, Some(2));
+    }
+
+    // === PX-L009: Unreachable steps after return/abort ===
+
+    #[test]
+    fn l009_unreachable_after_return() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "early_exit",
+            vec![
+                PxStep::Call {
+                    name: "setup".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+                PxStep::Return { value: Some(serde_json::json!("done")) },
+                PxStep::Call {
+                    name: "cleanup".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].step_index, Some(2));
+        assert!(diags[0].message.contains("return"));
+        assert!(diags[0].message.contains("step 2"));
+    }
+
+    #[test]
+    fn l009_unreachable_after_abort() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "fail_fast",
+            vec![
+                PxStep::Abort { value: Some(serde_json::json!("fatal error")) },
+                PxStep::Call {
+                    name: "never_reached".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+                PxStep::Call {
+                    name: "also_unreachable".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert_eq!(diags.len(), 2);
+        assert_eq!(diags[0].step_index, Some(1));
+        assert_eq!(diags[1].step_index, Some(2));
+    }
+
+    #[test]
+    fn l009_no_warning_when_return_is_last() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "clean_exit",
+            vec![
+                PxStep::Call {
+                    name: "work".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+                PxStep::Return { value: None },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l009_unreachable_in_nested_when_block() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "nested",
+            vec![PxStep::When {
+                condition: "$flag == true".to_string(),
+                steps: vec![
+                    PxStep::Return { value: None },
+                    PxStep::Call {
+                        name: "dead_code".to_string(),
+                        params: serde_json::json!({}),
+                        output_var: None,
+                    },
+                ],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("return"));
     }
 }

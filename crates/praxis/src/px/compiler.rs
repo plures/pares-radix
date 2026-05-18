@@ -354,6 +354,20 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
             }
             obj
         }
+        PxStep::Return { value } => {
+            let mut obj = json!({ "kind": "return" });
+            if let Some(v) = value {
+                obj["value"] = v.clone();
+            }
+            obj
+        }
+        PxStep::Abort { value } => {
+            let mut obj = json!({ "kind": "abort" });
+            if let Some(v) = value {
+                obj["value"] = v.clone();
+            }
+            obj
+        }
     }
 }
 

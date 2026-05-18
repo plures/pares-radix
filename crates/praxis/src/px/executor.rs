@@ -99,6 +99,10 @@ pub enum ExecutionError {
     /// A match step had no matching arm.
     #[error("no matching arm in match step")]
     NoMatchingArm,
+
+    /// The procedure was explicitly aborted.
+    #[error("aborted: {0}")]
+    Aborted(String),
 }
 
 // ── Executor ──────────────────────────────────────────────────────────────────
@@ -141,7 +145,11 @@ pub fn execute_with_vars(
 
     for (index, step) in steps.iter().enumerate() {
         let result = execute_step(step, index, &mut vars, handler)?;
+        let is_return = result.kind == "return";
         step_results.push(result);
+        if is_return {
+            break;
+        }
     }
 
     Ok(ExecutionResult {
@@ -173,6 +181,23 @@ fn execute_step(
         "emit" => execute_emit(step, index, vars, handler),
         "try" => execute_try(step, index, vars, handler),
         "parallel" => execute_parallel(step, index, vars, handler),
+        "return" => {
+            let value = step.get("value").cloned();
+            Ok(StepResult {
+                index,
+                kind: "return".to_string(),
+                output: value,
+                skipped: false,
+            })
+        }
+        "abort" => {
+            let reason = step
+                .get("value")
+                .and_then(|v| v.as_str())
+                .unwrap_or("procedure aborted")
+                .to_string();
+            Err(ExecutionError::Aborted(reason))
+        }
         other => Err(ExecutionError::InvalidStructure(format!(
             "unknown step kind: {other}"
         ))),

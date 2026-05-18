@@ -122,7 +122,11 @@ pub async fn execute_async_with_vars(
         handler.on_step_start(index, kind).await;
         let result = execute_step_async(step, index, &mut vars, handler).await?;
         handler.on_step_complete(index, &result).await;
+        let is_return = result.kind == "return";
         step_results.push(result);
+        if is_return {
+            break;
+        }
     }
 
     Ok(ExecutionResult {
@@ -155,6 +159,23 @@ fn execute_step_async<'a>(
             "emit" => execute_emit_async(step, index, vars),
             "try" => execute_try_async(step, index, vars, handler).await,
             "parallel" => execute_parallel_async(step, index, vars, handler).await,
+            "return" => {
+                let value = step.get("value").cloned();
+                Ok(StepResult {
+                    index,
+                    kind: "return".to_string(),
+                    output: value,
+                    skipped: false,
+                })
+            }
+            "abort" => {
+                let reason = step
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("procedure aborted")
+                    .to_string();
+                Err(ExecutionError::Aborted(reason))
+            }
             other => Err(ExecutionError::InvalidStructure(format!(
                 "unknown step kind: {other}"
             ))),

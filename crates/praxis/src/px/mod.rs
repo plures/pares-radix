@@ -199,6 +199,14 @@ pub enum PxStep {
         /// Optional variable to collect results into (map of branch_name → last output).
         output_var: Option<String>,
     },
+    /// Early return from the procedure with an optional value.
+    Return {
+        value: Option<serde_json::Value>,
+    },
+    /// Abort the procedure with an optional error/reason value.
+    Abort {
+        value: Option<serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -791,5 +799,40 @@ mod parse_step_tests {
 "#;
         let doc = parse(source);
         assert!(doc.is_ok(), "failed to parse constraint with match expr: {:?}", doc.err());
+    }
+
+    #[test]
+    fn parse_procedure_with_return() {
+        let source = "procedure guard_check:\n  trigger: manual\n  validate_input {} -> $valid\n  when $valid == false:\n    return 'invalid'\n  end\n  process_data {}\n";
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        let proc = &doc.procedures[0];
+        assert_eq!(proc.steps.len(), 3); // validate, when, process
+        match &proc.steps[1] {
+            PxStep::When { steps, .. } => {
+                assert_eq!(steps.len(), 1);
+                match &steps[0] {
+                    PxStep::Return { value } => {
+                        assert!(value.is_some());
+                    }
+                    other => panic!("expected Return, got {:?}", other),
+                }
+            }
+            other => panic!("expected When, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_procedure_with_abort() {
+        let source = "procedure fail_fast:\n  trigger: manual\n  check_system {} -> $ok\n  abort 'system down'\n  do_work {}\n";
+        let doc = parse(source).expect("parse failed");
+        let proc = &doc.procedures[0];
+        assert_eq!(proc.steps.len(), 3);
+        match &proc.steps[1] {
+            PxStep::Abort { value } => {
+                assert_eq!(value.as_ref().unwrap(), "system down");
+            }
+            other => panic!("expected Abort, got {:?}", other),
+        }
     }
 }
