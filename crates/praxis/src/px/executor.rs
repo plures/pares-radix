@@ -1608,6 +1608,20 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
         return eval_ends_with(lhs, rhs, vars);
     }
 
+    // Match expression (standalone): `match var { "a" => true, _ => false }`
+    // Evaluate inline and check truthiness of result.
+    if expr.starts_with("match ") {
+        if let Some(result) = try_match_expr(expr, vars) {
+            let r = result.trim();
+            return match r {
+                "true" | "1" | "yes" => true,
+                "false" | "0" | "no" | "" => false,
+                _ => !r.is_empty(),
+            };
+        }
+        return false;
+    }
+
     // Function-call syntax: `len(items)`, `is_empty(name)`, etc.
     if let Some(result) = resolve_function_call(expr, vars) {
         return is_truthy(&result);
@@ -1625,10 +1639,11 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
     false
 }
 
-/// Split an expression on a logical operator (`&&` or `||`), respecting parentheses.
+/// Split an expression on a logical operator (`&&` or `||`), respecting parentheses and braces.
 fn split_logical<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
+    let mut brace_depth = 0i32;
     let mut last = 0;
     let bytes = expr.as_bytes();
     let op_bytes = op.as_bytes();
@@ -1639,6 +1654,8 @@ fn split_logical<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
         match bytes[i] {
             b'(' => depth += 1,
             b')' => depth -= 1,
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth -= 1,
             b'"' => {
                 // Skip quoted strings
                 i += 1;
@@ -1649,7 +1666,7 @@ fn split_logical<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
                     i += 1;
                 }
             }
-            _ if depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
+            _ if depth == 0 && brace_depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
                 parts.push(&expr[last..i]);
                 i += op_len;
                 last = i;
@@ -1687,17 +1704,20 @@ fn matching_close_paren(expr: &str) -> Option<usize> {
 /// Split a simple comparison expression on an operator, ensuring we don't confuse
 /// `>=` with `>` followed by `=`.
 fn split_comparison<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
-    // For multi-char ops, find the first occurrence outside parens
+    // For multi-char ops, find the first occurrence outside parens and braces
     let bytes = expr.as_bytes();
     let op_bytes = op.as_bytes();
     let op_len = op_bytes.len();
     let mut depth = 0i32;
+    let mut brace_depth = 0i32;
 
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
             b'(' => depth += 1,
             b')' => depth -= 1,
+            b'{' => brace_depth += 1,
+            b'}' => brace_depth -= 1,
             b'"' => {
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'"' {
@@ -1707,9 +1727,14 @@ fn split_comparison<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
                     i += 1;
                 }
             }
-            _ if depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
-                // For single-char ops (> or <), ensure they're not part of >= or <=
-                if op_len == 1 && i + 1 < bytes.len() && bytes[i + 1] == b'=' {
+            _ if depth == 0 && brace_depth == 0 && i + op_len <= bytes.len() && &bytes[i..i + op_len] == op_bytes => {
+                // For single-char ops (> or <), ensure they're not part of >= or <= or =>
+                if op_len == 1 && i + 1 < bytes.len() && (bytes[i + 1] == b'=' || bytes[i + 1] == b'>') {
+                    i += 1;
+                    continue;
+                }
+                // For `==`, ensure it's not part of `=>`
+                if op == "==" && i > 0 && bytes[i] == b'=' && i + 1 < bytes.len() && bytes[i + 1] == b'>' {
                     i += 1;
                     continue;
                 }
@@ -1788,6 +1813,29 @@ fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
         let rhs_val = resolve_value_with_pipes(rhs, vars)
             .unwrap_or_else(|| rhs.trim_matches('"').to_string());
         return filtered == rhs_val;
+    }
+
+    // Match expression on lhs: `match status { ... } == "value"`
+    if lhs.trim().starts_with("match ") {
+        if let Some(lhs_val) = try_match_expr(lhs.trim(), vars) {
+            let rhs_val = if rhs.trim().starts_with("match ") {
+                try_match_expr(rhs.trim(), vars).unwrap_or_default()
+            } else {
+                rhs.trim_matches('"').to_string()
+            };
+            return lhs_val == rhs_val;
+        }
+        return false;
+    }
+    // Match expression on rhs: `var == match level { ... }`
+    if rhs.trim().starts_with("match ") {
+        if let Some(rhs_val) = try_match_expr(rhs.trim(), vars) {
+            if let Some(val) = resolve_var(lhs, vars) {
+                return value_to_interpolation_string(&val) == rhs_val;
+            }
+            return lhs == rhs_val;
+        }
+        return false;
     }
 
     // Try arithmetic on lhs first
@@ -5437,5 +5485,111 @@ mod tests {
             &vars,
         );
         assert_eq!(result, Some("ok".to_string()));
+    }
+
+    // ── match_expr in condition evaluation tests ────────────────────────────
+
+    #[test]
+    fn test_condition_match_expr_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        // match resolves to "true" → truthy
+        assert!(default_evaluate_condition(
+            r#"match status { "active" => true, _ => false }"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_falsy() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("inactive"));
+        // match resolves to "false" → falsy
+        assert!(!default_evaluate_condition(
+            r#"match status { "active" => true, _ => false }"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_non_empty_is_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("level".to_string(), json!("error"));
+        // match resolves to "red" — non-empty, truthy
+        assert!(default_evaluate_condition(
+            r#"match level { "error" => "red", _ => "" }"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_empty_is_falsy() {
+        let mut vars = HashMap::new();
+        vars.insert("level".to_string(), json!("info"));
+        // match resolves to "" — empty, falsy
+        assert!(!default_evaluate_condition(
+            r#"match level { "error" => "red", _ => "" }"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_no_match_is_falsy() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("unknown"));
+        // No arm matches and no default → try_match_expr returns None → false
+        assert!(!default_evaluate_condition(
+            r#"match x { "a" => true, "b" => true }"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_in_comparison() {
+        let mut vars = HashMap::new();
+        vars.insert("tier".to_string(), json!("premium"));
+        // match tier { "premium" => "gold", _ => "silver" } == "gold"
+        assert!(default_evaluate_condition(
+            r#"match tier { "premium" => "gold", _ => "silver" } == "gold""#,
+            &vars,
+        ));
+        assert!(!default_evaluate_condition(
+            r#"match tier { "premium" => "gold", _ => "silver" } == "silver""#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_with_logical_ops() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        vars.insert("role".to_string(), json!("admin"));
+        // match resolves to true AND role == admin
+        assert!(default_evaluate_condition(
+            r#"match status { "active" => true, _ => false } && role == admin"#,
+            &vars,
+        ));
+        // match resolves to false AND role == admin → false
+        vars.insert("status".to_string(), json!("inactive"));
+        assert!(!default_evaluate_condition(
+            r#"match status { "active" => true, _ => false } && role == admin"#,
+            &vars,
+        ));
+    }
+
+    #[test]
+    fn test_condition_match_expr_numeric_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("code".to_string(), json!(200));
+        // "1" is truthy, "0" is falsy
+        assert!(default_evaluate_condition(
+            r#"match code { "200" => 1, _ => 0 }"#,
+            &vars,
+        ));
+        vars.insert("code".to_string(), json!(500));
+        assert!(!default_evaluate_condition(
+            r#"match code { "200" => 1, _ => 0 }"#,
+            &vars,
+        ));
     }
 }
