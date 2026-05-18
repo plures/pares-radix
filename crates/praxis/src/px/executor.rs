@@ -270,15 +270,16 @@ fn execute_match_subject(
     index: usize,
     vars: &HashMap<String, Value>,
 ) -> Result<StepResult, ExecutionError> {
-    // Resolve the subject value
-    let subject_val = if (subject_expr.starts_with('"') && subject_expr.ends_with('"'))
+    // Resolve the subject as both string and raw Value (for tuple matching)
+    let (subject_val, subject_raw) = if (subject_expr.starts_with('"') && subject_expr.ends_with('"'))
         || (subject_expr.starts_with('\'') && subject_expr.ends_with('\''))
     {
-        subject_expr[1..subject_expr.len() - 1].to_string()
+        let s = subject_expr[1..subject_expr.len() - 1].to_string();
+        (s.clone(), Value::String(s))
     } else if let Some(val) = resolve_var(subject_expr, vars) {
-        value_to_interpolation_string(&val)
+        (value_to_interpolation_string(&val), val)
     } else {
-        subject_expr.to_string()
+        (subject_expr.to_string(), Value::String(subject_expr.to_string()))
     };
 
     for arm in arms {
@@ -310,6 +311,10 @@ fn execute_match_subject(
         let alternatives = split_pattern_alternatives(pattern);
         let matched = alternatives.iter().any(|alt| {
             let alt = alt.trim();
+            // Tuple pattern: ("error", 500, _)
+            if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
+                return tuple_match;
+            }
             // Range pattern
             if let Some(range_match) = try_range_pattern(alt, &subject_val) {
                 return range_match;
@@ -1400,15 +1405,16 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
     let brace_end = find_matching_brace(inner)?;
     let arms_str = inner[..brace_end].trim();
 
-    // Resolve the subject value
-    let subject_val = if (subject_str.starts_with('"') && subject_str.ends_with('"'))
+    // Resolve the subject as both a raw Value (for tuple matching) and a string
+    let (subject_val, subject_raw) = if (subject_str.starts_with('"') && subject_str.ends_with('"'))
         || (subject_str.starts_with('\'') && subject_str.ends_with('\''))
     {
-        subject_str[1..subject_str.len() - 1].to_string()
+        let s = subject_str[1..subject_str.len() - 1].to_string();
+        (s.clone(), Value::String(s))
     } else if let Some(val) = resolve_var(subject_str, vars) {
-        value_to_interpolation_string(&val)
+        (value_to_interpolation_string(&val), val)
     } else {
-        subject_str.to_string()
+        (subject_str.to_string(), Value::String(subject_str.to_string()))
     };
 
     // Parse arms: split by top-level commas
@@ -1444,6 +1450,10 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
         let alternatives = split_pattern_alternatives(pattern);
         let matched = alternatives.iter().any(|alt| {
             let alt = alt.trim();
+            // Tuple pattern: ("error", 500, _)
+            if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
+                return tuple_match;
+            }
             // Range pattern: 1..5 (exclusive end) or 1..=5 (inclusive end)
             if let Some(range_match) = try_range_pattern(alt, &subject_val) {
                 return range_match;
@@ -1562,7 +1572,147 @@ fn try_range_pattern(pattern: &str, subject: &str) -> Option<bool> {
     None
 }
 
-/// Split match arms by top-level commas (respecting braces and quotes)
+/// Try to match a tuple pattern like `("error", 500, _)` against a JSON array subject.
+/// Returns `Some(true)` if the pattern matches, `Some(false)` if it's a valid tuple pattern
+/// that doesn't match, or `None` if the pattern is not a tuple pattern.
+///
+/// Elements are compared positionally:
+/// - `_` is a wildcard (matches anything)
+/// - Quoted strings compare as strings
+/// - Numbers compare as numbers
+/// - Variables (`$name` or bare `ident`) are resolved from vars
+/// - Tuple length must match array length
+fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<bool> {
+    let trimmed = pattern.trim();
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    // Extract the subject as a JSON array
+    let subject_arr = match subject_val {
+        Value::Array(arr) => arr,
+        _ => return Some(false), // Tuple pattern against non-array = no match
+    };
+
+    // Parse the tuple elements (split by top-level commas within the parens)
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let elements = split_tuple_elements(inner);
+
+    // Length must match
+    if elements.len() != subject_arr.len() {
+        return Some(false);
+    }
+
+    // Compare element by element
+    for (elem_pat, subject_elem) in elements.iter().zip(subject_arr.iter()) {
+        let elem_pat = elem_pat.trim();
+
+        // Wildcard
+        if elem_pat == "_" {
+            continue;
+        }
+
+        // Quoted string
+        if (elem_pat.starts_with('"') && elem_pat.ends_with('"'))
+            || (elem_pat.starts_with('\'') && elem_pat.ends_with('\''))
+        {
+            let pat_str = &elem_pat[1..elem_pat.len() - 1];
+            match subject_elem {
+                Value::String(s) if s == pat_str => continue,
+                _ => return Some(false),
+            }
+        }
+
+        // Boolean
+        if elem_pat == "true" {
+            if subject_elem == &Value::Bool(true) {
+                continue;
+            }
+            return Some(false);
+        }
+        if elem_pat == "false" {
+            if subject_elem == &Value::Bool(false) {
+                continue;
+            }
+            return Some(false);
+        }
+
+        // Null
+        if elem_pat == "null" {
+            if subject_elem.is_null() {
+                continue;
+            }
+            return Some(false);
+        }
+
+        // Number
+        if let Ok(n) = elem_pat.parse::<f64>() {
+            match subject_elem {
+                Value::Number(num) => {
+                    if let Some(sv) = num.as_f64() {
+                        if (sv - n).abs() < f64::EPSILON {
+                            continue;
+                        }
+                    }
+                    return Some(false);
+                }
+                _ => return Some(false),
+            }
+        }
+
+        // Variable reference ($name or bare ident)
+        if let Some(resolved) = resolve_var(elem_pat, vars) {
+            let subject_str = value_to_interpolation_string(subject_elem);
+            let resolved_str = value_to_interpolation_string(&resolved);
+            if subject_str == resolved_str {
+                continue;
+            }
+            return Some(false);
+        }
+
+        // Bare string comparison (unquoted literal)
+        let subject_str = value_to_interpolation_string(subject_elem);
+        if subject_str == elem_pat {
+            continue;
+        }
+        return Some(false);
+    }
+
+    Some(true)
+}
+
+/// Split tuple elements by top-level commas (respecting nested parens and quotes).
+fn split_tuple_elements(s: &str) -> Vec<&str> {
+    let mut elements = Vec::new();
+    let mut depth = 0;
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut start = 0;
+    let bytes = s.as_bytes();
+
+    for i in 0..bytes.len() {
+        match bytes[i] {
+            b'"' if !in_single => in_double = !in_double,
+            b'\'' if !in_double => in_single = !in_single,
+            b'(' if !in_double && !in_single => depth += 1,
+            b')' if !in_double && !in_single => depth -= 1,
+            b',' if !in_double && !in_single && depth == 0 => {
+                elements.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        let last = s[start..].trim();
+        if !last.is_empty() {
+            elements.push(&s[start..]);
+        }
+    }
+    elements
+}
+
+/// Split match arms by top-level commas (respecting braces, parens, and quotes)
 fn split_match_arms(s: &str) -> Vec<&str> {
     let mut arms = Vec::new();
     let mut depth = 0;
@@ -1574,8 +1724,8 @@ fn split_match_arms(s: &str) -> Vec<&str> {
         match c {
             '"' if !in_single => in_double = !in_double,
             '\'' if !in_double => in_single = !in_single,
-            '{' if !in_double && !in_single => depth += 1,
-            '}' if !in_double && !in_single => depth -= 1,
+            '{' | '(' if !in_double && !in_single => depth += 1,
+            '}' | ')' if !in_double && !in_single => depth -= 1,
             ',' if !in_double && !in_single && depth == 0 => {
                 arms.push(&s[start..i]);
                 start = i + 1;
@@ -6321,5 +6471,112 @@ mod tests {
         );
         // "if" inside quotes should NOT be detected as guard
         assert_eq!(extract_guard("\"check if ready\""), ("\"check if ready\"", None));
+    }
+
+    // ── Tuple Destructuring Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_tuple_pattern_basic_string_match() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("error".into()), Value::Number(500.into())]);
+        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_tuple_pattern_no_match() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("ok".into()), Value::Number(200.into())]);
+        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_tuple_pattern_wildcard() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("error".into()), Value::Number(500.into())]);
+        assert_eq!(try_tuple_pattern(r#"("error", _)"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_tuple_pattern_all_wildcards() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("anything".into()), Value::Bool(true)]);
+        assert_eq!(try_tuple_pattern("(_, _)", &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_tuple_pattern_length_mismatch() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("a".into())]);
+        assert_eq!(try_tuple_pattern(r#"("a", "b")"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_tuple_pattern_not_a_tuple() {
+        let vars = HashMap::new();
+        let subject = Value::String("hello".into());
+        // Pattern starts with ( but subject is not an array
+        assert_eq!(try_tuple_pattern("(\"hello\")", &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_tuple_pattern_non_tuple_pattern() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::Number(1.into())]);
+        // Pattern doesn't start with ( — not a tuple pattern
+        assert_eq!(try_tuple_pattern("\"hello\"", &subject, &vars), None);
+    }
+
+    #[test]
+    fn test_tuple_pattern_with_variable() {
+        let mut vars = HashMap::new();
+        vars.insert("code".into(), Value::Number(404.into()));
+        let subject = Value::Array(vec![Value::String("error".into()), Value::Number(404.into())]);
+        assert_eq!(try_tuple_pattern(r#"("error", $code)"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_tuple_pattern_with_boolean() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("flag".into()), Value::Bool(true)]);
+        assert_eq!(try_tuple_pattern(r#"("flag", true)"#, &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("flag", false)"#, &subject, &vars), Some(false));
+    }
+
+    #[test]
+    fn test_tuple_pattern_with_null() {
+        let vars = HashMap::new();
+        let subject = Value::Array(vec![Value::String("x".into()), Value::Null]);
+        assert_eq!(try_tuple_pattern(r#"("x", null)"#, &subject, &vars), Some(true));
+    }
+
+    #[test]
+    fn test_tuple_pattern_in_match_expr() {
+        let mut vars = HashMap::new();
+        vars.insert("pair".into(), Value::Array(vec![Value::String("error".into()), Value::Number(500.into())]));
+        let expr = r#"match $pair { ("error", 500) => "server_error", ("error", 404) => "not_found", _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("server_error".to_string()));
+    }
+
+    #[test]
+    fn test_tuple_pattern_in_match_expr_wildcard_arm() {
+        let mut vars = HashMap::new();
+        vars.insert("pair".into(), Value::Array(vec![Value::String("ok".into()), Value::Number(200.into())]));
+        let expr = r#"match $pair { ("error", _) => "failed", ("ok", _) => "success", _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("success".to_string()));
+    }
+
+    #[test]
+    fn test_tuple_pattern_three_elements() {
+        let mut vars = HashMap::new();
+        vars.insert("triple".into(), Value::Array(vec![
+            Value::String("deploy".into()),
+            Value::String("prod".into()),
+            Value::Number(3.into()),
+        ]));
+        let expr = r#"match $triple { ("deploy", "prod", 3) => "full_prod", ("deploy", "staging", _) => "staging", _ => "other" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("full_prod".to_string()));
     }
 }
