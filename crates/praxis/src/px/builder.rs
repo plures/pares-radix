@@ -672,6 +672,7 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
             let mut over = None;
             let mut times = None;
             let mut item_var = "item".to_string();
+            let mut key_var = None;
             let mut output_var = None;
             let mut steps = vec![];
             let mut ident_index = 0;
@@ -690,6 +691,12 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
                                 .find(|p| p.as_rule() == Rule::integer)
                                 .and_then(|p| p.as_str().parse().ok());
                         }
+                    }
+                    Rule::key_as_clause => {
+                        key_var = child
+                            .into_inner()
+                            .find(|p| p.as_rule() == Rule::ident)
+                            .map(|p| p.as_str().to_string());
                     }
                     Rule::ident => {
                         if ident_index == 0 {
@@ -714,7 +721,7 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
                 over,
                 times,
                 item_var,
-                key_var: None,
+                key_var,
                 steps,
                 output_var,
             }

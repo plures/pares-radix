@@ -403,6 +403,35 @@ constraint deploy_gate:
     }
 
     #[test]
+    fn parse_procedure_loop_key_as() {
+        let source = "procedure iter_config:\n  trigger: manual\n  loop over $config as val key_as k -> $out:\n    process {key: $k, value: $val}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        assert_eq!(doc.procedures.len(), 1);
+        let proc = &doc.procedures[0];
+        assert_eq!(proc.steps.len(), 1);
+
+        match &proc.steps[0] {
+            PxStep::Loop {
+                over,
+                times,
+                item_var,
+                key_var,
+                steps,
+                output_var,
+            } => {
+                assert_eq!(over.as_deref(), Some("$config"));
+                assert!(times.is_none());
+                assert_eq!(item_var, "val");
+                assert_eq!(key_var.as_deref(), Some("k"));
+                assert_eq!(output_var.as_deref(), Some("out"));
+                assert_eq!(steps.len(), 1);
+            }
+            other => panic!("expected Loop step, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn parse_procedure_with_emit() {
         let source =
             "procedure notify:\n  trigger: manual\n  emit {type: \"alert\", level: \"high\"}\n";
@@ -541,8 +570,47 @@ constraint deploy_gate:
         assert_eq!(emit.len(), 1);
         assert_eq!(emit[0]["type"], "complete");
     }
-}
 
+    #[test]
+    fn full_pipeline_loop_key_as() {
+        // Parse → Compile → Execute with key_as syntax
+        use crate::px::compiler::compile;
+        use crate::px::executor::{self, ActionHandler, ExecutionError};
+        use serde_json::{json, Value};
+
+        struct KvHandler;
+        impl ActionHandler for KvHandler {
+            fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
+                match name {
+                    "collect" => {
+                        let k = params.get("k").and_then(|v| v.as_str()).unwrap_or("");
+                        let v = params.get("v").and_then(|v| v.as_str()).unwrap_or("");
+                        Ok(json!(format!("{k}={v}")))
+                    }
+                    _ => Err(ExecutionError::UnknownAction(name.to_string())),
+                }
+            }
+        }
+
+        let source = "procedure map_kv:\n  trigger: manual\n  loop over $config as val key_as k -> $pairs:\n    collect {k: $k, v: $val}\n  end\n";
+
+        let doc = parse(source).expect("parse failed");
+        let records = compile(&doc);
+        assert_eq!(records.len(), 1);
+
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("config".to_string(), json!({"host": "localhost", "port": "8080"}));
+
+        let result = executor::execute_with_vars(&records[0].data, &KvHandler, vars).unwrap();
+        assert!(result.success);
+        let pairs = result.variables.get("pairs").unwrap().as_array().unwrap();
+        assert_eq!(pairs.len(), 2);
+        // Values should be "key=val" strings (order varies for maps)
+        let mut sorted: Vec<&str> = pairs.iter().map(|v| v.as_str().unwrap()).collect();
+        sorted.sort();
+        assert_eq!(sorted, vec!["host=localhost", "port=8080"]);
+    }
+}
 #[cfg(test)]
 mod parse_value_tests {
     use super::*;
