@@ -9,6 +9,7 @@ pub mod compose;
 pub mod executor;
 pub mod lint;
 pub mod resolver;
+pub mod scenario_runner;
 pub mod watcher;
 
 use pest::Parser;
