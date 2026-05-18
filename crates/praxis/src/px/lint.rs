@@ -81,6 +81,9 @@ fn lint_procedure(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
 
     // L009: Unreachable steps after return/abort
     lint_unreachable_after_terminal(proc, diags);
+
+    // L010: Unused procedure parameters (declared in trigger but never referenced)
+    lint_unused_procedure_params(proc, diags);
 }
 
 /// Lint a single step (recursing into nested structures).
@@ -514,6 +517,54 @@ fn check_steps_for_unreachable(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// PX-L010: Unused procedure parameters — declared in trigger params but never referenced.
+///
+/// When a procedure's trigger declares parameters (e.g., `trigger: on_event {channel: "string", message: "string"}`),
+/// each param key should be referenced as `$key` somewhere in the procedure body.
+/// Unreferenced params are likely dead code or indicate a typo.
+fn lint_unused_procedure_params(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
+    // Extract parameter names from trigger params (if it's an object)
+    let param_names: Vec<String> = match &proc.trigger {
+        Some(trigger) => match &trigger.params {
+            Some(serde_json::Value::Object(map)) => map.keys().cloned().collect(),
+            _ => return,
+        },
+        None => return,
+    };
+
+    if param_names.is_empty() {
+        return;
+    }
+
+    // Collect all variable references across the procedure body
+    let mut references: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for step in &proc.steps {
+        collect_var_references(step, &mut references);
+    }
+
+    // Also check the `given` clause for references
+    if let Some(given) = &proc.given {
+        collect_refs_from_str(given, &mut references);
+    }
+
+    // Check each param against references
+    for param_name in &param_names {
+        let var_ref = format!("${}", param_name);
+        if !references.contains(&var_ref) {
+            diags.push(LintDiagnostic {
+                code: "PX-L010",
+                message: format!(
+                    "trigger parameter `{}` is declared but never referenced as `${}` in the procedure body",
+                    param_name, param_name
+                ),
+                severity: LintSeverity::Warning,
+                procedure: Some(proc.name.clone()),
+                step_index: None,
+            });
         }
     }
 }
@@ -1197,5 +1248,122 @@ mod tests {
         let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("return"));
+    }
+
+    // === PX-L010: Unused procedure parameters ===
+
+    #[test]
+    fn l010_unused_trigger_param() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "handler".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "on_event".to_string(),
+                params: Some(serde_json::json!({"channel": "string", "message": "string"})),
+            }),
+            given: None,
+            steps: vec![
+                PxStep::Call {
+                    name: "process".to_string(),
+                    params: serde_json::json!({"msg": "$message"}),
+                    output_var: None,
+                },
+            ],
+        });
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("channel"));
+        assert!(diags[0].message.contains("never referenced"));
+    }
+
+    #[test]
+    fn l010_no_warning_when_all_params_used() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "handler".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "on_event".to_string(),
+                params: Some(serde_json::json!({"channel": "string", "message": "string"})),
+            }),
+            given: None,
+            steps: vec![
+                PxStep::Call {
+                    name: "send".to_string(),
+                    params: serde_json::json!({"to": "$channel", "text": "$message"}),
+                    output_var: None,
+                },
+            ],
+        });
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l010_no_warning_without_trigger_params() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "handler".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: None,
+            }),
+            given: None,
+            steps: vec![
+                PxStep::Call {
+                    name: "work".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+            ],
+        });
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l010_param_used_in_given_clause() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "handler".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "on_event".to_string(),
+                params: Some(serde_json::json!({"priority": "string"})),
+            }),
+            given: Some("$priority == \"high\"".to_string()),
+            steps: vec![
+                PxStep::Call {
+                    name: "alert".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                },
+            ],
+        });
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l010_multiple_unused_params() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "handler".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "webhook".to_string(),
+                params: Some(serde_json::json!({"url": "string", "method": "string", "body": "string"})),
+            }),
+            given: None,
+            steps: vec![
+                PxStep::Emit {
+                    event: serde_json::json!({"type": "received"}),
+                },
+            ],
+        });
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
+        assert_eq!(diags.len(), 3);
     }
 }
