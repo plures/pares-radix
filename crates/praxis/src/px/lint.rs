@@ -72,6 +72,9 @@ fn lint_procedure(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
     for (idx, step) in proc.steps.iter().enumerate() {
         lint_step(step, &proc.name, idx, diags);
     }
+
+    // L005: Unused output variables (procedure-level analysis)
+    lint_unused_output_vars(proc, diags);
 }
 
 /// Lint a single step (recursing into nested structures).
@@ -80,6 +83,7 @@ fn lint_step(step: &PxStep, proc_name: &str, idx: usize, diags: &mut Vec<LintDia
         PxStep::Match { arms } => {
             lint_match_exhaustiveness(arms, proc_name, idx, diags);
             lint_match_unreachable(arms, proc_name, idx, diags);
+            lint_match_duplicate_conditions(arms, proc_name, idx, diags);
         }
         PxStep::Loop { steps, .. } => {
             for (sub_idx, sub_step) in steps.iter().enumerate() {
@@ -133,6 +137,172 @@ fn lint_match_exhaustiveness(
             procedure: Some(proc_name.to_string()),
             step_index: Some(idx),
         });
+    }
+}
+
+/// PX-L004: Duplicate arm conditions in a match.
+fn lint_match_duplicate_conditions(
+    arms: &[PxMatchArm],
+    proc_name: &str,
+    idx: usize,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    let mut seen: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    for (arm_idx, arm) in arms.iter().enumerate() {
+        let cond = arm.condition.trim();
+        if cond == "_" {
+            continue; // wildcard is a special case, not a duplicate
+        }
+        if let Some(&first_idx) = seen.get(cond) {
+            diags.push(LintDiagnostic {
+                code: "PX-L004",
+                message: format!(
+                    "arm {} has the same condition as arm {} (`{}`) — only the first will ever match",
+                    arm_idx + 1,
+                    first_idx + 1,
+                    cond
+                ),
+                severity: LintSeverity::Warning,
+                procedure: Some(proc_name.to_string()),
+                step_index: Some(idx),
+            });
+        } else {
+            seen.insert(cond, arm_idx);
+        }
+    }
+}
+
+/// PX-L005: Unused output variables — bound but never referenced in subsequent steps.
+fn lint_unused_output_vars(proc: &PxProcedure, diags: &mut Vec<LintDiagnostic>) {
+    // Collect all output_var bindings with their step index
+    let mut bindings: Vec<(usize, &str)> = Vec::new();
+    for (idx, step) in proc.steps.iter().enumerate() {
+        if let Some(var) = step_output_var(step) {
+            bindings.push((idx, var));
+        }
+    }
+
+    if bindings.is_empty() {
+        return;
+    }
+
+    // Collect all variable references across the procedure
+    let mut references: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for step in &proc.steps {
+        collect_var_references(step, &mut references);
+    }
+
+    // Check each binding against references
+    for (idx, var_name) in bindings {
+        if !references.contains(&format!("${}", var_name)) {
+            diags.push(LintDiagnostic {
+                code: "PX-L005",
+                message: format!(
+                    "output variable `${}` is bound but never referenced in subsequent steps",
+                    var_name
+                ),
+                severity: LintSeverity::Warning,
+                procedure: Some(proc.name.clone()),
+                step_index: Some(idx),
+            });
+        }
+    }
+}
+
+/// Extract the output_var from a step, if any.
+fn step_output_var(step: &PxStep) -> Option<&str> {
+    match step {
+        PxStep::Call { output_var, .. } => output_var.as_deref(),
+        PxStep::Loop { output_var, .. } => output_var.as_deref(),
+        PxStep::Parallel { output_var, .. } => output_var.as_deref(),
+        _ => None,
+    }
+}
+
+/// Recursively collect all `$variable` references from a step.
+fn collect_var_references(step: &PxStep, refs: &mut std::collections::HashSet<String>) {
+    match step {
+        PxStep::Call { params, .. } => {
+            collect_refs_from_value(params, refs);
+        }
+        PxStep::Match { arms } => {
+            for arm in arms {
+                collect_refs_from_str(&arm.condition, refs);
+                collect_refs_from_str(&arm.result, refs);
+            }
+        }
+        PxStep::When { condition, steps } => {
+            collect_refs_from_str(condition, refs);
+            for s in steps {
+                collect_var_references(s, refs);
+            }
+        }
+        PxStep::Loop { over, steps, .. } => {
+            if let Some(over_expr) = over {
+                collect_refs_from_str(over_expr, refs);
+            }
+            for s in steps {
+                collect_var_references(s, refs);
+            }
+        }
+        PxStep::Emit { event } => {
+            collect_refs_from_value(event, refs);
+        }
+        PxStep::Try { steps, catch, .. } => {
+            for s in steps {
+                collect_var_references(s, refs);
+            }
+            for s in catch {
+                collect_var_references(s, refs);
+            }
+        }
+        PxStep::Parallel { branches, .. } => {
+            for branch in branches {
+                for s in &branch.steps {
+                    collect_var_references(s, refs);
+                }
+            }
+        }
+    }
+}
+
+/// Extract `$identifier` patterns from a string.
+fn collect_refs_from_str(s: &str, refs: &mut std::collections::HashSet<String>) {
+    // Match $identifier patterns (alphanumeric + underscore, starting with $)
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '$' {
+            let mut var = String::from("$");
+            while let Some(&next) = chars.peek() {
+                if next.is_alphanumeric() || next == '_' {
+                    var.push(next);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            if var.len() > 1 {
+                refs.insert(var);
+            }
+        }
+    }
+}
+
+/// Extract `$identifier` patterns from a JSON value (recursing into objects/arrays/strings).
+fn collect_refs_from_value(val: &serde_json::Value, refs: &mut std::collections::HashSet<String>) {
+    match val {
+        serde_json::Value::String(s) => collect_refs_from_str(s, refs),
+        serde_json::Value::Array(arr) => {
+            for v in arr {
+                collect_refs_from_value(v, refs);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for v in map.values() {
+                collect_refs_from_value(v, refs);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -344,5 +514,180 @@ mod tests {
         assert!(s.contains("warning"));
         assert!(s.contains("handler"));
         assert!(s.contains("step 1"));
+    }
+
+    #[test]
+    fn l004_duplicate_arm_conditions() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "handler",
+            vec![PxStep::Match {
+                arms: vec![
+                    PxMatchArm {
+                        condition: "status == \"active\"".to_string(),
+                        result: "first".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "status == \"pending\"".to_string(),
+                        result: "second".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "status == \"active\"".to_string(),
+                        result: "duplicate".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "_".to_string(),
+                        result: "default".to_string(),
+                    },
+                ],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L004").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("same condition as arm 1"));
+    }
+
+    #[test]
+    fn l004_no_false_positive_for_unique_arms() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "handler",
+            vec![PxStep::Match {
+                arms: vec![
+                    PxMatchArm {
+                        condition: "status == \"a\"".to_string(),
+                        result: "a".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "status == \"b\"".to_string(),
+                        result: "b".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "_".to_string(),
+                        result: "default".to_string(),
+                    },
+                ],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L004").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l005_unused_output_var() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "fetch_data".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("data".to_string()),
+                },
+                PxStep::Emit {
+                    event: serde_json::json!({"type": "done"}),
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L005").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$data"));
+        assert!(diags[0].message.contains("never referenced"));
+    }
+
+    #[test]
+    fn l005_no_warning_when_var_is_used() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "fetch_data".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("data".to_string()),
+                },
+                PxStep::Call {
+                    name: "process".to_string(),
+                    params: serde_json::json!({"input": "$data"}),
+                    output_var: None,
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L005").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l005_var_used_in_loop_over() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "get_items".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("items".to_string()),
+                },
+                PxStep::Loop {
+                    over: Some("$items".to_string()),
+                    times: None,
+                    item_var: "item".to_string(),
+                    key_var: None,
+                    steps: vec![PxStep::Emit {
+                        event: serde_json::json!({"item": "$item"}),
+                    }],
+                    output_var: None,
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L005").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l005_var_used_in_when_condition() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "pipeline",
+            vec![
+                PxStep::Call {
+                    name: "check".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: Some("result".to_string()),
+                },
+                PxStep::When {
+                    condition: "$result == true".to_string(),
+                    steps: vec![PxStep::Emit {
+                        event: serde_json::json!({"status": "ok"}),
+                    }],
+                },
+            ],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L005").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn collect_refs_from_str_works() {
+        let mut refs = std::collections::HashSet::new();
+        collect_refs_from_str("hello $world and $foo_bar", &mut refs);
+        assert!(refs.contains("$world"));
+        assert!(refs.contains("$foo_bar"));
+        assert_eq!(refs.len(), 2);
+    }
+
+    #[test]
+    fn collect_refs_from_str_no_bare_dollar() {
+        let mut refs = std::collections::HashSet::new();
+        collect_refs_from_str("cost is $5 or $ nothing", &mut refs);
+        // $5 starts with digit after $ but 5 is alphanumeric so it matches
+        assert!(refs.contains("$5"));
+        assert_eq!(refs.len(), 1);
     }
 }

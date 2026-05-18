@@ -2491,6 +2491,52 @@ impl RadixToolHandler {
         ToolResult::ok(json!({"stored": key}).to_string())
     }
 
+    // ── Lint tool ──────────────────────────────────────────────────────────────
+
+    async fn px_lint(&self, args: &Value) -> ToolResult {
+        let source = if let Some(src) = args.get("source").and_then(|v| v.as_str()) {
+            src.to_string()
+        } else if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+            match tokio::fs::read_to_string(path).await {
+                Ok(content) => content,
+                Err(e) => return ToolResult::error(format!("failed to read file: {e}")),
+            }
+        } else {
+            return ToolResult::error("provide either 'source' or 'path' parameter");
+        };
+
+        let doc = match px::parse(&source) {
+            Ok(doc) => doc,
+            Err(e) => {
+                return ToolResult::ok(json!({
+                    "status": "parse_error",
+                    "error": format!("{e}"),
+                    "diagnostics": []
+                }).to_string());
+            }
+        };
+
+        let diagnostics = px::lint::lint(&doc);
+        let diag_json: Vec<Value> = diagnostics.iter().map(|d| {
+            json!({
+                "code": d.code,
+                "message": d.message,
+                "severity": match d.severity {
+                    px::lint::LintSeverity::Warning => "warning",
+                    px::lint::LintSeverity::Error => "error",
+                },
+                "procedure": d.procedure,
+                "step_index": d.step_index,
+            })
+        }).collect();
+
+        ToolResult::ok(json!({
+            "status": if diagnostics.is_empty() { "clean" } else { "issues_found" },
+            "diagnostics_count": diagnostics.len(),
+            "diagnostics": diag_json
+        }).to_string())
+    }
+
     // ── Chronos tools ─────────────────────────────────────────────────────────
 
     async fn chronos_history(&self, args: &Value) -> ToolResult {
@@ -3393,6 +3439,22 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Lint tool ────────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "px_lint".into(),
+            description: Some(
+                "Lint .px source code for potential issues (non-exhaustive matches, unreachable arms, duplicate conditions, unused variables). Returns diagnostics.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "source": {"type": "string", "description": "The .px source code to lint"},
+                    "path": {"type": "string", "description": "Path to a .px file to lint (alternative to source)"}
+                })),
+                required: None,
+            },
+        });
+
         // ── Chronos tools (always available) ────────────────────────────────────────
         tools.push(Tool {
             name: "chronos_history".into(),
@@ -3561,6 +3623,7 @@ impl ToolHandler for RadixToolHandler {
             "praxis_run" => self.praxis_run(&arguments).await,
             "praxis_add_constraint" => self.praxis_add_constraint(&arguments).await,
             "praxis_add_rule" => self.praxis_add_rule(&arguments).await,
+            "px_lint" => self.px_lint(&arguments).await,
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
