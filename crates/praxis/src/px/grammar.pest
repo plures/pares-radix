@@ -119,7 +119,17 @@ expr = { comparison ~ (logic_op ~ comparison)* }
 comparison = { term ~ (comp_op ~ term)? }
 logic_op = { "&&" | "||" | "and" | "or" }
 comp_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
-term = { not_expr | call_expr | dotted_ident | value | "(" ~ expr ~ ")" }
+term = { not_expr | match_expr | call_expr | dotted_ident | value | "(" ~ expr ~ ")" }
+
+// Match expression: match subject { pattern => result, _ => default }
+match_expr = { "match" ~ match_subject ~ "{" ~ NEWLINE? ~ match_expr_arm_list ~ "}" }
+match_subject = { call_expr | dotted_ident | value }
+match_expr_arm_list = { NEWLINE* ~ (match_expr_arm ~ ","? ~ NEWLINE*)+ }
+match_expr_arm = { match_pattern ~ "=>" ~ match_result }
+match_pattern = { "_" | multi_pattern }
+multi_pattern = { match_single_pattern ~ ("|" ~ match_single_pattern)* }
+match_single_pattern = { value }
+match_result = { call_expr | dotted_ident | value }
 not_expr = { "NOT" ~ term }
 call_expr = { ident ~ "(" ~ (expr ~ ("," ~ expr)*)? ~ ")" }
 dotted_ident = @{ ident ~ (("." ~ ident) | bracket_segment)* }

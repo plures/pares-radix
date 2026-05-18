@@ -650,4 +650,74 @@ mod parse_step_tests {
         assert_eq!(branches[0]["retry_backoff"], "fixed");
         assert_eq!(branches[0]["retry_jitter"], true);
     }
+
+    // === Match Expression Grammar Tests ===
+
+    #[test]
+    fn parse_match_expr_simple() {
+        let result = PxParser::parse(Rule::match_expr, r#"match status { "active" => "green", _ => "gray" }"#);
+        assert!(result.is_ok(), "failed to parse simple match expr: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_variable_subject() {
+        let result = PxParser::parse(Rule::match_expr, r#"match $state { "running" => "ok", "stopped" => "warn", _ => "unknown" }"#);
+        assert!(result.is_ok(), "failed to parse match expr with var subject: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_multi_pattern() {
+        let result = PxParser::parse(Rule::match_expr, r#"match level { "error" | "fatal" => "red", "warn" => "yellow", _ => "white" }"#);
+        assert!(result.is_ok(), "failed to parse match expr with multi-pattern: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_numeric_patterns() {
+        let result = PxParser::parse(Rule::match_expr, r#"match code { 200 => "ok", 404 => "not_found", _ => "error" }"#);
+        assert!(result.is_ok(), "failed to parse match expr with numeric patterns: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_dotted_subject() {
+        let result = PxParser::parse(Rule::match_expr, r#"match event.kind { "push" => "build", _ => "skip" }"#);
+        assert!(result.is_ok(), "failed to parse match expr with dotted subject: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_multiline() {
+        let input = "match status {\n\"active\" => \"green\",\n\"paused\" => \"yellow\",\n_ => \"gray\"\n}";
+        let result = PxParser::parse(Rule::match_expr, input);
+        assert!(result.is_ok(), "failed to parse multiline match expr: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_in_expression_context() {
+        // match_expr should be valid as part of a term/expr
+        let result = PxParser::parse(Rule::expr, r#"match x { "a" => "1", _ => "0" }"#);
+        assert!(result.is_ok(), "failed to parse match expr as expression: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_result_is_var_ref() {
+        let result = PxParser::parse(Rule::match_expr, r#"match mode { "fast" => $speed_val, _ => $default_val }"#);
+        assert!(result.is_ok(), "failed to parse match expr with var_ref results: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_multi_pattern_three_values() {
+        let result = PxParser::parse(Rule::match_expr, r#"match tier { "s1" | "s2" | "s3" => "standard", "p1" | "p2" => "premium", _ => "unknown" }"#);
+        assert!(result.is_ok(), "failed to parse match expr with 3-value multi-pattern: {:?}", result.err());
+    }
+
+    #[test]
+    fn parse_match_expr_in_constraint_require() {
+        // A constraint that uses match in its require clause
+        let source = r#"constraint color_rule:
+  require: match status { "active" => "green", _ => "gray" } == "green"
+  severity: error
+  message: "status must be active"
+"#;
+        let doc = parse(source);
+        assert!(doc.is_ok(), "failed to parse constraint with match expr: {:?}", doc.err());
+    }
 }
