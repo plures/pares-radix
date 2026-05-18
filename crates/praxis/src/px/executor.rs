@@ -268,7 +268,7 @@ fn execute_match_subject(
     subject_expr: &str,
     arms: &[Value],
     index: usize,
-    vars: &HashMap<String, Value>,
+    vars: &mut HashMap<String, Value>,
 ) -> Result<StepResult, ExecutionError> {
     // Resolve the subject as both string and raw Value (for tuple matching)
     let (subject_val, subject_raw) = if (subject_expr.starts_with('"') && subject_expr.ends_with('"'))
@@ -299,24 +299,32 @@ fn execute_match_subject(
                 }
             }
             let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
+            let resolved = resolve_vars(&result_val, vars);
             return Ok(StepResult {
                 index,
                 kind: "match".into(),
-                output: Some(result_val),
+                output: Some(resolved),
                 skipped: false,
             });
         }
 
         // Multi-pattern support
         let alternatives = split_pattern_alternatives(pattern);
+        let mut arm_bindings: MatchBindings = HashMap::new();
         let matched = alternatives.iter().any(|alt| {
             let alt = alt.trim();
             // Tuple pattern: ("error", 500, _)
-            if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
+            if let Some((tuple_match, bindings)) = try_tuple_pattern(alt, &subject_raw, vars) {
+                if tuple_match {
+                    arm_bindings = bindings;
+                }
                 return tuple_match;
             }
             // Struct pattern: {kind: "error", code: 500}
-            if let Some(struct_match) = try_struct_pattern(alt, &subject_raw, vars) {
+            if let Some((struct_match, bindings)) = try_struct_pattern(alt, &subject_raw, vars) {
+                if struct_match {
+                    arm_bindings = bindings;
+                }
                 return struct_match;
             }
             // Range pattern
@@ -336,17 +344,24 @@ fn execute_match_subject(
         });
 
         if matched {
-            // If there's a guard, evaluate it
+            // If there's a guard, evaluate it (with bindings available)
+            let guard_vars: HashMap<String, Value> = vars.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .chain(arm_bindings.iter().map(|(k, v)| (k.clone(), v.clone())))
+                .collect();
             if let Some(guard_expr) = guard {
-                if !default_evaluate_condition(guard_expr, vars) {
+                if !default_evaluate_condition(guard_expr, &guard_vars) {
                     continue; // Pattern matched but guard failed
                 }
             }
+            // Inject bindings into vars for result resolution
+            vars.extend(arm_bindings);
             let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
+            let resolved = resolve_vars(&result_val, vars);
             return Ok(StepResult {
                 index,
                 kind: "match".into(),
-                output: Some(result_val),
+                output: Some(resolved),
                 skipped: false,
             });
         }
@@ -1452,14 +1467,21 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
 
         // Multi-pattern support: "a" | "b" | "c" => result
         let alternatives = split_pattern_alternatives(pattern);
+        let mut arm_bindings: MatchBindings = HashMap::new();
         let matched = alternatives.iter().any(|alt| {
             let alt = alt.trim();
             // Tuple pattern: ("error", 500, _)
-            if let Some(tuple_match) = try_tuple_pattern(alt, &subject_raw, vars) {
+            if let Some((tuple_match, bindings)) = try_tuple_pattern(alt, &subject_raw, vars) {
+                if tuple_match {
+                    arm_bindings = bindings;
+                }
                 return tuple_match;
             }
             // Struct pattern: {kind: "error", code: 500}
-            if let Some(struct_match) = try_struct_pattern(alt, &subject_raw, vars) {
+            if let Some((struct_match, bindings)) = try_struct_pattern(alt, &subject_raw, vars) {
+                if struct_match {
+                    arm_bindings = bindings;
+                }
                 return struct_match;
             }
             // Range pattern: 1..5 (exclusive end) or 1..=5 (inclusive end)
@@ -1479,13 +1501,17 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
         });
 
         if matched {
-            // If there's a guard, evaluate it — only match if guard passes
+            // If there's a guard, evaluate it — with bindings available
+            let merged_vars: HashMap<String, Value> = vars.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .chain(arm_bindings.iter().map(|(k, v)| (k.clone(), v.clone())))
+                .collect();
             if let Some(guard_expr) = &guard {
-                if !default_evaluate_condition(guard_expr, vars) {
+                if !default_evaluate_condition(guard_expr, &merged_vars) {
                     continue; // Pattern matched but guard failed, try next arm
                 }
             }
-            return Some(resolve_match_result(result_expr, vars));
+            return Some(resolve_match_result(result_expr, &merged_vars));
         }
     }
 
@@ -1580,17 +1606,21 @@ fn try_range_pattern(pattern: &str, subject: &str) -> Option<bool> {
     None
 }
 
+/// Result of a pattern match attempt: matched flag + captured bindings.
+type MatchBindings = HashMap<String, Value>;
+
 /// Try to match a tuple pattern like `("error", 500, _)` against a JSON array subject.
-/// Returns `Some(true)` if the pattern matches, `Some(false)` if it's a valid tuple pattern
-/// that doesn't match, or `None` if the pattern is not a tuple pattern.
+/// Returns `Some((true, bindings))` if the pattern matches, `Some((false, empty))` if it's a valid
+/// tuple pattern that doesn't match, or `None` if the pattern is not a tuple pattern.
 ///
 /// Elements are compared positionally:
 /// - `_` is a wildcard (matches anything)
+/// - `$name` where name is NOT in vars captures the value as a binding
+/// - `$name` where name IS in vars compares against the stored value
 /// - Quoted strings compare as strings
 /// - Numbers compare as numbers
-/// - Variables (`$name` or bare `ident`) are resolved from vars
 /// - Tuple length must match array length
-fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<bool> {
+fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<(bool, MatchBindings)> {
     let trimmed = pattern.trim();
     if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
         return None;
@@ -1599,7 +1629,7 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
     // Extract the subject as a JSON array
     let subject_arr = match subject_val {
         Value::Array(arr) => arr,
-        _ => return Some(false), // Tuple pattern against non-array = no match
+        _ => return Some((false, HashMap::new())), // Tuple pattern against non-array = no match
     };
 
     // Parse the tuple elements (split by top-level commas within the parens)
@@ -1608,8 +1638,10 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
 
     // Length must match
     if elements.len() != subject_arr.len() {
-        return Some(false);
+        return Some((false, HashMap::new()));
     }
+
+    let mut bindings: MatchBindings = HashMap::new();
 
     // Compare element by element
     for (elem_pat, subject_elem) in elements.iter().zip(subject_arr.iter()) {
@@ -1620,6 +1652,14 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
             continue;
         }
 
+        // Binding variable: $name where name is NOT in vars → capture
+        if let Some(var_name) = elem_pat.strip_prefix('$') {
+            if !vars.contains_key(var_name) {
+                bindings.insert(var_name.to_string(), subject_elem.clone());
+                continue;
+            }
+        }
+
         // Quoted string
         if (elem_pat.starts_with('"') && elem_pat.ends_with('"'))
             || (elem_pat.starts_with('\'') && elem_pat.ends_with('\''))
@@ -1627,7 +1667,7 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
             let pat_str = &elem_pat[1..elem_pat.len() - 1];
             match subject_elem {
                 Value::String(s) if s == pat_str => continue,
-                _ => return Some(false),
+                _ => return Some((false, HashMap::new())),
             }
         }
 
@@ -1636,13 +1676,13 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
             if subject_elem == &Value::Bool(true) {
                 continue;
             }
-            return Some(false);
+            return Some((false, HashMap::new()));
         }
         if elem_pat == "false" {
             if subject_elem == &Value::Bool(false) {
                 continue;
             }
-            return Some(false);
+            return Some((false, HashMap::new()));
         }
 
         // Null
@@ -1650,7 +1690,7 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
             if subject_elem.is_null() {
                 continue;
             }
-            return Some(false);
+            return Some((false, HashMap::new()));
         }
 
         // Number
@@ -1662,20 +1702,20 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
                             continue;
                         }
                     }
-                    return Some(false);
+                    return Some((false, HashMap::new()));
                 }
-                _ => return Some(false),
+                _ => return Some((false, HashMap::new())),
             }
         }
 
-        // Variable reference ($name or bare ident)
+        // Variable reference ($name or bare ident) — only for vars that EXIST
         if let Some(resolved) = resolve_var(elem_pat, vars) {
             let subject_str = value_to_interpolation_string(subject_elem);
             let resolved_str = value_to_interpolation_string(&resolved);
             if subject_str == resolved_str {
                 continue;
             }
-            return Some(false);
+            return Some((false, HashMap::new()));
         }
 
         // Bare string comparison (unquoted literal)
@@ -1683,10 +1723,10 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
         if subject_str == elem_pat {
             continue;
         }
-        return Some(false);
+        return Some((false, HashMap::new()));
     }
 
-    Some(true)
+    Some((true, bindings))
 }
 
 /// Try to match a struct pattern like `{kind: "error", code: 500}` against a JSON object subject.
@@ -1701,7 +1741,7 @@ fn try_tuple_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, 
 /// - Variables (`$name` or bare `ident` starting with `$`) are resolved from vars
 /// - The pattern does NOT require exhaustive fields — unmentioned fields are ignored
 /// - All mentioned fields must exist in the subject and match their patterns
-fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<bool> {
+fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String, Value>) -> Option<(bool, MatchBindings)> {
     let trimmed = pattern.trim();
     if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         return None;
@@ -1710,7 +1750,7 @@ fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String,
     // Extract the subject as a JSON object
     let subject_obj = match subject_val {
         Value::Object(obj) => obj,
-        _ => return Some(false), // Struct pattern against non-object = no match
+        _ => return Some((false, HashMap::new())), // Struct pattern against non-object = no match
     };
 
     // Parse the field patterns (split by top-level commas within the braces)
@@ -1718,10 +1758,11 @@ fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String,
     let inner_trimmed = inner.trim();
     if inner_trimmed.is_empty() {
         // Empty struct pattern `{}` matches any object
-        return Some(true);
+        return Some((true, HashMap::new()));
     }
 
     let fields = split_struct_fields(inner);
+    let mut bindings: MatchBindings = HashMap::new();
 
     // Check each field pattern against the subject
     for field_pat in &fields {
@@ -1738,7 +1779,7 @@ fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String,
                 // For now, check field exists in subject
                 let field_name = field_pat.trim();
                 if !subject_obj.contains_key(field_name) {
-                    return Some(false);
+                    return Some((false, HashMap::new()));
                 }
                 continue;
             }
@@ -1750,25 +1791,37 @@ fn try_struct_pattern(pattern: &str, subject_val: &Value, vars: &HashMap<String,
         // Look up the field in the subject
         let subject_field = match subject_obj.get(field_name) {
             Some(val) => val,
-            None => return Some(false), // Required field missing
+            None => return Some((false, HashMap::new())), // Required field missing
         };
 
         // Match the value pattern against the subject field
-        if !struct_field_matches(value_pattern, subject_field, vars) {
-            return Some(false);
+        let (field_matched, field_bindings) = struct_field_matches(value_pattern, subject_field, vars);
+        if !field_matched {
+            return Some((false, HashMap::new()));
         }
+        bindings.extend(field_bindings);
     }
 
-    Some(true)
+    Some((true, bindings))
 }
 
 /// Check if a single struct field value matches the expected pattern.
-fn struct_field_matches(pattern: &str, subject: &Value, vars: &HashMap<String, Value>) -> bool {
+/// Returns (matched, bindings) where bindings are variables captured during matching.
+fn struct_field_matches(pattern: &str, subject: &Value, vars: &HashMap<String, Value>) -> (bool, MatchBindings) {
     let pat = pattern.trim();
 
     // Wildcard
     if pat == "_" {
-        return true;
+        return (true, HashMap::new());
+    }
+
+    // Binding variable: $name where name is NOT in vars → capture
+    if let Some(var_name) = pat.strip_prefix('$') {
+        if !vars.contains_key(var_name) {
+            let mut bindings = HashMap::new();
+            bindings.insert(var_name.to_string(), subject.clone());
+            return (true, bindings);
+        }
     }
 
     // Quoted string
@@ -1776,54 +1829,54 @@ fn struct_field_matches(pattern: &str, subject: &Value, vars: &HashMap<String, V
         || (pat.starts_with('\'') && pat.ends_with('\''))
     {
         let pat_str = &pat[1..pat.len() - 1];
-        return matches!(subject, Value::String(s) if s == pat_str);
+        return (matches!(subject, Value::String(s) if s == pat_str), HashMap::new());
     }
 
     // Boolean
     if pat == "true" {
-        return subject == &Value::Bool(true);
+        return (subject == &Value::Bool(true), HashMap::new());
     }
     if pat == "false" {
-        return subject == &Value::Bool(false);
+        return (subject == &Value::Bool(false), HashMap::new());
     }
 
     // Null
     if pat == "null" {
-        return subject.is_null();
+        return (subject.is_null(), HashMap::new());
     }
 
     // Nested struct pattern
     if pat.starts_with('{') && pat.ends_with('}') {
-        if let Some(result) = try_struct_pattern(pat, subject, vars) {
-            return result;
+        if let Some((result, nested_bindings)) = try_struct_pattern(pat, subject, vars) {
+            return (result, nested_bindings);
         }
     }
 
     // Nested tuple pattern
     if pat.starts_with('(') && pat.ends_with(')') {
-        if let Some(result) = try_tuple_pattern(pat, subject, vars) {
-            return result;
+        if let Some((result, nested_bindings)) = try_tuple_pattern(pat, subject, vars) {
+            return (result, nested_bindings);
         }
     }
 
     // Number
     if let Ok(n) = pat.parse::<f64>() {
         if let Some(sv) = subject.as_f64() {
-            return (sv - n).abs() < f64::EPSILON;
+            return ((sv - n).abs() < f64::EPSILON, HashMap::new());
         }
-        return false;
+        return (false, HashMap::new());
     }
 
-    // Variable reference ($name)
+    // Variable reference ($name) — only for vars that EXIST
     if let Some(resolved) = resolve_var(pat, vars) {
         let subject_str = value_to_interpolation_string(subject);
         let resolved_str = value_to_interpolation_string(&resolved);
-        return subject_str == resolved_str;
+        return (subject_str == resolved_str, HashMap::new());
     }
 
     // Bare string comparison (unquoted literal)
     let subject_str = value_to_interpolation_string(subject);
-    subject_str == pat
+    (subject_str == pat, HashMap::new())
 }
 
 /// Split struct fields by top-level commas (respecting nested braces, parens, and quotes).
@@ -6684,35 +6737,35 @@ mod tests {
     fn test_tuple_pattern_basic_string_match() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("error".into()), Value::Number(500.into())]);
-        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_tuple_pattern_no_match() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("ok".into()), Value::Number(200.into())]);
-        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars), Some(false));
+        assert_eq!(try_tuple_pattern(r#"("error", 500)"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
     fn test_tuple_pattern_wildcard() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("error".into()), Value::Number(500.into())]);
-        assert_eq!(try_tuple_pattern(r#"("error", _)"#, &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("error", _)"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_tuple_pattern_all_wildcards() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("anything".into()), Value::Bool(true)]);
-        assert_eq!(try_tuple_pattern("(_, _)", &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern("(_, _)", &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_tuple_pattern_length_mismatch() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("a".into())]);
-        assert_eq!(try_tuple_pattern(r#"("a", "b")"#, &subject, &vars), Some(false));
+        assert_eq!(try_tuple_pattern(r#"("a", "b")"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6720,7 +6773,7 @@ mod tests {
         let vars = HashMap::new();
         let subject = Value::String("hello".into());
         // Pattern starts with ( but subject is not an array
-        assert_eq!(try_tuple_pattern("(\"hello\")", &subject, &vars), Some(false));
+        assert_eq!(try_tuple_pattern("(\"hello\")", &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6736,22 +6789,22 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("code".into(), Value::Number(404.into()));
         let subject = Value::Array(vec![Value::String("error".into()), Value::Number(404.into())]);
-        assert_eq!(try_tuple_pattern(r#"("error", $code)"#, &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("error", $code)"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_tuple_pattern_with_boolean() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("flag".into()), Value::Bool(true)]);
-        assert_eq!(try_tuple_pattern(r#"("flag", true)"#, &subject, &vars), Some(true));
-        assert_eq!(try_tuple_pattern(r#"("flag", false)"#, &subject, &vars), Some(false));
+        assert_eq!(try_tuple_pattern(r#"("flag", true)"#, &subject, &vars).map(|(m, _)| m), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("flag", false)"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
     fn test_tuple_pattern_with_null() {
         let vars = HashMap::new();
         let subject = Value::Array(vec![Value::String("x".into()), Value::Null]);
-        assert_eq!(try_tuple_pattern(r#"("x", null)"#, &subject, &vars), Some(true));
+        assert_eq!(try_tuple_pattern(r#"("x", null)"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
@@ -6791,28 +6844,28 @@ mod tests {
     fn test_struct_pattern_basic_match() {
         let subject = json!({"kind": "error", "code": 500});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_struct_pattern_no_match() {
         let subject = json!({"kind": "error", "code": 404});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
     fn test_struct_pattern_wildcard() {
         let subject = json!({"kind": "error", "code": 500, "msg": "internal"});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error", code: _}"#, &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: _}"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_struct_pattern_missing_field() {
         let subject = json!({"kind": "error"});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern(r#"{kind: "error", code: 500}"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6820,7 +6873,7 @@ mod tests {
         // Pattern doesn't need to cover all fields
         let subject = json!({"kind": "error", "code": 500, "msg": "internal", "retryable": true});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
@@ -6828,14 +6881,14 @@ mod tests {
         // Empty struct pattern matches any object
         let subject = json!({"anything": 42});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern("{}", &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern("{}", &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_struct_pattern_not_an_object() {
         let subject = json!([1, 2, 3]);
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern(r#"{kind: "error"}"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6850,8 +6903,8 @@ mod tests {
     fn test_struct_pattern_boolean_and_null() {
         let subject = json!({"active": true, "deleted": null});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern("{active: true, deleted: null}", &subject, &vars), Some(true));
-        assert_eq!(try_struct_pattern("{active: false}", &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern("{active: true, deleted: null}", &subject, &vars).map(|(m, _)| m), Some(true));
+        assert_eq!(try_struct_pattern("{active: false}", &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6859,23 +6912,23 @@ mod tests {
         let subject = json!({"status": "active"});
         let mut vars = HashMap::new();
         vars.insert("expected_status".into(), Value::String("active".into()));
-        assert_eq!(try_struct_pattern("{status: $expected_status}", &subject, &vars), Some(true));
+        assert_eq!(try_struct_pattern("{status: $expected_status}", &subject, &vars).map(|(m, _)| m), Some(true));
     }
 
     #[test]
     fn test_struct_pattern_nested_struct() {
         let subject = json!({"outer": {"inner": "deep"}});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern(r#"{outer: {inner: "deep"}}"#, &subject, &vars), Some(true));
-        assert_eq!(try_struct_pattern(r#"{outer: {inner: "wrong"}}"#, &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern(r#"{outer: {inner: "deep"}}"#, &subject, &vars).map(|(m, _)| m), Some(true));
+        assert_eq!(try_struct_pattern(r#"{outer: {inner: "wrong"}}"#, &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
     fn test_struct_pattern_nested_tuple() {
         let subject = json!({"coords": [1, 2]});
         let vars = HashMap::new();
-        assert_eq!(try_struct_pattern("{coords: (1, 2)}", &subject, &vars), Some(true));
-        assert_eq!(try_struct_pattern("{coords: (1, 9)}", &subject, &vars), Some(false));
+        assert_eq!(try_struct_pattern("{coords: (1, 2)}", &subject, &vars).map(|(m, _)| m), Some(true));
+        assert_eq!(try_struct_pattern("{coords: (1, 9)}", &subject, &vars).map(|(m, _)| m), Some(false));
     }
 
     #[test]
@@ -6913,5 +6966,147 @@ mod tests {
         let expr = r#"match $event { {kind: "error"} if $should_retry => "retry", {kind: "error"} => "fail", _ => "ok" }"#;
         let result = try_match_expr(expr, &vars);
         assert_eq!(result, Some("retry".to_string()));
+    }
+
+    // ── Match Arm Bindings Tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_struct_binding_captures_value() {
+        // $k should bind to "error" since it doesn't exist in vars
+        let subject = json!({"kind": "error", "code": 500});
+        let vars = HashMap::new();
+        let result = try_struct_pattern(r#"{kind: $k, code: $c}"#, &subject, &vars);
+        let (matched, bindings) = result.unwrap();
+        assert!(matched);
+        assert_eq!(bindings.get("k"), Some(&Value::String("error".into())));
+        assert_eq!(bindings.get("c"), Some(&json!(500)));
+    }
+
+    #[test]
+    fn test_struct_binding_existing_var_matches() {
+        // $expected exists in vars, so it compares rather than captures
+        let subject = json!({"kind": "error"});
+        let mut vars = HashMap::new();
+        vars.insert("expected".into(), Value::String("error".into()));
+        let result = try_struct_pattern("{kind: $expected}", &subject, &vars);
+        let (matched, bindings) = result.unwrap();
+        assert!(matched);
+        assert!(bindings.is_empty()); // No capture, just comparison
+    }
+
+    #[test]
+    fn test_struct_binding_existing_var_fails() {
+        // $expected exists but doesn't match
+        let subject = json!({"kind": "warning"});
+        let mut vars = HashMap::new();
+        vars.insert("expected".into(), Value::String("error".into()));
+        let result = try_struct_pattern("{kind: $expected}", &subject, &vars);
+        let (matched, _) = result.unwrap();
+        assert!(!matched);
+    }
+
+    #[test]
+    fn test_tuple_binding_captures_value() {
+        let subject = Value::Array(vec![Value::String("error".into()), Value::Number(404.into())]);
+        let vars = HashMap::new();
+        let result = try_tuple_pattern(r#"("error", $code)"#, &subject, &vars);
+        let (matched, bindings) = result.unwrap();
+        assert!(matched);
+        assert_eq!(bindings.get("code"), Some(&json!(404)));
+    }
+
+    #[test]
+    fn test_tuple_binding_multiple_captures() {
+        let subject = Value::Array(vec![
+            Value::String("deploy".into()),
+            Value::String("prod".into()),
+            Value::Number(3.into()),
+        ]);
+        let vars = HashMap::new();
+        let result = try_tuple_pattern("($action, $env, $count)", &subject, &vars);
+        let (matched, bindings) = result.unwrap();
+        assert!(matched);
+        assert_eq!(bindings.get("action"), Some(&Value::String("deploy".into())));
+        assert_eq!(bindings.get("env"), Some(&Value::String("prod".into())));
+        assert_eq!(bindings.get("count"), Some(&json!(3)));
+    }
+
+    #[test]
+    fn test_match_expr_with_struct_bindings() {
+        // Bindings should be available in the result expression
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500}));
+        let expr = r#"match $event { {kind: "error", code: $c} => $c, _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("500".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_with_tuple_bindings() {
+        let mut vars = HashMap::new();
+        vars.insert("pair".into(), json!(["error", 404]));
+        let expr = r#"match $pair { ("error", $code) => $code, _ => "none" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("404".to_string()));
+    }
+
+    #[test]
+    fn test_match_step_with_struct_bindings() {
+        // Test that bindings from match steps are injected into vars
+        let handler = MockHandler::new();
+        let step = json!({
+            "kind": "match",
+            "subject": "$event",
+            "arms": [
+                {"pattern": "{kind: \"error\", code: $c}", "result": "$c"},
+                {"pattern": "_", "result": "unknown"}
+            ]
+        });
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500}));
+        let result = execute_step(&step, 0, &mut vars, &handler).unwrap();
+        assert_eq!(result.output, Some(json!(500)));
+        // Binding should persist in vars
+        assert_eq!(vars.get("c"), Some(&json!(500)));
+    }
+
+    #[test]
+    fn test_match_step_binding_not_set_on_mismatch() {
+        // If the first arm doesn't match, its bindings shouldn't leak
+        let handler = MockHandler::new();
+        let step = json!({
+            "kind": "match",
+            "subject": "$event",
+            "arms": [
+                {"pattern": "{kind: \"warning\", code: $c}", "result": "$c"},
+                {"pattern": "_", "result": "fallback"}
+            ]
+        });
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500}));
+        let result = execute_step(&step, 0, &mut vars, &handler).unwrap();
+        assert_eq!(result.output, Some(json!("fallback")));
+        // $c should NOT be in vars since that arm didn't match
+        assert_eq!(vars.get("c"), None);
+    }
+
+    #[test]
+    fn test_nested_struct_binding() {
+        let subject = json!({"outer": {"inner": "deep_value"}});
+        let vars = HashMap::new();
+        let result = try_struct_pattern(r#"{outer: {inner: $val}}"#, &subject, &vars);
+        let (matched, bindings) = result.unwrap();
+        assert!(matched);
+        assert_eq!(bindings.get("val"), Some(&Value::String("deep_value".into())));
+    }
+
+    #[test]
+    fn test_binding_with_guard() {
+        // Bindings should be available in guard expressions
+        let mut vars = HashMap::new();
+        vars.insert("event".into(), json!({"kind": "error", "code": 500}));
+        let expr = r#"match $event { {kind: "error", code: $c} if $c > 499 => "server", {kind: "error", code: $c} => "client", _ => "other" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("server".to_string()));
     }
 }
