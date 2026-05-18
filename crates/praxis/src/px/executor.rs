@@ -1778,9 +1778,14 @@ fn resolve_arg(arg: &str, vars: &HashMap<String, Value>) -> Option<Value> {
     if let Some(val) = resolve_var(arg, vars) {
         return Some(val);
     }
-    // Try as string literal
+    // Try as string literal (with interpolation support)
     if arg.starts_with('"') && arg.ends_with('"') && arg.len() >= 2 {
-        return Some(Value::String(arg[1..arg.len() - 1].to_string()));
+        let raw = &arg[1..arg.len() - 1];
+        // If the string contains ${...}, interpolate variables
+        if raw.contains("${") {
+            return Some(Value::String(interpolate_string(raw, vars)));
+        }
+        return Some(Value::String(raw.to_string()));
     }
     // Try as numeric literal
     if let Ok(n) = arg.parse::<i64>() {
@@ -2044,6 +2049,189 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
             Some(Value::String("null".to_string()))
         }
 
+        // one_of(var, val1, val2, ...) — returns true if var equals any of the values
+        // Like SQL IN: `one_of(status, "active", "pending", "review")`
+        "one_of" | "any_of" | "in_list" => {
+            if args.len() < 2 {
+                return None;
+            }
+            let var_arg = args[0].trim();
+            let var_val = resolve_arg(var_arg, vars)?;
+            let var_str = value_to_interpolation_string(&var_val);
+            for candidate in &args[1..] {
+                let candidate = candidate.trim();
+                if let Some(cval) = resolve_arg(candidate, vars) {
+                    if value_to_interpolation_string(&cval) == var_str {
+                        return Some(Value::Bool(true));
+                    }
+                } else {
+                    // Raw string fallback
+                    let raw = candidate.trim_matches('"');
+                    if raw == var_str {
+                        return Some(Value::Bool(true));
+                    }
+                }
+            }
+            Some(Value::Bool(false))
+        }
+
+        // none_of(var, val1, val2, ...) — returns true if var does NOT equal any of the values
+        "none_of" | "not_in" => {
+            if args.len() < 2 {
+                return None;
+            }
+            let var_arg = args[0].trim();
+            let var_val = resolve_arg(var_arg, vars)?;
+            let var_str = value_to_interpolation_string(&var_val);
+            for candidate in &args[1..] {
+                let candidate = candidate.trim();
+                if let Some(cval) = resolve_arg(candidate, vars) {
+                    if value_to_interpolation_string(&cval) == var_str {
+                        return Some(Value::Bool(false));
+                    }
+                } else {
+                    let raw = candidate.trim_matches('"');
+                    if raw == var_str {
+                        return Some(Value::Bool(false));
+                    }
+                }
+            }
+            Some(Value::Bool(true))
+        }
+
+        // if_else(condition, then_value, else_value) — conditional expression
+        // Example: `if_else(is_admin, "full", "limited")`
+        "if_else" | "ternary" | "cond" => {
+            if args.len() != 3 {
+                return None;
+            }
+            let cond_arg = args[0].trim();
+            let then_arg = args[1].trim();
+            let else_arg = args[2].trim();
+            // Evaluate condition: try as function call, then as variable truthy check
+            let cond_result = if let Some(val) = resolve_arg(cond_arg, vars) {
+                is_truthy(&val)
+            } else {
+                // Try evaluating as a sub-expression
+                default_evaluate_condition(cond_arg, vars)
+            };
+            if cond_result {
+                resolve_arg(then_arg, vars).or_else(|| {
+                    Some(Value::String(then_arg.trim_matches('"').to_string()))
+                })
+            } else {
+                resolve_arg(else_arg, vars).or_else(|| {
+                    Some(Value::String(else_arg.trim_matches('"').to_string()))
+                })
+            }
+        }
+
+        // coalesce(val1, val2, ...) — returns the first non-null, non-empty value
+        // Example: `coalesce(display_name, username, "anonymous")`
+        "coalesce" | "first_of" => {
+            if args.is_empty() {
+                return None;
+            }
+            for arg in &args {
+                let arg = arg.trim();
+                if let Some(val) = resolve_arg(arg, vars) {
+                    if is_truthy(&val) {
+                        return Some(val);
+                    }
+                }
+            }
+            // All were null/empty — return null
+            Some(Value::Null)
+        }
+
+        // min(a, b, ...) — returns the minimum numeric value
+        "min" => {
+            if args.is_empty() {
+                return None;
+            }
+            let mut min_val: Option<f64> = None;
+            for arg in &args {
+                let arg = arg.trim();
+                if let Some(val) = resolve_arg(arg, vars) {
+                    if let Some(n) = value_to_f64(&val) {
+                        min_val = Some(match min_val {
+                            None => n,
+                            Some(current) => current.min(n),
+                        });
+                    }
+                }
+            }
+            min_val.and_then(|n| {
+                if n == n.floor() && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+                    Some(Value::Number(serde_json::Number::from(n as i64)))
+                } else {
+                    serde_json::Number::from_f64(n).map(Value::Number)
+                }
+            })
+        }
+
+        // max(a, b, ...) — returns the maximum numeric value
+        "max" => {
+            if args.is_empty() {
+                return None;
+            }
+            let mut max_val: Option<f64> = None;
+            for arg in &args {
+                let arg = arg.trim();
+                if let Some(val) = resolve_arg(arg, vars) {
+                    if let Some(n) = value_to_f64(&val) {
+                        max_val = Some(match max_val {
+                            None => n,
+                            Some(current) => current.max(n),
+                        });
+                    }
+                }
+            }
+            max_val.and_then(|n| {
+                if n == n.floor() && n >= i64::MIN as f64 && n <= i64::MAX as f64 {
+                    Some(Value::Number(serde_json::Number::from(n as i64)))
+                } else {
+                    serde_json::Number::from_f64(n).map(Value::Number)
+                }
+            })
+        }
+
+        // abs(var) — returns absolute value
+        "abs" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            let val = resolve_arg(arg, vars)?;
+            let n = value_to_f64(&val)?;
+            let abs_n = n.abs();
+            if abs_n == abs_n.floor() && abs_n >= 0.0 && abs_n <= i64::MAX as f64 {
+                Some(Value::Number(serde_json::Number::from(abs_n as i64)))
+            } else {
+                serde_json::Number::from_f64(abs_n).map(Value::Number)
+            }
+        }
+
+        // clamp(val, min, max) — clamps val between min and max
+        "clamp" => {
+            if args.len() != 3 {
+                return None;
+            }
+            let val = resolve_arg(args[0].trim(), vars)?;
+            let min_val = resolve_arg(args[1].trim(), vars)?;
+            let max_val = resolve_arg(args[2].trim(), vars)?;
+            let n = value_to_f64(&val)?;
+            let lo = value_to_f64(&min_val)?;
+            let hi = value_to_f64(&max_val)?;
+            let clamped = n.max(lo).min(hi);
+            if clamped == clamped.floor() && clamped >= i64::MIN as f64 && clamped <= i64::MAX as f64
+            {
+                Some(Value::Number(serde_json::Number::from(clamped as i64)))
+            } else {
+                serde_json::Number::from_f64(clamped).map(Value::Number)
+            }
+        }
+
         _ => None,
     }
 }
@@ -2085,6 +2273,17 @@ fn is_truthy(val: &Value) -> bool {
         Value::String(s) => !s.is_empty(),
         Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
         _ => true,
+    }
+}
+
+/// Convert a JSON value to f64 (for numeric functions).
+fn value_to_f64(val: &Value) -> Option<f64> {
+    match val {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        Value::Bool(true) => Some(1.0),
+        Value::Bool(false) => Some(0.0),
+        _ => None,
     }
 }
 
@@ -4773,5 +4972,209 @@ mod tests {
         vars.insert("name".to_string(), json!("  hello  "));
         // Common validation pattern: len(trim(name)) > 0
         assert!(default_evaluate_condition("len(trim(name)) > 0", &vars));
+    }
+
+    // ── one_of / any_of tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_one_of_matches() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        assert!(default_evaluate_condition(
+            r#"one_of(status, "pending", "active", "review")"#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_one_of_no_match() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("deleted"));
+        assert!(!default_evaluate_condition(
+            r#"one_of(status, "pending", "active", "review")"#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_one_of_with_variable_candidates() {
+        let mut vars = HashMap::new();
+        vars.insert("color".to_string(), json!("blue"));
+        vars.insert("primary".to_string(), json!("red"));
+        vars.insert("secondary".to_string(), json!("blue"));
+        // color matches secondary variable
+        assert!(default_evaluate_condition(
+            "one_of(color, primary, secondary)",
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_none_of_passes() {
+        let mut vars = HashMap::new();
+        vars.insert("role".to_string(), json!("admin"));
+        assert!(default_evaluate_condition(
+            r#"none_of(role, "guest", "banned", "suspended")"#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_none_of_fails() {
+        let mut vars = HashMap::new();
+        vars.insert("role".to_string(), json!("banned"));
+        assert!(!default_evaluate_condition(
+            r#"none_of(role, "guest", "banned", "suspended")"#,
+            &vars
+        ));
+    }
+
+    // ── if_else / ternary tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_if_else_true_branch() {
+        let mut vars = HashMap::new();
+        vars.insert("is_admin".to_string(), json!(true));
+        // if_else returns "full" when condition is truthy
+        let result = resolve_function_call(r#"if_else(is_admin, "full", "limited")"#, &vars);
+        assert_eq!(result, Some(json!("full")));
+    }
+
+    #[test]
+    fn test_if_else_false_branch() {
+        let mut vars = HashMap::new();
+        vars.insert("is_admin".to_string(), json!(false));
+        let result = resolve_function_call(r#"if_else(is_admin, "full", "limited")"#, &vars);
+        assert_eq!(result, Some(json!("limited")));
+    }
+
+    #[test]
+    fn test_if_else_with_nested_condition() {
+        let mut vars = HashMap::new();
+        vars.insert("count".to_string(), json!(5));
+        // Uses a nested function as condition
+        let result = resolve_function_call(r#"if_else(count, "has items", "empty")"#, &vars);
+        assert_eq!(result, Some(json!("has items")));
+    }
+
+    // ── coalesce tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_coalesce_first_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("Alice"));
+        vars.insert("fallback".to_string(), json!("Unknown"));
+        let result = resolve_function_call("coalesce(name, fallback)", &vars);
+        assert_eq!(result, Some(json!("Alice")));
+    }
+
+    #[test]
+    fn test_coalesce_skips_empty() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!(""));
+        vars.insert("nick".to_string(), json!("Bob"));
+        let result = resolve_function_call("coalesce(name, nick)", &vars);
+        assert_eq!(result, Some(json!("Bob")));
+    }
+
+    #[test]
+    fn test_coalesce_all_empty() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(null));
+        vars.insert("b".to_string(), json!(""));
+        let result = resolve_function_call("coalesce(a, b)", &vars);
+        assert_eq!(result, Some(Value::Null));
+    }
+
+    // ── min / max / abs / clamp tests ─────────────────────────────────────
+
+    #[test]
+    fn test_min_basic() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(10));
+        vars.insert("b".to_string(), json!(3));
+        vars.insert("c".to_string(), json!(7));
+        let result = resolve_function_call("min(a, b, c)", &vars);
+        assert_eq!(result, Some(json!(3)));
+    }
+
+    #[test]
+    fn test_max_basic() {
+        let mut vars = HashMap::new();
+        vars.insert("a".to_string(), json!(10));
+        vars.insert("b".to_string(), json!(3));
+        vars.insert("c".to_string(), json!(7));
+        let result = resolve_function_call("max(a, b, c)", &vars);
+        assert_eq!(result, Some(json!(10)));
+    }
+
+    #[test]
+    fn test_abs_negative() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!(-42));
+        let result = resolve_function_call("abs(x)", &vars);
+        assert_eq!(result, Some(json!(42)));
+    }
+
+    #[test]
+    fn test_abs_positive() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!(7));
+        let result = resolve_function_call("abs(x)", &vars);
+        assert_eq!(result, Some(json!(7)));
+    }
+
+    #[test]
+    fn test_clamp_within_range() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(5));
+        let result = resolve_function_call("clamp(val, 0, 10)", &vars);
+        assert_eq!(result, Some(json!(5)));
+    }
+
+    #[test]
+    fn test_clamp_below_min() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(-3));
+        let result = resolve_function_call("clamp(val, 0, 10)", &vars);
+        assert_eq!(result, Some(json!(0)));
+    }
+
+    #[test]
+    fn test_clamp_above_max() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(15));
+        let result = resolve_function_call("clamp(val, 0, 10)", &vars);
+        assert_eq!(result, Some(json!(10)));
+    }
+
+    // ── Combined expression tests (real-world patterns) ───────────────────
+
+    #[test]
+    fn test_one_of_combined_with_logic() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        vars.insert("role".to_string(), json!("admin"));
+        // Complex guard: status is active AND role is admin or moderator
+        assert!(default_evaluate_condition(
+            r#"one_of(status, "active") && one_of(role, "admin", "moderator")"#,
+            &vars
+        ));
+    }
+
+    #[test]
+    fn test_one_of_in_when_guard_pattern() {
+        let mut vars = HashMap::new();
+        vars.insert("event_type".to_string(), json!("push"));
+        // Typical when-guard: only fire on certain event types
+        assert!(default_evaluate_condition(
+            r#"one_of(event_type, "push", "pull_request", "release")"#,
+            &vars
+        ));
+        vars.insert("event_type".to_string(), json!("comment"));
+        assert!(!default_evaluate_condition(
+            r#"one_of(event_type, "push", "pull_request", "release")"#,
+            &vars
+        ));
     }
 }
