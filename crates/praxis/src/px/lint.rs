@@ -85,7 +85,14 @@ fn lint_step(step: &PxStep, proc_name: &str, idx: usize, diags: &mut Vec<LintDia
             lint_match_unreachable(arms, proc_name, idx, diags);
             lint_match_duplicate_conditions(arms, proc_name, idx, diags);
         }
-        PxStep::Loop { steps, .. } => {
+        PxStep::Loop {
+            over,
+            item_var,
+            key_var,
+            steps,
+            ..
+        } => {
+            lint_unused_loop_item_var(over, item_var, key_var, steps, proc_name, idx, diags);
             for (sub_idx, sub_step) in steps.iter().enumerate() {
                 lint_step(sub_step, proc_name, sub_idx, diags);
             }
@@ -96,6 +103,7 @@ fn lint_step(step: &PxStep, proc_name: &str, idx: usize, diags: &mut Vec<LintDia
             }
         }
         PxStep::Try { steps, catch, .. } => {
+            lint_empty_catch(catch, proc_name, idx, diags);
             for (sub_idx, sub_step) in steps.iter().enumerate() {
                 lint_step(sub_step, proc_name, sub_idx, diags);
             }
@@ -306,6 +314,77 @@ fn collect_refs_from_value(val: &serde_json::Value, refs: &mut std::collections:
     }
 }
 
+/// PX-L006: Unused loop item variable — loop iterates but never references the item.
+fn lint_unused_loop_item_var(
+    over: &Option<String>,
+    item_var: &str,
+    key_var: &Option<String>,
+    steps: &[PxStep],
+    proc_name: &str,
+    idx: usize,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    // Only applies to `over` loops (not `times` loops which may just repeat N times)
+    if over.is_none() {
+        return;
+    }
+
+    let mut refs: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for step in steps {
+        collect_var_references(step, &mut refs);
+    }
+
+    let item_ref = format!("${}", item_var);
+    if !refs.contains(&item_ref) {
+        diags.push(LintDiagnostic {
+            code: "PX-L006",
+            message: format!(
+                "loop item variable `${}` is never referenced in loop body — consider using `times` instead of `over`",
+                item_var
+            ),
+            severity: LintSeverity::Warning,
+            procedure: Some(proc_name.to_string()),
+            step_index: Some(idx),
+        });
+    }
+
+    // Also check key_var if declared
+    if let Some(kv) = key_var {
+        let key_ref = format!("${}", kv);
+        if !refs.contains(&key_ref) {
+            diags.push(LintDiagnostic {
+                code: "PX-L006",
+                message: format!(
+                    "loop key variable `${}` is declared but never referenced in loop body",
+                    kv
+                ),
+                severity: LintSeverity::Warning,
+                procedure: Some(proc_name.to_string()),
+                step_index: Some(idx),
+            });
+        }
+    }
+}
+
+/// PX-L007: Empty catch block — errors are silently swallowed.
+fn lint_empty_catch(
+    catch: &[PxStep],
+    proc_name: &str,
+    idx: usize,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    if catch.is_empty() {
+        diags.push(LintDiagnostic {
+            code: "PX-L007",
+            message: "try step has an empty catch block — errors will be silently swallowed"
+                .to_string(),
+            severity: LintSeverity::Warning,
+            procedure: Some(proc_name.to_string()),
+            step_index: Some(idx),
+        });
+    }
+}
+
 /// PX-L003: Unreachable arms after a wildcard `_`.
 fn lint_match_unreachable(
     arms: &[PxMatchArm],
@@ -475,8 +554,10 @@ mod tests {
         ));
 
         let diags = lint(&doc);
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].code, "PX-L002");
+        // L002 for non-exhaustive match + L006 for unused $item (condition uses bare `item.type` not `$item`)
+        assert_eq!(diags.len(), 2);
+        assert!(diags.iter().any(|d| d.code == "PX-L002"));
+        assert!(diags.iter().any(|d| d.code == "PX-L006"));
     }
 
     #[test]
@@ -689,5 +770,151 @@ mod tests {
         // $5 starts with digit after $ but 5 is alphanumeric so it matches
         assert!(refs.contains("$5"));
         assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn l006_unused_loop_item_var() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "counter",
+            vec![PxStep::Loop {
+                over: Some("$items".to_string()),
+                times: None,
+                item_var: "item".to_string(),
+                key_var: None,
+                steps: vec![PxStep::Call {
+                    name: "increment".to_string(),
+                    params: serde_json::json!({"value": 1}),
+                    output_var: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L006").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$item"));
+        assert!(diags[0].message.contains("never referenced"));
+    }
+
+    #[test]
+    fn l006_no_warning_when_item_used() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "processor",
+            vec![PxStep::Loop {
+                over: Some("$items".to_string()),
+                times: None,
+                item_var: "item".to_string(),
+                key_var: None,
+                steps: vec![PxStep::Call {
+                    name: "process".to_string(),
+                    params: serde_json::json!({"data": "$item"}),
+                    output_var: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L006").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l006_unused_key_var() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "mapper",
+            vec![PxStep::Loop {
+                over: Some("$map".to_string()),
+                times: None,
+                item_var: "val".to_string(),
+                key_var: Some("key".to_string()),
+                steps: vec![PxStep::Call {
+                    name: "process".to_string(),
+                    params: serde_json::json!({"data": "$val"}),
+                    output_var: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L006").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("$key"));
+    }
+
+    #[test]
+    fn l006_no_warning_for_times_loop() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "repeater",
+            vec![PxStep::Loop {
+                over: None,
+                times: Some(5),
+                item_var: "i".to_string(),
+                key_var: None,
+                steps: vec![PxStep::Call {
+                    name: "ping".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L006").collect();
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn l007_empty_catch_block() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "risky",
+            vec![PxStep::Try {
+                steps: vec![PxStep::Call {
+                    name: "risky_op".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+                catch: vec![],
+                retry: None,
+                retry_delay_ms: None,
+                retry_backoff: None,
+                retry_max_delay_ms: None,
+                retry_jitter: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L007").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("silently swallowed"));
+    }
+
+    #[test]
+    fn l007_no_warning_with_catch_steps() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "safe",
+            vec![PxStep::Try {
+                steps: vec![PxStep::Call {
+                    name: "risky_op".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+                catch: vec![PxStep::Emit {
+                    event: serde_json::json!({"error": "handled"}),
+                }],
+                retry: None,
+                retry_delay_ms: None,
+                retry_backoff: None,
+                retry_max_delay_ms: None,
+                retry_jitter: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L007").collect();
+        assert!(diags.is_empty());
     }
 }

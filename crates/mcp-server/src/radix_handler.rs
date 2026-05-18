@@ -3443,7 +3443,7 @@ impl ToolHandler for RadixToolHandler {
         tools.push(Tool {
             name: "px_lint".into(),
             description: Some(
-                "Lint .px source code for potential issues (non-exhaustive matches, unreachable arms, duplicate conditions, unused variables). Returns diagnostics.".into(),
+                "Lint .px source code for potential issues (non-exhaustive matches, unreachable arms, duplicate conditions, unused variables, unused loop items, empty catch blocks). Returns diagnostics.".into(),
             ),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
