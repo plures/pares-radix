@@ -214,6 +214,12 @@ fn execute_call(
 }
 
 /// Execute a `match` step: find the first arm whose condition is true.
+///
+/// Supports two modes:
+/// 1. Condition-based: each arm has a `condition` that is evaluated as a boolean expression.
+/// 2. Subject-based: the step has a `subject` field, and each arm has a `pattern` field
+///    that is matched against the resolved subject value (supports literals, variables,
+///    multi-pattern `|`, range patterns, and `_` wildcard).
 fn execute_match(
     step: &Value,
     index: usize,
@@ -224,6 +230,11 @@ fn execute_match(
         .get("arms")
         .and_then(|v| v.as_array())
         .ok_or_else(|| ExecutionError::InvalidStructure("match step missing 'arms'".into()))?;
+
+    // Check for subject-based matching
+    if let Some(subject_expr) = step.get("subject").and_then(|v| v.as_str()) {
+        return execute_match_subject(subject_expr, arms, index, vars);
+    }
 
     for arm in arms {
         let condition = arm
@@ -244,6 +255,79 @@ fn execute_match(
 
     // No arm matched — this is not necessarily an error for match steps.
     // Return a skipped result rather than failing hard.
+    Ok(StepResult {
+        index,
+        kind: "match".into(),
+        output: None,
+        skipped: true,
+    })
+}
+
+/// Execute a subject-based match step: resolve subject, match patterns in each arm.
+fn execute_match_subject(
+    subject_expr: &str,
+    arms: &[Value],
+    index: usize,
+    vars: &HashMap<String, Value>,
+) -> Result<StepResult, ExecutionError> {
+    // Resolve the subject value
+    let subject_val = if (subject_expr.starts_with('"') && subject_expr.ends_with('"'))
+        || (subject_expr.starts_with('\'') && subject_expr.ends_with('\''))
+    {
+        subject_expr[1..subject_expr.len() - 1].to_string()
+    } else if let Some(val) = resolve_var(subject_expr, vars) {
+        value_to_interpolation_string(&val)
+    } else {
+        subject_expr.to_string()
+    };
+
+    for arm in arms {
+        let pattern = arm
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .unwrap_or("_");
+
+        if pattern == "_" {
+            let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
+            return Ok(StepResult {
+                index,
+                kind: "match".into(),
+                output: Some(result_val),
+                skipped: false,
+            });
+        }
+
+        // Multi-pattern support
+        let alternatives = split_pattern_alternatives(pattern);
+        let matched = alternatives.iter().any(|alt| {
+            let alt = alt.trim();
+            // Range pattern
+            if let Some(range_match) = try_range_pattern(alt, &subject_val) {
+                return range_match;
+            }
+            let pattern_val = if (alt.starts_with('"') && alt.ends_with('"'))
+                || (alt.starts_with('\'') && alt.ends_with('\''))
+            {
+                alt[1..alt.len() - 1].to_string()
+            } else if let Some(val) = resolve_var(alt, vars) {
+                value_to_interpolation_string(&val)
+            } else {
+                alt.to_string()
+            };
+            subject_val == pattern_val
+        });
+
+        if matched {
+            let result_val = arm.get("result").cloned().unwrap_or(Value::Null);
+            return Ok(StepResult {
+                index,
+                kind: "match".into(),
+                output: Some(result_val),
+                skipped: false,
+            });
+        }
+    }
+
     Ok(StepResult {
         index,
         kind: "match".into(),
@@ -1302,6 +1386,10 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
         let alternatives = split_pattern_alternatives(pattern);
         let matched = alternatives.iter().any(|alt| {
             let alt = alt.trim();
+            // Range pattern: 1..5 (exclusive end) or 1..=5 (inclusive end)
+            if let Some(range_match) = try_range_pattern(alt, &subject_val) {
+                return range_match;
+            }
             let pattern_val = if (alt.starts_with('"') && alt.ends_with('"'))
                 || (alt.starts_with('\'') && alt.ends_with('\''))
             {
@@ -1351,6 +1439,35 @@ fn split_pattern_alternatives(pattern: &str) -> Vec<&str> {
     } else {
         parts
     }
+}
+
+/// Try to match a range pattern like `1..5` (exclusive) or `1..=5` (inclusive)
+/// Returns Some(true) if the subject matches, Some(false) if it's a valid range but doesn't match,
+/// None if the pattern isn't a range at all.
+fn try_range_pattern(pattern: &str, subject: &str) -> Option<bool> {
+    // Check for inclusive range first: `start..=end`
+    if let Some(dot_idx) = pattern.find("..=") {
+        let start_str = pattern[..dot_idx].trim();
+        let end_str = pattern[dot_idx + 3..].trim();
+        let start: f64 = start_str.parse().ok()?;
+        let end: f64 = end_str.parse().ok()?;
+        let subject_num: f64 = subject.parse().ok()?;
+        return Some(subject_num >= start && subject_num <= end);
+    }
+    // Check for exclusive range: `start..end`
+    if let Some(dot_idx) = pattern.find("..") {
+        // Make sure it's not something like `..` alone or a float
+        let start_str = pattern[..dot_idx].trim();
+        let end_str = pattern[dot_idx + 2..].trim();
+        if start_str.is_empty() || end_str.is_empty() {
+            return None;
+        }
+        let start: f64 = start_str.parse().ok()?;
+        let end: f64 = end_str.parse().ok()?;
+        let subject_num: f64 = subject.parse().ok()?;
+        return Some(subject_num >= start && subject_num < end);
+    }
+    None
 }
 
 /// Split match arms by top-level commas (respecting braces and quotes)
@@ -5711,5 +5828,143 @@ mod tests {
             r#"match env { "prod" | "staging" => true, _ => false }"#,
             &vars,
         ));
+    }
+
+    #[test]
+    fn test_match_expr_range_exclusive() {
+        let mut vars = HashMap::new();
+        vars.insert("age".to_string(), json!(3));
+        let result = try_match_expr(r#"match age { 1..5 => "child", 5..18 => "teen", _ => "adult" }"#, &vars);
+        assert_eq!(result, Some("child".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_exclusive_boundary() {
+        let mut vars = HashMap::new();
+        // 5 should NOT match 1..5 (exclusive end), should match 5..18
+        vars.insert("age".to_string(), json!(5));
+        let result = try_match_expr(r#"match age { 1..5 => "child", 5..18 => "teen", _ => "adult" }"#, &vars);
+        assert_eq!(result, Some("teen".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_inclusive() {
+        let mut vars = HashMap::new();
+        vars.insert("score".to_string(), json!(100));
+        let result = try_match_expr(r#"match score { 0..=59 => "fail", 60..=100 => "pass", _ => "invalid" }"#, &vars);
+        assert_eq!(result, Some("pass".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_inclusive_boundary() {
+        let mut vars = HashMap::new();
+        vars.insert("score".to_string(), json!(59));
+        let result = try_match_expr(r#"match score { 0..=59 => "fail", 60..=100 => "pass", _ => "invalid" }"#, &vars);
+        assert_eq!(result, Some("fail".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_no_match_falls_to_default() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(200));
+        let result = try_match_expr(r#"match val { 0..100 => "low", _ => "high" }"#, &vars);
+        assert_eq!(result, Some("high".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_with_multi_pattern() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!(7));
+        // Range combined with literal via multi-pattern
+        let result = try_match_expr(r#"match x { 1..5 | "7" => "match", _ => "no" }"#, &vars);
+        assert_eq!(result, Some("match".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_range_float() {
+        let mut vars = HashMap::new();
+        vars.insert("temp".to_string(), json!(36.6));
+        let result = try_match_expr(r#"match temp { 35.0..=37.5 => "normal", _ => "abnormal" }"#, &vars);
+        assert_eq!(result, Some("normal".to_string()));
+    }
+
+    #[test]
+    fn test_step_match_with_subject() {
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "status",
+            "arms": [
+                { "pattern": "\"active\"", "result": "running" },
+                { "pattern": "\"paused\"", "result": "stopped" },
+                { "pattern": "_", "result": "unknown" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert_eq!(result.output, Some(json!("running")));
+        assert!(!result.skipped);
+    }
+
+    #[test]
+    fn test_step_match_with_subject_default() {
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("deleted"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "status",
+            "arms": [
+                { "pattern": "\"active\"", "result": "running" },
+                { "pattern": "_", "result": "unknown" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert_eq!(result.output, Some(json!("unknown")));
+    }
+
+    #[test]
+    fn test_step_match_with_subject_range() {
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("code".to_string(), json!(404));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "code",
+            "arms": [
+                { "pattern": "200..=299", "result": "success" },
+                { "pattern": "400..=499", "result": "client_error" },
+                { "pattern": "500..=599", "result": "server_error" },
+                { "pattern": "_", "result": "unknown" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert_eq!(result.output, Some(json!("client_error")));
+    }
+
+    #[test]
+    fn test_step_match_with_subject_no_match() {
+        let handler = MockHandler::new();
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("foo"));
+
+        let step = json!({
+            "kind": "match",
+            "subject": "x",
+            "arms": [
+                { "pattern": "\"bar\"", "result": "matched" }
+            ]
+        });
+
+        let result = execute_match(&step, 0, &mut vars, &handler).unwrap();
+        assert!(result.skipped);
+        assert_eq!(result.output, None);
     }
 }
