@@ -54,6 +54,7 @@ pub fn lint(doc: &PxDocument) -> Vec<LintDiagnostic> {
 
     // Document-level lints (cross-procedure analysis)
     lint_undefined_calls(doc, &mut diagnostics);
+    lint_arity_mismatch(doc, &mut diagnostics);
 
     diagnostics
 }
@@ -650,6 +651,135 @@ fn collect_undefined_calls_in_steps(
                     collect_undefined_calls_in_steps(
                         &branch.steps, proc_name, known_procs, known_fns, diags,
                     );
+                }
+            }
+            PxStep::Match { arms: _ }
+            | PxStep::Emit { .. }
+            | PxStep::Return { .. }
+            | PxStep::Abort { .. } => {}
+        }
+    }
+}
+
+/// PX-L012: Arity mismatch — a Call step passes parameters not declared by the target procedure/function,
+/// or the target declares parameters not provided by the call.
+///
+/// For intra-document calls only (targets that resolve to a procedure or function in this document).
+/// - Extra params (passed but not declared): Warning — likely a typo or stale param.
+/// - Missing params (declared but not passed): Warning — target may expect this value.
+fn lint_arity_mismatch(doc: &PxDocument, diags: &mut Vec<LintDiagnostic>) {
+    use std::collections::{HashMap, HashSet};
+
+    // Build signature maps: name → set of declared param names
+    let proc_params: HashMap<&str, HashSet<&str>> = doc
+        .procedures
+        .iter()
+        .filter_map(|p| {
+            let trigger = p.trigger.as_ref()?;
+            let obj = trigger.params.as_ref()?.as_object()?;
+            let keys: HashSet<&str> = obj.keys().map(|k| k.as_str()).collect();
+            Some((p.name.as_str(), keys))
+        })
+        .collect();
+
+    let fn_params: HashMap<&str, HashSet<&str>> = doc
+        .functions
+        .iter()
+        .map(|f| {
+            let keys: HashSet<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+            (f.name.as_str(), keys)
+        })
+        .collect();
+
+    for procedure in &doc.procedures {
+        check_arity_in_steps(
+            &procedure.steps,
+            &procedure.name,
+            &proc_params,
+            &fn_params,
+            diags,
+        );
+    }
+}
+
+/// Recursively walk steps checking arity for Call steps with known targets.
+fn check_arity_in_steps(
+    steps: &[PxStep],
+    proc_name: &str,
+    proc_params: &std::collections::HashMap<&str, std::collections::HashSet<&str>>,
+    fn_params: &std::collections::HashMap<&str, std::collections::HashSet<&str>>,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    for (idx, step) in steps.iter().enumerate() {
+        match step {
+            PxStep::Call { name, params, .. } => {
+                // Find the target's declared params
+                let declared = proc_params.get(name.as_str())
+                    .or_else(|| fn_params.get(name.as_str()));
+
+                if let Some(declared_keys) = declared {
+                    // Get the call's param keys (skip if params isn't an object)
+                    if let Some(call_obj) = params.as_object() {
+                        let call_keys: std::collections::HashSet<&str> =
+                            call_obj.keys().map(|k| k.as_str()).collect();
+
+                        // Extra params: in call but not in declaration
+                        for extra in call_keys.difference(declared_keys) {
+                            diags.push(LintDiagnostic {
+                                code: "PX-L012",
+                                message: format!(
+                                    "call to `{}` passes unexpected parameter `{}` (not declared by target)",
+                                    name, extra
+                                ),
+                                severity: LintSeverity::Warning,
+                                procedure: Some(proc_name.to_string()),
+                                step_index: Some(idx),
+                            });
+                        }
+
+                        // Missing params: in declaration but not in call
+                        for missing in declared_keys.difference(&call_keys) {
+                            diags.push(LintDiagnostic {
+                                code: "PX-L012",
+                                message: format!(
+                                    "call to `{}` is missing parameter `{}` (declared by target)",
+                                    name, missing
+                                ),
+                                severity: LintSeverity::Warning,
+                                procedure: Some(proc_name.to_string()),
+                                step_index: Some(idx),
+                            });
+                        }
+                    } else if !declared_keys.is_empty() && params.is_null() {
+                        // Call passes no params (null) but target expects some
+                        let missing: Vec<_> = declared_keys.iter().collect();
+                        diags.push(LintDiagnostic {
+                            code: "PX-L012",
+                            message: format!(
+                                "call to `{}` passes no parameters but target declares: {}",
+                                name,
+                                missing.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                            ),
+                            severity: LintSeverity::Warning,
+                            procedure: Some(proc_name.to_string()),
+                            step_index: Some(idx),
+                        });
+                    }
+                }
+            }
+            PxStep::When { steps: nested, .. } => {
+                check_arity_in_steps(nested, proc_name, proc_params, fn_params, diags);
+            }
+            PxStep::Loop { steps: nested, .. } => {
+                check_arity_in_steps(nested, proc_name, proc_params, fn_params, diags);
+            }
+            PxStep::Try { steps, catch, .. } => {
+                check_arity_in_steps(steps, proc_name, proc_params, fn_params, diags);
+                check_arity_in_steps(catch, proc_name, proc_params, fn_params, diags);
+            }
+            PxStep::Parallel { branches, .. } => {
+                for branch in branches {
+                    check_arity_in_steps(&branch.steps, proc_name, proc_params, fn_params, diags);
                 }
             }
             PxStep::Match { arms: _ }
@@ -1592,6 +1722,221 @@ mod tests {
         ));
 
         let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 0);
+    }
+
+    // === PX-L012: Arity mismatch ===
+
+    #[test]
+    fn lint_l012_extra_param_in_call() {
+        let mut doc = empty_doc();
+        // Target procedure declares {x, y}
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: Some(serde_json::json!({"x": "number", "y": "number"})),
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        // Caller passes {x, y, z} — z is extra
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "target".to_string(),
+                params: serde_json::json!({"x": 1, "y": 2, "z": 3}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("`z`"));
+        assert!(diags[0].message.contains("unexpected"));
+        assert_eq!(diags[0].severity, LintSeverity::Warning);
+    }
+
+    #[test]
+    fn lint_l012_missing_param_in_call() {
+        let mut doc = empty_doc();
+        // Target declares {x, y}
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: Some(serde_json::json!({"x": "number", "y": "number"})),
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        // Caller passes {x} only — y is missing
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "target".to_string(),
+                params: serde_json::json!({"x": 1}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("`y`"));
+        assert!(diags[0].message.contains("missing"));
+    }
+
+    #[test]
+    fn lint_l012_exact_match_no_diagnostic() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: Some(serde_json::json!({"x": "number", "y": "number"})),
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "target".to_string(),
+                params: serde_json::json!({"x": 1, "y": 2}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn lint_l012_function_arity_mismatch() {
+        let mut doc = empty_doc();
+        doc.functions.push(crate::px::PxFunction {
+            name: "compute".to_string(),
+            params: vec![
+                crate::px::PxField { name: "input".to_string(), type_expr: "string".to_string() },
+                crate::px::PxField { name: "mode".to_string(), type_expr: "string".to_string() },
+            ],
+            return_type: "string".to_string(),
+            mode: crate::px::FunctionMode::Deterministic,
+            docstring: String::new(),
+        });
+        // Call passes {input, mode, extra}
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "compute".to_string(),
+                params: serde_json::json!({"input": "data", "mode": "fast", "extra": true}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("`extra`"));
+    }
+
+    #[test]
+    fn lint_l012_no_trigger_params_no_diagnostic() {
+        let mut doc = empty_doc();
+        // Target has no declared params (trigger without params)
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: None,
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        // Caller passes params — target has no signature so we can't check
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "target".to_string(),
+                params: serde_json::json!({"anything": 1}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn lint_l012_null_params_with_declared_params() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: Some(serde_json::json!({"required_param": "string"})),
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        // Caller passes null (no object)
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "target".to_string(),
+                params: serde_json::Value::Null,
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("no parameters"));
+        assert!(diags[0].message.contains("`required_param`"));
+    }
+
+    #[test]
+    fn lint_l012_nested_call_in_when() {
+        let mut doc = empty_doc();
+        doc.procedures.push(PxProcedure {
+            name: "target".to_string(),
+            trigger: Some(PxProcedureTrigger {
+                kind: "manual".to_string(),
+                params: Some(serde_json::json!({"a": "number"})),
+            }),
+            given: None,
+            steps: vec![PxStep::Emit { event: serde_json::json!({"done": true}) }],
+        });
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::When {
+                condition: "$x == true".to_string(),
+                steps: vec![PxStep::Call {
+                    name: "target".to_string(),
+                    params: serde_json::json!({"a": 1, "b": 2}),
+                    output_var: None,
+                }],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("`b`"));
+    }
+
+    #[test]
+    fn lint_l012_external_call_no_diagnostic() {
+        let mut doc = empty_doc();
+        // Call to a procedure NOT in the document — L012 shouldn't fire (only L011 handles that)
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "external_api".to_string(),
+                params: serde_json::json!({"any": "thing"}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
         assert_eq!(diags.len(), 0);
     }
 }
