@@ -419,12 +419,31 @@ fn execute_loop(
     let output_var = step.get("output_var").and_then(|v| v.as_str());
 
     // Determine iteration source
-    let iterations: Vec<Value> = if let Some(over_ref) = step.get("over").and_then(|v| v.as_str()) {
+    // For map/object iteration, we track keys separately
+    let is_map_iteration;
+    let iterations: Vec<Value>;
+    let map_keys: Vec<String>;
+
+    if let Some(over_ref) = step.get("over").and_then(|v| v.as_str()) {
         // Resolve variable reference
         let var_name = over_ref.strip_prefix('$').unwrap_or(over_ref);
         match vars.get(var_name) {
-            Some(Value::Array(arr)) => arr.clone(),
-            Some(other) => vec![other.clone()], // single-item iteration
+            Some(Value::Array(arr)) => {
+                iterations = arr.clone();
+                map_keys = Vec::new();
+                is_map_iteration = false;
+            }
+            Some(Value::Object(map)) => {
+                // Map iteration: iterate over key-value pairs
+                map_keys = map.keys().cloned().collect();
+                iterations = map.values().cloned().collect();
+                is_map_iteration = true;
+            }
+            Some(other) => {
+                iterations = vec![other.clone()]; // single-item iteration
+                map_keys = Vec::new();
+                is_map_iteration = false;
+            }
             None => {
                 return Ok(StepResult {
                     index,
@@ -435,18 +454,30 @@ fn execute_loop(
             }
         }
     } else if let Some(times) = step.get("times").and_then(|v| v.as_u64()) {
-        (0..times).map(|i| Value::Number(i.into())).collect()
+        iterations = (0..times).map(|i| Value::Number(i.into())).collect();
+        map_keys = Vec::new();
+        is_map_iteration = false;
     } else {
         return Err(ExecutionError::InvalidStructure(
             "loop step requires 'over' or 'times'".into(),
         ));
     };
 
+    // key_var defaults to "key" but can be overridden with "key_as"
+    let key_var = step.get("key_as").and_then(|v| v.as_str()).unwrap_or("key");
+
     let mut results: Vec<Value> = Vec::new();
 
     for (iter_index, item) in iterations.into_iter().enumerate() {
         vars.insert(item_var.to_string(), item);
         vars.insert("index".to_string(), Value::Number(iter_index.into()));
+
+        // For map iteration, bind the key variable
+        if is_map_iteration {
+            if let Some(k) = map_keys.get(iter_index) {
+                vars.insert(key_var.to_string(), Value::String(k.clone()));
+            }
+        }
 
         for nested in nested_steps {
             let result = execute_step(nested, iter_index, vars, handler)?;
@@ -459,6 +490,9 @@ fn execute_loop(
     // Clean up loop variables
     vars.remove(item_var);
     vars.remove("index");
+    if is_map_iteration {
+        vars.remove(key_var);
+    }
 
     let output = Value::Array(results);
 
@@ -3341,6 +3375,96 @@ mod tests {
 
         let result = execute(&procedure, &handler).unwrap();
         assert!(result.step_results[0].skipped);
+    }
+
+    #[test]
+    fn execute_loop_over_map() {
+        let handler = MockHandler::new()
+            .with_result("process", json!("ok"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "map_iter",
+            "steps": [
+                {
+                    "kind": "loop",
+                    "over": "config",
+                    "as": "value",
+                    "output_var": "results",
+                    "steps": [
+                        { "kind": "call", "name": "process", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let vars = HashMap::from([("config".to_string(), json!({ "host": "localhost", "port": "8080", "debug": "true" }))]);
+        let result = execute_with_vars(&procedure, &handler, vars).unwrap();
+        assert!(result.success);
+        // 3 entries in the map = 3 call results collected
+        let results = result.variables.get("results").unwrap();
+        assert_eq!(results.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn execute_loop_over_map_binds_key() {
+        let handler = MockHandler::new()
+            .with_result("noop", json!("done"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "map_kv",
+            "steps": [
+                {
+                    "kind": "loop",
+                    "over": "settings",
+                    "as": "val",
+                    "key_as": "k",
+                    "output_var": "out",
+                    "steps": [
+                        { "kind": "call", "name": "noop", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let vars = HashMap::from([("settings".to_string(), json!({ "alpha": "1", "beta": "2" }))]);
+        let result = execute_with_vars(&procedure, &handler, vars).unwrap();
+        assert!(result.success);
+        // key and value vars should be cleaned up after loop
+        assert!(!result.variables.contains_key("k"));
+        assert!(!result.variables.contains_key("val"));
+        // output collected
+        let out = result.variables.get("out").unwrap();
+        assert_eq!(out.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn execute_loop_over_map_collects_output() {
+        let handler = MockHandler::new()
+            .with_result("double", json!("doubled"));
+
+        let procedure = json!({
+            "type": "procedure",
+            "name": "map_collect",
+            "steps": [
+                {
+                    "kind": "loop",
+                    "over": "items",
+                    "output_var": "collected",
+                    "steps": [
+                        { "kind": "call", "name": "double", "params": {} }
+                    ]
+                }
+            ]
+        });
+
+        let vars = HashMap::from([("items".to_string(), json!({ "x": "1", "y": "2", "z": "3" }))]);
+        let result = execute_with_vars(&procedure, &handler, vars).unwrap();
+        assert!(result.success);
+        // output_var should contain 3 "doubled" results
+        let collected = result.variables.get("collected").unwrap();
+        assert_eq!(collected.as_array().unwrap().len(), 3);
     }
 
     #[test]
