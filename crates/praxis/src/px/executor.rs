@@ -1298,24 +1298,59 @@ fn try_match_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String> {
             continue;
         }
 
-        // Pattern can be a quoted string, number, or variable
-        let pattern_val = if (pattern.starts_with('"') && pattern.ends_with('"'))
-            || (pattern.starts_with('\'') && pattern.ends_with('\''))
-        {
-            pattern[1..pattern.len() - 1].to_string()
-        } else if let Some(val) = resolve_var(pattern, vars) {
-            value_to_interpolation_string(&val)
-        } else {
-            pattern.to_string()
-        };
+        // Multi-pattern support: "a" | "b" | "c" => result
+        let alternatives = split_pattern_alternatives(pattern);
+        let matched = alternatives.iter().any(|alt| {
+            let alt = alt.trim();
+            let pattern_val = if (alt.starts_with('"') && alt.ends_with('"'))
+                || (alt.starts_with('\'') && alt.ends_with('\''))
+            {
+                alt[1..alt.len() - 1].to_string()
+            } else if let Some(val) = resolve_var(alt, vars) {
+                value_to_interpolation_string(&val)
+            } else {
+                alt.to_string()
+            };
+            subject_val == pattern_val
+        });
 
-        if subject_val == pattern_val {
+        if matched {
             return Some(resolve_match_result(result_expr, vars));
         }
     }
 
     // No arm matched — use default or return None
     default_result
+}
+
+/// Split multi-pattern alternatives by top-level `|` (respecting quotes)
+/// e.g., `"a" | "b" | var` → [`"a"`, `"b"`, `var`]
+fn split_pattern_alternatives(pattern: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut in_double = false;
+    let mut in_single = false;
+    let mut start = 0;
+
+    for (i, c) in pattern.char_indices() {
+        match c {
+            '"' if !in_single => in_double = !in_double,
+            '\'' if !in_double => in_single = !in_single,
+            '|' if !in_double && !in_single => {
+                parts.push(&pattern[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if start < pattern.len() {
+        parts.push(&pattern[start..]);
+    }
+    // If no `|` found, return the whole pattern as a single alternative
+    if parts.is_empty() {
+        vec![pattern]
+    } else {
+        parts
+    }
 }
 
 /// Split match arms by top-level commas (respecting braces and quotes)
@@ -5589,6 +5624,91 @@ mod tests {
         vars.insert("code".to_string(), json!(500));
         assert!(!default_evaluate_condition(
             r#"match code { "200" => 1, _ => 0 }"#,
+            &vars,
+        ));
+    }
+
+    // ── multi-pattern (| separator) tests ───────────────────────────────────
+
+    #[test]
+    fn test_match_expr_multi_pattern_first_alt() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("active"));
+        let result = try_match_expr(
+            r#"match status { "active" | "enabled" => "on", "inactive" | "disabled" => "off", _ => "unknown" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("on".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_second_alt() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("enabled"));
+        let result = try_match_expr(
+            r#"match status { "active" | "enabled" => "on", _ => "off" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("on".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_no_match_falls_to_default() {
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("pending"));
+        let result = try_match_expr(
+            r#"match status { "active" | "enabled" => "on", "inactive" | "disabled" => "off", _ => "unknown" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("unknown".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_three_alternatives() {
+        let mut vars = HashMap::new();
+        vars.insert("code".to_string(), json!("503"));
+        let result = try_match_expr(
+            r#"match code { "500" | "502" | "503" => "server_error", "400" | "404" => "client_error", _ => "ok" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("server_error".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_with_variables() {
+        let mut vars = HashMap::new();
+        vars.insert("level".to_string(), json!("warn"));
+        vars.insert("alt_level".to_string(), json!("warn"));
+        // Pattern uses a variable reference
+        let result = try_match_expr(
+            r#"match level { "error" | "warn" | "fatal" => "alert", _ => "normal" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("alert".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_numeric() {
+        let mut vars = HashMap::new();
+        vars.insert("exit_code".to_string(), json!(1));
+        let result = try_match_expr(
+            r#"match exit_code { 0 => "success", 1 | 2 | 3 => "failure", _ => "unknown" }"#,
+            &vars,
+        );
+        assert_eq!(result, Some("failure".to_string()));
+    }
+
+    #[test]
+    fn test_match_expr_multi_pattern_in_condition() {
+        let mut vars = HashMap::new();
+        vars.insert("env".to_string(), json!("staging"));
+        assert!(default_evaluate_condition(
+            r#"match env { "prod" | "staging" => true, _ => false }"#,
+            &vars,
+        ));
+        vars.insert("env".to_string(), json!("dev"));
+        assert!(!default_evaluate_condition(
+            r#"match env { "prod" | "staging" => true, _ => false }"#,
             &vars,
         ));
     }
