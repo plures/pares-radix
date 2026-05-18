@@ -1457,6 +1457,11 @@ fn eval_atom(expr: &str, vars: &HashMap<String, Value>) -> bool {
         return eval_ends_with(lhs, rhs, vars);
     }
 
+    // Function-call syntax: `len(items)`, `is_empty(name)`, etc.
+    if let Some(result) = resolve_function_call(expr, vars) {
+        return is_truthy(&result);
+    }
+
     // Bare variable name — truthy check
     // Also support pipes: `name | trim` evaluates as truthy if result is non-empty
     if let Some(filtered) = resolve_value_with_pipes(expr, vars) {
@@ -1617,6 +1622,15 @@ fn resolve_value_with_pipes(expr: &str, vars: &HashMap<String, Value>) -> Option
 
 /// Compare for equality. Supports arithmetic expressions.
 fn compare_eq(lhs: &str, rhs: &str, vars: &HashMap<String, Value>) -> bool {
+    // Try function-call syntax on lhs: `trim(name) == "hello"`, `upper(x) == "FOO"`
+    if let Some(lhs_val) = resolve_function_call(lhs, vars) {
+        let rhs_val = resolve_function_call(rhs, vars)
+            .map(|v| value_to_interpolation_string(&v))
+            .or_else(|| resolve_value_with_pipes(rhs, vars))
+            .unwrap_or_else(|| rhs.trim_matches('"').to_string());
+        return value_to_interpolation_string(&lhs_val) == rhs_val;
+    }
+
     // Try pipe filters on lhs: `name | uppercase == "HELLO"`
     if let Some(filtered) = resolve_value_with_pipes(lhs, vars) {
         // Also resolve rhs pipes if present
@@ -1683,6 +1697,16 @@ fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
         return Some(n);
     }
 
+    // Try function-call syntax: len(items), length(name), etc.
+    if let Some(result) = resolve_function_call(expr, vars) {
+        return match &result {
+            Value::Number(n) => n.as_f64(),
+            Value::String(s) => s.parse::<f64>().ok(),
+            Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
+            _ => None,
+        };
+    }
+
     // Try as a variable reference
     if let Some(val) = resolve_var(expr, vars) {
         return match &val {
@@ -1740,6 +1764,281 @@ fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
     }
 
     None
+}
+
+/// Resolve a function-call expression like `len(items)`, `is_empty(name)`, `trim(value)`, etc.
+/// Returns the result as a JSON Value, or None if not a recognized function call.
+fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Value> {
+    let expr = expr.trim();
+    // Match pattern: identifier( ... )
+    let paren_open = expr.find('(')?;
+    if !expr.ends_with(')') {
+        return None;
+    }
+    let fn_name = expr[..paren_open].trim();
+    // Validate that fn_name is a simple identifier (letters, digits, underscores)
+    if fn_name.is_empty() || !fn_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        return None;
+    }
+    let args_str = &expr[paren_open + 1..expr.len() - 1];
+
+    // Parse arguments (simple comma split, respecting quotes and nested parens)
+    let args = split_function_args(args_str);
+
+    match fn_name {
+        // len(var) — returns length of string or array
+        "len" | "length" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            // Try resolving as a variable
+            if let Some(val) = resolve_var(arg, vars) {
+                let n = match &val {
+                    Value::String(s) => s.len(),
+                    Value::Array(a) => a.len(),
+                    Value::Object(o) => o.len(),
+                    Value::Null => 0,
+                    _ => value_to_interpolation_string(&val).len(),
+                };
+                return Some(Value::Number(serde_json::Number::from(n)));
+            }
+            // Try as a string literal
+            if arg.starts_with('"') && arg.ends_with('"') {
+                let s = &arg[1..arg.len() - 1];
+                return Some(Value::Number(serde_json::Number::from(s.len())));
+            }
+            None
+        }
+
+        // is_empty(var) — returns true if null, empty string, empty array, or empty object
+        "is_empty" | "empty" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let empty = match &val {
+                    Value::Null => true,
+                    Value::String(s) => s.is_empty(),
+                    Value::Array(a) => a.is_empty(),
+                    Value::Object(o) => o.is_empty(),
+                    Value::Bool(b) => !b,
+                    Value::Number(_) => false,
+                };
+                return Some(Value::Bool(empty));
+            }
+            // Unresolved var treated as empty
+            Some(Value::Bool(true))
+        }
+
+        // not_empty(var) — opposite of is_empty
+        "not_empty" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let empty = match &val {
+                    Value::Null => true,
+                    Value::String(s) => s.is_empty(),
+                    Value::Array(a) => a.is_empty(),
+                    Value::Object(o) => o.is_empty(),
+                    Value::Bool(b) => !b,
+                    Value::Number(_) => false,
+                };
+                return Some(Value::Bool(!empty));
+            }
+            Some(Value::Bool(false))
+        }
+
+        // contains(haystack, needle) — check if string/array contains value
+        "contains" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let haystack_arg = args[0].trim();
+            let needle_arg = args[1].trim().trim_matches('"');
+            if let Some(val) = resolve_var(haystack_arg, vars) {
+                let result = match &val {
+                    Value::String(s) => s.contains(needle_arg),
+                    Value::Array(a) => a.iter().any(|item| {
+                        value_to_interpolation_string(item) == needle_arg
+                    }),
+                    _ => false,
+                };
+                return Some(Value::Bool(result));
+            }
+            Some(Value::Bool(false))
+        }
+
+        // starts_with(var, prefix)
+        "starts_with" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let var_arg = args[0].trim();
+            let prefix = args[1].trim().trim_matches('"');
+            if let Some(val) = resolve_var(var_arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::Bool(s.starts_with(prefix)));
+            }
+            Some(Value::Bool(false))
+        }
+
+        // ends_with(var, suffix)
+        "ends_with" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let var_arg = args[0].trim();
+            let suffix = args[1].trim().trim_matches('"');
+            if let Some(val) = resolve_var(var_arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::Bool(s.ends_with(suffix)));
+            }
+            Some(Value::Bool(false))
+        }
+
+        // trim(var) — returns trimmed string
+        "trim" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::String(s.trim().to_string()));
+            }
+            None
+        }
+
+        // uppercase(var) / upper(var)
+        "uppercase" | "upper" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::String(s.to_uppercase()));
+            }
+            None
+        }
+
+        // lowercase(var) / lower(var)
+        "lowercase" | "lower" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::String(s.to_lowercase()));
+            }
+            None
+        }
+
+        // capitalize(var)
+        "capitalize" | "cap" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                let mut chars = s.chars();
+                let result = match chars.next() {
+                    None => String::new(),
+                    Some(first) => {
+                        let upper: String = first.to_uppercase().collect();
+                        format!("{}{}", upper, chars.as_str())
+                    }
+                };
+                return Some(Value::String(result));
+            }
+            None
+        }
+
+        // reverse(var)
+        "reverse" | "rev" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let s = value_to_interpolation_string(&val);
+                return Some(Value::String(s.chars().rev().collect()));
+            }
+            None
+        }
+
+        // default(var, fallback) — return var value if truthy, otherwise fallback
+        "default" | "fallback" => {
+            if args.len() != 2 {
+                return None;
+            }
+            let var_arg = args[0].trim();
+            let fallback = args[1].trim().trim_matches('"');
+            if let Some(val) = resolve_var(var_arg, vars) {
+                if is_truthy(&val) {
+                    return Some(val);
+                }
+            }
+            Some(Value::String(fallback.to_string()))
+        }
+
+        // type_of(var) — returns the JSON type as a string
+        "type_of" | "typeof" => {
+            if args.len() != 1 {
+                return None;
+            }
+            let arg = args[0].trim();
+            if let Some(val) = resolve_var(arg, vars) {
+                let type_name = match &val {
+                    Value::Null => "null",
+                    Value::Bool(_) => "boolean",
+                    Value::Number(_) => "number",
+                    Value::String(_) => "string",
+                    Value::Array(_) => "array",
+                    Value::Object(_) => "object",
+                };
+                return Some(Value::String(type_name.to_string()));
+            }
+            Some(Value::String("null".to_string()))
+        }
+
+        _ => None,
+    }
+}
+
+/// Split function arguments, respecting nested parens and quoted strings.
+fn split_function_args(args_str: &str) -> Vec<&str> {
+    let args_str = args_str.trim();
+    if args_str.is_empty() {
+        return Vec::new();
+    }
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut in_quotes = false;
+    let mut last = 0;
+    let bytes = args_str.as_bytes();
+
+    for i in 0..bytes.len() {
+        match bytes[i] {
+            b'"' if !in_quotes => in_quotes = true,
+            b'"' if in_quotes => in_quotes = false,
+            b'(' if !in_quotes => depth += 1,
+            b')' if !in_quotes => depth -= 1,
+            b',' if !in_quotes && depth == 0 => {
+                parts.push(&args_str[last..i]);
+                last = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&args_str[last..]);
+    parts
 }
 
 /// Check if a JSON value is truthy.
@@ -4171,5 +4470,168 @@ mod tests {
         assert!(default_evaluate_condition("status == ok", &vars));
         assert!(default_evaluate_condition("count == 5", &vars));
         assert!(default_evaluate_condition("count > 3", &vars));
+    }
+
+    // ── Function-call syntax tests ────────────────────────────────────────
+
+    #[test]
+    fn test_fn_len_array_comparison() {
+        let mut vars = HashMap::new();
+        vars.insert("items".to_string(), json!(["a", "b", "c", "d", "e"]));
+        assert!(default_evaluate_condition("len(items) > 3", &vars));
+        assert!(default_evaluate_condition("len(items) == 5", &vars));
+        assert!(!default_evaluate_condition("len(items) < 3", &vars));
+        assert!(default_evaluate_condition("length(items) >= 5", &vars));
+    }
+
+    #[test]
+    fn test_fn_len_string() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        assert!(default_evaluate_condition("len(name) == 5", &vars));
+        assert!(default_evaluate_condition("len(name) > 2", &vars));
+    }
+
+    #[test]
+    fn test_fn_len_object() {
+        let mut vars = HashMap::new();
+        vars.insert("config".to_string(), json!({"a": 1, "b": 2}));
+        assert!(default_evaluate_condition("len(config) == 2", &vars));
+    }
+
+    #[test]
+    fn test_fn_is_empty_truthy() {
+        let mut vars = HashMap::new();
+        vars.insert("empty_str".to_string(), json!(""));
+        vars.insert("empty_arr".to_string(), json!([]));
+        vars.insert("full_str".to_string(), json!("hello"));
+        vars.insert("null_val".to_string(), Value::Null);
+
+        // is_empty returns true for empty values → truthy in condition
+        assert!(default_evaluate_condition("is_empty(empty_str)", &vars));
+        assert!(default_evaluate_condition("is_empty(empty_arr)", &vars));
+        assert!(default_evaluate_condition("is_empty(null_val)", &vars));
+        assert!(default_evaluate_condition("is_empty(nonexistent)", &vars));
+
+        // is_empty returns false for non-empty → falsy in condition
+        assert!(!default_evaluate_condition("is_empty(full_str)", &vars));
+    }
+
+    #[test]
+    fn test_fn_not_empty() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("world"));
+        vars.insert("empty".to_string(), json!(""));
+
+        assert!(default_evaluate_condition("not_empty(name)", &vars));
+        assert!(!default_evaluate_condition("not_empty(empty)", &vars));
+    }
+
+    #[test]
+    fn test_fn_contains() {
+        let mut vars = HashMap::new();
+        vars.insert("greeting".to_string(), json!("hello world"));
+        vars.insert("tags".to_string(), json!(["rust", "praxis", "radix"]));
+
+        assert!(default_evaluate_condition("contains(greeting, \"world\")", &vars));
+        assert!(!default_evaluate_condition("contains(greeting, \"foo\")", &vars));
+        assert!(default_evaluate_condition("contains(tags, \"rust\")", &vars));
+        assert!(!default_evaluate_condition("contains(tags, \"python\")", &vars));
+    }
+
+    #[test]
+    fn test_fn_starts_with_ends_with() {
+        let mut vars = HashMap::new();
+        vars.insert("path".to_string(), json!("/api/v2/users"));
+
+        assert!(default_evaluate_condition("starts_with(path, \"/api\")", &vars));
+        assert!(!default_evaluate_condition("starts_with(path, \"/web\")", &vars));
+        assert!(default_evaluate_condition("ends_with(path, \"users\")", &vars));
+        assert!(!default_evaluate_condition("ends_with(path, \"posts\")", &vars));
+    }
+
+    #[test]
+    fn test_fn_trim_comparison() {
+        let mut vars = HashMap::new();
+        vars.insert("input".to_string(), json!("  hello  "));
+
+        assert!(default_evaluate_condition("trim(input) == hello", &vars));
+        assert!(!default_evaluate_condition("trim(input) == \"  hello  \"", &vars));
+    }
+
+    #[test]
+    fn test_fn_uppercase_lowercase() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("Hello"));
+
+        assert!(default_evaluate_condition("upper(name) == HELLO", &vars));
+        assert!(default_evaluate_condition("lowercase(name) == hello", &vars));
+    }
+
+    #[test]
+    fn test_fn_type_of() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("hello"));
+        vars.insert("count".to_string(), json!(42));
+        vars.insert("flag".to_string(), json!(true));
+        vars.insert("items".to_string(), json!([1, 2, 3]));
+
+        assert!(default_evaluate_condition("type_of(name) == string", &vars));
+        assert!(default_evaluate_condition("type_of(count) == number", &vars));
+        assert!(default_evaluate_condition("type_of(flag) == boolean", &vars));
+        assert!(default_evaluate_condition("type_of(items) == array", &vars));
+        assert!(default_evaluate_condition("type_of(missing) == null", &vars));
+    }
+
+    #[test]
+    fn test_fn_default_fallback() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("world"));
+        vars.insert("empty".to_string(), json!(""));
+
+        assert!(default_evaluate_condition("default(name, \"anon\") == world", &vars));
+        assert!(default_evaluate_condition("default(empty, \"anon\") == anon", &vars));
+        assert!(default_evaluate_condition("default(missing, \"anon\") == anon", &vars));
+    }
+
+    #[test]
+    fn test_fn_in_logical_expressions() {
+        let mut vars = HashMap::new();
+        vars.insert("items".to_string(), json!(["a", "b", "c"]));
+        vars.insert("name".to_string(), json!("admin"));
+
+        // Combined with && and ||
+        assert!(default_evaluate_condition("len(items) > 2 && not_empty(name)", &vars));
+        assert!(default_evaluate_condition("is_empty(missing) || len(items) == 3", &vars));
+        assert!(!default_evaluate_condition("len(items) > 5 && not_empty(name)", &vars));
+    }
+
+    #[test]
+    fn test_fn_with_negation() {
+        let mut vars = HashMap::new();
+        vars.insert("items".to_string(), json!(["a", "b"]));
+        vars.insert("name".to_string(), json!("hello"));
+
+        assert!(default_evaluate_condition("!is_empty(name)", &vars));
+        assert!(!default_evaluate_condition("!not_empty(name)", &vars));
+    }
+
+    #[test]
+    fn test_fn_capitalize_reverse() {
+        let mut vars = HashMap::new();
+        vars.insert("word".to_string(), json!("hello"));
+
+        assert!(default_evaluate_condition("capitalize(word) == Hello", &vars));
+        assert!(default_evaluate_condition("reverse(word) == olleh", &vars));
+    }
+
+    #[test]
+    fn test_fn_len_arithmetic() {
+        let mut vars = HashMap::new();
+        vars.insert("items".to_string(), json!(["a", "b", "c"]));
+        vars.insert("offset".to_string(), json!(2));
+
+        // len(items) + offset == 5
+        assert!(default_evaluate_condition("len(items) + offset == 5", &vars));
     }
 }
