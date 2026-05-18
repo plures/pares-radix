@@ -394,6 +394,25 @@ pub fn compile_with_stats(doc: &PxDocument) -> CompileResult {
     CompileResult { records, stats }
 }
 
+/// Result of compilation with lint diagnostics.
+#[derive(Debug)]
+pub struct CompileWithLintResult {
+    pub records: Vec<CompiledRecord>,
+    pub stats: CompileStats,
+    pub diagnostics: Vec<super::lint::LintDiagnostic>,
+}
+
+/// Compile a document and run the lint pass.
+pub fn compile_with_lint(doc: &PxDocument) -> CompileWithLintResult {
+    let result = compile_with_stats(doc);
+    let diagnostics = super::lint::lint(doc);
+    CompileWithLintResult {
+        records: result.records,
+        stats: result.stats,
+        diagnostics,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

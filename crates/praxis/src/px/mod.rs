@@ -7,6 +7,7 @@ pub mod builder;
 pub mod compiler;
 pub mod compose;
 pub mod executor;
+pub mod lint;
 pub mod resolver;
 pub mod watcher;
 
