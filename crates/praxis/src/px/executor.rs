@@ -2023,11 +2023,12 @@ fn find_matching_brace(s: &str) -> Option<usize> {
 fn resolve_match_result(expr: &str, vars: &HashMap<String, Value>) -> String {
     let expr = expr.trim();
 
-    // Quoted string
+    // Quoted string — supports ${...} interpolation inside
     if (expr.starts_with('"') && expr.ends_with('"'))
         || (expr.starts_with('\'') && expr.ends_with('\''))
     {
-        return expr[1..expr.len() - 1].to_string();
+        let inner = &expr[1..expr.len() - 1];
+        return interpolate_string(inner, vars);
     }
 
     // Variable reference
@@ -2076,8 +2077,9 @@ fn try_ternary_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<String>
     if (chosen.starts_with('"') && chosen.ends_with('"'))
         || (chosen.starts_with('\'') && chosen.ends_with('\''))
     {
-        // Quoted string literal — strip quotes
-        return Some(chosen[1..chosen.len() - 1].to_string());
+        // Quoted string literal — strip quotes, apply interpolation
+        let inner = &chosen[1..chosen.len() - 1];
+        return Some(interpolate_string(inner, vars));
     }
 
     // Try as a variable
@@ -7108,5 +7110,78 @@ mod tests {
         let expr = r#"match $event { {kind: "error", code: $c} if $c > 499 => "server", {kind: "error", code: $c} => "client", _ => "other" }"#;
         let result = try_match_expr(expr, &vars);
         assert_eq!(result, Some("server".to_string()));
+    }
+
+    #[test]
+    fn test_match_result_string_interpolation() {
+        // Match result expressions should support ${...} interpolation
+        let mut vars = HashMap::new();
+        vars.insert("code".to_string(), json!(404));
+        vars.insert("status".to_string(), json!("error"));
+        let expr = r#"match status { "error" => "Error ${code} occurred", "ok" => "All good", _ => "unknown" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("Error 404 occurred".to_string()));
+    }
+
+    #[test]
+    fn test_match_result_interpolation_with_binding() {
+        // Bindings captured in the pattern should be available in interpolated results
+        let mut vars = HashMap::new();
+        vars.insert("event".to_string(), json!({"kind": "error", "code": 503}));
+        let expr = r#"match $event { {kind: "error", code: $c} => "Error code: ${c}", _ => "ok" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("Error code: 503".to_string()));
+    }
+
+    #[test]
+    fn test_match_result_interpolation_with_arithmetic() {
+        // Arithmetic in interpolation within match results
+        let mut vars = HashMap::new();
+        vars.insert("level".to_string(), json!("critical"));
+        vars.insert("count".to_string(), json!(5));
+        let expr = r#"match level { "critical" => "Alert! ${count + 1} issues", _ => "fine" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("Alert! 6 issues".to_string()));
+    }
+
+    #[test]
+    fn test_match_result_no_interpolation_without_dollar() {
+        // Plain strings without ${} should still work normally
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("a"));
+        let expr = r#"match x { "a" => "just plain text", _ => "other" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("just plain text".to_string()));
+    }
+
+    #[test]
+    fn test_ternary_result_string_interpolation() {
+        // Ternary expression results should also support ${...} interpolation
+        let mut vars = HashMap::new();
+        vars.insert("active".to_string(), json!(true));
+        vars.insert("name".to_string(), json!("Alice"));
+        let result = try_ternary_expr(r#"active == true ? "Hello, ${name}!" : "Goodbye"
+"#.trim(), &vars);
+        assert_eq!(result, Some("Hello, Alice!".to_string()));
+    }
+
+    #[test]
+    fn test_ternary_false_branch_interpolation() {
+        let mut vars = HashMap::new();
+        vars.insert("active".to_string(), json!(false));
+        vars.insert("reason".to_string(), json!("timeout"));
+        let result = try_ternary_expr(r#"active == true ? "ok" : "Failed: ${reason}""#, &vars);
+        assert_eq!(result, Some("Failed: timeout".to_string()));
+    }
+
+    #[test]
+    fn test_match_default_arm_interpolation() {
+        // Default arm should also support interpolation
+        let mut vars = HashMap::new();
+        vars.insert("status".to_string(), json!("unknown_val"));
+        vars.insert("status".to_string(), json!("weird"));
+        let expr = r#"match status { "ok" => "good", _ => "Unexpected: ${status}" }"#;
+        let result = try_match_expr(expr, &vars);
+        assert_eq!(result, Some("Unexpected: weird".to_string()));
     }
 }
