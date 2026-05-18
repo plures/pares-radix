@@ -8,7 +8,7 @@ use serde_json::json;
 
 use super::{
     FunctionMode, PxConstraint, PxContract, PxDocument, PxFact, PxFunction, PxImport, PxProcedure,
-    PxRule, PxStep, PxTrigger,
+    PxRule, PxScenario, PxStep, PxTrigger,
 };
 
 /// A compiled PluresDB record ready for storage.
@@ -47,8 +47,11 @@ pub fn compile(doc: &PxDocument) -> Vec<CompiledRecord> {
     for trigger in &doc.triggers {
         records.push(compile_trigger(trigger));
     }
-    for procedure in &doc.procedures {
+        for procedure in &doc.procedures {
         records.push(compile_procedure(procedure));
+    }
+    for scenario in &doc.scenarios {
+        records.push(compile_scenario(scenario));
     }
 
     records
@@ -357,6 +360,37 @@ fn compile_step(step: &PxStep) -> serde_json::Value {
     }
 }
 
+fn compile_scenario(scenario: &PxScenario) -> CompiledRecord {
+    let setup: Vec<serde_json::Value> = scenario.setup.iter().map(compile_step).collect();
+    let expectations: Vec<serde_json::Value> = scenario
+        .expectations
+        .iter()
+        .map(|e| {
+            json!({
+                "negated": e.negated,
+                "check": e.check,
+                "params": e.params,
+            })
+        })
+        .collect();
+
+    CompiledRecord {
+        key: format!("px:scenario/{}", scenario.name),
+        data: json!({
+            "type": "scenario",
+            "name": scenario.name,
+            "given": scenario.given,
+            "setup": setup,
+            "run": scenario.run.as_ref().map(|r| json!({
+                "procedure": r.procedure,
+                "params": r.params,
+            })),
+            "expectations": expectations,
+        }),
+        embed: false,
+    }
+}
+
 /// Summary of compilation results.
 #[derive(Debug)]
 pub struct CompileResult {
@@ -374,6 +408,7 @@ pub struct CompileStats {
     pub functions: usize,
     pub triggers: usize,
     pub procedures: usize,
+    pub scenarios: usize,
     pub total: usize,
 }
 
@@ -389,6 +424,7 @@ pub fn compile_with_stats(doc: &PxDocument) -> CompileResult {
         functions: doc.functions.len(),
         triggers: doc.triggers.len(),
         procedures: doc.procedures.len(),
+        scenarios: doc.scenarios.len(),
         total: records.len(),
     };
     CompileResult { records, stats }
@@ -429,6 +465,7 @@ mod tests {
             functions: vec![],
             triggers: vec![],
             procedures: vec![],
+            scenarios: vec![],
         }
     }
 

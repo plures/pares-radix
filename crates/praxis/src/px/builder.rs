@@ -4,14 +4,14 @@ use pest::iterators::{Pair, Pairs};
 use std::collections::HashMap;
 
 use super::{
-    FunctionMode, PxAction, PxCapture, PxConstraint, PxContract, PxDocument, PxExample, PxFact,
-    PxField, PxFunction, PxImport, PxMatchArm, PxParallelBranch, PxProcedure, PxProcedureTrigger,
-    PxRule, PxStep, PxTrigger, Rule,
+    FunctionMode, PxAction, PxCapture, PxConstraint, PxContract, PxDocument, PxExample,
+    PxExpectation, PxFact, PxField, PxFunction, PxImport, PxMatchArm, PxParallelBranch,
+    PxProcedure, PxProcedureTrigger, PxRule, PxScenario, PxScenarioRun, PxStep, PxTrigger, Rule,
 };
 
 /// Build a PxDocument from parsed pest pairs.
 pub fn build(pairs: Pairs<'_, Rule>) -> PxDocument {
-    let mut doc = PxDocument {
+        let mut doc = PxDocument {
         imports: vec![],
         facts: vec![],
         rules: vec![],
@@ -20,6 +20,7 @@ pub fn build(pairs: Pairs<'_, Rule>) -> PxDocument {
         functions: vec![],
         triggers: vec![],
         procedures: vec![],
+        scenarios: vec![],
     };
 
     for pair in pairs {
@@ -49,6 +50,7 @@ fn push_pair_into_document(pair: Pair<'_, Rule>, doc: &mut PxDocument) {
         Rule::function_decl => doc.functions.push(build_function(pair)),
         Rule::trigger_decl => doc.triggers.push(build_trigger(pair)),
         Rule::procedure_decl => doc.procedures.push(build_procedure(pair)),
+        Rule::scenario_decl => doc.scenarios.push(build_scenario(pair)),
         Rule::EOI => {}
         _ => {}
     }
@@ -913,6 +915,67 @@ fn build_step(pair: Pair<'_, Rule>) -> PxStep {
         },
     }
 }
+fn build_scenario(pair: Pair<'_, Rule>) -> PxScenario {
+    let mut inner = pair.into_inner();
+    let name = next_str(&mut inner);
+
+    let mut given = String::new();
+    let mut setup = vec![];
+    let mut run = None;
+    let mut expectations = vec![];
+
+    let Some(scenario_body) = inner.find(|p| p.as_rule() == Rule::scenario_body) else {
+        return PxScenario { name, given, setup, run, expectations };
+    };
+
+    for child in scenario_body.into_inner() {
+        match child.as_rule() {
+            Rule::given_clause => {
+                given = child.into_inner().next().map(|p| unquote(p.as_str())).unwrap_or_default();
+            }
+            Rule::setup_clause => {
+                if let Some(step_list) = child.into_inner().find(|p| p.as_rule() == Rule::step_list) {
+                    setup = step_list.into_inner().filter(|p| p.as_rule() == Rule::step_decl).map(build_step).collect();
+                }
+            }
+            Rule::scenario_run_clause => {
+                let mut parts = child.into_inner();
+                let procedure = next_str(&mut parts);
+                let params = parts.find(|p| p.as_rule() == Rule::map_val).map(parse_value);
+                run = Some(PxScenarioRun { procedure, params });
+            }
+            Rule::expect_clause => {
+                if let Some(expectation_list) = child.into_inner().find(|p| p.as_rule() == Rule::expectation_list) {
+                    expectations = expectation_list.into_inner().filter(|p| p.as_rule() == Rule::expectation).map(build_expectation).collect();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    PxScenario { name, given, setup, run, expectations }
+}
+
+fn build_expectation(pair: Pair<'_, Rule>) -> PxExpectation {
+    let inner = pair.into_inner().next().unwrap();
+    match inner.as_rule() {
+        Rule::not_expectation => {
+            let positive = inner.into_inner().find(|p| p.as_rule() == Rule::positive_expectation).unwrap();
+            let mut parts = positive.into_inner();
+            let check = next_str(&mut parts);
+            let params = parts.find(|p| p.as_rule() == Rule::map_val).map(parse_value);
+            PxExpectation { negated: true, check, params }
+        }
+        Rule::positive_expectation => {
+            let mut parts = inner.into_inner();
+            let check = next_str(&mut parts);
+            let params = parts.find(|p| p.as_rule() == Rule::map_val).map(parse_value);
+            PxExpectation { negated: false, check, params }
+        }
+        _ => PxExpectation { negated: false, check: "unknown".into(), params: None },
+    }
+}
+
 
 // === Helpers ===
 

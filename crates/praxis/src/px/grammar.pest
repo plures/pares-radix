@@ -6,7 +6,7 @@ COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
 
 document = { SOI ~ NEWLINE* ~ (statement ~ NEWLINE*)* ~ EOI }
 
-statement = _{ import_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl | procedure_decl }
+statement = _{ import_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl | procedure_decl | scenario_decl }
 
 // === Imports ===
 import_decl = { "import" ~ rust_path ~ ("as" ~ ident)? }
@@ -79,6 +79,17 @@ retry_backoff_opt = { "backoff" ~ backoff_strategy }
 backoff_strategy = { "exponential" | "fixed" }
 retry_max_delay_opt = { "max_delay" ~ integer ~ "ms" }
 retry_jitter_opt = { "jitter" }
+
+// === Scenarios ===
+scenario_decl = { "scenario" ~ ident ~ ":" ~ NEWLINE ~ scenario_body }
+scenario_body = { given_clause ~ setup_clause? ~ scenario_run_clause? ~ expect_clause }
+setup_clause = { "setup:" ~ NEWLINE ~ step_list }
+scenario_run_clause = { "run:" ~ ident ~ map_val? ~ NEWLINE }
+expect_clause = { "expect:" ~ NEWLINE ~ expectation_list }
+expectation_list = { ("-" ~ expectation ~ NEWLINE)+ }
+expectation = { not_expectation | positive_expectation }
+not_expectation = { "NOT" ~ positive_expectation }
+positive_expectation = { ident ~ map_val? }
 
 // === Contracts ===
 contract_decl = { "contract" ~ ident ~ ":" ~ NEWLINE ~ contract_body }

@@ -180,6 +180,7 @@ mod tests {
             functions: vec![],
             triggers: vec![],
             procedures: vec![],
+            scenarios: vec![],
         }
     }
 
