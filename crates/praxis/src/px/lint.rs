@@ -52,6 +52,9 @@ pub fn lint(doc: &PxDocument) -> Vec<LintDiagnostic> {
         lint_procedure(procedure, &mut diagnostics);
     }
 
+    // Document-level lints (cross-procedure analysis)
+    lint_undefined_calls(doc, &mut diagnostics);
+
     diagnostics
 }
 
@@ -569,6 +572,94 @@ fn lint_unused_procedure_params(proc: &PxProcedure, diags: &mut Vec<LintDiagnost
     }
 }
 
+/// PX-L011: Undefined procedure calls — a Call step references a procedure not defined in this document.
+///
+/// Collects all procedure names, then walks all Call steps to check if their `name` matches
+/// a known procedure. Unresolved calls likely indicate typos or missing imports.
+fn lint_undefined_calls(doc: &PxDocument, diags: &mut Vec<LintDiagnostic>) {
+    let known_procedures: std::collections::HashSet<&str> = doc
+        .procedures
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+
+    // Also consider functions as callable (they share the call namespace)
+    let known_functions: std::collections::HashSet<&str> = doc
+        .functions
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+
+    for procedure in &doc.procedures {
+        collect_undefined_calls_in_steps(
+            &procedure.steps,
+            &procedure.name,
+            &known_procedures,
+            &known_functions,
+            diags,
+        );
+    }
+}
+
+/// Recursively walk steps looking for Call steps with undefined targets.
+fn collect_undefined_calls_in_steps(
+    steps: &[PxStep],
+    proc_name: &str,
+    known_procs: &std::collections::HashSet<&str>,
+    known_fns: &std::collections::HashSet<&str>,
+    diags: &mut Vec<LintDiagnostic>,
+) {
+    for (idx, step) in steps.iter().enumerate() {
+        match step {
+            PxStep::Call { name, .. } => {
+                if !known_procs.contains(name.as_str())
+                    && !known_fns.contains(name.as_str())
+                {
+                    diags.push(LintDiagnostic {
+                        code: "PX-L011",
+                        message: format!(
+                            "call to undefined procedure or function `{}`",
+                            name
+                        ),
+                        severity: LintSeverity::Error,
+                        procedure: Some(proc_name.to_string()),
+                        step_index: Some(idx),
+                    });
+                }
+            }
+            PxStep::When { steps: nested, .. } => {
+                collect_undefined_calls_in_steps(
+                    nested, proc_name, known_procs, known_fns, diags,
+                );
+            }
+            PxStep::Loop { steps: nested, .. } => {
+                collect_undefined_calls_in_steps(
+                    nested, proc_name, known_procs, known_fns, diags,
+                );
+            }
+            PxStep::Try { steps, catch, .. } => {
+                collect_undefined_calls_in_steps(
+                    steps, proc_name, known_procs, known_fns, diags,
+                );
+                collect_undefined_calls_in_steps(
+                    catch, proc_name, known_procs, known_fns, diags,
+                );
+            }
+            PxStep::Parallel { branches, .. } => {
+                for branch in branches {
+                    collect_undefined_calls_in_steps(
+                        &branch.steps, proc_name, known_procs, known_fns, diags,
+                    );
+                }
+            }
+            PxStep::Match { arms: _ }
+            | PxStep::Emit { .. }
+            | PxStep::Return { .. }
+            | PxStep::Abort { .. } => {}
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,6 +809,13 @@ mod tests {
     #[test]
     fn lint_no_issues_for_simple_procedure() {
         let mut doc = empty_doc();
+        // Add target so L011 (undefined call) doesn't fire
+        doc.procedures.push(make_proc(
+            "greet",
+            vec![PxStep::Emit {
+                event: serde_json::json!({"type": "hello"}),
+            }],
+        ));
         doc.procedures.push(make_proc(
             "simple",
             vec![
@@ -1365,5 +1463,135 @@ mod tests {
 
         let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L010").collect();
         assert_eq!(diags.len(), 3);
+    }
+
+    // === PX-L011: Undefined procedure calls ===
+
+    #[test]
+    fn lint_l011_undefined_call() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "nonexistent_proc".to_string(),
+                params: serde_json::json!({}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].severity, LintSeverity::Error);
+        assert!(diags[0].message.contains("nonexistent_proc"));
+    }
+
+    #[test]
+    fn lint_l011_defined_call_no_diagnostic() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "helper",
+            vec![PxStep::Emit {
+                event: serde_json::json!({"done": true}),
+            }],
+        ));
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "helper".to_string(),
+                params: serde_json::json!({}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn lint_l011_call_to_function_no_diagnostic() {
+        let mut doc = empty_doc();
+        doc.functions.push(crate::px::PxFunction {
+            name: "compute_hash".to_string(),
+            params: vec![],
+            return_type: "string".to_string(),
+            mode: crate::px::FunctionMode::Deterministic,
+            docstring: String::new(),
+        });
+        doc.procedures.push(make_proc(
+            "caller",
+            vec![PxStep::Call {
+                name: "compute_hash".to_string(),
+                params: serde_json::json!({"input": "data"}),
+                output_var: Some("hash".to_string()),
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 0);
+    }
+
+    #[test]
+    fn lint_l011_nested_undefined_call_in_when() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "outer",
+            vec![PxStep::When {
+                condition: "$x == true".to_string(),
+                steps: vec![PxStep::Call {
+                    name: "missing_fn".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("missing_fn"));
+    }
+
+    #[test]
+    fn lint_l011_nested_undefined_call_in_try_catch() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "handler",
+            vec![PxStep::Try {
+                steps: vec![PxStep::Call {
+                    name: "ok_proc".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+                catch: vec![PxStep::Call {
+                    name: "fallback_missing".to_string(),
+                    params: serde_json::json!({}),
+                    output_var: None,
+                }],
+                retry: None,
+                retry_delay_ms: None,
+                retry_backoff: None,
+                retry_max_delay_ms: None,
+                retry_jitter: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        // Both ok_proc and fallback_missing are undefined
+        assert_eq!(diags.len(), 2);
+    }
+
+    #[test]
+    fn lint_l011_self_recursive_call_no_diagnostic() {
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "recursive",
+            vec![PxStep::Call {
+                name: "recursive".to_string(),
+                params: serde_json::json!({"depth": 1}),
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L011").collect();
+        assert_eq!(diags.len(), 0);
     }
 }
