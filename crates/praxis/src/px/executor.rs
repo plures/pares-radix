@@ -1766,11 +1766,48 @@ fn eval_numeric_expr(expr: &str, vars: &HashMap<String, Value>) -> Option<f64> {
     None
 }
 
+/// Resolve a function argument: try nested function call first, then variable lookup, then literal.
+/// This enables expressions like `len(trim(name))` where inner functions resolve first.
+fn resolve_arg(arg: &str, vars: &HashMap<String, Value>) -> Option<Value> {
+    let arg = arg.trim();
+    // Try as nested function call first
+    if let Some(val) = resolve_function_call(arg, vars) {
+        return Some(val);
+    }
+    // Try as variable
+    if let Some(val) = resolve_var(arg, vars) {
+        return Some(val);
+    }
+    // Try as string literal
+    if arg.starts_with('"') && arg.ends_with('"') && arg.len() >= 2 {
+        return Some(Value::String(arg[1..arg.len() - 1].to_string()));
+    }
+    // Try as numeric literal
+    if let Ok(n) = arg.parse::<i64>() {
+        return Some(Value::Number(serde_json::Number::from(n)));
+    }
+    if let Ok(n) = arg.parse::<f64>() {
+        if let Some(num) = serde_json::Number::from_f64(n) {
+            return Some(Value::Number(num));
+        }
+    }
+    // Try as boolean literal
+    match arg {
+        "true" => return Some(Value::Bool(true)),
+        "false" => return Some(Value::Bool(false)),
+        "null" | "nil" => return Some(Value::Null),
+        _ => {}
+    }
+    None
+}
+
 /// Resolve a function-call expression like `len(items)`, `is_empty(name)`, `trim(value)`, etc.
+/// Supports nested calls like `len(trim(name))` via recursive `resolve_arg`.
 /// Returns the result as a JSON Value, or None if not a recognized function call.
 fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Value> {
     let expr = expr.trim();
     // Match pattern: identifier( ... )
+    // Use rfind-based matching to handle nested parens: find the FIRST '(' that matches the last ')'
     let paren_open = expr.find('(')?;
     if !expr.ends_with(')') {
         return None;
@@ -1787,13 +1824,13 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
 
     match fn_name {
         // len(var) — returns length of string or array
+        // Supports nested calls: len(trim(name))
         "len" | "length" => {
             if args.len() != 1 {
                 return None;
             }
             let arg = args[0].trim();
-            // Try resolving as a variable
-            if let Some(val) = resolve_var(arg, vars) {
+            if let Some(val) = resolve_arg(arg, vars) {
                 let n = match &val {
                     Value::String(s) => s.len(),
                     Value::Array(a) => a.len(),
@@ -1802,11 +1839,6 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                     _ => value_to_interpolation_string(&val).len(),
                 };
                 return Some(Value::Number(serde_json::Number::from(n)));
-            }
-            // Try as a string literal
-            if arg.starts_with('"') && arg.ends_with('"') {
-                let s = &arg[1..arg.len() - 1];
-                return Some(Value::Number(serde_json::Number::from(s.len())));
             }
             None
         }
@@ -1817,7 +1849,7 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
+            if let Some(val) = resolve_arg(arg, vars) {
                 let empty = match &val {
                     Value::Null => true,
                     Value::String(s) => s.is_empty(),
@@ -1838,7 +1870,7 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
+            if let Some(val) = resolve_arg(arg, vars) {
                 let empty = match &val {
                     Value::Null => true,
                     Value::String(s) => s.is_empty(),
@@ -1858,18 +1890,22 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let haystack_arg = args[0].trim();
-            let needle_arg = args[1].trim().trim_matches('"');
-            if let Some(val) = resolve_var(haystack_arg, vars) {
-                let result = match &val {
-                    Value::String(s) => s.contains(needle_arg),
-                    Value::Array(a) => a.iter().any(|item| {
-                        value_to_interpolation_string(item) == needle_arg
-                    }),
-                    _ => false,
-                };
-                return Some(Value::Bool(result));
-            }
-            Some(Value::Bool(false))
+            let needle_arg = args[1].trim();
+            let haystack_val = resolve_arg(haystack_arg, vars)?;
+            // Resolve needle: try as arg first, fall back to raw string
+            let needle_str = if let Some(nval) = resolve_arg(needle_arg, vars) {
+                value_to_interpolation_string(&nval)
+            } else {
+                needle_arg.trim_matches('"').to_string()
+            };
+            let result = match &haystack_val {
+                Value::String(s) => s.contains(needle_str.as_str()),
+                Value::Array(a) => a.iter().any(|item| {
+                    value_to_interpolation_string(item) == needle_str
+                }),
+                _ => false,
+            };
+            Some(Value::Bool(result))
         }
 
         // starts_with(var, prefix)
@@ -1878,12 +1914,15 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let var_arg = args[0].trim();
-            let prefix = args[1].trim().trim_matches('"');
-            if let Some(val) = resolve_var(var_arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::Bool(s.starts_with(prefix)));
-            }
-            Some(Value::Bool(false))
+            let prefix_arg = args[1].trim();
+            let val = resolve_arg(var_arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            let prefix = if let Some(pval) = resolve_arg(prefix_arg, vars) {
+                value_to_interpolation_string(&pval)
+            } else {
+                prefix_arg.trim_matches('"').to_string()
+            };
+            Some(Value::Bool(s.starts_with(prefix.as_str())))
         }
 
         // ends_with(var, suffix)
@@ -1892,12 +1931,15 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let var_arg = args[0].trim();
-            let suffix = args[1].trim().trim_matches('"');
-            if let Some(val) = resolve_var(var_arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::Bool(s.ends_with(suffix)));
-            }
-            Some(Value::Bool(false))
+            let suffix_arg = args[1].trim();
+            let val = resolve_arg(var_arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            let suffix = if let Some(sval) = resolve_arg(suffix_arg, vars) {
+                value_to_interpolation_string(&sval)
+            } else {
+                suffix_arg.trim_matches('"').to_string()
+            };
+            Some(Value::Bool(s.ends_with(suffix.as_str())))
         }
 
         // trim(var) — returns trimmed string
@@ -1906,11 +1948,9 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::String(s.trim().to_string()));
-            }
-            None
+            let val = resolve_arg(arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            Some(Value::String(s.trim().to_string()))
         }
 
         // uppercase(var) / upper(var)
@@ -1919,11 +1959,9 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::String(s.to_uppercase()));
-            }
-            None
+            let val = resolve_arg(arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            Some(Value::String(s.to_uppercase()))
         }
 
         // lowercase(var) / lower(var)
@@ -1932,11 +1970,9 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::String(s.to_lowercase()));
-            }
-            None
+            let val = resolve_arg(arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            Some(Value::String(s.to_lowercase()))
         }
 
         // capitalize(var)
@@ -1945,19 +1981,17 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                let mut chars = s.chars();
-                let result = match chars.next() {
-                    None => String::new(),
-                    Some(first) => {
-                        let upper: String = first.to_uppercase().collect();
-                        format!("{}{}", upper, chars.as_str())
-                    }
-                };
-                return Some(Value::String(result));
-            }
-            None
+            let val = resolve_arg(arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            let mut chars = s.chars();
+            let result = match chars.next() {
+                None => String::new(),
+                Some(first) => {
+                    let upper: String = first.to_uppercase().collect();
+                    format!("{}{}", upper, chars.as_str())
+                }
+            };
+            Some(Value::String(result))
         }
 
         // reverse(var)
@@ -1966,11 +2000,9 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
-                let s = value_to_interpolation_string(&val);
-                return Some(Value::String(s.chars().rev().collect()));
-            }
-            None
+            let val = resolve_arg(arg, vars)?;
+            let s = value_to_interpolation_string(&val);
+            Some(Value::String(s.chars().rev().collect()))
         }
 
         // default(var, fallback) — return var value if truthy, otherwise fallback
@@ -1979,13 +2011,17 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let var_arg = args[0].trim();
-            let fallback = args[1].trim().trim_matches('"');
-            if let Some(val) = resolve_var(var_arg, vars) {
+            let fallback_arg = args[1].trim();
+            if let Some(val) = resolve_arg(var_arg, vars) {
                 if is_truthy(&val) {
                     return Some(val);
                 }
             }
-            Some(Value::String(fallback.to_string()))
+            // Resolve fallback as arg too
+            if let Some(fb) = resolve_arg(fallback_arg, vars) {
+                return Some(fb);
+            }
+            Some(Value::String(fallback_arg.trim_matches('"').to_string()))
         }
 
         // type_of(var) — returns the JSON type as a string
@@ -1994,7 +2030,7 @@ fn resolve_function_call(expr: &str, vars: &HashMap<String, Value>) -> Option<Va
                 return None;
             }
             let arg = args[0].trim();
-            if let Some(val) = resolve_var(arg, vars) {
+            if let Some(val) = resolve_arg(arg, vars) {
                 let type_name = match &val {
                     Value::Null => "null",
                     Value::Bool(_) => "boolean",
@@ -4633,5 +4669,109 @@ mod tests {
 
         // len(items) + offset == 5
         assert!(default_evaluate_condition("len(items) + offset == 5", &vars));
+    }
+
+    // ===== Nested function call tests =====
+
+    #[test]
+    fn test_nested_len_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("  hello  "));
+        // len(trim(name)) should be 5 ("hello")
+        assert!(default_evaluate_condition("len(trim(name)) == 5", &vars));
+    }
+
+    #[test]
+    fn test_nested_len_upper() {
+        let mut vars = HashMap::new();
+        vars.insert("greeting".to_string(), json!("hi"));
+        // len(upper(greeting)) == 2
+        assert!(default_evaluate_condition("len(upper(greeting)) == 2", &vars));
+    }
+
+    #[test]
+    fn test_nested_is_empty_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("blank".to_string(), json!("   "));
+        vars.insert("filled".to_string(), json!(" hi "));
+        // is_empty(trim(blank)) should be true (trimmed to empty string)
+        assert!(default_evaluate_condition("is_empty(trim(blank))", &vars));
+        // is_empty(trim(filled)) should be false
+        assert!(!default_evaluate_condition("is_empty(trim(filled))", &vars));
+    }
+
+    #[test]
+    fn test_nested_upper_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!(" world "));
+        // upper(trim(name)) == "WORLD"
+        assert!(default_evaluate_condition(r#"upper(trim(name)) == "WORLD""#, &vars));
+    }
+
+    #[test]
+    fn test_nested_lower_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!(" HeLLo "));
+        // lower(trim(name)) == "hello"
+        assert!(default_evaluate_condition(r#"lower(trim(name)) == "hello""#, &vars));
+    }
+
+    #[test]
+    fn test_nested_contains_lower() {
+        let mut vars = HashMap::new();
+        vars.insert("msg".to_string(), json!("Hello World"));
+        // contains(lower(msg), "hello") should be true
+        assert!(default_evaluate_condition(r#"contains(lower(msg), "hello")"#, &vars));
+    }
+
+    #[test]
+    fn test_nested_starts_with_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("path".to_string(), json!("  /api/v1/users"));
+        // starts_with(trim(path), "/api") should be true
+        assert!(default_evaluate_condition(r#"starts_with(trim(path), "/api")"#, &vars));
+    }
+
+    #[test]
+    fn test_nested_three_levels() {
+        let mut vars = HashMap::new();
+        vars.insert("val".to_string(), json!(" Hello "));
+        // len(lower(trim(val))) == 5 (trim->"Hello", lower->"hello", len->5)
+        assert!(default_evaluate_condition("len(lower(trim(val))) == 5", &vars));
+    }
+
+    #[test]
+    fn test_nested_not_empty_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("input".to_string(), json!("  data  "));
+        vars.insert("empty".to_string(), json!("     "));
+        // not_empty(trim(input)) -> true
+        assert!(default_evaluate_condition("not_empty(trim(input))", &vars));
+        // not_empty(trim(empty)) -> false
+        assert!(!default_evaluate_condition("not_empty(trim(empty))", &vars));
+    }
+
+    #[test]
+    fn test_nested_type_of_trim() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), json!("  42  "));
+        // type_of(trim(x)) == "string" (trim returns a string)
+        assert!(default_evaluate_condition(r#"type_of(trim(x)) == "string""#, &vars));
+    }
+
+    #[test]
+    fn test_nested_capitalize_lower() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("JOHN"));
+        // capitalize(lower(name)) == "John"
+        assert!(default_evaluate_condition(r#"capitalize(lower(name)) == "John""#, &vars));
+    }
+
+    #[test]
+    fn test_nested_len_trim_gt_zero() {
+        let mut vars = HashMap::new();
+        vars.insert("name".to_string(), json!("  hello  "));
+        // Common validation pattern: len(trim(name)) > 0
+        assert!(default_evaluate_condition("len(trim(name)) > 0", &vars));
     }
 }
