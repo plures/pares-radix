@@ -3303,6 +3303,48 @@ impl RadixToolHandler {
         )
     }
 
+    /// End the current agent turn and yield control back to the orchestrator.
+    /// Used after spawning sub-agents to wait for their completion events.
+    async fn session_yield(&self, args: &Value) -> ToolResult {
+        let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
+
+        // Record the yield event in Chronos if available
+        if let Some(chronos) = &self.chronos {
+            let entry = chronos.build_entry(
+                "session.yield",
+                "agent",
+                ChronosAction::ToolInvoked,
+                &json!({"message": message}),
+                vec![],
+                None,
+            );
+            chronos.record(&entry);
+        }
+
+        // Store yield state so the orchestrator knows this session is waiting
+        if let Some(store) = &self.state_store {
+            store
+                .set(
+                    "session:yield:pending",
+                    json!({
+                        "yielded": true,
+                        "message": message,
+                        "at": chrono::Utc::now().to_rfc3339()
+                    }),
+                )
+                .await;
+        }
+
+        ToolResult::ok(
+            json!({
+                "yielded": true,
+                "message": message,
+                "status": "Turn ended. Waiting for sub-agent completion events."
+            })
+            .to_string(),
+        )
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -4353,6 +4395,19 @@ impl ToolHandler for RadixToolHandler {
                 required: None,
             },
         });
+        tools.push(Tool {
+            name: "session_yield".into(),
+            description: Some(
+                "End the current agent turn and yield control back to the orchestrator. Use after spawning sub-agents to wait for their completion events.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "message": {"type": "string", "description": "Optional message to include with the yield (e.g., status update or reason for yielding)"}
+                })),
+                required: None,
+            },
+        });
 
         tools
     }
@@ -4433,6 +4488,7 @@ impl ToolHandler for RadixToolHandler {
             "session_history" => self.session_history(&arguments).await,
             "session_send" => self.session_send(&arguments).await,
             "session_list" => self.session_list(&arguments).await,
+            "session_yield" => self.session_yield(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -7324,5 +7380,55 @@ mod tests {
         assert!(!result.is_error);
         assert!(result.content.contains("shell_sessions"));
         assert!(result.content.contains("subagent_count"));
+    }
+
+    #[tokio::test]
+    async fn session_yield_basic() {
+        let handler = make_handler();
+        let result = handler.call_tool("session_yield", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("yielded"));
+        assert!(result.content.contains("true"));
+    }
+
+    #[tokio::test]
+    async fn session_yield_with_message() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "session_yield",
+                json!({"message": "Waiting for subagent to finish code review"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("Waiting for subagent"));
+        assert!(result.content.contains("yielded"));
+    }
+
+    #[tokio::test]
+    async fn session_yield_with_state_store() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool(
+                "session_yield",
+                json!({"message": "spawned 3 workers"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        // Verify yield state was stored
+        let store = handler.state_store.as_ref().unwrap();
+        let stored = store.get("session:yield:pending").await;
+        assert!(stored.is_some());
+        let val = stored.unwrap();
+        assert_eq!(val["yielded"], true);
+        assert_eq!(val["message"], "spawned 3 workers");
+    }
+
+    #[tokio::test]
+    async fn session_yield_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"session_yield"));
     }
 }
