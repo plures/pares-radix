@@ -1027,6 +1027,42 @@ impl RadixToolHandler {
         ToolResult::ok(format!("deleted key: {key}"))
     }
 
+    async fn db_keys(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let prefix = args
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let keys = store.keys_with_prefix(prefix).await;
+        ToolResult::ok(serde_json::to_string_pretty(&keys).unwrap_or_default())
+    }
+
+    async fn db_dump(&self, _args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        // Get all keys, then fetch each value
+        let keys = store.keys_with_prefix("").await;
+        let mut entries = serde_json::Map::new();
+        for key in &keys {
+            if let Some(value) = store.get(key).await {
+                if !value.is_null() {
+                    entries.insert(key.clone(), value);
+                }
+            }
+        }
+        ToolResult::ok(
+            serde_json::to_string_pretty(&Value::Object(entries)).unwrap_or_default(),
+        )
+    }
+
     // ── Config & Runtime tools ──────────────────────────────────────────────────
 
     async fn config_get(&self, args: &Value) -> ToolResult {
@@ -3331,6 +3367,30 @@ impl ToolHandler for RadixToolHandler {
                     required: Some(vec!["key".into()]),
                 },
             },
+            Tool {
+                name: "db_keys".into(),
+                description: Some(
+                    "List all keys in the state store matching an optional prefix.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "prefix": {"type": "string", "description": "Optional prefix filter. Lists all keys if omitted."}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "db_dump".into(),
+                description: Some(
+                    "Dump all non-null key-value pairs from the state store.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                },
+            },
             // ── Config & Runtime tools ────────────────────────────────────
             Tool {
                 name: "config_get".into(),
@@ -4001,6 +4061,8 @@ impl ToolHandler for RadixToolHandler {
             "db_get" => self.db_get(&arguments).await,
             "db_put" => self.db_put(&arguments).await,
             "db_delete" => self.db_delete(&arguments).await,
+            "db_keys" => self.db_keys(&arguments).await,
+            "db_dump" => self.db_dump(&arguments).await,
             "config_get" => self.config_get(&arguments).await,
             "config_set" => self.config_set(&arguments).await,
             "config_list" => self.config_list(&arguments).await,
@@ -4817,6 +4879,90 @@ mod tests {
         assert!(names.contains(&"db_get"));
         assert!(names.contains(&"db_put"));
         assert!(names.contains(&"db_delete"));
+        assert!(names.contains(&"db_keys"));
+        assert!(names.contains(&"db_dump"));
+    }
+
+    #[tokio::test]
+    async fn db_keys_lists_matching_prefix() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("db_put", json!({"key": "app:one", "value": 1}))
+            .await;
+        handler
+            .call_tool("db_put", json!({"key": "app:two", "value": 2}))
+            .await;
+        handler
+            .call_tool("db_put", json!({"key": "other:x", "value": 3}))
+            .await;
+
+        let result = handler
+            .call_tool("db_keys", json!({"prefix": "app:"}))
+            .await;
+        assert!(!result.is_error);
+        let keys: Vec<String> = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"app:one".to_string()));
+        assert!(keys.contains(&"app:two".to_string()));
+    }
+
+    #[tokio::test]
+    async fn db_keys_no_prefix_lists_all() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("db_put", json!({"key": "k1", "value": "a"}))
+            .await;
+        handler
+            .call_tool("db_put", json!({"key": "k2", "value": "b"}))
+            .await;
+
+        let result = handler.call_tool("db_keys", json!({})).await;
+        assert!(!result.is_error);
+        let keys: Vec<String> = serde_json::from_str(&result.content).unwrap();
+        assert!(keys.len() >= 2);
+        assert!(keys.contains(&"k1".to_string()));
+        assert!(keys.contains(&"k2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn db_dump_returns_all_entries() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("db_put", json!({"key": "d:a", "value": {"x": 1}}))
+            .await;
+        handler
+            .call_tool("db_put", json!({"key": "d:b", "value": "hello"}))
+            .await;
+
+        let result = handler.call_tool("db_dump", json!({})).await;
+        assert!(!result.is_error);
+        let dump: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let obj = dump.as_object().unwrap();
+        assert!(obj.contains_key("d:a"));
+        assert!(obj.contains_key("d:b"));
+        assert_eq!(obj["d:a"], json!({"x": 1}));
+        assert_eq!(obj["d:b"], json!("hello"));
+    }
+
+    #[tokio::test]
+    async fn db_dump_excludes_deleted_keys() {
+        let handler = make_handler_with_state();
+        handler
+            .call_tool("db_put", json!({"key": "keep", "value": 1}))
+            .await;
+        handler
+            .call_tool("db_put", json!({"key": "gone", "value": 2}))
+            .await;
+        handler
+            .call_tool("db_delete", json!({"key": "gone"}))
+            .await;
+
+        let result = handler.call_tool("db_dump", json!({})).await;
+        assert!(!result.is_error);
+        let dump: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        let obj = dump.as_object().unwrap();
+        assert!(obj.contains_key("keep"));
+        assert!(!obj.contains_key("gone"));
     }
 
     // ── Config & Runtime tool tests ────────────────────────────────────────────
