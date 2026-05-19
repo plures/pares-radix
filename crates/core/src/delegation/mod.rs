@@ -35,6 +35,7 @@ pub mod builtin;
 pub mod context;
 pub mod manager;
 pub mod registry;
+pub mod steering;
 
 pub use aggregator::{AggregatedResult, ResultAggregator};
 pub use broker::{DelegationBroker, SubTask, SubTaskResult};
@@ -43,6 +44,7 @@ pub use manager::{
     CompletionEvent, SessionId, SessionInfo, SessionStatus, SpawnOptions, SubAgentManager,
 };
 pub use registry::{AgentCapabilities, AgentDefinition, AgentRegistry};
+pub use steering::{SteeringRx, SteeringTx};
 
 /// Errors that can arise during delegation.
 #[derive(Debug, thiserror::Error)]

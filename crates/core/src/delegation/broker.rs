@@ -19,13 +19,13 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, instrument, warn};
 
-use crate::delegation::{context::AgentContext, registry::AgentRegistry, DelegationError};
+use crate::delegation::{context::AgentContext, registry::AgentRegistry, steering::SteeringRx, DelegationError};
 use crate::model::{ChatOptions, ModelClient, ToolDefinition, ToolDispatcher};
 
 // ── SubTask ──────────────────────────────────────────────────────────────────
 
 /// A single unit of work to be delegated to a named agent.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct SubTask {
     /// Name of the agent that should execute this task (must be registered in
     /// the [`AgentRegistry`]).
@@ -35,6 +35,17 @@ pub struct SubTask {
     /// Optional summary of the parent conversation, injected as grounding
     /// context into the agent's isolated history.
     pub parent_context: Option<String>,
+    /// Optional steering channel receiver for mid-execution message injection.
+    pub steering_rx: Option<SteeringRx>,
+}
+
+// Manual PartialEq — steering_rx is a runtime channel, not part of semantic equality.
+impl PartialEq for SubTask {
+    fn eq(&self, other: &Self) -> bool {
+        self.agent_name == other.agent_name
+            && self.input == other.input
+            && self.parent_context == other.parent_context
+    }
 }
 
 impl SubTask {
@@ -44,12 +55,19 @@ impl SubTask {
             agent_name: agent_name.into(),
             input: input.into(),
             parent_context: None,
+            steering_rx: None,
         }
     }
 
     /// Builder — attach a parent-context summary for grounding.
     pub fn with_parent_context(mut self, ctx: impl Into<String>) -> Self {
         self.parent_context = Some(ctx.into());
+        self
+    }
+
+    /// Builder — attach a steering channel receiver for mid-run message injection.
+    pub fn with_steering(mut self, rx: SteeringRx) -> Self {
+        self.steering_rx = Some(rx);
         self
     }
 }
@@ -144,6 +162,7 @@ async fn run_sub_task(
     tools: Arc<dyn ToolDispatcher>,
 ) -> SubTaskResult {
     let agent_name = task.agent_name.clone();
+    let steering_rx = task.steering_rx.clone();
 
     // 1. Look up the agent definition.
     let definition = match registry.get(&agent_name) {
@@ -179,6 +198,15 @@ async fn run_sub_task(
     // 4. Agentic model loop — up to max_turns iterations.
     let max_turns = definition.capabilities.max_turns;
     for turn in 0..max_turns {
+        // Check for steering messages between turns (injected by parent via steer()).
+        if let Some(ref rx) = steering_rx {
+            let steering_msgs = rx.drain().await;
+            for msg in steering_msgs {
+                debug!(agent = %agent_name, turn, "injecting steering message");
+                context.push_user(format!("[STEERING from parent]: {msg}"));
+            }
+        }
+
         let completion = match model
             .complete(context.as_messages(), &allowed, &ChatOptions::default())
             .await
@@ -527,6 +555,98 @@ mod tests {
         assert!(
             output.contains("memory leak"),
             "parent context must be passed to agent; got: {output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_with_steering_injects_messages() {
+        // Model that returns content based on the last user message it sees.
+        struct LastUserModel;
+
+        #[async_trait]
+        impl ModelClient for LastUserModel {
+            async fn complete(
+                &self,
+                messages: &[ChatMessage],
+                _tools: &[ToolDefinition],
+                _options: &ChatOptions,
+            ) -> Result<ModelCompletion, String> {
+                let last_user = messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == "user")
+                    .map(|m| m.content.clone())
+                    .unwrap_or_default();
+                // If we see a steering message, include it in output.
+                if last_user.contains("[STEERING") {
+                    Ok(ModelCompletion {
+                        content: Some(format!("steered:{last_user}")),
+                        tool_calls: vec![],
+                        logprobs: None,
+                        model: None,
+                    })
+                } else {
+                    // First turn: call a tool so we get another iteration
+                    Ok(ModelCompletion {
+                        content: None,
+                        tool_calls: vec![crate::model::ToolCall {
+                            id: "tc1".into(),
+                            name: "noop".into(),
+                            arguments: serde_json::json!({}),
+                        }],
+                        logprobs: None,
+                        model: None,
+                    })
+                }
+            }
+        }
+
+        struct NoopToolDispatcher;
+
+        #[async_trait]
+        impl ToolDispatcher for NoopToolDispatcher {
+            async fn available_tools(&self) -> Vec<ToolDefinition> {
+                vec![ToolDefinition {
+                    name: "noop".into(),
+                    description: "noop".into(),
+                    parameters: serde_json::json!({}),
+                }]
+            }
+            async fn call_tool(&self, _name: &str, _arguments: Value) -> String {
+                "ok".into()
+            }
+        }
+
+        use crate::delegation::registry::AgentDefinition;
+        use crate::delegation::steering;
+
+        let mut reg = AgentRegistry::new();
+        reg.register(
+            AgentDefinition::new("steered", "can be steered", "system")
+                .with_tools(["noop"])
+                .with_max_turns(5),
+        );
+
+        let (steering_tx, steering_rx) = steering::channel();
+
+        // Pre-queue the steering message before execution starts.
+        // It will be picked up on turn 1 (after the tool call completes on turn 0).
+        steering_tx.send("change direction".into()).await;
+
+        let task = SubTask::new("steered", "do something").with_steering(steering_rx);
+
+        let broker = DelegationBroker::new(
+            Arc::new(reg),
+            Arc::new(LastUserModel),
+            Arc::new(NoopToolDispatcher),
+        );
+
+        let results = broker.delegate(vec![task]).await;
+        assert_eq!(results.len(), 1);
+        let output = results[0].output.as_ref().unwrap();
+        assert!(
+            output.contains("change direction"),
+            "steering message must be injected; got: {output}"
         );
     }
 }

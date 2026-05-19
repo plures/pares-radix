@@ -18,6 +18,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::delegation::broker::{DelegationBroker, SubTask, SubTaskResult};
+use crate::delegation::steering::{self, SteeringTx};
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ pub struct SubAgentManager {
     broker: Arc<DelegationBroker>,
     sessions: Arc<RwLock<HashMap<SessionId, SessionInfo>>>,
     handles: Arc<Mutex<HashMap<SessionId, JoinHandle<()>>>>,
+    steering_txs: Arc<RwLock<HashMap<SessionId, SteeringTx>>>,
     completion_tx: mpsc::UnboundedSender<CompletionEvent>,
 }
 
@@ -145,6 +147,7 @@ impl SubAgentManager {
             broker,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             handles: Arc::new(Mutex::new(HashMap::new())),
+            steering_txs: Arc::new(RwLock::new(HashMap::new())),
             completion_tx: tx,
         };
         (manager, rx)
@@ -179,8 +182,13 @@ impl SubAgentManager {
         // Register the session.
         self.sessions.write().await.insert(id.clone(), info);
 
-        // Build the sub-task.
+        // Create steering channel for this session.
+        let (steering_tx, steering_rx) = steering::channel();
+        self.steering_txs.write().await.insert(id.clone(), steering_tx);
+
+        // Build the sub-task with steering channel attached.
         let mut task = SubTask::new(agent_name.clone(), input);
+        task = task.with_steering(steering_rx);
         if let Some(ctx) = options.parent_context {
             task = task.with_parent_context(ctx);
         }
@@ -288,6 +296,9 @@ impl SubAgentManager {
                 info.completed_at = Some(Utc::now());
             }
 
+            // Clean up steering channel.
+            self.steering_txs.write().await.remove(session_id);
+
             info!(session_id = %session_id, "sub-agent killed");
             true
         } else {
@@ -297,23 +308,45 @@ impl SubAgentManager {
 
     /// Steer a running sub-agent by injecting an additional message.
     ///
-    /// Currently stores the steering message in the session's pending queue.
-    /// The broker will pick up pending messages on the next turn boundary.
+    /// Sends the message through the steering channel so it gets picked up
+    /// at the next turn boundary in the broker's model loop.
+    /// Also records the message in `pending_messages` for observability.
     /// Returns `true` if the message was queued successfully.
     pub async fn steer(&self, session_id: &str, message: &str) -> bool {
-        let mut sessions = self.sessions.write().await;
-        match sessions.get_mut(session_id) {
-            Some(info) if info.status == SessionStatus::Running => {
-                info.pending_messages.push(message.to_string());
-                info!(session_id = %session_id, "steering message queued for sub-agent");
-                true
+        // First check session status.
+        {
+            let sessions = self.sessions.read().await;
+            match sessions.get(session_id) {
+                Some(info) if info.status == SessionStatus::Running => {}
+                Some(_) => {
+                    warn!(session_id = %session_id, "cannot steer: session not running");
+                    return false;
+                }
+                None => return false,
             }
-            Some(_) => {
-                warn!(session_id = %session_id, "cannot steer: session not running");
+        }
+
+        // Send through the steering channel.
+        let sent = {
+            let txs = self.steering_txs.read().await;
+            if let Some(tx) = txs.get(session_id) {
+                tx.send(message.to_string()).await;
+                true
+            } else {
                 false
             }
-            _ => false,
+        };
+
+        if sent {
+            // Record in pending_messages for observability.
+            let mut sessions = self.sessions.write().await;
+            if let Some(info) = sessions.get_mut(session_id) {
+                info.pending_messages.push(message.to_string());
+            }
+            info!(session_id = %session_id, "steering message sent to sub-agent");
         }
+
+        sent
     }
 
     /// Remove completed sessions older than `max_age` from the session store.
