@@ -22,6 +22,7 @@ use serde_json::json;
 use tokio::sync::{Mutex, RwLock};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use uuid::Uuid;
 
@@ -2946,6 +2947,32 @@ enum Commands {
         action: ClusterAction,
     },
 
+    /// Run the agent using the spine-driven pipeline (ADR-0001).
+    ///
+    /// Channels are thin I/O — all logic flows through the EventSpine.
+    #[cfg(feature = "spine")]
+    ServeSpine {
+        /// Telegram bot token.
+        #[arg(long, env = "PARES_TELEGRAM_TOKEN")]
+        telegram_token: String,
+
+        /// OpenAI-compatible API URL.
+        #[arg(
+            long,
+            env = "PARES_MODEL_URL",
+            default_value = "https://models.inference.ai.azure.com"
+        )]
+        model_url: String,
+
+        /// Model name to use.
+        #[arg(long, env = "PARES_MODEL", default_value = "gpt-4o")]
+        model: String,
+
+        /// Use GitHub Copilot device flow authentication.
+        #[arg(long, env = "PARES_USE_COPILOT")]
+        use_copilot: bool,
+    },
+
     /// Run the agent as a headless daemon with a channel adapter.
     Serve {
         /// Telegram bot token (from BotFather). Optional — omit for desktop-only mode.
@@ -3338,6 +3365,60 @@ async fn main() {
                     eprintln!("Migration failed: {e}");
                     std::process::exit(1);
                 }
+            }
+        }
+
+        // NOTE: ServeSpine is gated behind cfg(feature = "spine") — spine modules
+        // not yet implemented in pares-agens-core/channels.
+        #[cfg(feature = "spine")]
+        Commands::ServeSpine {
+            telegram_token,
+            model_url,
+            model,
+            use_copilot,
+        } => {
+            use pares_agens_core::spine::pipeline::Pipeline;
+            use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
+            use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
+            use pares_agens_core::spine::procedures::response_router::ResponseRouter;
+            use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
+            use pares_agens_core::spine::channel::SpineChannel;
+
+            info!("Starting pares-radix in spine-driven mode (ADR-0001)");
+
+            // 1. Create the pipeline
+            let (pipeline, rx) = Pipeline::new(256);
+
+            // 2. Register procedures
+            pipeline.register(Arc::new(InboundRouter)).await;
+            pipeline.register(Arc::new(ResponseRouter)).await;
+            info!("Pipeline procedures registered: inbound_router, response_router");
+
+            // 3. Start the pipeline event loop
+            let pipeline_for_loop = Arc::clone(&pipeline);
+            tokio::spawn(async move {
+                pipeline_for_loop.run(rx).await;
+            });
+            info!("Pipeline event loop started");
+
+            // 4. Start Telegram channel (delivery loop)
+            let delivery_rx = pipeline.subscribe_deliveries();
+            let tg_channel = TelegramSpineChannel::new(TelegramSpineConfig {
+                token: telegram_token.clone(),
+            });
+            tokio::spawn(async move {
+                tg_channel.run_delivery_loop(delivery_rx).await;
+            });
+            info!("Telegram delivery loop started");
+
+            // 5. Start receiving (blocks)
+            let emitter = pipeline.emitter();
+            let receiver_channel = TelegramSpineChannel::new(TelegramSpineConfig {
+                token: telegram_token,
+            });
+            info!("Starting Telegram receiver — spine-driven mode active");
+            if let Err(e) = receiver_channel.start_receiving(emitter).await {
+                error!(error = %e, "Telegram receiver failed");
             }
         }
 
