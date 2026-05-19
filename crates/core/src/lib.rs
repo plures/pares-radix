@@ -117,3 +117,5 @@ pub mod pii_guard;
 /// Bridge between compiled `.px` procedures and the core [`Procedure`] trait.
 pub mod px_adapter;
 pub mod shell_executor;
+#[cfg(feature = "spine")]
+pub mod spine;
