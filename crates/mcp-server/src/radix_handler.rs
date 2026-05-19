@@ -3042,6 +3042,142 @@ impl RadixToolHandler {
     }
 
     /// Full agent loop via MCP — channel-agnostic. Same as Telegram/TUI.
+    async fn session_status(&self, args: &Value) -> ToolResult {
+        let session_id = args.get("session_id").and_then(|v| v.as_str());
+
+        // Handle model override if requested
+        if let Some(model_override) = args.get("model").and_then(|v| v.as_str()) {
+            if let Some(store) = &self.state_store {
+                let key = format!(
+                    "session:model_override:{}",
+                    session_id.unwrap_or("main")
+                );
+                if model_override == "default" {
+                    store.delete(&key).await;
+                } else {
+                    store.set(&key, Value::String(model_override.to_string())).await;
+                }
+            }
+        }
+
+        let uptime_secs = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let shell_sessions = self.shell.list().await;
+        let active_shells = shell_sessions.len();
+
+        let mut active_subagents = 0usize;
+        if let Some(manager) = &self.subagent_manager {
+            active_subagents = manager.list_running().await.len();
+        }
+
+        // Get model override if set
+        let model_override = if let Some(store) = &self.state_store {
+            let key = format!(
+                "session:model_override:{}",
+                session_id.unwrap_or("main")
+            );
+            store.get(&key).await.and_then(|v| v.as_str().map(|s| s.to_string()))
+        } else {
+            None
+        };
+
+        let status = json!({
+            "session_id": session_id.unwrap_or("main"),
+            "status": "running",
+            "version": env!("CARGO_PKG_VERSION"),
+            "timestamp_unix": uptime_secs,
+            "model": model_override.as_deref().unwrap_or("default"),
+            "active_shell_sessions": active_shells,
+            "active_subagents": active_subagents,
+            "components": {
+                "memory": if self.memory.is_some() { "active" } else { "not_configured" },
+                "scheduler": if self.scheduler.is_some() { "active" } else { "not_configured" },
+                "state_store": if self.state_store.is_some() { "active" } else { "not_configured" },
+                "subagent_manager": if self.subagent_manager.is_some() { "active" } else { "not_configured" }
+            }
+        });
+
+        ToolResult::ok(serde_json::to_string_pretty(&status).unwrap_or_default())
+    }
+
+    async fn session_history(&self, args: &Value) -> ToolResult {
+        let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
+            Some(id) => id,
+            None => return ToolResult::error("missing required parameter: session_id"),
+        };
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(100) as usize;
+        let include_tools = args
+            .get("include_tools")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Look up session history from state store
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => {
+                return ToolResult::error(
+                    "State store not configured — session history unavailable",
+                )
+            }
+        };
+
+        let key = format!("session:history:{session_id}");
+        let history = store.get(&key).await;
+
+        match history {
+            Some(Value::Array(messages)) => {
+                let filtered: Vec<&Value> = messages
+                    .iter()
+                    .filter(|msg| {
+                        if include_tools {
+                            return true;
+                        }
+                        // Filter out tool messages unless include_tools=true
+                        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                        role != "tool" && role != "tool_result"
+                    })
+                    .collect();
+                let truncated: Vec<&&Value> = filtered.iter().rev().take(limit).collect();
+                let result: Vec<&Value> = truncated.into_iter().rev().copied().collect();
+
+                ToolResult::ok(
+                    json!({
+                        "session_id": session_id,
+                        "message_count": result.len(),
+                        "total_messages": messages.len(),
+                        "messages": result
+                    })
+                    .to_string(),
+                )
+            }
+            Some(other) => ToolResult::ok(
+                json!({
+                    "session_id": session_id,
+                    "message_count": 0,
+                    "messages": [],
+                    "note": format!("unexpected history format: {}", other)
+                })
+                .to_string(),
+            ),
+            None => ToolResult::ok(
+                json!({
+                    "session_id": session_id,
+                    "message_count": 0,
+                    "messages": [],
+                    "note": "no history found for this session"
+                })
+                .to_string(),
+            ),
+        }
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -4036,6 +4172,37 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Session management tools ─────────────────────────────────────
+        tools.push(Tool {
+            name: "session_status".into(),
+            description: Some(
+                "Get status of the current or a specific session: model, uptime, usage stats, active sub-agents.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "session_id": {"type": "string", "description": "Optional session ID (defaults to current/main session)"},
+                    "model": {"type": "string", "description": "Optional: set a per-session model override. Use 'default' to reset."}
+                })),
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "session_history".into(),
+            description: Some(
+                "Get message history for a session. Returns sanitized messages with role and content.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "session_id": {"type": "string", "description": "Session ID to retrieve history for (required)"},
+                    "limit": {"type": "integer", "description": "Max messages to return (default: 20, max: 100)"},
+                    "include_tools": {"type": "boolean", "description": "Include tool call/result messages (default: false)"}
+                })),
+                required: Some(vec!["session_id".into()]),
+            },
+        });
+
         tools
     }
 
@@ -4111,6 +4278,8 @@ impl ToolHandler for RadixToolHandler {
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
             "agent_ask" => self.agent_ask(&arguments).await,
+            "session_status" => self.session_status(&arguments).await,
+            "session_history" => self.session_history(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -6889,5 +7058,56 @@ mod tests {
         assert!(names.contains(&"plugin_register"));
         assert!(names.contains(&"plugin_activate"));
         assert!(names.contains(&"plugin_deactivate"));
+    }
+
+    #[tokio::test]
+    async fn session_status_returns_info() {
+        let handler = make_handler();
+        let result = handler.call_tool("session_status", json!({})).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["session_id"], "main");
+        assert_eq!(parsed["status"], "running");
+        assert!(parsed["version"].is_string());
+        assert!(parsed["components"].is_object());
+    }
+
+    #[tokio::test]
+    async fn session_status_with_session_id() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("session_status", json!({"session_id": "test-session"}))
+            .await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["session_id"], "test-session");
+    }
+
+    #[tokio::test]
+    async fn session_history_missing_session_id() {
+        let handler = make_handler();
+        let result = handler.call_tool("session_history", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("session_id"));
+    }
+
+    #[tokio::test]
+    async fn session_history_no_state_store() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("session_history", json!({"session_id": "test"}))
+            .await;
+        // Without state store, should return error
+        assert!(result.is_error);
+        assert!(result.content.contains("State store not configured"));
+    }
+
+    #[tokio::test]
+    async fn session_tools_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"session_status"));
+        assert!(names.contains(&"session_history"));
     }
 }
