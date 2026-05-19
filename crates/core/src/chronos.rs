@@ -337,6 +337,40 @@ impl ChronosTimeline {
         entries
     }
 
+    /// Timeline view: recent entries with optional `since` timestamp and `level` filter.
+    /// Mirrors OpenClaw's `radix__chronos-timeline` behavior.
+    /// `since` is a Unix timestamp in milliseconds — only entries after this time are included.
+    /// `level` filters to entries at or above the given severity.
+    pub fn timeline(
+        &self,
+        limit: usize,
+        since: Option<u64>,
+        level: Option<ChronosLevel>,
+    ) -> Vec<ChronosEntry> {
+        let mut entries: Vec<ChronosEntry> = self
+            .store
+            .list()
+            .into_iter()
+            .filter_map(|r| {
+                let e: ChronosEntry = serde_json::from_value(r.data).ok()?;
+                if let Some(ts) = since {
+                    if e.timestamp < ts {
+                        return None;
+                    }
+                }
+                if let Some(ref lvl) = level {
+                    if e.level < *lvl {
+                        return None;
+                    }
+                }
+                Some(e)
+            })
+            .collect();
+        entries.sort_by_key(|e| std::cmp::Reverse(e.timestamp));
+        entries.truncate(limit);
+        entries
+    }
+
     /// Recent entries across all keys (newest first), up to `limit`.
     pub fn recent(&self, limit: usize) -> Vec<ChronosEntry> {
         let mut entries: Vec<ChronosEntry> = self
@@ -654,5 +688,88 @@ mod tests {
         let timeline = ChronosTimeline::new(store);
         let replayed = timeline.replay(None, None);
         assert!(replayed.is_empty());
+    }
+
+    #[test]
+    fn timeline_basic() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let entry = timeline.build_entry(
+            "tl:key1",
+            "actor1",
+            ChronosAction::Create,
+            &serde_json::json!({"x": 1}),
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+
+        let results = timeline.timeline(50, None, None);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "tl:key1");
+    }
+
+    #[test]
+    fn timeline_level_filter() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        // Lower min level so debug entries get recorded
+        timeline.set_level(ChronosLevel::Debug);
+
+        let debug_entry = timeline.build_entry_with_level(
+            "tl:debug",
+            "actor1",
+            ChronosAction::Create,
+            ChronosLevel::Debug,
+            &serde_json::json!("d"),
+            vec![],
+            None,
+        );
+        timeline.record(&debug_entry);
+
+        let warn_entry = timeline.build_entry_with_level(
+            "tl:warn",
+            "actor1",
+            ChronosAction::Update,
+            ChronosLevel::Warn,
+            &serde_json::json!("w"),
+            vec![],
+            None,
+        );
+        timeline.record(&warn_entry);
+
+        // Filter to warn+ should only return the warn entry
+        let results = timeline.timeline(50, None, Some(ChronosLevel::Warn));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "tl:warn");
+
+        // No filter returns both
+        let results = timeline.timeline(50, None, None);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn timeline_since_filter() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let entry = timeline.build_entry(
+            "tl:recent",
+            "actor1",
+            ChronosAction::Create,
+            &serde_json::json!("r"),
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+
+        // Since far future: nothing
+        let results = timeline.timeline(50, Some(u64::MAX), None);
+        assert_eq!(results.len(), 0);
+
+        // Since epoch 0: everything
+        let results = timeline.timeline(50, Some(0), None);
+        assert_eq!(results.len(), 1);
     }
 }

@@ -2758,6 +2758,26 @@ impl RadixToolHandler {
         )
     }
 
+    async fn chronos_timeline(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+        let since = args.get("since").and_then(|v| v.as_str()).and_then(|s| {
+            // Parse ISO 8601 timestamp to epoch millis
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp_millis() as u64)
+        });
+        let level = args
+            .get("level")
+            .and_then(|v| v.as_str())
+            .and_then(ChronosLevel::from_str_loose);
+        let entries = chronos.timeline(limit, since, level);
+        ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
+    }
+
     // ── Sub-agent tools ──────────────────────────────────────────────────────────
 
     async fn subagent_spawn(&self, args: &Value) -> ToolResult {
@@ -3677,6 +3697,22 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        tools.push(Tool {
+            name: "chronos_timeline".into(),
+            description: Some(
+                "Get the event timeline (last N events), optionally filtered by since timestamp and severity level. Mirrors OpenClaw's radix__chronos-timeline.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "limit": {"type": "integer", "description": "Max events to return (default 50)"},
+                    "since": {"type": "string", "description": "ISO 8601 timestamp — only events after this time"},
+                    "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Minimum severity level filter"}
+                })),
+                required: None,
+            },
+        });
+
         // ── Sub-agent tools ─────────────────────────────────────────────────────────────
         tools.push(Tool {
             name: "subagent_spawn".into(),
@@ -3792,6 +3828,7 @@ impl ToolHandler for RadixToolHandler {
             "chronos_set_level" => self.chronos_set_level(&arguments).await,
             "chronos_get_level" => self.chronos_get_level(&arguments).await,
             "chronos_replay" => self.chronos_replay(&arguments).await,
+            "chronos_timeline" => self.chronos_timeline(&arguments).await,
             "subagent_spawn" => self.subagent_spawn(&arguments).await,
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
@@ -5622,6 +5659,96 @@ mod tests {
         let tools = handler.list_tools().await;
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"chronos_replay"));
+    }
+
+    #[tokio::test]
+    async fn chronos_timeline_without_chronos() {
+        let handler = make_handler();
+        let result = handler.call_tool("chronos_timeline", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_timeline_basic() {
+        use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        let entry = timeline.build_entry(
+            "timeline:test",
+            "actor-timeline",
+            ChronosAction::Create,
+            &json!({"value": 42}),
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(timeline);
+
+        let result = handler
+            .call_tool("chronos_timeline", json!({"limit": 10}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("timeline:test"));
+        assert!(result.content.contains("actor-timeline"));
+    }
+
+    #[tokio::test]
+    async fn chronos_timeline_with_level_filter() {
+        use pares_agens_core::chronos::{ChronosAction, ChronosLevel, ChronosTimeline};
+        use pluresdb::CrdtStore;
+
+        let store = Arc::new(CrdtStore::default());
+        let timeline = Arc::new(ChronosTimeline::new(store));
+
+        // Record a debug entry
+        let debug_entry = timeline.build_entry_with_level(
+            "timeline:debug",
+            "actor-1",
+            ChronosAction::Create,
+            ChronosLevel::Debug,
+            &json!("debug-data"),
+            vec![],
+            None,
+        );
+        timeline.record(&debug_entry);
+
+        // Record an error entry
+        let error_entry = timeline.build_entry_with_level(
+            "timeline:error",
+            "actor-1",
+            ChronosAction::Update,
+            ChronosLevel::Error,
+            &json!("error-data"),
+            vec![],
+            None,
+        );
+        timeline.record(&error_entry);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(timeline);
+
+        // Filter to error level - should only get the error entry
+        let result = handler
+            .call_tool("chronos_timeline", json!({"level": "error"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("timeline:error"));
+        assert!(!result.content.contains("timeline:debug"));
+    }
+
+    #[tokio::test]
+    async fn chronos_timeline_in_tool_list() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"chronos_timeline"));
     }
 
     #[tokio::test]
