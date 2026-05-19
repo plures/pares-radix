@@ -48,8 +48,10 @@ const MAX_INDEX_LISTING_ITEMS: usize = 10;
 const DEFAULT_NIX_FLAKE_DIR: &str = "nixos-config";
 const DEFAULT_NIX_HOST: &str = "praxisbot";
 /// Directory containing the pares-radix source for rebuilding the binary.
+#[allow(dead_code)]
 const DEFAULT_PARES_RADIX_DIR: &str = "pares-radix";
 /// Subdirectory under $HOME/projects for defaults, or override with env vars.
+#[allow(dead_code)]
 const PROJECTS_SUBDIR: &str = "projects";
 const TELEGRAM_MAX_MESSAGE_CHARS: usize = 3900;
 /// Internal prefix added by the Telegram adapter when `/verbose` is enabled.
@@ -632,6 +634,7 @@ pub struct TelegramRuntimeConfig {
 /// Telegram messages.
 pub struct TelegramAdapter {
     config: TelegramConfig,
+    /// Handle to the event spine for spine-driven message delivery.
     pub event_spine: Option<EventSpineHandle>,
 }
 
