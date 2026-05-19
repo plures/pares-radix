@@ -732,123 +732,8 @@ impl ModelClient for ToggleableModelClient {
     }
 }
 
-/// Minimal tool dispatcher for spine mode.
-/// Provides basic tool definitions without the full ProcedureRegistry infrastructure.
-struct SpineToolDispatcher;
-
-#[async_trait]
-impl ToolDispatcher for SpineToolDispatcher {
-    async fn available_tools(&self) -> Vec<ToolDefinition> {
-        // Spine mode provides a minimal tool set for now.
-        // TODO: Wire up full ProcedureRegistry when spine mode matures.
-        vec![
-            ToolDefinition {
-                name: "read_file".into(),
-                description: "Read a UTF-8 text file from disk".into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Path to the file to read"}
-                    },
-                    "required": ["path"]
-                }),
-            },
-            ToolDefinition {
-                name: "write_file".into(),
-                description: "Write content to a file, creating it if it doesn't exist".into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string", "description": "Path to write"},
-                        "content": {"type": "string", "description": "Content to write"}
-                    },
-                    "required": ["path", "content"]
-                }),
-            },
-            ToolDefinition {
-                name: "exec".into(),
-                description: "Execute a shell command and return its output".into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string", "description": "Shell command to execute"}
-                    },
-                    "required": ["command"]
-                }),
-            },
-            ToolDefinition {
-                name: "web_search".into(),
-                description: "Search the web for information".into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"}
-                    },
-                    "required": ["query"]
-                }),
-            },
-        ]
-    }
-
-    async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> String {
-        match name {
-            "read_file" => {
-                let path = arguments["path"].as_str().unwrap_or("");
-                match std::fs::read_to_string(path) {
-                    Ok(content) => {
-                        if content.len() > 50_000 {
-                            format!("{}\n\n[truncated at 50KB]", &content[..50_000])
-                        } else {
-                            content
-                        }
-                    }
-                    Err(e) => format!("Error reading file: {e}"),
-                }
-            }
-            "write_file" => {
-                let path = arguments["path"].as_str().unwrap_or("");
-                let content = arguments["content"].as_str().unwrap_or("");
-                if let Some(parent) = std::path::Path::new(path).parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                match std::fs::write(path, content) {
-                    Ok(_) => format!("Successfully wrote {} bytes to {path}", content.len()),
-                    Err(e) => format!("Error writing file: {e}"),
-                }
-            }
-            "exec" => {
-                let command = arguments["command"].as_str().unwrap_or("");
-                match std::process::Command::new("bash")
-                    .arg("-c")
-                    .arg(command)
-                    .output()
-                {
-                    Ok(output) => {
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        let mut result = String::new();
-                        if !stdout.is_empty() {
-                            result.push_str(&stdout);
-                        }
-                        if !stderr.is_empty() {
-                            if !result.is_empty() {
-                                result.push_str("\n--- stderr ---\n");
-                            }
-                            result.push_str(&stderr);
-                        }
-                        if result.is_empty() {
-                            format!("Command completed with exit code: {}", output.status.code().unwrap_or(-1))
-                        } else {
-                            result
-                        }
-                    }
-                    Err(e) => format!("Error executing command: {e}"),
-                }
-            }
-            _ => format!("Unknown tool: {name}"),
-        }
-    }
-}
+// SpineToolDispatcher removed — ServeSpine now uses SpineProcedureDispatcher
+// backed by a full ProcedureRegistry (see Commands::ServeSpine handler).
 
 struct ProcedureToolDispatcher {
     registry: Arc<ProcedureRegistry>,
@@ -3574,8 +3459,108 @@ async fn main() {
             };
             info!(model = %model, copilot = use_copilot, "Model client initialized for spine mode");
 
-            // 2. Set up tool dispatcher (minimal spine-mode tools)
-            let spine_tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(SpineToolDispatcher);
+            // 2. Set up tool dispatcher via SpineProcedureDispatcher (full procedure registry)
+            use pares_agens_core::spine::dispatcher::SpineProcedureDispatcher;
+
+            let shell_executor = Arc::new(ShellExecutor::new());
+            let mut spine_registry = ProcedureRegistry::new();
+            spine_registry.register(Box::new(ReadFileProcedure));
+            spine_registry.register(Box::new(WriteFileProcedure));
+            spine_registry.register(Box::new(EditFileProcedure));
+            spine_registry.register(Box::new(ListDirectoryProcedure));
+            spine_registry.register(Box::new(RunCommandProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
+            spine_registry.register(Box::new(ProcessManageProcedure {
+                executor: Arc::clone(&shell_executor),
+            }));
+
+            let spine_registry = Arc::new(RwLock::new(spine_registry));
+            let spine_tool_definitions = vec![
+                ToolDefinition {
+                    name: "read_file".into(),
+                    description: "Read a UTF-8 text file from disk".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Path to the file to read"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "write_file".into(),
+                    description: "Write content to a file, creating parent dirs if needed".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "content": {"type": "string"}
+                        },
+                        "required": ["path", "content"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "edit_file".into(),
+                    description: "Replace the first occurrence of old_text with new_text in a file".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "old_text": {"type": "string"},
+                            "new_text": {"type": "string"}
+                        },
+                        "required": ["path", "old_text", "new_text"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "list_directory".into(),
+                    description: "List files in a directory".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"}
+                        },
+                        "required": ["path"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "run_command".into(),
+                    description: "Run a shell command. Supports background, pty, timeout, workdir, env.".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "command": {"type": "string", "description": "Shell command to execute"},
+                            "workdir": {"type": "string"},
+                            "background": {"type": "boolean"},
+                            "pty": {"type": "boolean"},
+                            "timeout": {"type": "integer"},
+                            "yieldMs": {"type": "integer"},
+                            "env": {"type": "object"}
+                        },
+                        "required": ["command"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "process".into(),
+                    description: "Manage background shell sessions: list, poll, log, write, kill.".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "action": {"type": "string", "enum": ["list", "poll", "log", "write", "kill"]},
+                            "sessionId": {"type": "string"},
+                            "timeout": {"type": "integer"},
+                            "data": {"type": "string"},
+                            "offset": {"type": "integer"},
+                            "limit": {"type": "integer"}
+                        },
+                        "required": ["action"]
+                    }),
+                },
+            ];
+            let spine_tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(
+                SpineProcedureDispatcher::with_tools(spine_registry, spine_tool_definitions),
+            );
 
             // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
