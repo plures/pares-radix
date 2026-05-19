@@ -2670,6 +2670,94 @@ impl RadixToolHandler {
         ToolResult::ok(json!({ "level": level.to_string() }).to_string())
     }
 
+    async fn chronos_replay(&self, args: &Value) -> ToolResult {
+        use pares_radix_praxis::px::executor::default_evaluate_condition;
+        use std::collections::HashMap;
+
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let from_id = args.get("fromId").and_then(|v| v.as_str());
+        let to_id = args.get("toId").and_then(|v| v.as_str());
+        let entries = chronos.replay(from_id, to_id);
+
+        // Dry-run: evaluate each entry through .px constraints in PluresDB
+        let mut results: Vec<Value> = Vec::new();
+        for entry in &entries {
+            let action_str = format!("{:?}", entry.action);
+            let mut violations: Vec<Value> = Vec::new();
+
+            if let Some(ref store) = self.state_store {
+                let constraint_keys = store.keys_with_prefix("px:constraint/").await;
+                let mut vars: HashMap<String, Value> = HashMap::new();
+                vars.insert("action".to_string(), Value::String(action_str.clone()));
+                vars.insert("actor".to_string(), Value::String(entry.actor.clone()));
+                vars.insert("key".to_string(), Value::String(entry.key.clone()));
+                vars.insert(
+                    "level".to_string(),
+                    Value::String(entry.level.to_string()),
+                );
+
+                for key in constraint_keys {
+                    if let Some(record) = store.get(&key).await {
+                        let name = record
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
+                        let severity = record
+                            .get("severity")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("error");
+                        let message = record
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        let when_expr = record
+                            .get("when")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("true");
+                        let require_expr = record
+                            .get("require")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("true");
+
+                        if !default_evaluate_condition(when_expr, &vars) {
+                            continue;
+                        }
+                        if !default_evaluate_condition(require_expr, &vars) {
+                            violations.push(json!({
+                                "constraint": name,
+                                "severity": severity,
+                                "message": message,
+                            }));
+                        }
+                    }
+                }
+            }
+
+            results.push(json!({
+                "id": entry.id,
+                "timestamp": entry.timestamp,
+                "actor": entry.actor,
+                "key": entry.key,
+                "action": action_str,
+                "level": entry.level.to_string(),
+                "violations": violations,
+            }));
+        }
+
+        ToolResult::ok(
+            json!({
+                "replayed": results.len(),
+                "fromId": from_id,
+                "toId": to_id,
+                "results": results,
+            })
+            .to_string(),
+        )
+    }
+
     // ── Sub-agent tools ──────────────────────────────────────────────────────────
 
     async fn subagent_spawn(&self, args: &Value) -> ToolResult {
@@ -3574,6 +3662,21 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        tools.push(Tool {
+            name: "chronos_replay".into(),
+            description: Some(
+                "Replay timeline events through the Praxis engine (dry-run evaluation). Returns entries with any constraint violations.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "fromId": {"type": "string", "description": "Start replay from this event id (inclusive). Omit to start from oldest."},
+                    "toId": {"type": "string", "description": "End replay at this event id (inclusive). Omit to replay to newest."}
+                })),
+                required: None,
+            },
+        });
+
         // ── Sub-agent tools ─────────────────────────────────────────────────────────────
         tools.push(Tool {
             name: "subagent_spawn".into(),
@@ -3688,6 +3791,7 @@ impl ToolHandler for RadixToolHandler {
             "chronos_record" => self.chronos_record(&arguments).await,
             "chronos_set_level" => self.chronos_set_level(&arguments).await,
             "chronos_get_level" => self.chronos_get_level(&arguments).await,
+            "chronos_replay" => self.chronos_replay(&arguments).await,
             "subagent_spawn" => self.subagent_spawn(&arguments).await,
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
@@ -5464,6 +5568,60 @@ mod tests {
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_replay_without_timeline() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler.call_tool("chronos_replay", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_replay_with_entries() {
+        use pares_agens_core::chronos::ChronosTimeline;
+        use pluresdb::CrdtStore;
+
+        let shell = Arc::new(ShellExecutor::new());
+        let store = Arc::new(CrdtStore::default());
+        let chronos = Arc::new(ChronosTimeline::new(store.clone()));
+        let state = Arc::new(pares_agens_core::InMemoryStateStore::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(chronos.clone())
+            .with_state_store(state);
+
+        // Record some entries
+        handler
+            .call_tool(
+                "chronos_record",
+                json!({"key": "test:a", "actor": "agent", "action": "Create", "data": {"x": 1}}),
+            )
+            .await;
+        handler
+            .call_tool(
+                "chronos_record",
+                json!({"key": "test:b", "actor": "agent", "action": "Update", "data": {"x": 2}}),
+            )
+            .await;
+
+        // Replay all
+        let result = handler.call_tool("chronos_replay", json!({})).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["replayed"], 2);
+        assert!(parsed["results"].as_array().unwrap().len() == 2);
+    }
+
+    #[tokio::test]
+    async fn chronos_replay_in_tool_list() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"chronos_replay"));
     }
 
     #[tokio::test]

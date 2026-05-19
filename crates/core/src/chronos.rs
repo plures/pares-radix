@@ -349,6 +349,44 @@ impl ChronosTimeline {
         entries.truncate(limit);
         entries
     }
+
+    /// Replay timeline events between two entry IDs (inclusive).
+    ///
+    /// If `from_id` is None, starts from the oldest entry.
+    /// If `to_id` is None, ends at the newest entry.
+    /// Returns entries in chronological order (oldest first) for replay.
+    pub fn replay(&self, from_id: Option<&str>, to_id: Option<&str>) -> Vec<ChronosEntry> {
+        let all_entries: Vec<ChronosEntry> = self
+            .store
+            .list()
+            .into_iter()
+            .filter_map(|r| serde_json::from_value(r.data).ok())
+            .collect();
+
+        // Sort chronologically (oldest first) for replay, with ID as tiebreaker
+        let mut sorted = all_entries;
+        sorted.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
+
+        // Find the from/to boundaries
+        let start_idx = match from_id {
+            Some(fid) => sorted.iter().position(|e| e.id == fid).unwrap_or(0),
+            None => 0,
+        };
+        let end_idx = match to_id {
+            Some(tid) => sorted
+                .iter()
+                .position(|e| e.id == tid)
+                .map(|i| i + 1)
+                .unwrap_or(sorted.len()),
+            None => sorted.len(),
+        };
+
+        if start_idx >= sorted.len() || start_idx >= end_idx {
+            return Vec::new();
+        }
+
+        sorted[start_idx..end_idx].to_vec()
+    }
 }
 
 /// SHA-256 hash of a JSON value (deterministic via to_string).
@@ -537,5 +575,84 @@ mod tests {
 
         timeline.set_level(ChronosLevel::Debug);
         assert_eq!(timeline.get_level(), ChronosLevel::Debug);
+    }
+
+    #[test]
+    fn replay_all_entries() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        timeline.set_level(ChronosLevel::Debug);
+
+        let mut ids = Vec::new();
+        for i in 0..3 {
+            let e = timeline.build_entry(
+                &format!("key{i}"),
+                "agent",
+                ChronosAction::Create,
+                &json!({"val": i}),
+                vec![],
+                None,
+            );
+            timeline.record(&e);
+            ids.push(e.id.clone());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Replay all
+        let replayed = timeline.replay(None, None);
+        assert_eq!(replayed.len(), 3);
+        // Should be chronological (oldest first)
+        assert!(replayed[0].timestamp <= replayed[1].timestamp);
+        assert!(replayed[1].timestamp <= replayed[2].timestamp);
+    }
+
+    #[test]
+    fn replay_with_range() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        timeline.set_level(ChronosLevel::Debug);
+
+        let mut entries_created = Vec::new();
+        for i in 0..5 {
+            let e = timeline.build_entry(
+                &format!("key{i}"),
+                "agent",
+                ChronosAction::Create,
+                &json!({"val": i}),
+                vec![],
+                None,
+            );
+            timeline.record(&e);
+            entries_created.push(e);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Get all replayed entries and verify they're all present
+        let all_replayed = timeline.replay(None, None);
+        assert_eq!(all_replayed.len(), 5);
+
+        // Pick the first and last entries from the replayed list (sorted by timestamp+id)
+        let first_id = &all_replayed[0].id;
+        let last_id = &all_replayed[4].id;
+
+        // Replay the full range using first and last IDs
+        let replayed = timeline.replay(Some(first_id), Some(last_id));
+        assert_eq!(replayed.len(), 5);
+
+        // Replay a subset: entries 1..3 (inclusive)
+        let mid_from = &all_replayed[1].id;
+        let mid_to = &all_replayed[3].id;
+        let subset = timeline.replay(Some(mid_from), Some(mid_to));
+        assert_eq!(subset.len(), 3);
+        assert_eq!(subset[0].id, *mid_from);
+        assert_eq!(subset[2].id, *mid_to);
+    }
+
+    #[test]
+    fn replay_empty_timeline() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        let replayed = timeline.replay(None, None);
+        assert!(replayed.is_empty());
     }
 }
