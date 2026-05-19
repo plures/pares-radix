@@ -3178,6 +3178,131 @@ impl RadixToolHandler {
         }
     }
 
+    async fn session_send(&self, args: &Value) -> ToolResult {
+        let session_id = match args.get("session_id").and_then(|v| v.as_str()) {
+            Some(id) => id.to_string(),
+            None => return ToolResult::error("missing required parameter: session_id"),
+        };
+        let message = match args.get("message").and_then(|v| v.as_str()) {
+            Some(m) => m.to_string(),
+            None => return ToolResult::error("missing required parameter: message"),
+        };
+        let timeout_secs = args
+            .get("timeout_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30)
+            .min(300);
+
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => {
+                return ToolResult::error(
+                    "State store not configured — session messaging unavailable",
+                )
+            }
+        };
+
+        // Append message to the target session's inbox
+        let inbox_key = format!("session:inbox:{session_id}");
+        let msg_entry = json!({
+            "from": "mcp",
+            "message": message,
+            "timestamp": SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            "status": "pending"
+        });
+
+        // Get existing inbox or create new
+        let mut inbox = match store.get(&inbox_key).await {
+            Some(Value::Array(arr)) => arr,
+            _ => Vec::new(),
+        };
+        inbox.push(msg_entry.clone());
+        store.set(&inbox_key, Value::Array(inbox)).await;
+
+        // Wait for a response if timeout > 0
+        if timeout_secs > 0 {
+            let response_key = format!("session:response:{session_id}:latest");
+            let start = std::time::Instant::now();
+            let timeout_dur = std::time::Duration::from_secs(timeout_secs);
+
+            // Clear any old response first
+            store.delete(&response_key).await;
+
+            // Poll for response (check every 500ms)
+            while start.elapsed() < timeout_dur {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if let Some(response) = store.get(&response_key).await {
+                    return ToolResult::ok(
+                        json!({
+                            "session_id": session_id,
+                            "status": "responded",
+                            "response": response
+                        })
+                        .to_string(),
+                    );
+                }
+            }
+        }
+
+        // If we didn't get a response (or timeout=0), return confirmation of delivery
+        ToolResult::ok(
+            json!({
+                "session_id": session_id,
+                "status": "delivered",
+                "message": "Message delivered to session inbox. No response received within timeout."
+            })
+            .to_string(),
+        )
+    }
+
+    async fn session_list(&self, _args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => {
+                return ToolResult::error(
+                    "State store not configured — session listing unavailable",
+                )
+            }
+        };
+
+        // List sessions from state store (sessions register themselves)
+        let sessions_key = "sessions:active";
+        let sessions = match store.get(sessions_key).await {
+            Some(Value::Array(arr)) => arr,
+            _ => Vec::new(),
+        };
+
+        // Also list shell sessions and subagents
+        let shell_sessions = self.shell.list().await;
+        let mut subagent_info: Vec<Value> = Vec::new();
+        if let Some(manager) = &self.subagent_manager {
+            let running = manager.list_running().await;
+            for s in running {
+                subagent_info.push(json!({
+                    "id": s.id,
+                    "agent": s.agent_name,
+                    "task": s.task_input,
+                    "label": s.label,
+                    "started_at": s.started_at.to_rfc3339(),
+                    "status": format!("{:?}", s.status)
+                }));
+            }
+        }
+
+        ToolResult::ok(
+            json!({
+                "sessions": sessions,
+                "shell_sessions": shell_sessions.len(),
+                "subagent_count": subagent_info.len(),
+                "subagents": subagent_info
+            })
+            .to_string(),
+        )
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -4202,6 +4327,32 @@ impl ToolHandler for RadixToolHandler {
                 required: Some(vec!["session_id".into()]),
             },
         });
+        tools.push(Tool {
+            name: "session_send".into(),
+            description: Some(
+                "Send a message to another session. Delivers to the target session's inbox and optionally waits for a response.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "session_id": {"type": "string", "description": "Target session ID to send the message to (required)"},
+                    "message": {"type": "string", "description": "Message content to send (required)"},
+                    "timeout_seconds": {"type": "integer", "description": "Seconds to wait for a response (default: 30, max: 300, 0 = fire-and-forget)"}
+                })),
+                required: Some(vec!["session_id".into(), "message".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "session_list".into(),
+            description: Some(
+                "List active sessions, shell sessions, and running sub-agents.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({})),
+                required: None,
+            },
+        });
 
         tools
     }
@@ -4280,6 +4431,8 @@ impl ToolHandler for RadixToolHandler {
             "agent_ask" => self.agent_ask(&arguments).await,
             "session_status" => self.session_status(&arguments).await,
             "session_history" => self.session_history(&arguments).await,
+            "session_send" => self.session_send(&arguments).await,
+            "session_list" => self.session_list(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -7109,5 +7262,67 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"session_status"));
         assert!(names.contains(&"session_history"));
+        assert!(names.contains(&"session_send"));
+        assert!(names.contains(&"session_list"));
+    }
+
+    #[tokio::test]
+    async fn session_send_missing_session_id() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("session_send", json!({"message": "hello"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("missing required parameter: session_id"));
+    }
+
+    #[tokio::test]
+    async fn session_send_missing_message() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("session_send", json!({"session_id": "test"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("missing required parameter: message"));
+    }
+
+    #[tokio::test]
+    async fn session_send_no_state_store() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("session_send", json!({"session_id": "s1", "message": "hi"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("State store not configured"));
+    }
+
+    #[tokio::test]
+    async fn session_send_delivers_with_state_store() {
+        let handler = make_handler_with_state();
+        let result = handler
+            .call_tool(
+                "session_send",
+                json!({"session_id": "target-1", "message": "test msg", "timeout_seconds": 0}),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("delivered"));
+    }
+
+    #[tokio::test]
+    async fn session_list_no_state_store() {
+        let handler = make_handler();
+        let result = handler.call_tool("session_list", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("State store not configured"));
+    }
+
+    #[tokio::test]
+    async fn session_list_with_state_store() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("session_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("shell_sessions"));
+        assert!(result.content.contains("subagent_count"));
     }
 }
