@@ -523,6 +523,7 @@ impl Agent {
         let options = ChatOptions {
             temperature: None,
             logprobs: true,
+                model: None,
         };
 
         let (mut reply, logprobs, mut messages) = match self
@@ -554,6 +555,7 @@ impl Agent {
                 let deep_options = ChatOptions {
                     temperature: None,
                     logprobs: false,
+                model: None,
                 };
                 match self
                     .run_model_loop(
@@ -1912,6 +1914,7 @@ mod tests {
                 content: Some(format!("Echo: {last_user}")),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }

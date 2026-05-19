@@ -237,6 +237,7 @@ mod tests {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -260,6 +261,7 @@ mod tests {
                     arguments: json!({"query": "rust programming"}),
                 }],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -310,6 +312,7 @@ mod tests {
                 content: Some("captured".into()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }

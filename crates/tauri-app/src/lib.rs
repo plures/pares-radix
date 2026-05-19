@@ -234,6 +234,7 @@ impl ModelClient for AppModelClient {
             content: choice.message.content.clone(),
             tool_calls,
             logprobs,
+            model: Some(response.model),
         })
     }
 }

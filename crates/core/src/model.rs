@@ -98,6 +98,8 @@ pub struct ModelCompletion {
     pub tool_calls: Vec<ToolCall>,
     /// Log probabilities for each generated token (when supported).
     pub logprobs: Option<Vec<f64>>,
+    /// Model identifier returned by the provider (e.g. "gpt-4o", "claude-sonnet-4-20250514").
+    pub model: Option<String>,
 }
 
 /// Optional settings for a chat completion.
@@ -107,6 +109,8 @@ pub struct ChatOptions {
     pub temperature: Option<f64>,
     /// Request token logprobs when supported by the provider.
     pub logprobs: bool,
+    /// Model override for this specific request. `None` uses the client's default.
+    pub model: Option<String>,
 }
 
 // ── Traits ───────────────────────────────────────────────────────────────────

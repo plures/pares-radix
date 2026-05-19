@@ -274,6 +274,7 @@ mod tests {
                 content: Some(format!("echo:{last_user}")),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -333,6 +334,7 @@ mod tests {
                         arguments: serde_json::json!({"path": "foo.txt"}),
                     }],
                     logprobs: None,
+                model: None,
                 })
             } else {
                 // Second call — produce the final answer
@@ -341,6 +343,7 @@ mod tests {
                     content: Some("final answer after tool".into()),
                     tool_calls: vec![],
                     logprobs: None,
+                model: None,
                 })
             }
         }
@@ -501,6 +504,7 @@ mod tests {
                     content: Some(system_content),
                     tool_calls: vec![],
                     logprobs: None,
+                model: None,
                 })
             }
         }

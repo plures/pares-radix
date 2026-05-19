@@ -29,6 +29,7 @@ impl ModelClient for MockModel {
             content: Some(format!("Echo: {last_user}")),
             tool_calls: vec![],
             logprobs: None,
+                model: None,
         })
     }
 }

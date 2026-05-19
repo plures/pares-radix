@@ -375,6 +375,7 @@ mod tests {
                 content: Some(format!("echo:{last_user}")),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -402,6 +403,7 @@ mod tests {
                 content: Some(format!("slow:{last_user}")),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }

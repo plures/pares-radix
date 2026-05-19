@@ -712,6 +712,7 @@ impl ModelClient for RouterModelClient {
             content: choice.message.content.clone(),
             tool_calls,
             logprobs,
+            model: Some(response.model),
         })
     }
 }
@@ -728,6 +729,124 @@ impl ModelClient for ToggleableModelClient {
             return Err("deep model escalation is disabled".to_string());
         }
         self.inner.complete(messages, tools, options).await
+    }
+}
+
+/// Minimal tool dispatcher for spine mode.
+/// Provides basic tool definitions without the full ProcedureRegistry infrastructure.
+struct SpineToolDispatcher;
+
+#[async_trait]
+impl ToolDispatcher for SpineToolDispatcher {
+    async fn available_tools(&self) -> Vec<ToolDefinition> {
+        // Spine mode provides a minimal tool set for now.
+        // TODO: Wire up full ProcedureRegistry when spine mode matures.
+        vec![
+            ToolDefinition {
+                name: "read_file".into(),
+                description: "Read a UTF-8 text file from disk".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to the file to read"}
+                    },
+                    "required": ["path"]
+                }),
+            },
+            ToolDefinition {
+                name: "write_file".into(),
+                description: "Write content to a file, creating it if it doesn't exist".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string", "description": "Path to write"},
+                        "content": {"type": "string", "description": "Content to write"}
+                    },
+                    "required": ["path", "content"]
+                }),
+            },
+            ToolDefinition {
+                name: "exec".into(),
+                description: "Execute a shell command and return its output".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "Shell command to execute"}
+                    },
+                    "required": ["command"]
+                }),
+            },
+            ToolDefinition {
+                name: "web_search".into(),
+                description: "Search the web for information".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Search query"}
+                    },
+                    "required": ["query"]
+                }),
+            },
+        ]
+    }
+
+    async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> String {
+        match name {
+            "read_file" => {
+                let path = arguments["path"].as_str().unwrap_or("");
+                match std::fs::read_to_string(path) {
+                    Ok(content) => {
+                        if content.len() > 50_000 {
+                            format!("{}\n\n[truncated at 50KB]", &content[..50_000])
+                        } else {
+                            content
+                        }
+                    }
+                    Err(e) => format!("Error reading file: {e}"),
+                }
+            }
+            "write_file" => {
+                let path = arguments["path"].as_str().unwrap_or("");
+                let content = arguments["content"].as_str().unwrap_or("");
+                if let Some(parent) = std::path::Path::new(path).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                match std::fs::write(path, content) {
+                    Ok(_) => format!("Successfully wrote {} bytes to {path}", content.len()),
+                    Err(e) => format!("Error writing file: {e}"),
+                }
+            }
+            "exec" => {
+                let command = arguments["command"].as_str().unwrap_or("");
+                match std::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(command)
+                    .output()
+                {
+                    Ok(output) => {
+                        let stdout = String::from_utf8_lossy(&output.stdout);
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        let mut result = String::new();
+                        if !stdout.is_empty() {
+                            result.push_str(&stdout);
+                        }
+                        if !stderr.is_empty() {
+                            if !result.is_empty() {
+                                result.push_str("\n--- stderr ---\n");
+                            }
+                            result.push_str(&stderr);
+                        }
+                        if result.is_empty() {
+                            format!("Command completed with exit code: {}", output.status.code().unwrap_or(-1))
+                        } else {
+                            result
+                        }
+                    }
+                    Err(e) => format!("Error executing command: {e}"),
+                }
+            }
+            _ => format!("Unknown tool: {name}"),
+        }
     }
 }
 
@@ -3374,37 +3493,116 @@ async fn main() {
         #[cfg(feature = "spine")]
         Commands::ServeSpine {
             telegram_token,
-            model_url: _model_url,
-            model: _model,
-            use_copilot: _use_copilot,
+            model_url,
+            model,
+            use_copilot,
         } => {
             use pares_agens_core::spine::pipeline::Pipeline;
             use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
-            #[allow(unused_imports)]
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
+            use pares_agens_core::spine::procedures::tool_executor::ToolExecutor;
             use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
-            #[allow(unused_imports)]
             use pares_agens_core::spine::channel::SpineChannel;
 
             info!("Starting pares-radix in spine-driven mode (ADR-0001)");
 
-            // 1. Create the pipeline
+            // 1. Set up model client
+            let model_client: Arc<dyn ModelClient> = if use_copilot {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let auth_path = PathBuf::from(&home).join(".pares-radix/copilot-auth.json");
+                let cached = std::fs::read_to_string(&auth_path)
+                    .ok()
+                    .and_then(|raw| serde_json::from_str::<CopilotAuthCache>(&raw).ok());
+
+                let oauth_token = if let Some(cache) = cached {
+                    cache.oauth_token
+                } else {
+                    let (device_code, user_code, verification_uri) =
+                        match CopilotAuth::device_flow_start().await {
+                            Ok(response) => response,
+                            Err(e) => {
+                                error!("Copilot device flow failed: {e}");
+                                std::process::exit(1);
+                            }
+                        };
+                    println!(
+                        "Authorize Copilot: visit {verification_uri} and enter code {user_code}"
+                    );
+                    let token = match CopilotAuth::device_flow_poll(&device_code).await {
+                        Ok(token) => token,
+                        Err(e) => {
+                            error!("Copilot device flow polling failed: {e}");
+                            std::process::exit(1);
+                        }
+                    };
+                    if let Some(parent) = auth_path.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Ok(serialized) = serde_json::to_string_pretty(&CopilotAuthCache {
+                        oauth_token: token.clone(),
+                        cached_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                    }) {
+                        let _ = std::fs::write(&auth_path, serialized);
+                    }
+                    token
+                };
+
+                let auth = CopilotAuth::new(oauth_token);
+                let model_name_arc = Arc::new(RwLock::new(model.clone()));
+                Arc::new(
+                    CopilotModelClient::new_with_model_handle(auth, model_name_arc)
+                        .with_fallbacks(vec![
+                            "claude-sonnet-4.5".to_string(),
+                            "gpt-4o".to_string(),
+                        ]),
+                )
+            } else {
+                let provider_config = ProviderConfig::new(&model_url, None);
+                let router_config = RouterConfig::single("spine", provider_config);
+                let model_router = Arc::new(ModelRouter::new(router_config));
+                let model_name_arc = Arc::new(RwLock::new(model.clone()));
+                Arc::new(RouterModelClient {
+                    router: Arc::new(RwLock::new(model_router)),
+                    model: model_name_arc,
+                    endpoint: Arc::new(RwLock::new(model_url.clone())),
+                    api_key: None,
+                })
+            };
+            info!(model = %model, copilot = use_copilot, "Model client initialized for spine mode");
+
+            // 2. Set up tool dispatcher (minimal spine-mode tools)
+            let spine_tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(SpineToolDispatcher);
+
+            // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
 
-            // 2. Register procedures
+            // 4. Register procedures (full pipeline: inbound → model → tools → response)
             pipeline.register(Arc::new(InboundRouter)).await;
+            pipeline
+                .register(Arc::new(ModelInvoker::with_system_prompt(
+                    Arc::clone(&model_client),
+                    Arc::clone(&spine_tool_dispatcher),
+                    "You are a helpful assistant. Be concise and direct.",
+                )))
+                .await;
+            pipeline
+                .register(Arc::new(ToolExecutor::new(spine_tool_dispatcher)))
+                .await;
             pipeline.register(Arc::new(ResponseRouter)).await;
-            info!("Pipeline procedures registered: inbound_router, response_router");
+            info!("Pipeline procedures registered: inbound_router, model_invoker, tool_executor, response_router");
 
-            // 3. Start the pipeline event loop
+            // 5. Start the pipeline event loop
             let pipeline_for_loop = Arc::clone(&pipeline);
             tokio::spawn(async move {
                 pipeline_for_loop.run(rx).await;
             });
             info!("Pipeline event loop started");
 
-            // 4. Start Telegram channel (delivery loop)
+            // 6. Start Telegram channel (delivery loop)
             let delivery_rx = pipeline.subscribe_deliveries();
             let tg_channel = TelegramSpineChannel::new(TelegramSpineConfig {
                 token: telegram_token.clone(),
@@ -3414,7 +3612,7 @@ async fn main() {
             });
             info!("Telegram delivery loop started");
 
-            // 5. Start receiving (blocks)
+            // 7. Start receiving (blocks)
             let emitter = pipeline.emitter();
             let receiver_channel = TelegramSpineChannel::new(TelegramSpineConfig {
                 token: telegram_token,
@@ -5160,6 +5358,7 @@ mod tests {
                 content: Some("ok".to_string()),
                 tool_calls: Vec::<ToolCall>::new(),
                 logprobs: None,
+                model: None,
             })
         }
     }

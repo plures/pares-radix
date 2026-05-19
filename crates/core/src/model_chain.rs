@@ -146,6 +146,7 @@ mod tests {
                 content: Some(self.0.to_string()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }

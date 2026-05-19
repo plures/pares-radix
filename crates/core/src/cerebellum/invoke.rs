@@ -312,6 +312,7 @@ mod tests {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -334,6 +335,7 @@ mod tests {
                 content: Some("late response".into()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -369,6 +371,7 @@ mod tests {
                 content: None,
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -641,6 +644,7 @@ mod tests {
                 content: Some(user_msg),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }
@@ -664,6 +668,7 @@ mod tests {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
                 logprobs: None,
+                model: None,
             })
         }
     }

@@ -603,6 +603,7 @@ impl ModelClient for CopilotModelClient {
             content,
             tool_calls,
             logprobs,
+            model: None,
         })
     }
 }
