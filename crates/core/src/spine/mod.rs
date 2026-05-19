@@ -15,6 +15,7 @@
 //! ```
 
 pub mod channel;
+pub mod dispatcher;
 pub mod event;
 pub mod pipeline;
 pub mod procedures;
