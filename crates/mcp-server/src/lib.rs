@@ -36,4 +36,4 @@ pub mod server;
 
 pub use handler::ToolHandler;
 pub use radix_handler::{RadixToolHandler, SharedProcedures};
-pub use server::McpServer;
+pub use server::{McpServer, McpServerError, ServerNotification, spawn_completion_forwarder};
