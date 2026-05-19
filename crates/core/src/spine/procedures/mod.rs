@@ -3,3 +3,4 @@
 pub mod inbound_router;
 pub mod model_invoker;
 pub mod response_router;
+pub mod tool_executor;

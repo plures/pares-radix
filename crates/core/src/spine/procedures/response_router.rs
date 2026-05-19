@@ -26,11 +26,18 @@ impl SpineProcedure for ResponseRouter {
             id,
             chat_id,
             content,
+            tool_calls,
             ..
         } = event
         else {
             return;
         };
+
+        // If the model made tool calls, don't deliver — the ToolExecutor handles it.
+        if !tool_calls.is_empty() {
+            debug!(event_id = %id, tool_count = tool_calls.len(), "response_router: skipping (has tool calls)");
+            return;
+        }
 
         debug!(event_id = %id, "response_router: routing response to delivery");
 
@@ -64,6 +71,7 @@ mod tests {
             chat_id: "456".into(),
             content: "Hello back!".into(),
             model: "gpt-4".into(),
+            tool_calls: vec![],
             metadata: serde_json::json!({}),
         };
 

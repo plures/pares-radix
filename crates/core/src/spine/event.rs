@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::model::ToolCall;
+
 /// A spine event — the unit of communication between pipeline procedures.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SpineEvent {
@@ -31,8 +33,33 @@ pub enum SpineEvent {
     ModelResponse {
         id: String,
         chat_id: String,
+        /// Text content (may be empty if model only made tool calls).
         content: String,
         model: String,
+        /// Tool calls requested by the model (empty if direct text response).
+        tool_calls: Vec<ToolCall>,
+        metadata: serde_json::Value,
+    },
+
+    /// A request to execute a tool (emitted by tool executor when processing tool calls).
+    ToolRequest {
+        id: String,
+        chat_id: String,
+        /// The tool call to execute.
+        tool_call: ToolCall,
+        metadata: serde_json::Value,
+    },
+
+    /// Result of a tool execution.
+    ToolResult {
+        id: String,
+        chat_id: String,
+        /// The tool_call.id this result correlates to.
+        tool_call_id: String,
+        /// The tool name that was called.
+        tool_name: String,
+        /// The result content.
+        content: String,
         metadata: serde_json::Value,
     },
 
@@ -76,7 +103,9 @@ impl SpineEvent {
             | Self::ModelResponse { id, .. }
             | Self::DeliveryRequest { id, .. }
             | Self::DeliverySuccess { id, .. }
-            | Self::DeliveryFailure { id, .. } => id,
+            | Self::DeliveryFailure { id, .. }
+            | Self::ToolRequest { id, .. }
+            | Self::ToolResult { id, .. } => id,
         }
     }
 
@@ -89,6 +118,8 @@ impl SpineEvent {
             Self::DeliveryRequest { .. } => "delivery_request",
             Self::DeliverySuccess { .. } => "delivery_success",
             Self::DeliveryFailure { .. } => "delivery_failure",
+            Self::ToolRequest { .. } => "tool_request",
+            Self::ToolResult { .. } => "tool_result",
         }
     }
 }

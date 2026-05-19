@@ -42,6 +42,7 @@ impl SpineProcedure for ModelInvoker {
                 chat_id: chat_id.clone(),
                 content: format!("[model placeholder] {}", content),
                 model: "placeholder".into(),
+                tool_calls: vec![],
                 metadata: serde_json::json!({}),
             })
             .await;
