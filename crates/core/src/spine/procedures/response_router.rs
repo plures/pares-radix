@@ -8,7 +8,7 @@ use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
 /// Routes model responses to channel delivery.
 ///
 /// Listens for `ModelResponse` events and emits `DeliveryRequest` events
-/// targeting the appropriate channel for the chat.
+/// targeting the channel that originated the conversation.
 pub struct ResponseRouter;
 
 #[async_trait::async_trait]
@@ -24,6 +24,7 @@ impl SpineProcedure for ResponseRouter {
     async fn handle(&self, event: &SpineEvent, emitter: &PipelineEmitter) {
         let SpineEvent::ModelResponse {
             id,
+            source,
             chat_id,
             content,
             tool_calls,
@@ -39,14 +40,12 @@ impl SpineProcedure for ResponseRouter {
             return;
         }
 
-        debug!(event_id = %id, "response_router: routing response to delivery");
+        debug!(event_id = %id, channel = %source, "response_router: routing response to delivery");
 
-        // TODO: Look up which channel the chat_id belongs to.
-        // For now, assume Telegram.
         emitter
             .emit(SpineEvent::DeliveryRequest {
                 id: SpineEvent::new_id(),
-                channel: "telegram".into(),
+                channel: source.clone(),
                 chat_id: chat_id.clone(),
                 content: content.clone(),
                 metadata: serde_json::json!({}),
@@ -68,6 +67,7 @@ mod tests {
         let router = ResponseRouter;
         let event = SpineEvent::ModelResponse {
             id: "resp-1".into(),
+            source: "discord".into(),
             chat_id: "456".into(),
             content: "Hello back!".into(),
             model: "gpt-4".into(),
@@ -86,9 +86,35 @@ mod tests {
             ..
         } = emitted
         {
-            assert_eq!(channel, "telegram");
+            assert_eq!(channel, "discord");
             assert_eq!(chat_id, "456");
             assert_eq!(content, "Hello back!");
         }
+    }
+
+    #[tokio::test]
+    async fn skips_responses_with_tool_calls() {
+        let (tx, mut rx) = mpsc::channel(16);
+        let emitter = PipelineEmitter { tx };
+
+        let router = ResponseRouter;
+        let event = SpineEvent::ModelResponse {
+            id: "resp-2".into(),
+            source: "telegram".into(),
+            chat_id: "789".into(),
+            content: String::new(),
+            model: "gpt-4".into(),
+            tool_calls: vec![crate::model::ToolCall {
+                id: "call-1".into(),
+                name: "search".into(),
+                arguments: serde_json::json!({"q": "test"}),
+            }],
+            metadata: serde_json::json!({}),
+        };
+
+        router.handle(&event, &emitter).await;
+
+        // Nothing should be emitted
+        assert!(rx.try_recv().is_err());
     }
 }

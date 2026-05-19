@@ -20,10 +20,6 @@ vault = ["dep:vault-core"]
 ## Requires the `embeddings` feature on the `pluresdb` dependency.
 embeddings = []
 
-## Enable the spine-driven pipeline (ADR-0001).
-## Requires spine modules to be implemented.
-spine = []
-
 [dependencies]
 tokio.workspace = true
 serde.workspace = true

@@ -2955,7 +2955,6 @@ enum Commands {
     /// Run the agent using the spine-driven pipeline (ADR-0001).
     ///
     /// Channels are thin I/O — all logic flows through the EventSpine.
-    #[cfg(feature = "spine")]
     ServeSpine {
         /// Telegram bot token.
         #[arg(long, env = "PARES_TELEGRAM_TOKEN")]
@@ -3373,9 +3372,6 @@ async fn main() {
             }
         }
 
-        // NOTE: ServeSpine is gated behind cfg(feature = "spine") — spine modules
-        // not yet implemented in pares-agens-core/channels.
-        #[cfg(feature = "spine")]
         Commands::ServeSpine {
             telegram_token,
             model_url,

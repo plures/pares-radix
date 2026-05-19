@@ -59,7 +59,7 @@ impl SpineProcedure for StatefulModelInvoker {
 
     async fn handle(&self, event: &SpineEvent, emitter: &PipelineEmitter) {
         let SpineEvent::ModelRequest {
-            chat_id, content, ..
+            chat_id, source, content, ..
         } = event
         else {
             return;
@@ -72,6 +72,7 @@ impl SpineProcedure for StatefulModelInvoker {
             emitter
                 .emit(SpineEvent::ModelResponse {
                     id: SpineEvent::new_id(),
+                    source: source.clone(),
                     chat_id: chat_id.clone(),
                     content: String::new(),
                     model: "test-model".into(),
@@ -88,6 +89,7 @@ impl SpineProcedure for StatefulModelInvoker {
             emitter
                 .emit(SpineEvent::ModelResponse {
                     id: SpineEvent::new_id(),
+                    source: source.clone(),
                     chat_id: chat_id.clone(),
                     content: format!("Based on tool results: {}", content),
                     model: "test-model".into(),
@@ -227,6 +229,7 @@ async fn pipeline_direct_response_skips_tool_executor() {
             emitter
                 .emit(SpineEvent::ModelResponse {
                     id: SpineEvent::new_id(),
+                    source: "test".into(),
                     chat_id: chat_id.clone(),
                     content: "Direct answer, no tools needed.".into(),
                     model: "test".into(),

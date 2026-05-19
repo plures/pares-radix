@@ -46,6 +46,7 @@ impl SpineProcedure for InboundRouter {
         emitter
             .emit(SpineEvent::ModelRequest {
                 id: SpineEvent::new_id(),
+                source: source.clone(),
                 chat_id: chat_id.clone(),
                 sender: sender.clone(),
                 content: content.clone(),

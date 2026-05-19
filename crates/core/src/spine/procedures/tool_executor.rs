@@ -89,6 +89,7 @@ impl SpineProcedure for ToolExecutor {
 
         let SpineEvent::ModelResponse {
             id,
+            source,
             chat_id,
             content,
             tool_calls,
@@ -220,6 +221,7 @@ impl SpineProcedure for ToolExecutor {
         emitter
             .emit(SpineEvent::ModelRequest {
                 id: SpineEvent::new_id(),
+                source: source.clone(),
                 chat_id: chat_id.clone(),
                 sender: "system".into(),
                 content: tool_results_content,
@@ -288,6 +290,7 @@ mod tests {
         let executor = ToolExecutor::new(Arc::new(MockDispatcher));
 
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-1".into(),
             chat_id: "chat-42".into(),
             content: String::new(),
@@ -351,6 +354,7 @@ mod tests {
         let executor = ToolExecutor::new(Arc::new(MockDispatcher));
 
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-2".into(),
             chat_id: "chat-42".into(),
             content: "Just a text response".into(),
@@ -373,6 +377,7 @@ mod tests {
         let executor = ToolExecutor::new(Arc::new(MockDispatcher));
 
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-3".into(),
             chat_id: "chat-99".into(),
             content: String::new(),
@@ -424,6 +429,7 @@ mod tests {
         // Simulate 3 iterations (all should succeed)
         for i in 1..=3 {
             let event = SpineEvent::ModelResponse {
+                source: "test".into(),
                 id: format!("resp-{}", i),
                 chat_id: chat_id.clone(),
                 content: String::new(),
@@ -445,6 +451,7 @@ mod tests {
 
         // 4th iteration should be blocked
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-4".into(),
             chat_id: chat_id.clone(),
             content: String::new(),
@@ -484,6 +491,7 @@ mod tests {
         // Use 2 iterations (the max)
         for i in 1..=2 {
             let event = SpineEvent::ModelResponse {
+                source: "test".into(),
                 id: format!("resp-{}", i),
                 chat_id: chat_id.clone(),
                 content: String::new(),
@@ -516,6 +524,7 @@ mod tests {
 
         // Now we should be able to do 2 more iterations without hitting the guard
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-after-reset".into(),
             chat_id: chat_id.clone(),
             content: String::new(),
@@ -544,6 +553,7 @@ mod tests {
 
         // First iteration
         let event1 = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-h1".into(),
             chat_id: chat_id.clone(),
             content: "Let me search for that".into(),
@@ -573,6 +583,7 @@ mod tests {
 
         // Second iteration
         let event2 = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-h2".into(),
             chat_id: chat_id.clone(),
             content: "Now let me read a file".into(),
@@ -613,6 +624,7 @@ mod tests {
         // Fill up chat-A to max
         for i in 1..=2 {
             let event = SpineEvent::ModelResponse {
+                source: "test".into(),
                 id: format!("a-{}", i),
                 chat_id: "chat-A".into(),
                 content: String::new(),
@@ -634,6 +646,7 @@ mod tests {
 
         // chat-B should still work fine (independent counter)
         let event_b = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "b-1".into(),
             chat_id: "chat-B".into(),
             content: String::new(),
@@ -658,6 +671,7 @@ mod tests {
         let chat_id = "chat-structured".to_string();
 
         let event = SpineEvent::ModelResponse {
+            source: "test".into(),
             id: "resp-s1".into(),
             chat_id: chat_id.clone(),
             content: "I'll search for that".into(),

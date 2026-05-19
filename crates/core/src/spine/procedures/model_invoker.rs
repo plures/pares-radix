@@ -137,6 +137,7 @@ impl SpineProcedure for ModelInvoker {
     async fn handle(&self, event: &SpineEvent, emitter: &PipelineEmitter) {
         let SpineEvent::ModelRequest {
             id,
+            source,
             chat_id,
             content,
             system_prompt,
@@ -181,6 +182,7 @@ impl SpineProcedure for ModelInvoker {
                 emitter
                     .emit(SpineEvent::ModelResponse {
                         id: SpineEvent::new_id(),
+                        source: source.clone(),
                         chat_id: chat_id.clone(),
                         content: response_content,
                         model: completion.model.unwrap_or_else(|| "unknown".into()),
@@ -201,7 +203,7 @@ impl SpineProcedure for ModelInvoker {
                 emitter
                     .emit(SpineEvent::DeliveryRequest {
                         id: SpineEvent::new_id(),
-                        channel: "system".into(),
+                        channel: source.clone(),
                         chat_id: chat_id.clone(),
                         content: format!("⚠️ Model error: {}", e),
                         metadata: serde_json::json!({
@@ -380,6 +382,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-1".into(),
             chat_id: "chat-1".into(),
             sender: "user".into(),
@@ -418,6 +421,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-2".into(),
             chat_id: "chat-2".into(),
             sender: "user".into(),
@@ -453,6 +457,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-3".into(),
             chat_id: "chat-3".into(),
             sender: "user".into(),
@@ -484,6 +489,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-4".into(),
             chat_id: "chat-4".into(),
             sender: "user".into(),
@@ -512,6 +518,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-5".into(),
             chat_id: "chat-5".into(),
             sender: "user".into(),
@@ -537,6 +544,7 @@ mod tests {
         );
 
         let event = SpineEvent::ModelRequest {
+            source: "test".into(),
             id: "req-6".into(),
             chat_id: "chat-6".into(),
             sender: "system".into(),

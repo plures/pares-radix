@@ -17,7 +17,6 @@ pub mod stdin;
 pub mod tauri_ipc;
 pub mod telegram;
 
-#[cfg(feature = "spine")]
 pub mod telegram_spine;
 
 /// Get the local hostname for cluster display.

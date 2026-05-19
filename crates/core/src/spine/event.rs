@@ -21,6 +21,8 @@ pub enum SpineEvent {
     /// A request to invoke the model (emitted by inbound router).
     ModelRequest {
         id: String,
+        /// The channel that originated this request (e.g. "telegram", "discord").
+        source: String,
         chat_id: String,
         sender: String,
         content: String,
@@ -32,6 +34,8 @@ pub enum SpineEvent {
     /// The model's response (emitted by model invoker).
     ModelResponse {
         id: String,
+        /// The originating channel (propagated from ModelRequest).
+        source: String,
         chat_id: String,
         /// Text content (may be empty if model only made tool calls).
         content: String,

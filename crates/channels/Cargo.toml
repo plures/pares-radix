@@ -23,7 +23,6 @@ pares-rector = { path = "../rector" }
 
 [features]
 default = []
-spine = ["pares-agens-core/spine"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
