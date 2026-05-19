@@ -5,6 +5,7 @@
 //! Entries are stored in PluresDB under the `chronos:` key prefix and linked
 //! into per-key causal chains via `parent_id`.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -16,6 +17,54 @@ use uuid::Uuid;
 /// The PluresDB actor used for Chronos writes.
 const CHRONOS_ACTOR: &str = "chronos";
 
+/// Recording severity level for Chronos events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChronosLevel {
+    Debug = 0,
+    Info = 1,
+    Warn = 2,
+    Error = 3,
+}
+
+impl ChronosLevel {
+    /// Parse from string (case-insensitive).
+    pub fn from_str_loose(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "debug" => Some(Self::Debug),
+            "info" => Some(Self::Info),
+            "warn" | "warning" => Some(Self::Warn),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+
+    fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Debug,
+            1 => Self::Info,
+            2 => Self::Warn,
+            3 => Self::Error,
+            _ => Self::Info,
+        }
+    }
+}
+
+impl std::fmt::Display for ChronosLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Debug => write!(f, "debug"),
+            Self::Info => write!(f, "info"),
+            Self::Warn => write!(f, "warn"),
+            Self::Error => write!(f, "error"),
+        }
+    }
+}
+
 /// A version timeline entry — records every data mutation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChronosEntry {
@@ -24,6 +73,7 @@ pub struct ChronosEntry {
     pub actor: String,
     pub key: String,
     pub action: ChronosAction,
+    pub level: ChronosLevel,
     pub data_hash: String,
     pub parent_id: Option<String>,
     pub rationale: Option<String>,
@@ -77,6 +127,8 @@ pub struct ChronosTimeline {
     /// Optional JSONL output directory. When set, every record() also
     /// appends the entry as one JSON line to `<dir>/YYYY-MM-DD.jsonl`.
     jsonl_dir: Option<std::path::PathBuf>,
+    /// Minimum recording level. Events below this level are silently dropped.
+    min_level: AtomicU8,
 }
 
 impl ChronosTimeline {
@@ -85,6 +137,7 @@ impl ChronosTimeline {
         Self {
             store,
             jsonl_dir: None,
+            min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
         }
     }
 
@@ -94,6 +147,7 @@ impl ChronosTimeline {
         Self {
             store,
             jsonl_dir: Some(dir),
+            min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
         }
     }
 
@@ -106,13 +160,25 @@ impl ChronosTimeline {
             Self {
                 store,
                 jsonl_dir: Some(path),
+                min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
             }
         } else {
             Self {
                 store,
                 jsonl_dir: None,
+                min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
             }
         }
+    }
+
+    /// Set the minimum recording level. Events below this are dropped.
+    pub fn set_level(&self, level: ChronosLevel) {
+        self.min_level.store(level.as_u8(), Ordering::Relaxed);
+    }
+
+    /// Get the current minimum recording level.
+    pub fn get_level(&self) -> ChronosLevel {
+        ChronosLevel::from_u8(self.min_level.load(Ordering::Relaxed))
     }
 
     /// Build a new [`ChronosEntry`] for a write, automatically resolving the
@@ -122,6 +188,21 @@ impl ChronosTimeline {
         key: &str,
         actor: &str,
         action: ChronosAction,
+        data: &Value,
+        constraint_results: Vec<String>,
+        rationale: Option<String>,
+    ) -> ChronosEntry {
+        self.build_entry_with_level(key, actor, action, ChronosLevel::Info, data, constraint_results, rationale)
+    }
+
+    /// Build an entry with an explicit severity level.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_entry_with_level(
+        &self,
+        key: &str,
+        actor: &str,
+        action: ChronosAction,
+        level: ChronosLevel,
         data: &Value,
         constraint_results: Vec<String>,
         rationale: Option<String>,
@@ -139,6 +220,7 @@ impl ChronosTimeline {
             actor: actor.to_string(),
             key: key.to_string(),
             action,
+            level,
             data_hash,
             parent_id,
             rationale,
@@ -146,8 +228,12 @@ impl ChronosTimeline {
         }
     }
 
-    /// Record a mutation in the timeline.
-    pub fn record(&self, entry: &ChronosEntry) {
+    /// Record a mutation in the timeline. Returns false if filtered by level.
+    pub fn record(&self, entry: &ChronosEntry) -> bool {
+        let min = ChronosLevel::from_u8(self.min_level.load(Ordering::Relaxed));
+        if entry.level < min {
+            return false;
+        }
         let entry_key = format!("chronos:entry:{}", entry.id);
         self.store.put(
             entry_key,
@@ -178,6 +264,7 @@ impl ChronosTimeline {
                 }
             }
         }
+        true
     }
 
     /// Get the version history for a key (newest first), up to `limit`.
@@ -366,5 +453,89 @@ mod tests {
 
         assert_eq!(timeline.recent(3).len(), 3);
         assert_eq!(timeline.recent(10).len(), 5);
+    }
+
+    #[test]
+    fn level_filtering() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        // Default level is Info — debug entries should be dropped.
+        let debug_entry = timeline.build_entry_with_level(
+            "k",
+            "a",
+            ChronosAction::Create,
+            ChronosLevel::Debug,
+            &json!("debug-data"),
+            vec![],
+            None,
+        );
+        assert!(!timeline.record(&debug_entry));
+        assert_eq!(timeline.recent(10).len(), 0);
+
+        // Info entry should be recorded.
+        let info_entry = timeline.build_entry(
+            "k",
+            "a",
+            ChronosAction::Create,
+            &json!("info-data"),
+            vec![],
+            None,
+        );
+        assert!(timeline.record(&info_entry));
+        assert_eq!(timeline.recent(10).len(), 1);
+
+        // Lower level to debug — now debug entries should be recorded.
+        timeline.set_level(ChronosLevel::Debug);
+        let debug_entry2 = timeline.build_entry_with_level(
+            "k2",
+            "a",
+            ChronosAction::Create,
+            ChronosLevel::Debug,
+            &json!("debug2"),
+            vec![],
+            None,
+        );
+        assert!(timeline.record(&debug_entry2));
+        assert_eq!(timeline.recent(10).len(), 2);
+
+        // Raise level to error — info entries should be dropped.
+        timeline.set_level(ChronosLevel::Error);
+        let info_entry2 = timeline.build_entry(
+            "k3",
+            "a",
+            ChronosAction::Create,
+            &json!("info2"),
+            vec![],
+            None,
+        );
+        assert!(!timeline.record(&info_entry2));
+        assert_eq!(timeline.recent(10).len(), 2);
+
+        // Error entry should still be recorded.
+        let err_entry = timeline.build_entry_with_level(
+            "k4",
+            "a",
+            ChronosAction::Create,
+            ChronosLevel::Error,
+            &json!("error"),
+            vec![],
+            None,
+        );
+        assert!(timeline.record(&err_entry));
+        assert_eq!(timeline.recent(10).len(), 3);
+    }
+
+    #[test]
+    fn get_set_level() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        assert_eq!(timeline.get_level(), ChronosLevel::Info);
+
+        timeline.set_level(ChronosLevel::Warn);
+        assert_eq!(timeline.get_level(), ChronosLevel::Warn);
+
+        timeline.set_level(ChronosLevel::Debug);
+        assert_eq!(timeline.get_level(), ChronosLevel::Debug);
     }
 }

@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use pares_agens_core::chronos::{ChronosAction, ChronosTimeline};
+use pares_agens_core::chronos::{ChronosAction, ChronosLevel, ChronosTimeline};
 use pares_agens_core::delegation::{SpawnOptions, SubAgentManager};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::shell_executor::ShellExecutor;
@@ -2624,17 +2624,50 @@ impl RadixToolHandler {
             })
             .unwrap_or_default();
 
-        let entry = chronos.build_entry(key, actor, action, &data, constraints, rationale);
-        chronos.record(&entry);
+        let level_str = args.get("level").and_then(|v| v.as_str()).unwrap_or("info");
+        let level = ChronosLevel::from_str_loose(level_str).unwrap_or(ChronosLevel::Info);
+
+        let entry = chronos.build_entry_with_level(key, actor, action, level, &data, constraints, rationale);
+        let recorded = chronos.record(&entry);
 
         ToolResult::ok(
             json!({
                 "id": entry.id,
                 "key": entry.key,
-                "timestamp": entry.timestamp
+                "timestamp": entry.timestamp,
+                "recorded": recorded,
+                "level": level_str
             })
             .to_string(),
         )
+    }
+
+    // ── Chronos level tools ───────────────────────────────────────────────────────
+
+    async fn chronos_set_level(&self, args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let level_str = match args.get("level").and_then(|v| v.as_str()) {
+            Some(l) => l,
+            None => return ToolResult::error("missing required parameter: level (debug|info|warn|error)"),
+        };
+        let level = match ChronosLevel::from_str_loose(level_str) {
+            Some(l) => l,
+            None => return ToolResult::error(format!("invalid level: {level_str}. Valid: debug, info, warn, error")),
+        };
+        chronos.set_level(level);
+        ToolResult::ok(json!({ "level": level.to_string() }).to_string())
+    }
+
+    async fn chronos_get_level(&self, _args: &Value) -> ToolResult {
+        let chronos = match &self.chronos {
+            Some(c) => c,
+            None => return ToolResult::error("Chronos timeline not configured"),
+        };
+        let level = chronos.get_level();
+        ToolResult::ok(json!({ "level": level.to_string() }).to_string())
     }
 
     // ── Sub-agent tools ──────────────────────────────────────────────────────────
@@ -3508,11 +3541,36 @@ impl ToolHandler for RadixToolHandler {
                     "key": {"type": "string", "description": "Data key this event relates to"},
                     "actor": {"type": "string", "description": "Who/what performed this action (default: agent)"},
                     "action": {"type": "string", "description": "Action type: create, update, delete, move, tool_invoked, message_received, response_generated, context_managed, model_called, outcome_recorded"},
+                    "level": {"type": "string", "description": "Severity level: debug, info, warn, error (default: info). Events below the minimum recording level are dropped."},
                     "data": {"type": "object", "description": "Arbitrary data payload for this event"},
                     "rationale": {"type": "string", "description": "Human-readable reason for this mutation"},
                     "constraints": {"type": "array", "items": {"type": "string"}, "description": "Constraint results that apply to this event"}
                 })),
                 required: Some(vec!["key".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "chronos_set_level".into(),
+            description: Some(
+                "Set the minimum recording level for Chronos. Events below this level are silently dropped.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Minimum recording level"}
+                })),
+                required: Some(vec!["level".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "chronos_get_level".into(),
+            description: Some(
+                "Get the current minimum recording level for Chronos.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
             },
         });
 
@@ -3628,6 +3686,8 @@ impl ToolHandler for RadixToolHandler {
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
             "chronos_record" => self.chronos_record(&arguments).await,
+            "chronos_set_level" => self.chronos_set_level(&arguments).await,
+            "chronos_get_level" => self.chronos_get_level(&arguments).await,
             "subagent_spawn" => self.subagent_spawn(&arguments).await,
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
@@ -5180,6 +5240,9 @@ mod tests {
         assert!(names.contains(&"chronos_history"));
         assert!(names.contains(&"chronos_recent"));
         assert!(names.contains(&"chronos_by_actor"));
+        assert!(names.contains(&"chronos_record"));
+        assert!(names.contains(&"chronos_set_level"));
+        assert!(names.contains(&"chronos_get_level"));
     }
 
     #[tokio::test]
@@ -5326,6 +5389,78 @@ mod tests {
 
         let result = handler
             .call_tool("chronos_record", json!({"key": "x"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn chronos_set_level_and_get_level() {
+        let store = Arc::new(pluresdb::CrdtStore::default());
+        let chronos = Arc::new(pares_agens_core::chronos::ChronosTimeline::new(store));
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(chronos);
+
+        // Default level is info
+        let result = handler.call_tool("chronos_get_level", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("info"));
+
+        // Set to warn
+        let result = handler
+            .call_tool("chronos_set_level", json!({"level": "warn"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("warn"));
+
+        // Verify it changed
+        let result = handler.call_tool("chronos_get_level", json!({})).await;
+        assert!(result.content.contains("warn"));
+
+        // Record at info level should be filtered
+        let result = handler
+            .call_tool(
+                "chronos_record",
+                json!({"key": "test:filtered", "level": "info"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["recorded"], false);
+
+        // Record at error level should succeed
+        let result = handler
+            .call_tool(
+                "chronos_record",
+                json!({"key": "test:kept", "level": "error"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        let parsed: serde_json::Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(parsed["recorded"], true);
+    }
+
+    #[tokio::test]
+    async fn chronos_set_level_invalid() {
+        let store = Arc::new(pluresdb::CrdtStore::default());
+        let chronos = Arc::new(pares_agens_core::chronos::ChronosTimeline::new(store));
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(chronos);
+
+        let result = handler
+            .call_tool("chronos_set_level", json!({"level": "banana"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("invalid level"));
+    }
+
+    #[tokio::test]
+    async fn chronos_set_level_without_timeline() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+
+        let result = handler
+            .call_tool("chronos_set_level", json!({"level": "debug"}))
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
