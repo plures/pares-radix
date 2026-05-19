@@ -48,7 +48,7 @@ default = []
 # submodule and CMake ≥ 3.21 in the build environment.
 bitnet-native = ["pares-agens-bitnet/inference"]
 # Enable the spine-driven pipeline (ADR-0001).
-spine = ["pares-agens-core/spine"]
+spine = ["pares-agens-core/spine", "pares-agens-channels/spine"]
 
 [dev-dependencies]
 tempfile = "3"

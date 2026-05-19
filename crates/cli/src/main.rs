@@ -3374,15 +3374,17 @@ async fn main() {
         #[cfg(feature = "spine")]
         Commands::ServeSpine {
             telegram_token,
-            model_url,
-            model,
-            use_copilot,
+            model_url: _model_url,
+            model: _model,
+            use_copilot: _use_copilot,
         } => {
             use pares_agens_core::spine::pipeline::Pipeline;
             use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
+            #[allow(unused_imports)]
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
             use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
+            #[allow(unused_imports)]
             use pares_agens_core::spine::channel::SpineChannel;
 
             info!("Starting pares-radix in spine-driven mode (ADR-0001)");

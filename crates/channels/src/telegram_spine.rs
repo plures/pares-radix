@@ -7,8 +7,6 @@
 //! All logic (model calls, slash commands, cerebellum, history, tools)
 //! lives in spine procedures. This adapter is interchangeable.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
 use teloxide::prelude::*;
 use teloxide::types::ChatId;
