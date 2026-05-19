@@ -16,23 +16,12 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
-use crate::model::ToolDispatcher;
+use crate::model::{ChatMessage, ToolDispatcher};
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
 
 /// Default maximum tool-loop iterations per chat before aborting.
 const DEFAULT_MAX_ITERATIONS: usize = 25;
-
-/// A single message in conversation history.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct HistoryMessage {
-    pub role: String,
-    pub content: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
-}
 
 /// Per-chat state tracking for tool loop safety and context accumulation.
 #[derive(Debug, Clone, Default)]
@@ -40,7 +29,7 @@ struct ChatLoopState {
     /// How many tool-loop iterations have occurred in the current turn.
     iterations: usize,
     /// Accumulated conversation messages for this turn.
-    history: Vec<HistoryMessage>,
+    history: Vec<ChatMessage>,
 }
 
 /// Executes tool calls from model responses and feeds results back
@@ -154,14 +143,13 @@ impl SpineProcedure for ToolExecutor {
             return;
         }
 
-        // Record the assistant's response (with tool calls) in history
-        if !content.is_empty() {
-            state.history.push(HistoryMessage {
-                role: "assistant".into(),
-                content: content.clone(),
-                tool_call_id: None,
-                tool_name: None,
-            });
+        // Record the assistant's response (with tool calls) in history.
+        // Always record the assistant message when tool_calls are present,
+        // even if content is empty — the model needs to see which calls it made.
+        {
+            let mut msg = ChatMessage::assistant(content.clone());
+            msg.tool_calls = Some(tool_calls.clone());
+            state.history.push(msg);
         }
 
         // Drop the lock before doing async tool calls
@@ -178,7 +166,7 @@ impl SpineProcedure for ToolExecutor {
         );
 
         // Execute each tool call and collect results
-        let mut tool_results: Vec<HistoryMessage> = Vec::with_capacity(tool_calls.len());
+        let mut tool_results: Vec<ChatMessage> = Vec::with_capacity(tool_calls.len());
 
         for tc in tool_calls {
             debug!(
@@ -201,12 +189,7 @@ impl SpineProcedure for ToolExecutor {
                 })
                 .await;
 
-            tool_results.push(HistoryMessage {
-                role: "tool".into(),
-                content: result,
-                tool_call_id: Some(tc.id.clone()),
-                tool_name: Some(tc.name.clone()),
-            });
+            tool_results.push(ChatMessage::tool_result(tc.id.clone(), result));
         }
 
         // Append tool results to history
@@ -220,15 +203,15 @@ impl SpineProcedure for ToolExecutor {
             }
         }
 
-        // Build content for the model request (flattened tool results)
+        // Build content for the model request (flattened tool results for legacy consumers)
         let tool_results_content = tool_results
             .iter()
-            .map(|r| {
-                format!(
-                    "[tool:{}] {}",
-                    r.tool_name.as_deref().unwrap_or("unknown"),
-                    r.content
-                )
+            .enumerate()
+            .map(|(i, r)| {
+                let tool_name = tool_calls.get(i)
+                    .map(|tc| tc.name.as_str())
+                    .unwrap_or("unknown");
+                format!("[tool:{}] {}", tool_name, r.content)
             })
             .collect::<Vec<_>>()
             .join("\n\n");
@@ -615,7 +598,7 @@ mod tests {
             assert_eq!(history[1]["role"], "tool");
             assert_eq!(history[2]["role"], "assistant");
             assert_eq!(history[3]["role"], "tool");
-            assert_eq!(history[3]["tool_name"], "read");
+            assert_eq!(history[3]["tool_call_id"], "tc-h2");
         } else {
             panic!("expected ModelRequest");
         }
@@ -666,5 +649,62 @@ mod tests {
 
         let ev = rx.recv().await.unwrap();
         assert_eq!(ev.event_type(), "tool_result"); // Not an abort
+    }
+
+    #[tokio::test]
+    async fn history_includes_structured_tool_calls_on_assistant_messages() {
+        let (emitter, mut rx) = make_emitter();
+        let executor = ToolExecutor::new(Arc::new(MockDispatcher));
+        let chat_id = "chat-structured".to_string();
+
+        let event = SpineEvent::ModelResponse {
+            id: "resp-s1".into(),
+            chat_id: chat_id.clone(),
+            content: "I'll search for that".into(),
+            model: "gpt-4".into(),
+            tool_calls: vec![
+                ToolCall {
+                    id: "tc-s1".into(),
+                    name: "web_search".into(),
+                    arguments: serde_json::json!({"query": "structured test"}),
+                },
+                ToolCall {
+                    id: "tc-s2".into(),
+                    name: "read".into(),
+                    arguments: serde_json::json!({"path": "/tmp/f.md"}),
+                },
+            ],
+            metadata: serde_json::json!({}),
+        };
+        executor.handle(&event, &emitter).await;
+
+        // Drain ToolResult events
+        rx.recv().await.unwrap();
+        rx.recv().await.unwrap();
+
+        // Get the ModelRequest
+        let req = rx.recv().await.unwrap();
+        if let SpineEvent::ModelRequest { metadata, .. } = &req {
+            let history = metadata["conversation_history"].as_array().unwrap();
+
+            // First message: assistant with tool_calls array
+            let assistant_msg = &history[0];
+            assert_eq!(assistant_msg["role"], "assistant");
+            assert_eq!(assistant_msg["content"], "I'll search for that");
+            let tool_calls = assistant_msg["tool_calls"].as_array().unwrap();
+            assert_eq!(tool_calls.len(), 2);
+            assert_eq!(tool_calls[0]["id"], "tc-s1");
+            assert_eq!(tool_calls[0]["name"], "web_search");
+            assert_eq!(tool_calls[1]["id"], "tc-s2");
+            assert_eq!(tool_calls[1]["name"], "read");
+
+            // Tool results follow with proper tool_call_id
+            assert_eq!(history[1]["role"], "tool");
+            assert_eq!(history[1]["tool_call_id"], "tc-s1");
+            assert_eq!(history[2]["role"], "tool");
+            assert_eq!(history[2]["tool_call_id"], "tc-s2");
+        } else {
+            panic!("expected ModelRequest");
+        }
     }
 }

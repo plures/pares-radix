@@ -74,7 +74,20 @@ impl ModelInvoker {
                 let tool_call_id = entry["tool_call_id"].as_str();
 
                 match role {
-                    "assistant" => messages.push(ChatMessage::assistant(msg_content)),
+                    "assistant" => {
+                        let mut msg = ChatMessage::assistant(msg_content);
+                        // Restore structured tool_calls if present
+                        if let Some(tcs) = entry.get("tool_calls").and_then(|v| v.as_array()) {
+                            let tool_calls: Vec<crate::model::ToolCall> = tcs
+                                .iter()
+                                .filter_map(|tc| serde_json::from_value(tc.clone()).ok())
+                                .collect();
+                            if !tool_calls.is_empty() {
+                                msg.tool_calls = Some(tool_calls);
+                            }
+                        }
+                        messages.push(msg);
+                    }
                     "tool" => {
                         if let Some(tc_id) = tool_call_id {
                             messages.push(ChatMessage::tool_result(tc_id, msg_content));
