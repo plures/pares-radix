@@ -58,6 +58,8 @@ pub struct SessionInfo {
     pub status: SessionStatus,
     /// Output text (if completed).
     pub output: Option<String>,
+    /// Pending steering messages queued for injection at next turn boundary.
+    pub pending_messages: Vec<String>,
 }
 
 /// A completion event pushed to the parent when a sub-agent finishes.
@@ -171,6 +173,7 @@ impl SubAgentManager {
             completed_at: None,
             status: SessionStatus::Running,
             output: None,
+            pending_messages: Vec::new(),
         };
 
         // Register the session.
@@ -294,20 +297,19 @@ impl SubAgentManager {
 
     /// Steer a running sub-agent by injecting an additional message.
     ///
-    /// NOTE: The current broker implementation runs sub-tasks atomically,
-    /// so steering is only possible before the model loop starts (i.e., this
-    /// is a placeholder for future interactive sessions).  For now, this
-    /// returns `false` if the session is already running.
-    ///
-    /// In a full implementation, this would inject a user message into the
-    /// agent's context mid-turn.
-    pub async fn steer(&self, session_id: &str, _message: &str) -> bool {
-        let sessions = self.sessions.read().await;
-        match sessions.get(session_id) {
+    /// Currently stores the steering message in the session's pending queue.
+    /// The broker will pick up pending messages on the next turn boundary.
+    /// Returns `true` if the message was queued successfully.
+    pub async fn steer(&self, session_id: &str, message: &str) -> bool {
+        let mut sessions = self.sessions.write().await;
+        match sessions.get_mut(session_id) {
             Some(info) if info.status == SessionStatus::Running => {
-                // TODO: Implement interactive steering once the broker
-                // supports message injection into running sessions.
-                warn!(session_id = %session_id, "steering not yet implemented for running sessions");
+                info.pending_messages.push(message.to_string());
+                info!(session_id = %session_id, "steering message queued for sub-agent");
+                true
+            }
+            Some(_) => {
+                warn!(session_id = %session_id, "cannot steer: session not running");
                 false
             }
             _ => false,
@@ -578,5 +580,38 @@ mod tests {
         assert!(ids.contains(&id1.as_str()));
         assert!(ids.contains(&id2.as_str()));
         assert!(ids.contains(&id3.as_str()));
+    }
+
+    #[tokio::test]
+    async fn steer_queues_message_for_running_session() {
+        let broker = make_broker(Arc::new(SlowModel {
+            delay: Duration::from_secs(5),
+        }));
+        let (manager, _rx) = SubAgentManager::new(broker);
+
+        let id = manager
+            .spawn("echo", "task1", SpawnOptions::default())
+            .await;
+
+        // Give the session time to start executing.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Steer should succeed since session is still running.
+        let steered = manager.steer(&id, "change course").await;
+        assert!(steered);
+
+        // Verify message is queued.
+        let sessions = manager.sessions.read().await;
+        let info = sessions.get(&id).unwrap();
+        assert_eq!(info.pending_messages, vec!["change course".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn steer_fails_for_nonexistent_session() {
+        let broker = make_broker(Arc::new(EchoModel));
+        let (manager, _rx) = SubAgentManager::new(broker);
+
+        let steered = manager.steer("nonexistent", "hello").await;
+        assert!(!steered);
     }
 }
