@@ -183,7 +183,7 @@ impl SpineProcedure for ModelInvoker {
                         id: SpineEvent::new_id(),
                         chat_id: chat_id.clone(),
                         content: response_content,
-                        model: "model".into(), // Could be extracted from completion metadata
+                        model: completion.model.unwrap_or_else(|| "unknown".into()),
                         tool_calls,
                         metadata: serde_json::json!({}),
                     })
@@ -250,7 +250,7 @@ mod tests {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
                 logprobs: None,
-                model: None,
+                model: Some("gpt-4o-test".into()),
             })
         }
     }
@@ -274,7 +274,7 @@ mod tests {
                     arguments: json!({"query": "rust programming"}),
                 }],
                 logprobs: None,
-                model: None,
+                model: Some("claude-sonnet-4-20250514".into()),
             })
         }
     }
@@ -396,12 +396,14 @@ mod tests {
             content,
             tool_calls,
             chat_id,
+            model,
             ..
         } = response
         {
             assert_eq!(content, "Hello, world!");
             assert!(tool_calls.is_empty());
             assert_eq!(chat_id, "chat-1");
+            assert_eq!(model, "gpt-4o-test");
         } else {
             panic!("expected ModelResponse");
         }

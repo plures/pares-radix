@@ -50,6 +50,26 @@ impl ChatMessage {
         }
     }
 
+    /// Create an assistant message with tool calls (role `"assistant"`).
+    ///
+    /// Use this when the model responded with both content and tool call
+    /// requests, or with tool calls only (pass an empty string for content).
+    pub fn assistant_with_tool_calls(
+        content: impl Into<String>,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
+        Self {
+            role: "assistant".into(),
+            content: content.into(),
+            tool_call_id: None,
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
+        }
+    }
+
     /// Create a tool-result message (role `"tool"`) correlating with
     /// `tool_call_id`.
     pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {

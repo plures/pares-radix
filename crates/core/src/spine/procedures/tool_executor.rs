@@ -147,9 +147,9 @@ impl SpineProcedure for ToolExecutor {
         // Always record the assistant message when tool_calls are present,
         // even if content is empty — the model needs to see which calls it made.
         {
-            let mut msg = ChatMessage::assistant(content.clone());
-            msg.tool_calls = Some(tool_calls.clone());
-            state.history.push(msg);
+            state
+                .history
+                .push(ChatMessage::assistant_with_tool_calls(content.clone(), tool_calls.clone()));
         }
 
         // Drop the lock before doing async tool calls
