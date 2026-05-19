@@ -22,6 +22,7 @@ use tracing::{debug, info, warn};
 use pares_agens_core::chronos::{ChronosAction, ChronosLevel, ChronosTimeline};
 use pares_agens_core::delegation::{SpawnOptions, SubAgentManager};
 use pares_agens_core::memory::PluresLm;
+use pares_agens_core::plugins::PluginRuntime;
 use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
 use pares_radix_mcp_client::protocol::{Tool, ToolInputSchema};
@@ -84,6 +85,8 @@ pub struct RadixToolHandler {
     subagent_manager: Option<Arc<SubAgentManager>>,
     /// Agent instance for agent_ask tool — full agent loop via any channel.
     agent: Option<Arc<pares_agens_core::Agent>>,
+    /// Plugin runtime for plugin management tools.
+    plugin_runtime: Option<Arc<PluginRuntime>>,
 }
 
 impl RadixToolHandler {
@@ -105,6 +108,7 @@ impl RadixToolHandler {
             chronos: None,
             subagent_manager: None,
             agent: None,
+            plugin_runtime: None,
         }
     }
 
@@ -163,6 +167,12 @@ impl RadixToolHandler {
     /// Enables channel-agnostic agent invocation through MCP.
     pub fn with_agent(mut self, agent: Arc<pares_agens_core::Agent>) -> Self {
         self.agent = Some(agent);
+        self
+    }
+
+    /// Attach a plugin runtime for plugin management tools.
+    pub fn with_plugin_runtime(mut self, runtime: Arc<PluginRuntime>) -> Self {
+        self.plugin_runtime = Some(runtime);
         self
     }
 
@@ -2778,6 +2788,139 @@ impl RadixToolHandler {
         ToolResult::ok(serde_json::to_string_pretty(&entries).unwrap_or_default())
     }
 
+    // ── Plugin management tools ──────────────────────────────────────────────────────
+
+    async fn plugin_list(&self) -> ToolResult {
+        let runtime = match &self.plugin_runtime {
+            Some(r) => r,
+            None => return ToolResult::error("Plugin runtime not configured"),
+        };
+        let plugins = runtime.list().await;
+        let list: Vec<Value> = plugins
+            .iter()
+            .map(|m| {
+                json!({
+                    "name": m.name,
+                    "version": m.version,
+                    "description": m.description,
+                    "status": "active"
+                })
+            })
+            .collect();
+        ToolResult::ok(serde_json::to_string_pretty(&list).unwrap_or_default())
+    }
+
+    async fn plugin_info(&self, args: &Value) -> ToolResult {
+        let runtime = match &self.plugin_runtime {
+            Some(r) => r,
+            None => return ToolResult::error("Plugin runtime not configured"),
+        };
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: name"),
+        };
+        match runtime.get(name).await {
+            Some(manifest) => ToolResult::ok(
+                serde_json::to_string_pretty(&json!({
+                    "name": manifest.name,
+                    "version": manifest.version,
+                    "description": manifest.description,
+                    "author": manifest.author,
+                    "tools": manifest.tools.len(),
+                    "hooks": manifest.hooks.len(),
+                    "dependencies": manifest.dependencies,
+                    "status": "active"
+                }))
+                .unwrap_or_default(),
+            ),
+            None => ToolResult::error(format!("Plugin '{}' not found", name)),
+        }
+    }
+
+    async fn plugin_register(&self, args: &Value) -> ToolResult {
+        use pares_agens_core::plugins::PluginManifest;
+        let runtime = match &self.plugin_runtime {
+            Some(r) => r,
+            None => return ToolResult::error("Plugin runtime not configured"),
+        };
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n.to_string(),
+            None => return ToolResult::error("missing required parameter: name"),
+        };
+        let version = match args.get("version").and_then(|v| v.as_str()) {
+            Some(v) => v.to_string(),
+            None => return ToolResult::error("missing required parameter: version"),
+        };
+        let description = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let capabilities: Vec<String> = args
+            .get("capabilities")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let manifest = PluginManifest {
+            name: name.clone(),
+            version,
+            description,
+            author: None,
+            schema: Default::default(),
+            logic: Default::default(),
+            tools: Vec::new(),
+            ui: None,
+            permissions: Default::default(),
+            hooks: Vec::new(),
+            dependencies: capabilities,
+        };
+        match runtime.install(manifest).await {
+            Ok(()) => ToolResult::ok(json!({"registered": name, "status": "active"}).to_string()),
+            Err(e) => ToolResult::error(format!("Failed to register plugin: {}", e)),
+        }
+    }
+
+    async fn plugin_activate(&self, args: &Value) -> ToolResult {
+        // In pares-radix, all installed plugins are active.
+        // This tool is provided for API compatibility with OpenClaw.
+        let runtime = match &self.plugin_runtime {
+            Some(r) => r,
+            None => return ToolResult::error("Plugin runtime not configured"),
+        };
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: name"),
+        };
+        match runtime.get(name).await {
+            Some(_) => ToolResult::ok(
+                json!({"name": name, "status": "active", "message": "Plugin is already active"}).to_string(),
+            ),
+            None => ToolResult::error(format!("Plugin '{}' not found", name)),
+        }
+    }
+
+    async fn plugin_deactivate(&self, args: &Value) -> ToolResult {
+        let runtime = match &self.plugin_runtime {
+            Some(r) => r,
+            None => return ToolResult::error("Plugin runtime not configured"),
+        };
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return ToolResult::error("missing required parameter: name"),
+        };
+        match runtime.uninstall(name, false).await {
+            Ok(()) => ToolResult::ok(
+                json!({"name": name, "status": "deactivated"}).to_string(),
+            ),
+            Err(e) => ToolResult::error(format!("Failed to deactivate plugin: {}", e)),
+        }
+    }
+
     // ── Sub-agent tools ──────────────────────────────────────────────────────────
 
     async fn subagent_spawn(&self, args: &Value) -> ToolResult {
@@ -3713,6 +3856,74 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Plugin management tools ────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "plugin_list".into(),
+            description: Some(
+                "List all registered plugins and their status.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "plugin_info".into(),
+            description: Some(
+                "Get detailed info about a specific plugin.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Plugin name to inspect"}
+                })),
+                required: Some(vec!["name".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "plugin_register".into(),
+            description: Some(
+                "Register a plugin manifest. Installs and activates the plugin.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Unique plugin name (kebab-case)"},
+                    "version": {"type": "string", "description": "Semver version string"},
+                    "description": {"type": "string", "description": "Plugin description"},
+                    "capabilities": {"type": "array", "items": {"type": "string"}, "description": "Capabilities/dependencies"}
+                })),
+                required: Some(vec!["name".into(), "version".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "plugin_activate".into(),
+            description: Some(
+                "Activate a registered plugin.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Plugin name to activate"}
+                })),
+                required: Some(vec!["name".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "plugin_deactivate".into(),
+            description: Some(
+                "Deactivate a plugin (uninstalls it).".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "name": {"type": "string", "description": "Plugin name to deactivate"}
+                })),
+                required: Some(vec!["name".into()]),
+            },
+        });
+
         // ── Sub-agent tools ─────────────────────────────────────────────────────────────
         tools.push(Tool {
             name: "subagent_spawn".into(),
@@ -3829,6 +4040,11 @@ impl ToolHandler for RadixToolHandler {
             "chronos_get_level" => self.chronos_get_level(&arguments).await,
             "chronos_replay" => self.chronos_replay(&arguments).await,
             "chronos_timeline" => self.chronos_timeline(&arguments).await,
+            "plugin_list" => self.plugin_list().await,
+            "plugin_info" => self.plugin_info(&arguments).await,
+            "plugin_register" => self.plugin_register(&arguments).await,
+            "plugin_activate" => self.plugin_activate(&arguments).await,
+            "plugin_deactivate" => self.plugin_deactivate(&arguments).await,
             "subagent_spawn" => self.subagent_spawn(&arguments).await,
             "subagent_list" => self.subagent_list(&arguments).await,
             "subagent_kill" => self.subagent_kill(&arguments).await,
@@ -6425,5 +6641,107 @@ mod tests {
         let _ = h.call("stop_process", &json!({"pid": pid})).await;
         let resp = result.unwrap();
         assert_eq!(resp["status"], 200);
+    }
+
+    // ── Plugin management tests ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn plugin_list_without_runtime() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+        let result = handler.call_tool("plugin_list", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not configured"));
+    }
+
+    #[tokio::test]
+    async fn plugin_list_with_runtime() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime);
+        let result = handler.call_tool("plugin_list", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("[]"));
+    }
+
+    #[tokio::test]
+    async fn plugin_register_and_info() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime);
+
+        // Register
+        let result = handler
+            .call_tool(
+                "plugin_register",
+                json!({"name": "test-plugin", "version": "1.0.0", "description": "A test plugin"}),
+            )
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("test-plugin"));
+
+        // Info
+        let result = handler
+            .call_tool("plugin_info", json!({"name": "test-plugin"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("test-plugin"));
+        assert!(result.content.contains("1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn plugin_activate_not_found() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime);
+        let result = handler
+            .call_tool("plugin_activate", json!({"name": "nonexistent"}))
+            .await;
+        assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn plugin_deactivate_removes_plugin() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime);
+
+        // Register first
+        handler
+            .call_tool(
+                "plugin_register",
+                json!({"name": "ephemeral", "version": "0.1.0"}),
+            )
+            .await;
+
+        // Deactivate
+        let result = handler
+            .call_tool("plugin_deactivate", json!({"name": "ephemeral"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("deactivated"));
+
+        // Verify gone
+        let result = handler
+            .call_tool("plugin_info", json!({"name": "ephemeral"}))
+            .await;
+        assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn plugin_tools_in_tool_list() {
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"plugin_list"));
+        assert!(names.contains(&"plugin_info"));
+        assert!(names.contains(&"plugin_register"));
+        assert!(names.contains(&"plugin_activate"));
+        assert!(names.contains(&"plugin_deactivate"));
     }
 }

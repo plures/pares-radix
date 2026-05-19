@@ -1,3 +1,4 @@
+#![cfg(feature = "spine")]
 //! Spine pipeline integration test — full Inbound → Model → ToolExec → Delivery flow.
 //!
 //! Tests the complete agentic loop:

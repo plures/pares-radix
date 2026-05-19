@@ -193,7 +193,7 @@ mod tests {
         };
         logger.log(r1);
 
-        let mut r2 = TelemetryRecord {
+        let r2 = TelemetryRecord {
             timestamp: Utc::now().to_rfc3339(),
             node: "test".into(),
             interaction_id: "chain-002".into(),
