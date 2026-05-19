@@ -1,0 +1,23 @@
+# pipeline_composed.px — A pipeline that imports and composes other procedures
+#
+# Tests resolver (import resolution) + compose (procedure-to-procedure calls)
+
+import validation_utils
+import math_utils
+
+fact config:
+  max_retries: int
+  timeout_ms: int
+
+constraint timeout_sane:
+  require: config.timeout_ms > 0
+  severity: error
+  message: "Timeout must be positive"
+
+procedure process_request:
+  trigger: manual
+  validate_input {data: "$request"} -> $validation
+  when validation.valid == true:
+    sanitize {input: "$request.body"} -> $clean
+    double {input: "$clean"} -> $result
+  end

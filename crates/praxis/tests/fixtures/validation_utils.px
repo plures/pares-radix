@@ -1,0 +1,12 @@
+# validation_utils.px — Validation procedures for compose/resolver integration tests
+
+procedure validate_input:
+  trigger: manual
+  check_not_empty {value: "$data"} -> $valid
+  when valid == false:
+    emit {event: "validation_failed", reason: "empty_input"}
+  end
+
+procedure sanitize:
+  trigger: manual
+  strip_html {text: "$input"} -> $output

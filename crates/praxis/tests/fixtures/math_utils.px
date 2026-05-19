@@ -1,0 +1,5 @@
+# math_utils.px — Importable utility procedures for testing resolver + compose
+
+procedure double:
+  trigger: manual
+  multiply {value: "$input", factor: 2} -> $output
