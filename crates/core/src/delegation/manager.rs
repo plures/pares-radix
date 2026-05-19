@@ -74,6 +74,9 @@ pub struct CompletionEvent {
     pub result: Result<String, String>,
     /// Duration the task ran.
     pub duration: Duration,
+    /// Steering messages that were queued but never consumed by the sub-agent.
+    /// Non-empty means the parent sent directions that arrived too late.
+    pub undelivered_steerings: Vec<String>,
 }
 
 /// Options for spawning a sub-agent session.
@@ -186,6 +189,9 @@ impl SubAgentManager {
         let (steering_tx, steering_rx) = steering::channel();
         self.steering_txs.write().await.insert(id.clone(), steering_tx);
 
+        // Keep a clone of the rx so we can drain undelivered messages post-completion.
+        let post_completion_rx = steering_rx.clone();
+
         // Build the sub-task with steering channel attached.
         let mut task = SubTask::new(agent_name.clone(), input);
         task = task.with_steering(steering_rx);
@@ -196,6 +202,7 @@ impl SubAgentManager {
         // Spawn the background task.
         let broker = Arc::clone(&self.broker);
         let sessions = Arc::clone(&self.sessions);
+        let steering_txs = Arc::clone(&self.steering_txs);
         let tx = self.completion_tx.clone();
         let session_id = id.clone();
         let timeout = options.timeout;
@@ -240,12 +247,26 @@ impl SubAgentManager {
                 }
             }
 
+            // Clean up steering channel now that the session is done.
+            steering_txs.write().await.remove(&session_id);
+
+            // Drain any steering messages that were never consumed by the broker.
+            let undelivered = post_completion_rx.drain().await;
+            if !undelivered.is_empty() {
+                debug!(
+                    session_id = %session_id,
+                    count = undelivered.len(),
+                    "undelivered steering messages at completion"
+                );
+            }
+
             // Push completion event.
             let event = CompletionEvent {
                 session_id: session_id.clone(),
                 agent_name,
                 result,
                 duration,
+                undelivered_steerings: undelivered,
             };
 
             if let Err(e) = tx.send(event) {
@@ -646,5 +667,52 @@ mod tests {
 
         let steered = manager.steer("nonexistent", "hello").await;
         assert!(!steered);
+    }
+
+    #[tokio::test]
+    async fn completion_event_reports_undelivered_steerings() {
+        // Use SlowModel so there's a window to inject a steering message
+        // that won't be consumed (model returns text on first turn, no loop iteration).
+        let broker = make_broker(Arc::new(SlowModel {
+            delay: Duration::from_millis(200),
+        }));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let id = manager
+            .spawn("echo", "task", SpawnOptions::default())
+            .await;
+
+        // Wait for the model to start executing, then steer.
+        // The steering message arrives mid-model-call, so it won't be drained
+        // by the broker (drain only happens at the top of each loop iteration).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let steered = manager.steer(&id, "too late").await;
+        assert!(steered);
+
+        // Wait for completion.
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("channel closed");
+
+        assert_eq!(event.session_id, id);
+        assert_eq!(event.undelivered_steerings, vec!["too late".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn completion_event_empty_undelivered_when_no_steering() {
+        let broker = make_broker(Arc::new(EchoModel));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let _id = manager
+            .spawn("echo", "hello", SpawnOptions::default())
+            .await;
+
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("channel closed");
+
+        assert!(event.undelivered_steerings.is_empty());
     }
 }
