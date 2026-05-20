@@ -3563,9 +3563,19 @@ async fn main() {
             // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
 
-            // 3.5. Create PluresDB-backed conversation store
-            let conversation_store: Arc<dyn ConversationStore> = Arc::new(PluresConversationStore::in_memory());
-            info!("Conversation store initialized (PluresDB CrdtStore)");
+            // 3.5. Create PluresDB-backed conversation store (persistent)
+            let conversation_state_dir = PathBuf::from(&home).join(".pares-radix/conversation-state");
+            std::fs::create_dir_all(&conversation_state_dir).ok();
+            let conversation_store: Arc<dyn ConversationStore> = match PluresConversationStore::persistent(&conversation_state_dir) {
+                Ok(store) => {
+                    info!(path = %conversation_state_dir.display(), "Conversation store opened (persistent PluresDB)");
+                    Arc::new(store)
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to open persistent conversation store, using in-memory");
+                    Arc::new(PluresConversationStore::in_memory())
+                }
+            };
 
             // 3.6. Load system prompt from file or use default
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
@@ -3613,6 +3623,25 @@ async fn main() {
                 tg_channel.run_delivery_loop(delivery_rx).await;
             });
             info!("Telegram delivery loop started");
+
+            // 6.5. Start heartbeat runner (proactive behavior)
+            let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
+            {
+                let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
+                    Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+                let mut heartbeat =
+                    pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                heartbeat.load_config().await;
+                if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
+                    let mut cfg = heartbeat.config().clone();
+                    cfg.quiet_hours_enabled = false;
+                    heartbeat.set_config(cfg).await;
+                }
+                tokio::spawn(async move {
+                    heartbeat.run(heartbeat_shutdown_rx).await;
+                });
+                info!("Heartbeat runner started (proactive behavior)");
+            }
 
             // 7. Start receiving (blocks)
             let emitter = pipeline.emitter();

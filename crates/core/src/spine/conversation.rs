@@ -49,6 +49,19 @@ impl PluresConversationStore {
         }
     }
 
+    /// Create a store with persistent disk-backed storage.
+    ///
+    /// Uses SledStorage for durable on-disk persistence. Falls back to
+    /// in-memory if the path cannot be opened.
+    pub fn persistent(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
+        use pluresdb::{SledStorage, StorageEngine};
+        let storage: Arc<dyn StorageEngine> = Arc::new(
+            SledStorage::open(path).map_err(|e| format!("open conversation store: {e}"))?
+        );
+        let store = Arc::new(CrdtStore::default().with_persistence(storage));
+        Ok(Self { store })
+    }
+
     fn key_for(chat_id: &str) -> String {
         format!("chat:{}:history", chat_id)
     }
