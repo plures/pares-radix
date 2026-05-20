@@ -4169,6 +4169,85 @@ impl RadixToolHandler {
         ToolResult::ok("rule added")
     }
 
+    /// Push A2UI JSONL rendering instructions to the active canvas.
+    ///
+    /// A2UI (Agent-to-UI) is the protocol for pushing live UI updates from the
+    /// agent loop to connected canvas renderers (Tauri, web, node). Each JSONL
+    /// line is a rendering instruction (set, append, clear, animate, etc.).
+    async fn canvas_a2ui_push(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        // Accept either `jsonl` (string of newline-delimited JSON) or `instructions` (array)
+        let instructions: Vec<Value> = if let Some(jsonl_str) = args.get("jsonl").and_then(|v| v.as_str()) {
+            jsonl_str
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        } else if let Some(arr) = args.get("instructions").and_then(|v| v.as_array()) {
+            arr.clone()
+        } else {
+            return ToolResult::error("missing required parameter: jsonl (string) or instructions (array)");
+        };
+
+        if instructions.is_empty() {
+            return ToolResult::error("no valid instructions provided");
+        }
+
+        // Append to the A2UI queue in state store
+        let queue_key = "canvas:a2ui:queue";
+        let mut queue = match store.get(queue_key).await {
+            Some(Value::Array(arr)) => arr,
+            _ => Vec::new(),
+        };
+
+        let count = instructions.len();
+        for instr in instructions {
+            queue.push(instr);
+        }
+
+        store.set(queue_key, Value::Array(queue)).await;
+
+        // Also update the canvas's a2ui timestamp
+        if let Some(mut canvas) = store.get("canvas:active").await {
+            canvas["a2uiLastPush"] = json!(chrono::Utc::now().to_rfc3339());
+            store.set("canvas:active", canvas).await;
+        }
+
+        ToolResult::ok(format!("{count} instruction(s) pushed to A2UI queue"))
+    }
+
+    /// Reset the A2UI rendering queue, clearing all pending instructions.
+    ///
+    /// Optionally targets a specific node canvas; if no target is specified,
+    /// resets the global A2UI queue.
+    async fn canvas_a2ui_reset(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("global");
+        let queue_key = if target == "global" {
+            "canvas:a2ui:queue".to_string()
+        } else {
+            format!("canvas:a2ui:queue:{target}")
+        };
+
+        store.set(&queue_key, json!([])).await;
+
+        // Update canvas timestamp
+        if let Some(mut canvas) = store.get("canvas:active").await {
+            canvas["a2uiLastReset"] = json!(chrono::Utc::now().to_rfc3339());
+            store.set("canvas:active", canvas).await;
+        }
+
+        ToolResult::ok(format!("A2UI queue reset (target: {target})"))
+    }
+
     async fn canvas_catalog(&self) -> ToolResult {
         let catalog = json!({
             "components": [
@@ -5681,6 +5760,33 @@ impl ToolHandler for RadixToolHandler {
             },
         });
         tools.push(Tool {
+            name: "canvas_a2ui_push".into(),
+            description: Some(
+                "Push A2UI (Agent-to-UI) rendering instructions to the active canvas. Accepts JSONL string or instructions array.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "jsonl": {"type": "string", "description": "Newline-delimited JSON rendering instructions"},
+                    "instructions": {"type": "array", "items": {"type": "object"}, "description": "Array of rendering instruction objects"}
+                })),
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_a2ui_reset".into(),
+            description: Some(
+                "Reset the A2UI rendering queue, clearing all pending instructions.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "target": {"type": "string", "description": "Target node canvas to reset (default: global)"}
+                })),
+                required: None,
+            },
+        });
+        tools.push(Tool {
             name: "canvas_catalog".into(),
             description: Some(
                 "Get the full component catalog — lists all available component types, their props, events, and whether they accept children.".into(),
@@ -5811,6 +5917,8 @@ impl RadixToolHandler {
             "canvas_set_data" => self.canvas_set_data(&arguments).await,
             "canvas_add_procedure" => self.canvas_add_procedure(&arguments).await,
             "canvas_add_rule" => self.canvas_add_rule(&arguments).await,
+            "canvas_a2ui_push" => self.canvas_a2ui_push(&arguments).await,
+            "canvas_a2ui_reset" => self.canvas_a2ui_reset(&arguments).await,
             "canvas_catalog" => self.canvas_catalog().await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
@@ -9312,6 +9420,8 @@ mod tests {
         assert!(names.contains(&"canvas_set_data"));
         assert!(names.contains(&"canvas_add_procedure"));
         assert!(names.contains(&"canvas_add_rule"));
+        assert!(names.contains(&"canvas_a2ui_push"));
+        assert!(names.contains(&"canvas_a2ui_reset"));
         assert!(names.contains(&"canvas_catalog"));
     }
 
@@ -9349,5 +9459,83 @@ mod tests {
         assert_eq!(btn["children"], json!(false));
         let events = btn["events"].as_array().unwrap();
         assert!(events.contains(&json!("onClick")));
+    }
+
+    #[tokio::test]
+    async fn canvas_a2ui_push_with_jsonl() {
+        let handler = make_handler_with_state();
+        // Create a canvas first
+        handler.call_tool("canvas_create", json!({"title": "A2UI Test"})).await;
+
+        let jsonl = r#"{"op":"set","path":"/title","value":"Hello"}
+{"op":"append","path":"/items","value":{"text":"Item 1"}}"#;
+
+        let result = handler.call_tool("canvas_a2ui_push", json!({"jsonl": jsonl})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("2 instruction(s) pushed"));
+
+        // Verify canvas has a2uiLastPush timestamp
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert!(doc["a2uiLastPush"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn canvas_a2ui_push_with_instructions_array() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "A2UI Array Test"})).await;
+
+        let instructions = json!([
+            {"op": "set", "path": "/header", "value": "Dashboard"},
+            {"op": "clear", "path": "/notifications"}
+        ]);
+
+        let result = handler.call_tool("canvas_a2ui_push", json!({"instructions": instructions})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("2 instruction(s) pushed"));
+    }
+
+    #[tokio::test]
+    async fn canvas_a2ui_push_rejects_empty() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Empty Test"})).await;
+
+        // Empty JSONL
+        let result = handler.call_tool("canvas_a2ui_push", json!({"jsonl": ""})).await;
+        assert!(result.is_error);
+
+        // No params
+        let result = handler.call_tool("canvas_a2ui_push", json!({})).await;
+        assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn canvas_a2ui_reset_clears_queue() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Reset Test"})).await;
+
+        // Push some instructions
+        let jsonl = r#"{"op":"set","path":"/x","value":1}"#;
+        handler.call_tool("canvas_a2ui_push", json!({"jsonl": jsonl})).await;
+
+        // Reset
+        let result = handler.call_tool("canvas_a2ui_reset", json!({})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("reset"));
+
+        // Verify canvas has a2uiLastReset timestamp
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert!(doc["a2uiLastReset"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn canvas_a2ui_reset_with_target() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Target Reset"})).await;
+
+        let result = handler.call_tool("canvas_a2ui_reset", json!({"target": "node-1"})).await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("node-1"));
     }
 }
