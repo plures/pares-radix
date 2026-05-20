@@ -72,3 +72,8 @@ tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio", "testing"] }
+opentelemetry = { version = "0.28" }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-opentelemetry = "0.29"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
