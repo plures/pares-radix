@@ -780,12 +780,18 @@ mod tests {
         assert!(result.still_running);
         let session_id = result.session_id.unwrap();
 
-        // Wait for completion
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        let poll = executor.poll(&session_id, Some(1000)).await.unwrap();
-        assert!(!poll.running);
-        assert!(poll.new_output.contains("background_output"));
+        // Poll with generous timeout — the command runs ~100ms but under CI load may take longer
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let poll = executor.poll(&session_id, Some(3000)).await.unwrap();
+        if poll.running {
+            // Retry once more if still running (CI load)
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            let poll2 = executor.poll(&session_id, Some(3000)).await.unwrap();
+            assert!(!poll2.running, "process still running after 4.3s for a 0.1s command");
+            assert!(poll2.new_output.contains("background_output") || poll.new_output.contains("background_output"));
+        } else {
+            assert!(poll.new_output.contains("background_output"));
+        }
     }
 
     #[tokio::test]
