@@ -148,10 +148,26 @@ async fn sampling_ratio_zero_suppresses_spans() {
 #[cfg(feature = "otel")]
 #[tokio::test]
 async fn otel_config_defaults_are_valid() {
-    use pares_agens_core::otel::OtelConfig;
+    use pares_agens_core::otel::{OtelConfig, OtelProtocol};
 
     let config = OtelConfig::default();
     assert_eq!(config.endpoint, "http://localhost:4317");
     assert_eq!(config.service_name, "pares-radix");
     assert!((config.sample_ratio - 1.0).abs() < f64::EPSILON);
+    assert_eq!(config.protocol, OtelProtocol::Grpc);
+}
+
+/// Verify HTTP/protobuf config can be constructed.
+#[cfg(feature = "otel")]
+#[tokio::test]
+async fn otel_http_proto_config_is_valid() {
+    use pares_agens_core::otel::{OtelConfig, OtelProtocol};
+
+    let config = OtelConfig {
+        endpoint: "http://localhost:4318".into(),
+        protocol: OtelProtocol::HttpProto,
+        ..Default::default()
+    };
+    assert_eq!(config.endpoint, "http://localhost:4318");
+    assert_eq!(config.protocol, OtelProtocol::HttpProto);
 }

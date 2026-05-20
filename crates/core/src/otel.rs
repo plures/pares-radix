@@ -38,10 +38,22 @@ use opentelemetry_sdk::trace::{RandomIdGenerator, Sampler, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use tracing_opentelemetry::OpenTelemetryLayer;
 
+/// OTLP transport protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OtelProtocol {
+    /// gRPC via tonic (default, port 4317).
+    #[default]
+    Grpc,
+    /// HTTP/protobuf (port 4318, path `/v1/traces`).
+    HttpProto,
+}
+
 /// Configuration for the OTLP exporter.
 #[derive(Debug, Clone)]
 pub struct OtelConfig {
-    /// gRPC endpoint for the OTLP collector.
+    /// Endpoint for the OTLP collector.
+    /// For gRPC: `http://localhost:4317`
+    /// For HTTP/proto: `http://localhost:4318`
     pub endpoint: String,
     /// Service name reported in traces.
     pub service_name: String,
@@ -49,14 +61,30 @@ pub struct OtelConfig {
     pub service_version: String,
     /// Sampling ratio (0.0 to 1.0). 1.0 = sample everything.
     pub sample_ratio: f64,
+    /// Transport protocol (gRPC or HTTP/protobuf).
+    pub protocol: OtelProtocol,
 }
 
 impl OtelConfig {
     /// Load configuration from environment variables with sensible defaults.
+    ///
+    /// Reads `OTEL_EXPORTER_OTLP_PROTOCOL` to choose transport:
+    /// - `http/protobuf` → HTTP/protobuf (default endpoint `http://localhost:4318`)
+    /// - `grpc` or unset → gRPC/tonic (default endpoint `http://localhost:4317`)
     pub fn from_env() -> Self {
+        let protocol = match std::env::var("OTEL_EXPORTER_OTLP_PROTOCOL").as_deref() {
+            Ok("http/protobuf") => OtelProtocol::HttpProto,
+            _ => OtelProtocol::Grpc,
+        };
+
+        let default_endpoint = match protocol {
+            OtelProtocol::Grpc => "http://localhost:4317",
+            OtelProtocol::HttpProto => "http://localhost:4318",
+        };
+
         Self {
             endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-                .unwrap_or_else(|_| "http://localhost:4317".into()),
+                .unwrap_or_else(|_| default_endpoint.into()),
             service_name: std::env::var("OTEL_SERVICE_NAME")
                 .unwrap_or_else(|_| "pares-radix".into()),
             service_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -64,6 +92,7 @@ impl OtelConfig {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1.0),
+            protocol,
         }
     }
 }
@@ -75,6 +104,7 @@ impl Default for OtelConfig {
             service_name: "pares-radix".into(),
             service_version: env!("CARGO_PKG_VERSION").to_string(),
             sample_ratio: 1.0,
+            protocol: OtelProtocol::Grpc,
         }
     }
 }
@@ -89,12 +119,19 @@ pub fn init_otel_layer<S>(
 where
     S: tracing::Subscriber + for<'span> tracing_subscriber::registry::LookupSpan<'span>,
 {
-    // Build the OTLP span exporter (gRPC with tonic)
-    let exporter = SpanExporter::builder()
-        .with_tonic()
-        .with_endpoint(&config.endpoint)
-        .build()
-        .map_err(|e| OtelError::ExporterInit(e.to_string()))?;
+    // Build the OTLP span exporter based on configured protocol
+    let exporter = match config.protocol {
+        OtelProtocol::Grpc => SpanExporter::builder()
+            .with_tonic()
+            .with_endpoint(&config.endpoint)
+            .build()
+            .map_err(|e| OtelError::ExporterInit(e.to_string()))?,
+        OtelProtocol::HttpProto => SpanExporter::builder()
+            .with_http()
+            .with_endpoint(&config.endpoint)
+            .build()
+            .map_err(|e| OtelError::ExporterInit(e.to_string()))?,
+    };
 
     // Build the resource with service metadata
     let resource = Resource::builder()
@@ -166,15 +203,33 @@ mod tests {
         assert_eq!(config.endpoint, "http://localhost:4317");
         assert_eq!(config.service_name, "pares-radix");
         assert!((config.sample_ratio - 1.0).abs() < f64::EPSILON);
+        assert_eq!(config.protocol, OtelProtocol::Grpc);
     }
 
     #[test]
-    fn test_config_from_env() {
-        // Without env vars set, should use defaults
+    fn test_config_from_env_defaults_to_grpc() {
+        // Without env vars set, should use gRPC defaults
         let config = OtelConfig::from_env();
-        // service_name defaults to "pares-radix" when OTEL_SERVICE_NAME is unset
         assert!(!config.service_name.is_empty());
         assert!(!config.endpoint.is_empty());
+        // Default protocol when OTEL_EXPORTER_OTLP_PROTOCOL is unset
+        assert_eq!(config.protocol, OtelProtocol::Grpc);
+    }
+
+    #[test]
+    fn test_protocol_enum_default() {
+        assert_eq!(OtelProtocol::default(), OtelProtocol::Grpc);
+    }
+
+    #[test]
+    fn test_http_proto_config() {
+        let config = OtelConfig {
+            endpoint: "http://localhost:4318".into(),
+            protocol: OtelProtocol::HttpProto,
+            ..Default::default()
+        };
+        assert_eq!(config.endpoint, "http://localhost:4318");
+        assert_eq!(config.protocol, OtelProtocol::HttpProto);
     }
 
     #[test]
@@ -184,7 +239,6 @@ mod tests {
             sample_ratio: 1.0,
             ..Default::default()
         };
-        // We can't easily inspect Sampler variants, but verify no panic
         let _ = &config;
 
         // 0.0 → AlwaysOff
