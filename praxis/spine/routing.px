@@ -1,0 +1,27 @@
+# routing.px — Message routing as reactive PluresDB procedures
+#
+# Replaces InboundRouter + ResponseRouter — two Rust files (260 lines)
+# with two rules that describe what they do.
+
+# Route inbound messages to model invocation
+procedure route_inbound:
+  trigger: event("inbound")
+  emit {
+    type: "model_request",
+    source: "${event.source}",
+    chat_id: "${event.chat_id}",
+    sender: "${event.sender}",
+    content: "${event.content}"
+  }
+
+# Route model responses to channel delivery
+procedure route_response:
+  trigger: event("model_response")
+  when event.tool_calls.length == 0:
+    emit {
+      type: "delivery_request",
+      channel: "${event.source}",
+      chat_id: "${event.chat_id}",
+      content: "${event.content}"
+    }
+  end

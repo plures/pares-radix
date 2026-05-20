@@ -1,0 +1,27 @@
+# heartbeat.px — Proactive behavior as a PluresDB procedure
+#
+# Replaces HeartbeatRunner (Rust struct with config, timers, state).
+# A scheduled procedure that fires periodically and emits check events.
+
+fact heartbeat_config:
+  interval_ms: int
+  quiet_start_hour: int
+  quiet_end_hour: int
+
+constraint respect_quiet_hours:
+  when: event.type == "heartbeat_tick" and current_hour() >= heartbeat_config.quiet_start_hour and current_hour() < heartbeat_config.quiet_end_hour
+  require: false
+  severity: warn
+  message: "Heartbeat suppressed during quiet hours"
+
+procedure heartbeat_tick:
+  trigger: schedule(interval: "heartbeat_config.interval_ms")
+  # Check system health
+  run_command {command: "cat /proc/loadavg"} -> $load
+  # Store observation
+  pluresdb_write {
+    key: "heartbeat:last_check",
+    value: {timestamp: "${now()}", load: "$load"}
+  }
+  # Emit for any downstream procedures that want to react
+  emit {type: "heartbeat_complete", load: "$load"}
