@@ -14,7 +14,8 @@ use pares_agens_core::memory::store::PluresDbStore;
 use pares_agens_core::memory::store::{InMemoryStore, MemoryStore};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::model::{
-    ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher,
+    ChatMessage, ChatOptions, ModelClient, ModelCompletion, StreamDelta, StreamSender,
+    ToolDefinition, ToolDispatcher,
 };
 use pares_agens_core::optimization::OptimizationSafetyGate;
 use pares_agens_core::plugins::PluginRuntime;
@@ -141,7 +142,7 @@ impl ModelClient for AppModelClient {
                 .map(|r| r.model.clone())
                 .unwrap_or_else(|| settings.model.clone())
         };
-        tracing::Span::current().record("model", &model.as_str());
+        tracing::Span::current().record("model", model.as_str());
 
         let converted_messages = messages
             .iter()
@@ -166,6 +167,7 @@ impl ModelClient for AppModelClient {
                                     name: call.name,
                                     arguments: call.arguments.to_string(),
                                 },
+                                index: None,
                             })
                             .collect()
                     }),
@@ -242,6 +244,178 @@ impl ModelClient for AppModelClient {
             tool_calls,
             logprobs,
             model: Some(response.model),
+        })
+    }
+
+    #[instrument(skip_all, fields(model, provider = "router"))]
+    async fn complete_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+        options: &ChatOptions,
+        tx: StreamSender,
+    ) -> Result<ModelCompletion, String> {
+        use futures_util::StreamExt;
+
+        let model = {
+            let settings = self.settings.lock().await;
+            settings
+                .routing
+                .interactive
+                .as_ref()
+                .map(|r| r.model.clone())
+                .unwrap_or_else(|| settings.model.clone())
+        };
+        tracing::Span::current().record("model", model.as_str());
+
+        let converted_messages: Vec<pares_models::types::ChatMessage> = messages
+            .iter()
+            .map(|m| {
+                let role = match m.role.as_str() {
+                    "system" => Role::System,
+                    "user" => Role::User,
+                    "assistant" => Role::Assistant,
+                    "tool" => Role::Tool,
+                    _ => Role::User,
+                };
+                pares_models::types::ChatMessage {
+                    role,
+                    content: Some(m.content.clone()),
+                    tool_calls: m.tool_calls.clone().map(|calls| {
+                        calls
+                            .into_iter()
+                            .map(|call| pares_models::types::ToolCall {
+                                id: call.id,
+                                kind: "function".into(),
+                                function: pares_models::types::FunctionCall {
+                                    name: call.name,
+                                    arguments: call.arguments.to_string(),
+                                },
+                                index: None,
+                            })
+                            .collect()
+                    }),
+                    tool_call_id: m.tool_call_id.clone(),
+                    name: None,
+                }
+            })
+            .collect();
+
+        let mut request = ChatCompletionRequest::new(&model, converted_messages);
+        if !tools.is_empty() {
+            request.tools = Some(
+                tools
+                    .iter()
+                    .map(|tool| {
+                        Tool::function(
+                            tool.name.clone(),
+                            tool.description.clone(),
+                            tool.parameters.clone(),
+                        )
+                    })
+                    .collect(),
+            );
+        }
+        if let Some(temp) = options.temperature {
+            request.temperature = Some(temp as f32);
+        }
+
+        let start = std::time::Instant::now();
+        let router_guard = self.router.read().await;
+        let stream_result = router_guard.chat_stream(&request).await;
+        drop(router_guard);
+
+        let mut stream = match stream_result {
+            Ok(s) => s,
+            Err(e) => {
+                // Fall back to non-streaming on stream error.
+                let _ = tx.send(StreamDelta::Done);
+                return Err(e.to_string());
+            }
+        };
+
+        let mut full_content = String::new();
+        let mut tool_calls: Vec<pares_agens_core::model::ToolCall> = Vec::new();
+        // Buffer partial tool call arguments by index.
+        let mut tc_args: std::collections::HashMap<usize, (String, String, String)> =
+            std::collections::HashMap::new();
+        let mut response_model: Option<String> = None;
+
+        while let Some(chunk_result) = stream.next().await {
+            match chunk_result {
+                Ok(chunk) => {
+                    if response_model.is_none() {
+                        response_model = Some(chunk.model.clone());
+                    }
+                    for choice in &chunk.choices {
+                        // Text content delta.
+                        if let Some(ref content) = choice.delta.content {
+                            full_content.push_str(content);
+                            let _ = tx.send(StreamDelta::Content(content.clone()));
+                        }
+                        // Tool call deltas.
+                        if let Some(ref tc_deltas) = choice.delta.tool_calls {
+                            for tc in tc_deltas {
+                                let idx = tc.index.unwrap_or(0) as usize;
+                                let func = &tc.function;
+                                if !tc.id.is_empty() {
+                                    // New tool call start.
+                                    let name = func.name.clone();
+                                    tc_args.insert(
+                                        idx,
+                                        (tc.id.clone(), name.clone(), String::new()),
+                                    );
+                                    let _ = tx.send(StreamDelta::ToolCallStart {
+                                        index: idx,
+                                        id: tc.id.clone(),
+                                        name,
+                                    });
+                                }
+                                if !func.arguments.is_empty() {
+                                    if let Some(entry) = tc_args.get_mut(&idx) {
+                                        entry.2.push_str(&func.arguments);
+                                    }
+                                    let _ = tx.send(StreamDelta::ToolCallDelta {
+                                        index: idx,
+                                        arguments: func.arguments.clone(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "stream chunk error");
+                    break;
+                }
+            }
+        }
+
+        let _ = tx.send(StreamDelta::Done);
+
+        let latency_ms = start.elapsed().as_millis();
+        info!(latency_ms, model = %model, "streaming model call completed");
+        self.telemetry_service.record_model_call(latency_ms as u64).await;
+
+        // Assemble tool calls from buffered fragments.
+        for (_idx, (id, name, args)) in tc_args {
+            tool_calls.push(pares_agens_core::model::ToolCall {
+                id,
+                name,
+                arguments: serde_json::from_str(&args)
+                    .unwrap_or(serde_json::Value::String(args)),
+            });
+        }
+
+        Ok(ModelCompletion {
+            content: if full_content.is_empty() {
+                None
+            } else {
+                Some(full_content)
+            },
+            tool_calls,
+            logprobs: None,
+            model: response_model,
         })
     }
 }

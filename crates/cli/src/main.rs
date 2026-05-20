@@ -647,6 +647,7 @@ impl ModelClient for RouterModelClient {
                                     name: call.name,
                                     arguments: call.arguments.to_string(),
                                 },
+                                index: None,
                             })
                             .collect()
                     }),

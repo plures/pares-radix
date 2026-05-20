@@ -1,6 +1,35 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc;
+
+/// A single delta event emitted during streaming completion.
+#[derive(Debug, Clone)]
+pub enum StreamDelta {
+    /// A text content chunk from the model.
+    Content(String),
+    /// A tool call being assembled (streamed incrementally).
+    ToolCallStart {
+        /// Index of the tool call in the response.
+        index: usize,
+        /// Unique ID for this tool call.
+        id: String,
+        /// Tool name.
+        name: String,
+    },
+    /// Additional JSON argument fragment for a tool call.
+    ToolCallDelta {
+        /// Index of the tool call in the response.
+        index: usize,
+        /// Partial arguments JSON.
+        arguments: String,
+    },
+    /// Stream has completed.
+    Done,
+}
+
+/// A channel sender for streaming deltas to the consumer.
+pub type StreamSender = mpsc::UnboundedSender<StreamDelta>;
 
 // ── Chat message types ───────────────────────────────────────────────────────
 
@@ -151,6 +180,28 @@ pub trait ModelClient: Send + Sync {
         tools: &[ToolDefinition],
         options: &ChatOptions,
     ) -> Result<ModelCompletion, String>;
+
+    /// Request a streaming chat completion.
+    ///
+    /// Sends [`StreamDelta`] events to `tx` as tokens arrive, then returns the
+    /// final assembled [`ModelCompletion`]. The default implementation calls
+    /// [`Self::complete`] and emits the full content as a single delta + Done.
+    ///
+    /// Implementors should override this for true token-by-token streaming.
+    async fn complete_stream(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+        options: &ChatOptions,
+        tx: StreamSender,
+    ) -> Result<ModelCompletion, String> {
+        let result = self.complete(messages, tools, options).await?;
+        if let Some(content) = &result.content {
+            let _ = tx.send(StreamDelta::Content(content.clone()));
+        }
+        let _ = tx.send(StreamDelta::Done);
+        Ok(result)
+    }
 }
 
 /// Abstraction over the MCP tool dispatcher.
@@ -164,4 +215,102 @@ pub trait ToolDispatcher: Send + Sync {
 
     /// Invoke a tool by name and return its result as a string.
     async fn call_tool(&self, name: &str, arguments: Value) -> String;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct EchoClient;
+
+    #[async_trait]
+    impl ModelClient for EchoClient {
+        async fn complete(
+            &self,
+            messages: &[ChatMessage],
+            _tools: &[ToolDefinition],
+            _options: &ChatOptions,
+        ) -> Result<ModelCompletion, String> {
+            let content = messages.last().map(|m| m.content.clone());
+            Ok(ModelCompletion {
+                content,
+                tool_calls: vec![],
+                logprobs: None,
+                model: Some("echo".into()),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn default_complete_stream_emits_content_and_done() {
+        let client = EchoClient;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = client
+            .complete_stream(
+                &[ChatMessage::user("hello")],
+                &[],
+                &ChatOptions::default(),
+                tx,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.content.as_deref(), Some("hello"));
+
+        // Should receive Content then Done.
+        let delta1 = rx.recv().await.unwrap();
+        assert!(matches!(delta1, StreamDelta::Content(ref s) if s == "hello"));
+        let delta2 = rx.recv().await.unwrap();
+        assert!(matches!(delta2, StreamDelta::Done));
+        // Channel should be empty.
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn default_complete_stream_skips_content_when_none() {
+        struct ToolOnlyClient;
+
+        #[async_trait]
+        impl ModelClient for ToolOnlyClient {
+            async fn complete(
+                &self,
+                _messages: &[ChatMessage],
+                _tools: &[ToolDefinition],
+                _options: &ChatOptions,
+            ) -> Result<ModelCompletion, String> {
+                Ok(ModelCompletion {
+                    content: None,
+                    tool_calls: vec![ToolCall {
+                        id: "tc1".into(),
+                        name: "foo".into(),
+                        arguments: serde_json::json!({}),
+                    }],
+                    logprobs: None,
+                    model: None,
+                })
+            }
+        }
+
+        let client = ToolOnlyClient;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = client
+            .complete_stream(
+                &[ChatMessage::user("call tool")],
+                &[],
+                &ChatOptions::default(),
+                tx,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.content.is_none());
+        assert_eq!(result.tool_calls.len(), 1);
+
+        // Only Done should be emitted (no content delta).
+        let delta = rx.recv().await.unwrap();
+        assert!(matches!(delta, StreamDelta::Done));
+        assert!(rx.try_recv().is_err());
+    }
 }
