@@ -78,6 +78,8 @@ pub mod source;
 pub mod state;
 /// Privacy-first anonymous telemetry aggregation primitives.
 pub mod telemetry;
+#[cfg(feature = "otel")]
+pub mod otel;
 
 pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};
