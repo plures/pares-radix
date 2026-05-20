@@ -87,6 +87,8 @@ pub struct RadixToolHandler {
     agent: Option<Arc<pares_agens_core::Agent>>,
     /// Plugin runtime for plugin management tools.
     plugin_runtime: Option<Arc<PluginRuntime>>,
+    /// Notification sender for server-initiated notifications (e.g., tools/list_changed).
+    notification_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::server::ServerNotification>>,
 }
 
 impl RadixToolHandler {
@@ -109,6 +111,7 @@ impl RadixToolHandler {
             subagent_manager: None,
             agent: None,
             plugin_runtime: None,
+            notification_tx: None,
         }
     }
 
@@ -173,6 +176,18 @@ impl RadixToolHandler {
     /// Attach a plugin runtime for plugin management tools.
     pub fn with_plugin_runtime(mut self, runtime: Arc<PluginRuntime>) -> Self {
         self.plugin_runtime = Some(runtime);
+        self
+    }
+
+    /// Attach a notification sender for server-initiated notifications.
+    ///
+    /// When set, plugin changes (register/activate/deactivate) will emit
+    /// `notifications/tools/list_changed` to tell the client to re-fetch tools.
+    pub fn with_notification_tx(
+        mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<crate::server::ServerNotification>,
+    ) -> Self {
+        self.notification_tx = Some(tx);
         self
     }
 
@@ -2916,7 +2931,10 @@ impl RadixToolHandler {
             dependencies: capabilities,
         };
         match runtime.install(manifest).await {
-            Ok(()) => ToolResult::ok(json!({"registered": name, "status": "active"}).to_string()),
+            Ok(()) => {
+                self.notify_tools_changed();
+                ToolResult::ok(json!({"registered": name, "status": "active"}).to_string())
+            }
             Err(e) => ToolResult::error(format!("Failed to register plugin: {}", e)),
         }
     }
@@ -2950,10 +2968,22 @@ impl RadixToolHandler {
             None => return ToolResult::error("missing required parameter: name"),
         };
         match runtime.uninstall(name, false).await {
-            Ok(()) => ToolResult::ok(
-                json!({"name": name, "status": "deactivated"}).to_string(),
-            ),
+            Ok(()) => {
+                self.notify_tools_changed();
+                ToolResult::ok(
+                    json!({"name": name, "status": "deactivated"}).to_string(),
+                )
+            }
             Err(e) => ToolResult::error(format!("Failed to deactivate plugin: {}", e)),
+        }
+    }
+
+    /// Send a `notifications/tools/list_changed` notification to the MCP client.
+    ///
+    /// Called after plugin register/deactivate so the client knows to re-fetch `tools/list`.
+    fn notify_tools_changed(&self) {
+        if let Some(tx) = &self.notification_tx {
+            let _ = tx.send(crate::server::ServerNotification::tools_list_changed());
         }
     }
 
@@ -7496,5 +7526,76 @@ mod tests {
         let tools = handler.list_tools().await;
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"session_yield"));
+    }
+
+    #[tokio::test]
+    async fn plugin_register_emits_tools_list_changed_notification() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime)
+            .with_notification_tx(tx);
+
+        let result = handler
+            .call_tool(
+                "plugin_register",
+                json!({"name": "notif-test", "version": "1.0.0"}),
+            )
+            .await;
+        assert!(!result.is_error);
+
+        // Should have received a tools/list_changed notification
+        let notif = rx.try_recv().expect("expected tools_list_changed notification");
+        assert_eq!(notif.method, "notifications/tools/list_changed");
+        assert!(notif.params.is_none());
+    }
+
+    #[tokio::test]
+    async fn plugin_deactivate_emits_tools_list_changed_notification() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime)
+            .with_notification_tx(tx);
+
+        // Register first
+        handler
+            .call_tool(
+                "plugin_register",
+                json!({"name": "temp-plugin", "version": "0.1.0"}),
+            )
+            .await;
+        // Drain the register notification
+        let _ = rx.try_recv();
+
+        // Deactivate
+        let result = handler
+            .call_tool("plugin_deactivate", json!({"name": "temp-plugin"}))
+            .await;
+        assert!(!result.is_error);
+
+        // Should have received another tools/list_changed notification
+        let notif = rx.try_recv().expect("expected tools_list_changed notification on deactivate");
+        assert_eq!(notif.method, "notifications/tools/list_changed");
+    }
+
+    #[tokio::test]
+    async fn no_notification_when_tx_not_configured() {
+        let shell = Arc::new(ShellExecutor::new());
+        let runtime = Arc::new(PluginRuntime::new());
+        // No notification_tx attached
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_plugin_runtime(runtime);
+
+        // Should not panic
+        let result = handler
+            .call_tool(
+                "plugin_register",
+                json!({"name": "safe-plugin", "version": "1.0.0"}),
+            )
+            .await;
+        assert!(!result.is_error);
     }
 }

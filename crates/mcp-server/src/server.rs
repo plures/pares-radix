@@ -27,6 +27,17 @@ pub struct ServerNotification {
 }
 
 impl ServerNotification {
+    /// Create a `notifications/tools/list_changed` notification.
+    ///
+    /// Per MCP spec, this tells the client to re-fetch `tools/list` because
+    /// the available tools have changed (e.g., plugin activated/deactivated).
+    pub fn tools_list_changed() -> Self {
+        Self {
+            method: "notifications/tools/list_changed".to_string(),
+            params: None,
+        }
+    }
+
     /// Create a notification for a sub-agent completion.
     pub fn subagent_completed(
         session_id: &str,
@@ -271,7 +282,7 @@ impl McpServer {
             "protocolVersion": "2024-11-05",
             "capabilities": {
                 "tools": {
-                    "listChanged": false
+                    "listChanged": true
                 }
             },
             "serverInfo": {
@@ -527,5 +538,20 @@ mod tests {
             params: None,
         })
         .unwrap();
+    }
+
+    #[test]
+    fn tools_list_changed_notification_format() {
+        let notif = ServerNotification::tools_list_changed();
+        assert_eq!(notif.method, "notifications/tools/list_changed");
+        assert!(notif.params.is_none());
+    }
+
+    #[tokio::test]
+    async fn initialize_declares_list_changed_capability() {
+        let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
+        let server = McpServer::new(handler);
+        let result = server.handle_initialize().await.unwrap();
+        assert_eq!(result["capabilities"]["tools"]["listChanged"], true);
     }
 }
