@@ -4589,7 +4589,7 @@ async fn main() {
             cerebellum_model_path,
         } => {
             use crossterm::{
-                event::{self as ct_event, Event as CtEvent, KeyCode, KeyEventKind},
+                event::{self as ct_event, Event as CtEvent, KeyCode, KeyEventKind, KeyModifiers},
                 execute,
                 terminal::{
                     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -4962,6 +4962,38 @@ async fn main() {
                     };
                     if let CtEvent::Key(key) = event {
                         if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
+                        // Handle Ctrl+<key> shortcuts first
+                        if key.modifiers.contains(KeyModifiers::CONTROL) {
+                            match key.code {
+                                KeyCode::Char('c') => {
+                                    break 'main_loop Ok(());
+                                }
+                                KeyCode::Char('l') => {
+                                    app.messages.clear();
+                                    app.scroll_offset = 0;
+                                    app.user_scrolled = false;
+                                    app.push_system("Chat cleared.");
+                                }
+                                KeyCode::Char('u') => {
+                                    // Clear input line (like bash Ctrl+U)
+                                    app.input.clear();
+                                    app.input_cursor = 0;
+                                }
+                                KeyCode::Char('w') if app.input_cursor > 0 => {
+                                    // Delete word backwards (like bash Ctrl+W)
+                                    let before = &app.input[..app.input_cursor];
+                                    let trimmed = before.trim_end();
+                                    let new_end = trimmed
+                                        .rfind(char::is_whitespace)
+                                        .map(|i| i + 1)
+                                        .unwrap_or(0);
+                                    app.input.drain(new_end..app.input_cursor);
+                                    app.input_cursor = new_end;
+                                }
+                                _ => {}
+                            }
                             continue;
                         }
                         match key.code {
