@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -37,6 +37,106 @@ use pares_radix_praxis::rule::{RuleContext, RuleResult};
 
 use crate::browser::BrowserClient;
 use crate::handler::{ToolHandler, ToolResult};
+
+// ── Tool Metrics (for telemetry_snapshot) ──────────────────────────────────────
+
+/// Per-tool usage metrics collected at runtime.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ToolCallStats {
+    /// Number of times this tool was called.
+    pub calls: u64,
+    /// Number of successful calls.
+    pub successes: u64,
+    /// Number of failed calls.
+    pub failures: u64,
+    /// Total latency across all calls in milliseconds.
+    pub total_latency_ms: u64,
+}
+
+/// Aggregated metrics across all tool calls.
+#[derive(Debug, Default)]
+pub struct ToolMetrics {
+    /// Per-tool statistics.
+    pub per_tool: HashMap<String, ToolCallStats>,
+    /// Total tool calls.
+    pub total_calls: u64,
+    /// Timestamp (Unix epoch seconds) when metrics collection started.
+    pub started_at: u64,
+}
+
+impl ToolMetrics {
+    fn new() -> Self {
+        Self {
+            per_tool: HashMap::new(),
+            total_calls: 0,
+            started_at: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        }
+    }
+
+    fn record(&mut self, tool_name: &str, latency_ms: u64, success: bool) {
+        self.total_calls += 1;
+        let entry = self.per_tool.entry(tool_name.to_string()).or_default();
+        entry.calls += 1;
+        entry.total_latency_ms += latency_ms;
+        if success {
+            entry.successes += 1;
+        } else {
+            entry.failures += 1;
+        }
+    }
+
+    fn snapshot(&self) -> Value {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let uptime_secs = now.saturating_sub(self.started_at);
+
+        // Top tools by call count
+        let mut ranked: Vec<_> = self.per_tool.iter().collect();
+        ranked.sort_by_key(|b| std::cmp::Reverse(b.1.calls));
+
+        let top_tools: Vec<Value> = ranked
+            .iter()
+            .take(15)
+            .map(|(name, stats)| {
+                let avg_ms = stats.total_latency_ms.checked_div(stats.calls).unwrap_or(0);
+                json!({
+                    "name": name,
+                    "calls": stats.calls,
+                    "successes": stats.successes,
+                    "failures": stats.failures,
+                    "avg_latency_ms": avg_ms,
+                })
+            })
+            .collect();
+
+        let total_latency: u64 = self.per_tool.values().map(|s| s.total_latency_ms).sum();
+        let avg_latency = total_latency.checked_div(self.total_calls).unwrap_or(0);
+
+        json!({
+            "total_calls": self.total_calls,
+            "unique_tools_used": self.per_tool.len(),
+            "avg_latency_ms": avg_latency,
+            "uptime_secs": uptime_secs,
+            "started_at_unix": self.started_at,
+            "top_tools": top_tools,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.per_tool.clear();
+        self.total_calls = 0;
+        self.started_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+    }
+}
 
 /// A pre-loaded .px procedure ready for execution.
 #[derive(Debug, Clone)]
@@ -89,6 +189,8 @@ pub struct RadixToolHandler {
     plugin_runtime: Option<Arc<PluginRuntime>>,
     /// Notification sender for server-initiated notifications (e.g., tools/list_changed).
     notification_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::server::ServerNotification>>,
+    /// Runtime tool usage metrics (protected by Mutex for interior mutability).
+    metrics: Mutex<ToolMetrics>,
 }
 
 impl RadixToolHandler {
@@ -112,6 +214,7 @@ impl RadixToolHandler {
             agent: None,
             plugin_runtime: None,
             notification_tx: None,
+            metrics: Mutex::new(ToolMetrics::new()),
         }
     }
 
@@ -3399,6 +3502,26 @@ impl RadixToolHandler {
         )
     }
 
+    // ── Telemetry tools ──────────────────────────────────────────────────────────────────────
+
+    async fn telemetry_snapshot(&self) -> ToolResult {
+        let snapshot = match self.metrics.lock() {
+            Ok(metrics) => metrics.snapshot(),
+            Err(_) => return ToolResult::error("metrics lock poisoned".to_string()),
+        };
+        ToolResult::ok(snapshot.to_string())
+    }
+
+    async fn telemetry_reset(&self) -> ToolResult {
+        match self.metrics.lock() {
+            Ok(mut metrics) => {
+                metrics.reset();
+                ToolResult::ok(json!({"reset": true, "message": "All telemetry counters cleared."}).to_string())
+            }
+            Err(_) => ToolResult::error("metrics lock poisoned".to_string()),
+        }
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -4476,11 +4599,53 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Telemetry tools ────────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "telemetry_snapshot".into(),
+            description: Some(
+                "Get runtime telemetry: total tool calls, per-tool stats (call count, success/failure, avg latency), uptime. Useful for observability and performance monitoring.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "telemetry_reset".into(),
+            description: Some(
+                "Reset all telemetry counters to zero. Useful for starting a fresh measurement window.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+
         tools
     }
 
     async fn call_tool(&self, name: &str, arguments: Value) -> ToolResult {
         debug!(tool = name, "MCP tool call");
+
+        // Record metrics for every tool call (except telemetry tools themselves to avoid recursion)
+        let start = Instant::now();
+        let result = self.dispatch_tool(name, arguments).await;
+        if !name.starts_with("telemetry_") {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            let success = !result.is_error;
+            if let Ok(mut metrics) = self.metrics.lock() {
+                metrics.record(name, latency_ms, success);
+            }
+        }
+        result
+    }
+}
+
+impl RadixToolHandler {
+    /// Internal dispatch — routes tool name to handler method.
+    async fn dispatch_tool(&self, name: &str, arguments: Value) -> ToolResult {
         match name {
             "read_file" => self.read_file(&arguments).await,
             "write_file" => self.write_file(&arguments).await,
@@ -4557,6 +4722,8 @@ impl ToolHandler for RadixToolHandler {
             "session_send" => self.session_send(&arguments).await,
             "session_list" => self.session_list(&arguments).await,
             "session_yield" => self.session_yield(&arguments).await,
+            "telemetry_snapshot" => self.telemetry_snapshot().await,
+            "telemetry_reset" => self.telemetry_reset().await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -7597,5 +7764,81 @@ mod tests {
             )
             .await;
         assert!(!result.is_error);
+    }
+
+    #[tokio::test]
+    async fn telemetry_snapshot_returns_initial_state() {
+        let handler = make_handler();
+        let result = handler.call_tool("telemetry_snapshot", json!({})).await;
+        assert!(!result.is_error);
+        let data: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(data["total_calls"], 0);
+        assert_eq!(data["unique_tools_used"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_records_tool_calls() {
+        let handler = make_handler();
+
+        // Make a few tool calls
+        handler.call_tool("db_get", json!({"key": "x"})).await;
+        handler.call_tool("db_get", json!({"key": "y"})).await;
+        handler.call_tool("runtime_status", json!({})).await;
+
+        let result = handler.call_tool("telemetry_snapshot", json!({})).await;
+        assert!(!result.is_error);
+        let data: Value = serde_json::from_str(&result.content).unwrap();
+        // 3 calls (telemetry_snapshot itself is excluded from counting)
+        assert_eq!(data["total_calls"], 3);
+        assert_eq!(data["unique_tools_used"], 2);
+
+        // Top tools should include db_get
+        let top_tools = data["top_tools"].as_array().unwrap();
+        assert!(top_tools.iter().any(|t| t["name"] == "db_get" && t["calls"] == 2));
+    }
+
+    #[tokio::test]
+    async fn telemetry_tracks_failures() {
+        let handler = make_handler();
+
+        // Call an unknown tool — should fail
+        let result = handler.call_tool("nonexistent_tool", json!({})).await;
+        assert!(result.is_error);
+
+        let snapshot = handler.call_tool("telemetry_snapshot", json!({})).await;
+        let data: Value = serde_json::from_str(&snapshot.content).unwrap();
+        assert_eq!(data["total_calls"], 1);
+        let top = data["top_tools"].as_array().unwrap();
+        let entry = &top[0];
+        assert_eq!(entry["name"], "nonexistent_tool");
+        assert_eq!(entry["failures"], 1);
+        assert_eq!(entry["successes"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_reset_clears_counters() {
+        let handler = make_handler();
+
+        handler.call_tool("db_get", json!({"key": "a"})).await;
+        handler.call_tool("db_get", json!({"key": "b"})).await;
+
+        let result = handler.call_tool("telemetry_reset", json!({})).await;
+        assert!(!result.is_error);
+        let data: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(data["reset"], true);
+
+        // Snapshot should now be clean
+        let snapshot = handler.call_tool("telemetry_snapshot", json!({})).await;
+        let snap_data: Value = serde_json::from_str(&snapshot.content).unwrap();
+        assert_eq!(snap_data["total_calls"], 0);
+    }
+
+    #[tokio::test]
+    async fn telemetry_tools_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"telemetry_snapshot"));
+        assert!(names.contains(&"telemetry_reset"));
     }
 }
