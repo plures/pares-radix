@@ -4996,6 +4996,16 @@ async fn main() {
                             }
                             continue;
                         }
+                        // Alt+Enter inserts a newline for multi-line input
+                        if key.modifiers.contains(KeyModifiers::ALT)
+                            && key.code == KeyCode::Enter
+                        {
+                            let cursor =
+                                app.input_cursor.min(app.input.len());
+                            app.input.insert(cursor, '\n');
+                            app.input_cursor = cursor + 1;
+                            continue;
+                        }
                         match key.code {
                             KeyCode::Enter => {
                                 app.submit_input();
