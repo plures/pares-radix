@@ -27,6 +27,7 @@ use pares_agens_core::shell_executor::ShellExecutor;
 use pares_agens_core::StateStore;
 use pares_radix_mcp_client::protocol::{Tool, ToolInputSchema};
 
+use crate::app_metrics::AppMetrics;
 use pares_agens_agenda::scheduler::Scheduler;
 use pares_radix_praxis::module::PraxisModule;
 use pares_radix_praxis::px;
@@ -191,6 +192,8 @@ pub struct RadixToolHandler {
     notification_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::server::ServerNotification>>,
     /// Runtime tool usage metrics (protected by Mutex for interior mutability).
     metrics: Mutex<ToolMetrics>,
+    /// OpenTelemetry application metrics (no-op without a configured exporter).
+    otel_metrics: AppMetrics,
 }
 
 impl RadixToolHandler {
@@ -215,6 +218,7 @@ impl RadixToolHandler {
             plugin_runtime: None,
             notification_tx: None,
             metrics: Mutex::new(ToolMetrics::new()),
+            otel_metrics: AppMetrics::new(),
         }
     }
 
@@ -5703,6 +5707,8 @@ impl ToolHandler for RadixToolHandler {
             if let Ok(mut metrics) = self.metrics.lock() {
                 metrics.record(name, latency_ms, success);
             }
+            // Emit to OTLP exporter (no-op without configured provider)
+            self.otel_metrics.record_tool_call(name, latency_ms as f64, success);
         }
         result
     }
