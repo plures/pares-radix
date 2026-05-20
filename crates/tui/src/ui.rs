@@ -12,12 +12,16 @@ use crate::app::{App, Role};
 
 /// Render the full UI.
 pub fn draw(f: &mut Frame, app: &App) {
+    // Dynamic input height: 1 line of content + 2 for borders, up to max 8 (6 lines + borders)
+    let input_lines = app.input.lines().count().clamp(1, 6) as u16;
+    let input_height = input_lines + 2; // +2 for top/bottom borders
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),    // chat area
-            Constraint::Length(3), // input area
-            Constraint::Length(1), // status bar
+            Constraint::Min(3),              // chat area
+            Constraint::Length(input_height), // input area (dynamic)
+            Constraint::Length(1),           // status bar
         ])
         .split(f.area());
 
@@ -97,15 +101,28 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(" Input (Enter to send) "),
+                .title(" Input (Enter=send, Alt+Enter=newline) "),
         )
         .style(Style::default().fg(Color::White));
 
     f.render_widget(input, area);
 
-    // Place cursor
-    #[allow(clippy::cast_possible_truncation)]
-    f.set_cursor_position((area.x + app.input_cursor as u16 + 1, area.y + 1));
+    // Calculate cursor position for multi-line input.
+    // input_cursor is a byte offset; we need (col, row) within the text.
+    let text_before_cursor = &app.input[..app.input_cursor.min(app.input.len())];
+    let cursor_row = text_before_cursor.lines().count().saturating_sub(1) as u16;
+    // If text_before_cursor ends with '\n', we're at the start of a new line
+    let cursor_col = if text_before_cursor.ends_with('\n') {
+        0
+    } else {
+        text_before_cursor
+            .lines()
+            .last()
+            .unwrap_or("")
+            .len() as u16
+    };
+
+    f.set_cursor_position((area.x + cursor_col + 1, area.y + cursor_row + 1));
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {

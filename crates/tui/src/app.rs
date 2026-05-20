@@ -287,6 +287,13 @@ impl App {
         }
     }
 
+    /// Insert a newline at the current cursor position (for multi-line input).
+    pub fn insert_newline(&mut self) {
+        let cursor = self.input_cursor.min(self.input.len());
+        self.input.insert(cursor, '\n');
+        self.input_cursor = cursor + 1;
+    }
+
     /// Submit the current input buffer.
     pub fn submit_input(&mut self) {
         let input = self.input.drain(..).collect::<String>();
@@ -518,7 +525,25 @@ mod tests {
         );
 
         let (tx, rx) = mpsc::unbounded_channel();
-        let app = App::new(agent, "test-model".to_string(), tx);
+        // Create app with empty history (don't load from disk in tests)
+        let app = App {
+            messages: vec![ChatMessage {
+                role: Role::System,
+                content: "Pares Radix TUI — model: test-model. Type /help for commands.".to_string(),
+                timestamp: chrono::Utc::now(),
+            }],
+            input: String::new(),
+            input_cursor: 0,
+            scroll_offset: 0,
+            user_scrolled: false,
+            viewport_height: 35,
+            thinking: false,
+            streaming: false,
+            current_model: "test-model".to_string(),
+            agent,
+            event_tx: tx,
+            history: InputHistory::new(500), // Empty, no disk load
+        };
         (app, rx)
     }
 
@@ -693,5 +718,48 @@ mod tests {
 
         env::set_var("HOME", &orig_home);
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn insert_newline_at_cursor() {
+        let (mut app, _rx) = test_app();
+        app.input = "hello world".to_string();
+        app.input_cursor = 5; // after "hello"
+
+        app.insert_newline();
+
+        assert_eq!(app.input, "hello\n world");
+        assert_eq!(app.input_cursor, 6); // after the newline
+    }
+
+    #[test]
+    fn insert_newline_at_end() {
+        let (mut app, _rx) = test_app();
+        app.input = "first line".to_string();
+        app.input_cursor = app.input.len();
+
+        app.insert_newline();
+
+        assert_eq!(app.input, "first line\n");
+        assert_eq!(app.input_cursor, 11);
+    }
+
+    #[tokio::test]
+    async fn multiline_input_submits_correctly() {
+        let (mut app, _rx) = test_app();
+        app.input = "line1\nline2\nline3".to_string();
+        app.input_cursor = app.input.len();
+
+        // Submit — the multi-line content should become a user message
+        app.submit_input();
+
+        let user_msgs: Vec<_> = app
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User)
+            .collect();
+        assert_eq!(user_msgs.len(), 1);
+        assert_eq!(user_msgs[0].content, "line1\nline2\nline3");
+        assert!(app.input.is_empty());
     }
 }
