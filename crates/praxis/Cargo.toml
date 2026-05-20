@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-praxis-native = { git = "https://github.com/plures/praxis.git", rev = "ff2a2bb", default-features = false }
+pluresdb-px = { git = "https://github.com/plures/pluresdb", branch = "main" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
@@ -16,8 +16,6 @@ thiserror.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing = "0.1"
-futures = "0.3"
-regex = "1"
 
 [dev-dependencies]
 futures = "0.3"
