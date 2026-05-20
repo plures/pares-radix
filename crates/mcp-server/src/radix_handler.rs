@@ -3758,6 +3758,413 @@ impl RadixToolHandler {
         }
     }
 
+    // ── Canvas tool implementations ────────────────────────────────────────
+
+    async fn canvas_create(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let title = match args.get("title").and_then(|v| v.as_str()) {
+            Some(t) => t.to_string(),
+            None => return ToolResult::error("missing required parameter: title"),
+        };
+        let description = args.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let canvas = json!({
+            "id": id,
+            "title": title,
+            "description": description,
+            "tree": { "id": "root", "type": "Root", "children": [] },
+            "data": {},
+            "procedures": [],
+            "rules": [],
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+            "updatedAt": chrono::Utc::now().to_rfc3339()
+        });
+
+        store.set("canvas:active", canvas.clone()).await;
+        ToolResult::ok(serde_json::to_string_pretty(&canvas).unwrap_or_default())
+    }
+
+    async fn canvas_get(&self) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        match store.get("canvas:active").await {
+            Some(Value::Null) | None => ToolResult::ok("null"),
+            Some(canvas) => ToolResult::ok(serde_json::to_string_pretty(&canvas).unwrap_or_default()),
+        }
+    }
+
+    async fn canvas_set_tree(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let tree = match args.get("tree") {
+            Some(t) => t.clone(),
+            None => return ToolResult::error("missing required parameter: tree"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        canvas["tree"] = tree;
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok("tree updated")
+    }
+
+    async fn canvas_add_node(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let parent_id = match args.get("parentId").and_then(|v| v.as_str()) {
+            Some(p) => p.to_string(),
+            None => return ToolResult::error("missing required parameter: parentId"),
+        };
+        let node = match args.get("node") {
+            Some(n) => n.clone(),
+            None => return ToolResult::error("missing required parameter: node"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        fn insert_into_parent(tree: &mut Value, parent_id: &str, node: &Value) -> bool {
+            if let Some(id) = tree.get("id").and_then(|v| v.as_str()) {
+                if id == parent_id {
+                    if tree.get("children").is_none() {
+                        tree["children"] = json!([]);
+                    }
+                    if let Some(arr) = tree["children"].as_array_mut() {
+                        arr.push(node.clone());
+                    }
+                    return true;
+                }
+            }
+            if let Some(children) = tree.get_mut("children").and_then(|c| c.as_array_mut()) {
+                for child in children.iter_mut() {
+                    if insert_into_parent(child, parent_id, node) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        if !insert_into_parent(&mut canvas["tree"], &parent_id, &node) {
+            return ToolResult::error(format!("parent node '{parent_id}' not found in tree"));
+        }
+
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok(format!("node added under parent '{parent_id}'"))
+    }
+
+    async fn canvas_remove_node(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let node_id = match args.get("nodeId").and_then(|v| v.as_str()) {
+            Some(n) => n.to_string(),
+            None => return ToolResult::error("missing required parameter: nodeId"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        fn remove_from_tree(tree: &mut Value, node_id: &str) -> bool {
+            if let Some(children) = tree.get_mut("children").and_then(|c| c.as_array_mut()) {
+                let len_before = children.len();
+                children.retain(|child| {
+                    child.get("id").and_then(|v| v.as_str()) != Some(node_id)
+                });
+                if children.len() < len_before {
+                    return true;
+                }
+                for child in children.iter_mut() {
+                    if remove_from_tree(child, node_id) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        if !remove_from_tree(&mut canvas["tree"], &node_id) {
+            return ToolResult::error(format!("node '{node_id}' not found in tree"));
+        }
+
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok(format!("node '{node_id}' removed"))
+    }
+
+    async fn canvas_validate(&self) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        let mut issues: Vec<Value> = Vec::new();
+
+        // Check required fields
+        if canvas.get("id").and_then(|v| v.as_str()).is_none() {
+            issues.push(json!({"severity": "error", "message": "Canvas missing 'id' field"}));
+        }
+        if canvas.get("title").and_then(|v| v.as_str()).is_none() {
+            issues.push(json!({"severity": "error", "message": "Canvas missing 'title' field"}));
+        }
+        if canvas.get("tree").is_none() {
+            issues.push(json!({"severity": "error", "message": "Canvas missing 'tree' field"}));
+        }
+
+        // Check for duplicate node IDs in the tree
+        fn collect_ids(tree: &Value, ids: &mut Vec<String>) {
+            if let Some(id) = tree.get("id").and_then(|v| v.as_str()) {
+                ids.push(id.to_string());
+            }
+            if let Some(children) = tree.get("children").and_then(|c| c.as_array()) {
+                for child in children {
+                    collect_ids(child, ids);
+                }
+            }
+        }
+
+        if let Some(tree) = canvas.get("tree") {
+            let mut ids = Vec::new();
+            collect_ids(tree, &mut ids);
+            let mut seen = std::collections::HashSet::new();
+            for id in &ids {
+                if !seen.insert(id.as_str()) {
+                    issues.push(json!({"severity": "error", "message": format!("Duplicate node ID: '{id}'")}));
+                }
+            }
+        }
+
+        let result = json!({
+            "valid": issues.is_empty(),
+            "issues": issues
+        });
+        ToolResult::ok(serde_json::to_string_pretty(&result).unwrap_or_default())
+    }
+
+    async fn canvas_export(&self) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => ToolResult::ok(serde_json::to_string_pretty(&c).unwrap_or_default()),
+            _ => ToolResult::error("no active canvas — create one first"),
+        }
+    }
+
+    async fn canvas_import(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let json_str = match args.get("json").and_then(|v| v.as_str()) {
+            Some(j) => j,
+            None => return ToolResult::error("missing required parameter: json"),
+        };
+
+        let canvas: Value = match serde_json::from_str(json_str) {
+            Ok(v) => v,
+            Err(e) => return ToolResult::error(format!("invalid JSON: {e}")),
+        };
+
+        // Validate basic structure
+        if canvas.get("id").is_none() || canvas.get("title").is_none() {
+            return ToolResult::error("imported canvas must have 'id' and 'title' fields");
+        }
+
+        store.set("canvas:active", canvas.clone()).await;
+        ToolResult::ok(format!("canvas '{}' imported and set as active",
+            canvas.get("title").and_then(|v| v.as_str()).unwrap_or("untitled")))
+    }
+
+    async fn canvas_list(&self) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let keys = store.keys_with_prefix("canvas:saved:").await;
+        let mut canvases: Vec<Value> = Vec::new();
+
+        for key in &keys {
+            if let Some(canvas) = store.get(key).await {
+                if !canvas.is_null() {
+                    canvases.push(json!({
+                        "id": canvas.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                        "title": canvas.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                        "description": canvas.get("description"),
+                        "updatedAt": canvas.get("updatedAt")
+                    }));
+                }
+            }
+        }
+
+        ToolResult::ok(serde_json::to_string_pretty(&canvases).unwrap_or_default())
+    }
+
+    async fn canvas_load(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(i) => i,
+            None => return ToolResult::error("missing required parameter: id"),
+        };
+
+        let key = format!("canvas:saved:{id}");
+        match store.get(&key).await {
+            Some(canvas) if !canvas.is_null() => {
+                store.set("canvas:active", canvas.clone()).await;
+                ToolResult::ok(serde_json::to_string_pretty(&canvas).unwrap_or_default())
+            }
+            _ => ToolResult::error(format!("canvas '{id}' not found")),
+        }
+    }
+
+    async fn canvas_save(&self) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        let id = match canvas.get("id").and_then(|v| v.as_str()) {
+            Some(i) => i.to_string(),
+            None => return ToolResult::error("active canvas has no id"),
+        };
+
+        let key = format!("canvas:saved:{id}");
+        store.set(&key, canvas).await;
+        ToolResult::ok(format!("canvas '{id}' saved"))
+    }
+
+    async fn canvas_set_data(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let data = match args.get("data") {
+            Some(d) if d.is_object() => d.clone(),
+            Some(_) => return ToolResult::error("'data' must be a JSON object"),
+            None => return ToolResult::error("missing required parameter: data"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        // Merge data into existing canvas data
+        if let Some(existing) = canvas.get_mut("data").and_then(|d| d.as_object_mut()) {
+            if let Some(new_data) = data.as_object() {
+                for (k, v) in new_data {
+                    existing.insert(k.clone(), v.clone());
+                }
+            }
+        } else {
+            canvas["data"] = data;
+        }
+
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok("data updated")
+    }
+
+    async fn canvas_add_procedure(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let procedure = match args.get("procedure") {
+            Some(p) => p.clone(),
+            None => return ToolResult::error("missing required parameter: procedure"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        if canvas.get("procedures").is_none() {
+            canvas["procedures"] = json!([]);
+        }
+        if let Some(arr) = canvas["procedures"].as_array_mut() {
+            arr.push(procedure);
+        }
+
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok("procedure added")
+    }
+
+    async fn canvas_add_rule(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let rule = match args.get("rule") {
+            Some(r) => r.clone(),
+            None => return ToolResult::error("missing required parameter: rule"),
+        };
+
+        let mut canvas = match store.get("canvas:active").await {
+            Some(c) if !c.is_null() => c,
+            _ => return ToolResult::error("no active canvas — create one first"),
+        };
+
+        if canvas.get("rules").is_none() {
+            canvas["rules"] = json!([]);
+        }
+        if let Some(arr) = canvas["rules"].as_array_mut() {
+            arr.push(rule);
+        }
+
+        canvas["updatedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        store.set("canvas:active", canvas).await;
+        ToolResult::ok("rule added")
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -4893,6 +5300,182 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Canvas tools ────────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "canvas_create".into(),
+            description: Some(
+                "Create a new canvas app. Returns the canvas document with a generated ID.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "title": {"type": "string", "description": "Title for the canvas app"},
+                    "description": {"type": "string", "description": "Optional description"}
+                })),
+                required: Some(vec!["title".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_get".into(),
+            description: Some(
+                "Get the current active canvas document. Returns null if no canvas is active.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_set_tree".into(),
+            description: Some(
+                "Replace the entire component tree of the active canvas.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "tree": {"type": "object", "description": "The new component tree (CanvasNode with id, type, props, children)"}
+                })),
+                required: Some(vec!["tree".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_add_node".into(),
+            description: Some(
+                "Add a component node to the canvas tree under a specified parent.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "parentId": {"type": "string", "description": "ID of the parent node"},
+                    "node": {"type": "object", "description": "CanvasNode: { id, type, props?, bindings?, children?, visible? }"}
+                })),
+                required: Some(vec!["parentId".into(), "node".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_remove_node".into(),
+            description: Some(
+                "Remove a node from the canvas tree by ID.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "nodeId": {"type": "string", "description": "ID of the node to remove"}
+                })),
+                required: Some(vec!["nodeId".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_validate".into(),
+            description: Some(
+                "Validate the active canvas and return any issues found.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_export".into(),
+            description: Some(
+                "Export the active canvas as a .canvas JSON string.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_import".into(),
+            description: Some(
+                "Import a canvas from a JSON string. Sets it as the active canvas.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "json": {"type": "string", "description": "The .canvas JSON string to import"}
+                })),
+                required: Some(vec!["json".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_list".into(),
+            description: Some(
+                "List all saved canvases (id, title, description).".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_load".into(),
+            description: Some(
+                "Load a saved canvas by ID, making it the active canvas.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "id": {"type": "string", "description": "The canvas ID to load"}
+                })),
+                required: Some(vec!["id".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_save".into(),
+            description: Some(
+                "Save the active canvas to the saved canvases list.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_set_data".into(),
+            description: Some(
+                "Set data values in the active canvas (seeds PluresDB with canvas-scoped data).".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "data": {"type": "object", "description": "Key-value data to set in the canvas"}
+                })),
+                required: Some(vec!["data".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_add_procedure".into(),
+            description: Some(
+                "Add a behavior procedure to the active canvas.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "procedure": {"type": "object", "description": "The procedure definition to add"}
+                })),
+                required: Some(vec!["procedure".into()]),
+            },
+        });
+        tools.push(Tool {
+            name: "canvas_add_rule".into(),
+            description: Some(
+                "Add a Praxis validation rule to the active canvas.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "rule": {"type": "object", "description": "The Praxis rule definition to add"}
+                })),
+                required: Some(vec!["rule".into()]),
+            },
+        });
+
         tools
     }
 
@@ -4996,6 +5579,20 @@ impl RadixToolHandler {
             "session_yield" => self.session_yield(&arguments).await,
             "telemetry_snapshot" => self.telemetry_snapshot().await,
             "telemetry_reset" => self.telemetry_reset().await,
+            "canvas_create" => self.canvas_create(&arguments).await,
+            "canvas_get" => self.canvas_get().await,
+            "canvas_set_tree" => self.canvas_set_tree(&arguments).await,
+            "canvas_add_node" => self.canvas_add_node(&arguments).await,
+            "canvas_remove_node" => self.canvas_remove_node(&arguments).await,
+            "canvas_validate" => self.canvas_validate().await,
+            "canvas_export" => self.canvas_export().await,
+            "canvas_import" => self.canvas_import(&arguments).await,
+            "canvas_list" => self.canvas_list().await,
+            "canvas_load" => self.canvas_load(&arguments).await,
+            "canvas_save" => self.canvas_save().await,
+            "canvas_set_data" => self.canvas_set_data(&arguments).await,
+            "canvas_add_procedure" => self.canvas_add_procedure(&arguments).await,
+            "canvas_add_rule" => self.canvas_add_rule(&arguments).await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -8297,5 +8894,204 @@ mod tests {
         let tools = handler.list_tools().await;
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"px_status"));
+    }
+
+    // ── Canvas tool tests ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn canvas_create_returns_document() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("canvas_create", json!({"title": "Test App", "description": "A test"})).await;
+        assert!(!result.is_error);
+        let doc: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(doc["title"], "Test App");
+        assert_eq!(doc["description"], "A test");
+        assert!(doc["id"].as_str().is_some());
+        assert!(doc["tree"].is_object());
+    }
+
+    #[tokio::test]
+    async fn canvas_get_returns_active() {
+        let handler = make_handler_with_state();
+        // No active canvas initially
+        let result = handler.call_tool("canvas_get", json!({})).await;
+        assert_eq!(result.content, "null");
+
+        // Create one
+        handler.call_tool("canvas_create", json!({"title": "My Canvas"})).await;
+        let result = handler.call_tool("canvas_get", json!({})).await;
+        assert!(!result.is_error);
+        let doc: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(doc["title"], "My Canvas");
+    }
+
+    #[tokio::test]
+    async fn canvas_set_tree_replaces_tree() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Tree Test"})).await;
+
+        let new_tree = json!({"id": "root", "type": "Root", "children": [{"id": "box1", "type": "Box"}]});
+        let result = handler.call_tool("canvas_set_tree", json!({"tree": new_tree})).await;
+        assert!(!result.is_error);
+
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert_eq!(doc["tree"]["children"][0]["id"], "box1");
+    }
+
+    #[tokio::test]
+    async fn canvas_add_and_remove_node() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Node Test"})).await;
+
+        // Add a node under root
+        let node = json!({"id": "child1", "type": "Text", "props": {"text": "Hello"}});
+        let result = handler.call_tool("canvas_add_node", json!({"parentId": "root", "node": node})).await;
+        assert!(!result.is_error);
+
+        // Verify it's there
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert_eq!(doc["tree"]["children"][0]["id"], "child1");
+
+        // Remove it
+        let result = handler.call_tool("canvas_remove_node", json!({"nodeId": "child1"})).await;
+        assert!(!result.is_error);
+
+        // Verify it's gone
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert!(doc["tree"]["children"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn canvas_validate_catches_duplicate_ids() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Validate Test"})).await;
+
+        // Set tree with duplicate IDs
+        let tree = json!({"id": "root", "type": "Root", "children": [
+            {"id": "dup", "type": "Box"},
+            {"id": "dup", "type": "Text"}
+        ]});
+        handler.call_tool("canvas_set_tree", json!({"tree": tree})).await;
+
+        let result = handler.call_tool("canvas_validate", json!({})).await;
+        let validation: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(validation["valid"], false);
+        assert!(!validation["issues"].as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn canvas_save_and_load() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Save Test"})).await;
+
+        // Get the ID
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        let id = doc["id"].as_str().unwrap().to_string();
+
+        // Save it
+        let result = handler.call_tool("canvas_save", json!({})).await;
+        assert!(!result.is_error);
+
+        // Create a new canvas (overwrites active)
+        handler.call_tool("canvas_create", json!({"title": "Other"})).await;
+
+        // Load the saved one
+        let result = handler.call_tool("canvas_load", json!({"id": id})).await;
+        assert!(!result.is_error);
+        let loaded: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(loaded["title"], "Save Test");
+    }
+
+    #[tokio::test]
+    async fn canvas_list_shows_saved() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Listed"})).await;
+        handler.call_tool("canvas_save", json!({})).await;
+
+        let result = handler.call_tool("canvas_list", json!({})).await;
+        assert!(!result.is_error);
+        let list: Vec<Value> = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0]["title"], "Listed");
+    }
+
+    #[tokio::test]
+    async fn canvas_export_and_import() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Export Me"})).await;
+
+        let exported = handler.call_tool("canvas_export", json!({})).await;
+        assert!(!exported.is_error);
+
+        // Create a different canvas
+        handler.call_tool("canvas_create", json!({"title": "Different"})).await;
+
+        // Import the exported one
+        let result = handler.call_tool("canvas_import", json!({"json": exported.content})).await;
+        assert!(!result.is_error);
+
+        // Verify active is the imported one
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert_eq!(doc["title"], "Export Me");
+    }
+
+    #[tokio::test]
+    async fn canvas_set_data_merges() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Data Test"})).await;
+
+        handler.call_tool("canvas_set_data", json!({"data": {"count": 1, "name": "test"}})).await;
+        handler.call_tool("canvas_set_data", json!({"data": {"count": 2, "extra": true}})).await;
+
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert_eq!(doc["data"]["count"], 2);
+        assert_eq!(doc["data"]["name"], "test");
+        assert_eq!(doc["data"]["extra"], true);
+    }
+
+    #[tokio::test]
+    async fn canvas_add_procedure_and_rule() {
+        let handler = make_handler_with_state();
+        handler.call_tool("canvas_create", json!({"title": "Proc Test"})).await;
+
+        let proc = json!({"name": "onClick", "steps": [{"action": "navigate", "url": "/next"}]});
+        let result = handler.call_tool("canvas_add_procedure", json!({"procedure": proc})).await;
+        assert!(!result.is_error);
+
+        let rule = json!({"name": "no-empty-text", "check": "node.props.text != ''"});
+        let result = handler.call_tool("canvas_add_rule", json!({"rule": rule})).await;
+        assert!(!result.is_error);
+
+        let get = handler.call_tool("canvas_get", json!({})).await;
+        let doc: Value = serde_json::from_str(&get.content).unwrap();
+        assert_eq!(doc["procedures"].as_array().unwrap().len(), 1);
+        assert_eq!(doc["rules"].as_array().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn canvas_tools_listed() {
+        let handler = make_handler_with_state();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"canvas_create"));
+        assert!(names.contains(&"canvas_get"));
+        assert!(names.contains(&"canvas_set_tree"));
+        assert!(names.contains(&"canvas_add_node"));
+        assert!(names.contains(&"canvas_remove_node"));
+        assert!(names.contains(&"canvas_validate"));
+        assert!(names.contains(&"canvas_export"));
+        assert!(names.contains(&"canvas_import"));
+        assert!(names.contains(&"canvas_list"));
+        assert!(names.contains(&"canvas_load"));
+        assert!(names.contains(&"canvas_save"));
+        assert!(names.contains(&"canvas_set_data"));
+        assert!(names.contains(&"canvas_add_procedure"));
+        assert!(names.contains(&"canvas_add_rule"));
     }
 }
