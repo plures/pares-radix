@@ -5049,10 +5049,10 @@ async fn main() {
                                 }
                             }
                             KeyCode::Up => {
-                                // Reserved for future: input history recall
+                                app.history_up();
                             }
                             KeyCode::Down => {
-                                // Reserved for future: input history recall
+                                app.history_down();
                             }
                             KeyCode::Esc => {
                                 break 'main_loop Ok(());

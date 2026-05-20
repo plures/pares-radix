@@ -37,6 +37,103 @@ pub enum AppEvent {
     Quit,
 }
 
+/// Input history for Up/Down arrow recall.
+#[derive(Clone, Debug, Default)]
+pub struct InputHistory {
+    /// All past inputs, oldest first.
+    entries: Vec<String>,
+    /// Current navigation index (None = not navigating, at fresh prompt).
+    index: Option<usize>,
+    /// Stashed current input when user starts navigating.
+    stash: String,
+    /// Maximum entries to keep.
+    max_entries: usize,
+}
+
+impl InputHistory {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            index: None,
+            stash: String::new(),
+            max_entries,
+        }
+    }
+
+    /// Record a submitted input line.
+    pub fn push(&mut self, input: &str) {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        // Deduplicate consecutive entries
+        if self.entries.last().map(|s| s.as_str()) == Some(trimmed) {
+            return;
+        }
+        self.entries.push(trimmed.to_string());
+        if self.entries.len() > self.max_entries {
+            self.entries.remove(0);
+        }
+        self.reset_navigation();
+    }
+
+    /// Navigate up (older). Returns the history entry to display, or None if at the top.
+    pub fn up(&mut self, current_input: &str) -> Option<&str> {
+        if self.entries.is_empty() {
+            return None;
+        }
+        match self.index {
+            None => {
+                // Start navigating: stash current input, go to most recent
+                self.stash = current_input.to_string();
+                let idx = self.entries.len() - 1;
+                self.index = Some(idx);
+                Some(&self.entries[idx])
+            }
+            Some(idx) if idx > 0 => {
+                let new_idx = idx - 1;
+                self.index = Some(new_idx);
+                Some(&self.entries[new_idx])
+            }
+            _ => None, // Already at oldest
+        }
+    }
+
+    /// Navigate down (newer). Returns the entry or stashed input, or None if already at bottom.
+    pub fn down(&mut self) -> Option<&str> {
+        match self.index {
+            None => None, // Not navigating
+            Some(idx) => {
+                if idx + 1 < self.entries.len() {
+                    let new_idx = idx + 1;
+                    self.index = Some(new_idx);
+                    Some(&self.entries[new_idx])
+                } else {
+                    // Back to the stashed fresh input
+                    self.index = None;
+                    Some(&self.stash)
+                }
+            }
+        }
+    }
+
+    /// Reset navigation state (e.g., after submitting).
+    pub fn reset_navigation(&mut self) {
+        self.index = None;
+        self.stash.clear();
+    }
+
+    /// Number of entries stored.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether history is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 /// Application state.
 pub struct App {
     pub messages: Vec<ChatMessage>,
@@ -51,6 +148,8 @@ pub struct App {
     pub current_model: String,
     pub agent: Arc<Agent>,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
+    /// Input history for Up/Down arrow recall.
+    pub history: InputHistory,
 }
 
 impl App {
@@ -75,6 +174,7 @@ impl App {
             current_model: model_name,
             agent,
             event_tx,
+            history: InputHistory::new(500),
         }
     }
 
@@ -112,6 +212,22 @@ impl App {
         }
     }
 
+    /// Navigate input history up (older entry).
+    pub fn history_up(&mut self) {
+        if let Some(entry) = self.history.up(&self.input) {
+            self.input = entry.to_string();
+            self.input_cursor = self.input.len();
+        }
+    }
+
+    /// Navigate input history down (newer entry).
+    pub fn history_down(&mut self) {
+        if let Some(entry) = self.history.down() {
+            self.input = entry.to_string();
+            self.input_cursor = self.input.len();
+        }
+    }
+
     /// Submit the current input buffer.
     pub fn submit_input(&mut self) {
         let input = self.input.drain(..).collect::<String>();
@@ -120,6 +236,9 @@ impl App {
         if trimmed.is_empty() {
             return;
         }
+
+        // Record in history before processing
+        self.history.push(&trimmed);
 
         if self.handle_command(&trimmed) {
             return;
@@ -342,6 +461,50 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let app = App::new(agent, "test-model".to_string(), tx);
         (app, rx)
+    }
+
+    #[test]
+    fn history_up_recalls_previous_input() {
+        let (mut app, _rx) = test_app();
+        app.history.push("hello");
+        app.history.push("world");
+
+        app.history_up();
+        assert_eq!(app.input, "world");
+
+        app.history_up();
+        assert_eq!(app.input, "hello");
+    }
+
+    #[test]
+    fn history_down_returns_to_current_input() {
+        let (mut app, _rx) = test_app();
+        app.history.push("first");
+        app.history.push("second");
+        app.input = "typing...".to_string();
+
+        app.history_up();
+        assert_eq!(app.input, "second");
+
+        app.history_down();
+        assert_eq!(app.input, "typing...");
+    }
+
+    #[test]
+    fn history_deduplicates_consecutive() {
+        let (mut app, _rx) = test_app();
+        app.history.push("same");
+        app.history.push("same");
+        app.history.push("same");
+        assert_eq!(app.history.len(), 1);
+    }
+
+    #[test]
+    fn history_up_on_empty_does_nothing() {
+        let (mut app, _rx) = test_app();
+        app.input = "current".to_string();
+        app.history_up();
+        assert_eq!(app.input, "current");
     }
 
     #[test]
