@@ -30,7 +30,7 @@ use crate::event::Event;
 use crate::memory::entry::Exchange;
 use crate::memory::store::MemoryStore;
 use crate::memory::{passes_quality_gate, PluresLm};
-use crate::model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher};
+use crate::model::{ChatMessage, ChatOptions, ModelClient, StreamDelta, StreamSender, ToolDispatcher};
 use crate::pii_guard::PiiGuard;
 use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
 use crate::procedure::ProcedureRegistry;
@@ -479,6 +479,135 @@ impl Agent {
         }
     }
 
+    /// Handle a single event with real-time streaming support.
+    ///
+    /// When `stream_tx` is provided, content tokens from the model's first
+    /// completion turn are forwarded as [`StreamDelta`] events before the
+    /// full response is assembled. This enables live token-by-token UI updates.
+    ///
+    /// Falls back to non-streaming for procedural routes, delegations, and
+    /// subsequent tool-loop turns.
+    pub async fn handle_event_streaming(
+        &self,
+        event: Event,
+        stream_tx: StreamSender,
+    ) -> Option<Event> {
+        let request_id = Uuid::new_v4();
+        let _event_start = Instant::now();
+        info!(%request_id, event_kind = %event.kind(), "received event (streaming)");
+        if let Event::Message {
+            ref id,
+            ref channel,
+            ref content,
+            ..
+        } = event
+        {
+            if let Some(command_response) = self.handle_branch_command(id, channel, content).await {
+                let _ = stream_tx.send(StreamDelta::Done);
+                return Some(command_response);
+            }
+        }
+
+        // Cerebellum preprocessing (same as handle_event)
+        let (route, learned_context, clear_history) = if let (Some(cerebellum), Some(plures_lm)) =
+            (&self.cerebellum, &self.plures_lm)
+        {
+            match cerebellum
+                .preprocess(&event, plures_lm, &self.procedure_registry)
+                .await
+            {
+                Ok(ctx) => {
+                    if ctx.route == Route::Drop {
+                        let _ = stream_tx.send(StreamDelta::Done);
+                        return None;
+                    }
+                    (ctx.route, ctx.learned_context, ctx.clear_history)
+                }
+                Err(e) => {
+                    error!(error = %e, "cerebellum preprocess failed (streaming)");
+                    (Route::Conscious, String::new(), false)
+                }
+            }
+        } else {
+            let default_route = match event {
+                Event::Timer { .. } | Event::StateChange { .. } => Route::Procedural,
+                _ => Route::Conscious,
+            };
+            (default_route, String::new(), false)
+        };
+
+        if route == Route::Drop {
+            let _ = stream_tx.send(StreamDelta::Done);
+            return None;
+        }
+
+        match event {
+            Event::Message {
+                ref id,
+                ref channel,
+                ref content,
+                ..
+            } => match route {
+                Route::Procedural => {
+                    let _ = stream_tx.send(StreamDelta::Done);
+                    self.dispatch_procedures(&Event::Message {
+                        id: id.clone(),
+                        channel: channel.clone(),
+                        sender: String::new(),
+                        content: content.clone(),
+                    })
+                    .await
+                }
+                Route::Delegate { reason, tasks } => {
+                    let delegated = self
+                        .handle_delegation(id, channel, content, &learned_context, &reason, tasks)
+                        .await;
+                    if delegated.is_some() {
+                        let _ = stream_tx.send(StreamDelta::Done);
+                        delegated
+                    } else {
+                        self.handle_model_message_streaming(
+                            id,
+                            channel,
+                            content,
+                            &learned_context,
+                            clear_history,
+                            stream_tx,
+                        )
+                        .await
+                    }
+                }
+                Route::Conscious | Route::Deep { .. } => {
+                    self.handle_model_message_streaming(
+                        id,
+                        channel,
+                        content,
+                        &learned_context,
+                        clear_history,
+                        stream_tx,
+                    )
+                    .await
+                }
+                Route::Drop => {
+                    let _ = stream_tx.send(StreamDelta::Done);
+                    None
+                }
+            },
+            Event::Timer { .. } | Event::StateChange { .. } => {
+                let _ = stream_tx.send(StreamDelta::Done);
+                if matches!(route, Route::Procedural) {
+                    self.dispatch_procedures(&event).await
+                } else {
+                    None
+                }
+            }
+            _ => {
+                let _ = stream_tx.send(StreamDelta::Done);
+                None
+            }
+        }
+    }
+
     async fn handle_model_message(
         &self,
         id: &str,
@@ -486,6 +615,39 @@ impl Agent {
         content: &str,
         learned_context: &str,
         clear_history: bool,
+    ) -> Option<Event> {
+        self.handle_model_message_inner(id, channel, content, learned_context, clear_history, None)
+            .await
+    }
+
+    async fn handle_model_message_streaming(
+        &self,
+        id: &str,
+        channel: &str,
+        content: &str,
+        learned_context: &str,
+        clear_history: bool,
+        stream_tx: StreamSender,
+    ) -> Option<Event> {
+        self.handle_model_message_inner(
+            id,
+            channel,
+            content,
+            learned_context,
+            clear_history,
+            Some(stream_tx),
+        )
+        .await
+    }
+
+    async fn handle_model_message_inner(
+        &self,
+        id: &str,
+        channel: &str,
+        content: &str,
+        learned_context: &str,
+        clear_history: bool,
+        stream_tx: Option<StreamSender>,
     ) -> Option<Event> {
         info!(id, channel, "handle_model_message: starting model call");
         let session_channel = self.resolve_branch_channel(channel);
@@ -534,6 +696,7 @@ impl Agent {
                 &history_snapshot,
                 content,
                 &options,
+                stream_tx.as_ref(),
             )
             .await
         {
@@ -565,6 +728,7 @@ impl Agent {
                         &history_snapshot,
                         content,
                         &deep_options,
+                        None, // no streaming for deep fallback
                     )
                     .await
                 {
@@ -811,6 +975,7 @@ impl Agent {
         prompt
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_model_loop(
         &self,
         model_client: &Arc<dyn ModelClient>,
@@ -819,6 +984,7 @@ impl Agent {
         history_snapshot: &[ChatMessage],
         content: &str,
         options: &ChatOptions,
+        stream_tx: Option<&StreamSender>,
     ) -> Result<(String, Option<Vec<f64>>, Vec<ChatMessage>), String> {
         let mut messages = Vec::with_capacity(history_snapshot.len() + 2);
         messages.push(ChatMessage::system(system_text));
@@ -896,9 +1062,18 @@ impl Agent {
                 tool_count = tools.len(),
                 "ABOUT TO CALL model_client.complete"
             );
-            let completion = model_client
-                .complete(&messages_for_model, &tools, options)
-                .await?;
+            // Use streaming when a StreamSender is provided (first turn only —
+            // subsequent tool-loop turns use non-streaming since the UI already
+            // shows the tool execution phase).
+            let completion = if let (Some(tx), 0) = (stream_tx, turn) {
+                model_client
+                    .complete_stream(&messages_for_model, &tools, options, tx.clone())
+                    .await?
+            } else {
+                model_client
+                    .complete(&messages_for_model, &tools, options)
+                    .await?
+            };
             let latency_ms = model_start.elapsed().as_millis();
             info!(
                 turn,
@@ -1947,6 +2122,38 @@ mod tests {
         assert!(
             matches!(response, Some(Event::ModelResponse { ref content, .. }) if content == "Echo: hello")
         );
+    }
+
+    #[tokio::test]
+    async fn agent_streaming_emits_content_and_done() {
+        use tokio::sync::mpsc;
+
+        let agent = Agent::new(Arc::new(InMemory::new())).with_model(
+            Arc::new(MockModel),
+            Arc::new(MockTools),
+            "You are a test agent.".into(),
+        );
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let response = agent.handle_event_streaming(msg("hello"), tx).await;
+
+        // The response should still be returned.
+        assert!(
+            matches!(response, Some(Event::ModelResponse { ref content, .. }) if content == "Echo: hello")
+        );
+
+        // The stream should have received Content + Done (default complete_stream
+        // impl sends the full content as one chunk then Done).
+        let mut got_content = false;
+        let mut got_done = false;
+        while let Ok(delta) = rx.try_recv() {
+            match delta {
+                StreamDelta::Content(ref s) if s == "Echo: hello" => got_content = true,
+                StreamDelta::Done => got_done = true,
+                _ => {}
+            }
+        }
+        assert!(got_content, "expected StreamDelta::Content");
+        assert!(got_done, "expected StreamDelta::Done");
     }
 
     #[tokio::test]

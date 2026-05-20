@@ -62,6 +62,7 @@ struct ModelErrorPayload {
     error: String,
 }
 
+#[cfg(test)]
 fn split_stream_chunks(content: &str) -> Vec<String> {
     if content.is_empty() {
         return Vec::new();
@@ -613,7 +614,42 @@ pub fn run() {
                                 _ => None,
                             };
 
-                            let response = agent.handle_event(event).await;
+                            // Use streaming path for messages (real-time token emission).
+                            let response = if let Some(ref req_id) = request_id {
+                                let (tx, mut rx) =
+                                    tokio::sync::mpsc::unbounded_channel::<StreamDelta>();
+                                let stream_handle = app_handle.clone();
+                                let stream_req_id = req_id.clone();
+
+                                // Spawn a task to forward stream deltas to the frontend.
+                                let forwarder = tokio::spawn(async move {
+                                    while let Some(delta) = rx.recv().await {
+                                        match delta {
+                                            StreamDelta::Content(content) => {
+                                                emit_with_warn(
+                                                    &stream_handle,
+                                                    "model-chunk",
+                                                    &ModelChunkPayload {
+                                                        request_id: stream_req_id.clone(),
+                                                        content,
+                                                        done: false,
+                                                    },
+                                                );
+                                            }
+                                            StreamDelta::Done => break,
+                                            _ => {} // ToolCallStart/Delta handled internally
+                                        }
+                                    }
+                                });
+
+                                let resp = agent.handle_event_streaming(event, tx).await;
+                                // Ensure forwarder completes.
+                                let _ = forwarder.await;
+                                resp
+                            } else {
+                                agent.handle_event(event).await
+                            };
+
                             if let Some(content) =
                                 response.as_ref().and_then(notifications::response_content)
                             {
@@ -634,18 +670,7 @@ pub fn run() {
                                 match &response {
                                     Some(Event::ModelResponse { content, .. })
                                     | Some(Event::Message { content, .. }) => {
-                                        for chunk in split_stream_chunks(content) {
-                                            emit_with_warn(
-                                                &app_handle,
-                                                "model-chunk",
-                                                &ModelChunkPayload {
-                                                    request_id: request_id.clone(),
-                                                    content: chunk,
-                                                    done: false,
-                                                },
-                                            );
-                                        }
-
+                                        // Emit the final done marker and full response.
                                         emit_with_warn(
                                             &app_handle,
                                             "model-chunk",
