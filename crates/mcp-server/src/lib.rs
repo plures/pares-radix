@@ -29,6 +29,7 @@
 
 #![warn(missing_docs)]
 
+pub mod app_metrics;
 pub mod browser;
 pub mod handler;
 pub mod radix_handler;

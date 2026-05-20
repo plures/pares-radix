@@ -4987,6 +4987,7 @@ dependencies = [
  "futures-util",
  "html2text",
  "libc",
+ "opentelemetry",
  "pares-agens-agenda",
  "pares-agens-core",
  "pares-radix-mcp-client",
