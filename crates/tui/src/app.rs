@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use pares_agens_core::agent::Agent;
-use pares_agens_core::commands::{CommandContext, CommandRegistry, CommandResult};
+use pares_agens_core::commands::{CommandContext, CommandRegistry, CommandResult, SessionCommand};
 use pares_agens_core::model::StreamDelta;
 use pares_agens_core::Event;
 
@@ -205,6 +205,10 @@ pub struct App {
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
     /// Input history for Up/Down arrow recall.
     pub history: InputHistory,
+    /// Named sessions: Vec<(name, is_active)>.
+    pub sessions: Vec<(String, bool)>,
+    /// Current active session name.
+    pub current_session: String,
 }
 
 impl App {
@@ -234,6 +238,8 @@ impl App {
                 h.load_from_disk();
                 h
             },
+            sessions: vec![("default".to_string(), true)],
+            current_session: "default".to_string(),
         }
     }
 
@@ -296,6 +302,72 @@ impl App {
                 self.current_model = name.clone();
                 self.push_system(&format!("Model switched to: {name}"));
                 true
+            }
+            CommandResult::Session(cmd) => {
+                self.handle_session_command(cmd);
+                true
+            }
+        }
+    }
+
+    /// Handle session management commands.
+    fn handle_session_command(&mut self, cmd: SessionCommand) {
+        match cmd {
+            SessionCommand::List => {
+                let sessions = &self.sessions;
+                if sessions.is_empty() {
+                    self.push_system("No sessions. Current session: default");
+                } else {
+                    let mut lines = String::from("Sessions:\n");
+                    for (name, active) in sessions {
+                        let marker = if *active { " ← active" } else { "" };
+                        lines.push_str(&format!("  • {name}{marker}\n"));
+                    }
+                    self.push_system(lines.trim_end());
+                }
+            }
+            SessionCommand::New(name) => {
+                // Archive current session state and start fresh
+                let current = self.current_session.clone();
+                // Mark old session as inactive
+                if let Some(entry) = self.sessions.iter_mut().find(|(n, _)| *n == current) {
+                    entry.1 = false;
+                }
+                // Add new session
+                self.sessions.push((name.clone(), true));
+                self.current_session = name.clone();
+                self.messages.clear();
+                self.scroll_offset = 0;
+                self.push_system(&format!("New session created: {name}"));
+            }
+            SessionCommand::Switch(name) => {
+                // Check if session exists
+                let exists = self.sessions.iter().any(|(n, _)| *n == name);
+                if !exists {
+                    self.push_system(&format!("Session not found: {name}. Use /session list to see available sessions."));
+                    return;
+                }
+                // Mark all inactive, mark target active
+                for entry in self.sessions.iter_mut() {
+                    entry.1 = entry.0 == name;
+                }
+                self.current_session = name.clone();
+                // Clear current view — session messages will be loaded from store
+                self.messages.clear();
+                self.scroll_offset = 0;
+                self.push_system(&format!("Switched to session: {name}"));
+            }
+            SessionCommand::Archive => {
+                let current = self.current_session.clone();
+                // Remove from active sessions list
+                self.sessions.retain(|(n, _)| *n != current);
+                // Start a new default session
+                let new_name = "default".to_string();
+                self.sessions.push((new_name.clone(), true));
+                self.current_session = new_name;
+                self.messages.clear();
+                self.scroll_offset = 0;
+                self.push_system(&format!("Session '{current}' archived. Now in: default"));
             }
         }
     }
@@ -572,6 +644,8 @@ mod tests {
             agent,
             event_tx: tx,
             history: InputHistory::new(500), // Empty, no disk load
+            sessions: vec![("default".to_string(), true)],
+            current_session: "default".to_string(),
         };
         (app, rx)
     }
@@ -824,5 +898,75 @@ mod tests {
         assert_eq!(user_msgs.len(), 1);
         assert_eq!(user_msgs[0].content, "line1\nline2\nline3");
         assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn session_list_shows_default() {
+        let (mut app, _rx) = test_app();
+        app.handle_command("/session list");
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, Role::System);
+        assert!(last.content.contains("default"));
+        assert!(last.content.contains("active"));
+    }
+
+    #[test]
+    fn session_new_creates_and_switches() {
+        let (mut app, _rx) = test_app();
+        // Add a message to prove clear happens
+        app.messages.push(ChatMessage {
+            role: Role::User,
+            content: "old message".to_string(),
+            timestamp: chrono::Utc::now(),
+        });
+
+        app.handle_command("/session new work");
+
+        assert_eq!(app.current_session, "work");
+        assert_eq!(app.sessions.len(), 2);
+        // Old default should be inactive
+        assert!(!app.sessions.iter().find(|(n, _)| n == "default").unwrap().1);
+        // New should be active
+        assert!(app.sessions.iter().find(|(n, _)| n == "work").unwrap().1);
+        // Messages should be cleared (only the system notice remains)
+        assert_eq!(app.messages.len(), 1);
+        assert!(app.messages[0].content.contains("New session created: work"));
+    }
+
+    #[test]
+    fn session_switch_to_existing() {
+        let (mut app, _rx) = test_app();
+        // Create a second session
+        app.handle_command("/session new second");
+        // Switch back to default
+        app.handle_command("/session switch default");
+
+        assert_eq!(app.current_session, "default");
+        assert!(app.sessions.iter().find(|(n, _)| n == "default").unwrap().1);
+        assert!(!app.sessions.iter().find(|(n, _)| n == "second").unwrap().1);
+    }
+
+    #[test]
+    fn session_switch_nonexistent_shows_error() {
+        let (mut app, _rx) = test_app();
+        app.handle_command("/session switch ghost");
+
+        let last = app.messages.last().unwrap();
+        assert!(last.content.contains("Session not found: ghost"));
+        // Should still be on default
+        assert_eq!(app.current_session, "default");
+    }
+
+    #[test]
+    fn session_archive_resets_to_default() {
+        let (mut app, _rx) = test_app();
+        app.handle_command("/session new temp");
+        assert_eq!(app.current_session, "temp");
+
+        app.handle_command("/session archive");
+
+        assert_eq!(app.current_session, "default");
+        // "temp" should be removed from sessions list
+        assert!(!app.sessions.iter().any(|(n, _)| n == "temp"));
     }
 }

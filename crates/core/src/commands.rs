@@ -1,5 +1,7 @@
 //! Shared slash command registry for all channel adapters (TUI, Telegram, etc.)
 
+use chrono::Utc;
+
 /// Result of executing a command.
 pub enum CommandResult {
     /// Display this text to the user.
@@ -12,6 +14,21 @@ pub enum CommandResult {
     NotACommand,
     /// Switch model.
     SwitchModel(String),
+    /// Session management commands.
+    Session(SessionCommand),
+}
+
+/// Session management sub-commands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionCommand {
+    /// List all sessions for the current chat.
+    List,
+    /// Create a new named session (archives the current one).
+    New(String),
+    /// Switch to an existing session by name or key.
+    Switch(String),
+    /// Archive the current session.
+    Archive,
 }
 
 /// Shared command definitions.
@@ -60,6 +77,7 @@ impl CommandRegistry {
                 env!("CARGO_PKG_VERSION"),
                 option_env!("GIT_HASH").unwrap_or("dev")
             )),
+            "/session" => self.handle_session_command(args),
             "/memory" => {
                 if args.is_empty() {
                     CommandResult::Response("Usage: /memory <query> — or just ask the agent, it searches memory automatically.".into())
@@ -82,9 +100,43 @@ impl CommandRegistry {
         }
     }
 
+    fn handle_session_command(&self, args: &str) -> CommandResult {
+        let (sub, sub_args) = match args.split_once(' ') {
+            Some((s, a)) => (s.trim(), a.trim()),
+            None => (args.trim(), ""),
+        };
+
+        match sub {
+            "" | "list" => CommandResult::Session(SessionCommand::List),
+            "new" => {
+                let name = if sub_args.is_empty() {
+                    Utc::now().format("%Y%m%d-%H%M%S").to_string()
+                } else {
+                    sub_args.to_string()
+                };
+                CommandResult::Session(SessionCommand::New(name))
+            }
+            "switch" => {
+                if sub_args.is_empty() {
+                    CommandResult::Response(
+                        "Usage: /session switch <name> — switch to a named session".into(),
+                    )
+                } else {
+                    CommandResult::Session(SessionCommand::Switch(sub_args.to_string()))
+                }
+            }
+            "archive" => CommandResult::Session(SessionCommand::Archive),
+            _ => CommandResult::Response(format!(
+                "Unknown session command: {sub}\n\
+                 Usage: /session [list|new [name]|switch <name>|archive]"
+            )),
+        }
+    }
+
     fn help_text(&self) -> String {
         "Commands:\n  \
          /model [name]    — show or switch primary model\n  \
+         /session [cmd]   — list/new/switch/archive sessions\n  \
          /config          — show runtime config\n  \
          /status          — show session status\n  \
          /memory <query>  — search PluresDB memories\n  \
