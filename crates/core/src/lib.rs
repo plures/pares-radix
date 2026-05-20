@@ -83,6 +83,9 @@ pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};
 pub use event::Event;
 pub use state::{InMemoryStateStore, PluresDbStateStore, StateStore};
+
+/// Re-export PluresDB primitives for consumers that need the shared CrdtStore.
+pub use pluresdb::{CrdtStore, SledStorage, StorageEngine};
 /// Channel capability contracts for output rendering.
 pub mod channel_contract;
 /// Event spine — bridges pares-radix to PluresDB's AgensRuntime.

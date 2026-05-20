@@ -3563,19 +3563,25 @@ async fn main() {
             // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
 
-            // 3.5. Create PluresDB-backed conversation store (persistent)
-            let conversation_state_dir = PathBuf::from(&home).join(".pares-radix/conversation-state");
-            std::fs::create_dir_all(&conversation_state_dir).ok();
-            let conversation_store: Arc<dyn ConversationStore> = match PluresConversationStore::persistent(&conversation_state_dir) {
-                Ok(store) => {
-                    info!(path = %conversation_state_dir.display(), "Conversation store opened (persistent PluresDB)");
-                    Arc::new(store)
+            // 3.5. Open THE shared PluresDB instance — all state goes here
+            use pares_agens_core::{CrdtStore, SledStorage, StorageEngine};
+            let pluresdb_dir = PathBuf::from(&home).join(".pares-radix/runtime-state");
+            std::fs::create_dir_all(&pluresdb_dir).ok();
+            let shared_store: Arc<CrdtStore> = match SledStorage::open(&pluresdb_dir) {
+                Ok(storage) => {
+                    let engine: Arc<dyn StorageEngine> = Arc::new(storage);
+                    info!(path = %pluresdb_dir.display(), "PluresDB opened (shared instance)");
+                    Arc::new(CrdtStore::default().with_persistence(engine))
                 }
                 Err(e) => {
-                    warn!(error = %e, "Failed to open persistent conversation store, using in-memory");
-                    Arc::new(PluresConversationStore::in_memory())
+                    warn!(error = %e, "Failed to open PluresDB, using in-memory");
+                    Arc::new(CrdtStore::default())
                 }
             };
+
+            // Conversation store writes to the shared PluresDB
+            let conversation_store: Arc<dyn ConversationStore> =
+                Arc::new(PluresConversationStore::new(Arc::clone(&shared_store)));
 
             // 3.6. Load system prompt from file or use default
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
