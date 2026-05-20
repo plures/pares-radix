@@ -80,6 +80,8 @@ pub mod state;
 pub mod telemetry;
 #[cfg(feature = "otel")]
 pub mod otel;
+#[cfg(feature = "otel")]
+pub mod otel_metrics;
 
 pub use agent::Memory as AgentMemory;
 pub use agent::{Agent, InMemory};
