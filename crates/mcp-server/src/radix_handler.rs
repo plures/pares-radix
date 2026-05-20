@@ -2701,6 +2701,184 @@ impl RadixToolHandler {
         }).to_string())
     }
 
+    // ── Compose tool ──────────────────────────────────────────────────────────
+
+    async fn px_compose(&self, args: &Value) -> ToolResult {
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(a) => a,
+            None => return ToolResult::error("missing required field: action"),
+        };
+
+        match action {
+            "register" => {
+                // Get source from inline or file
+                let source = if let Some(src) = args.get("source").and_then(|v| v.as_str()) {
+                    src.to_string()
+                } else if let Some(file_path) = args.get("file").and_then(|v| v.as_str()) {
+                    let resolved = self.resolve_path(file_path);
+                    match tokio::fs::read_to_string(&resolved).await {
+                        Ok(content) => content,
+                        Err(e) => return ToolResult::error(format!("failed to read .px file: {e}")),
+                    }
+                } else {
+                    return ToolResult::error(
+                        "'source' (inline .px code) or 'file' (path to .px file) required for action=register",
+                    );
+                };
+
+                // Parse and compile
+                let doc = match px::parse(&source) {
+                    Ok(d) => d,
+                    Err(e) => return ToolResult::error(format!("parse error: {e}")),
+                };
+
+                let records = compiler::compile(&doc);
+                let mut registered: Vec<String> = Vec::new();
+
+                let mut procedures_guard = self.loaded_procedures.write().await;
+                let source_path = args
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .map(|f| self.resolve_path(f))
+                    .unwrap_or_else(|| PathBuf::from("<inline>"));
+
+                for record in &records {
+                    if record.data.get("type").and_then(|v| v.as_str()) == Some("procedure") {
+                        let name = record
+                            .data
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let description = record
+                            .data
+                            .get("description")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                        procedures_guard.insert(
+                            name.clone(),
+                            LoadedProcedure {
+                                name: name.clone(),
+                                source_file: source_path.clone(),
+                                data: record.data.clone(),
+                                description,
+                            },
+                        );
+                        registered.push(name);
+                    }
+                }
+
+                if registered.is_empty() {
+                    return ToolResult::error("no procedures found in source");
+                }
+
+                info!(count = registered.len(), names = ?registered, "px_compose: registered procedures");
+                ToolResult::ok(json!({
+                    "registered": registered,
+                    "total": procedures_guard.len(),
+                }).to_string())
+            }
+
+            "unregister" => {
+                let name = match args.get("name").and_then(|v| v.as_str()) {
+                    Some(n) => n,
+                    None => return ToolResult::error("'name' required for action=unregister"),
+                };
+
+                let mut procedures_guard = self.loaded_procedures.write().await;
+                if procedures_guard.remove(name).is_some() {
+                    info!(name, "px_compose: unregistered procedure");
+                    ToolResult::ok(json!({
+                        "unregistered": name,
+                        "total": procedures_guard.len(),
+                    }).to_string())
+                } else {
+                    let available: Vec<_> = procedures_guard.keys().cloned().collect();
+                    ToolResult::error(format!(
+                        "procedure '{name}' not found. Available: {available:?}"
+                    ))
+                }
+            }
+
+            "list" => {
+                let procedures_guard = self.loaded_procedures.read().await;
+                let list: Vec<Value> = procedures_guard
+                    .values()
+                    .map(|p| {
+                        json!({
+                            "name": p.name,
+                            "source_file": p.source_file.to_string_lossy(),
+                            "description": p.description,
+                        })
+                    })
+                    .collect();
+                ToolResult::ok(json!({
+                    "procedures": list,
+                    "count": list.len(),
+                }).to_string())
+            }
+
+            "pipe" => {
+                let pipeline = match args.get("pipeline").and_then(|v| v.as_array()) {
+                    Some(arr) => arr
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .collect::<Vec<_>>(),
+                    None => {
+                        return ToolResult::error(
+                            "'pipeline' (array of procedure names) required for action=pipe",
+                        )
+                    }
+                };
+
+                if pipeline.is_empty() {
+                    return ToolResult::error("pipeline must contain at least one procedure name");
+                }
+
+                let initial_input = args
+                    .get("input")
+                    .cloned()
+                    .or_else(|| args.get("vars").cloned())
+                    .unwrap_or(Value::Null);
+
+                let registry = self.build_procedure_registry().await;
+
+                // Verify all procedures exist before running
+                for name in &pipeline {
+                    if !registry.contains(name) {
+                        return ToolResult::error(format!(
+                            "procedure '{}' not found in registry. Available: {:?}",
+                            name,
+                            registry.names()
+                        ));
+                    }
+                }
+
+                let shell_handler = ShellBackedProcedureHandler {
+                    shell: Arc::clone(&self.shell),
+                    workdir: self.workdir.clone(),
+                    children: Arc::new(tokio::sync::Mutex::new(
+                        std::collections::HashMap::new(),
+                    )),
+                };
+
+                use pares_radix_praxis::px::compose::pipe;
+                match pipe(&pipeline, &registry, &shell_handler, initial_input).await {
+                    Ok(result) => ToolResult::ok(json!({
+                        "pipeline": pipeline,
+                        "result": result,
+                        "success": true,
+                    }).to_string()),
+                    Err(e) => ToolResult::error(format!("pipe execution failed: {e}")),
+                }
+            }
+
+            other => ToolResult::error(format!(
+                "unknown action: '{other}'. Valid actions: register, unregister, list, pipe"
+            )),
+        }
+    }
+
     // ── Chronos tools ─────────────────────────────────────────────────────────
 
     async fn chronos_history(&self, args: &Value) -> ToolResult {
@@ -4279,6 +4457,27 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Compose tool ─────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "px_compose".into(),
+            description: Some(
+                "Dynamic procedure composition: register/unregister procedures at runtime, list the registry, or run a pipeline (pipe) of procedures sequentially. Actions: register, unregister, list, pipe.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({
+                    "action": {"type": "string", "enum": ["register", "unregister", "list", "pipe"], "description": "Action to perform"},
+                    "source": {"type": "string", "description": "Inline .px source to register (for action=register)"},
+                    "file": {"type": "string", "description": "Path to .px file to register (for action=register)"},
+                    "name": {"type": "string", "description": "Procedure name (for action=unregister)"},
+                    "pipeline": {"type": "array", "items": {"type": "string"}, "description": "Ordered list of procedure names to execute as a pipe (for action=pipe)"},
+                    "input": {"description": "Initial input value for the pipe (for action=pipe)"},
+                    "vars": {"type": "object", "description": "Initial variables passed to the first pipeline stage (for action=pipe)"}
+                })),
+                required: Some(vec!["action".into()]),
+            },
+        });
+
         // ── Chronos tools (always available) ────────────────────────────────────────
         tools.push(Tool {
             name: "chronos_history".into(),
@@ -4699,6 +4898,7 @@ impl RadixToolHandler {
             "praxis_add_constraint" => self.praxis_add_constraint(&arguments).await,
             "praxis_add_rule" => self.praxis_add_rule(&arguments).await,
             "px_lint" => self.px_lint(&arguments).await,
+            "px_compose" => self.px_compose(&arguments).await,
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
@@ -7840,5 +8040,154 @@ mod tests {
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"telemetry_snapshot"));
         assert!(names.contains(&"telemetry_reset"));
+    }
+
+    // ── px_compose tests ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn px_compose_register_inline() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "px_compose",
+                json!({
+                    "action": "register",
+                    "source": "procedure greet:\n  trigger: manual\n  echo {msg: \"hello\"} -> $out\n"
+                }),
+            )
+            .await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("greet"));
+
+        // Verify it's in the list
+        let list_result = handler
+            .call_tool("px_compose", json!({"action": "list"}))
+            .await;
+        assert!(!list_result.is_error);
+        assert!(list_result.content.contains("greet"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_unregister() {
+        let handler = make_handler();
+        // Register first
+        handler
+            .call_tool(
+                "px_compose",
+                json!({
+                    "action": "register",
+                    "source": "procedure temp_proc:\n  trigger: manual\n  echo {x: 1} -> $y\n"
+                }),
+            )
+            .await;
+
+        // Unregister
+        let result = handler
+            .call_tool(
+                "px_compose",
+                json!({"action": "unregister", "name": "temp_proc"}),
+            )
+            .await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("temp_proc"));
+
+        // Verify it's gone
+        let list_result = handler
+            .call_tool("px_compose", json!({"action": "list"}))
+            .await;
+        assert!(!list_result.content.contains("temp_proc"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_unregister_nonexistent() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "px_compose",
+                json!({"action": "unregister", "name": "does_not_exist"}),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_list_empty() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("px_compose", json!({"action": "list"}))
+            .await;
+        assert!(!result.is_error);
+        assert!(result.content.contains("\"count\":0") || result.content.contains("\"count\": 0"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_pipe_missing_procedure() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool(
+                "px_compose",
+                json!({"action": "pipe", "pipeline": ["nonexistent"]}),
+            )
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_pipe_runs_single_procedure() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join("radix_test_px_compose_pipe");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+
+        let px_file = dir.join("pipe_test.px");
+        let mut f = std::fs::File::create(&px_file).unwrap();
+        write!(
+            f,
+            "procedure add_greeting:\n  trigger: manual\n  echo {{greeting: \"hello world\"}} -> $output\n"
+        )
+        .unwrap();
+        drop(f);
+
+        let shell = Arc::new(ShellExecutor::new());
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_px_dir(dir.clone());
+
+        let result = handler
+            .call_tool(
+                "px_compose",
+                json!({"action": "pipe", "pipeline": ["add_greeting"], "input": {"name": "test"}}),
+            )
+            .await;
+        assert!(!result.is_error, "unexpected error: {}", result.content);
+        assert!(result.content.contains("success"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn px_compose_invalid_action() {
+        let handler = make_handler();
+        let result = handler
+            .call_tool("px_compose", json!({"action": "invalid"}))
+            .await;
+        assert!(result.is_error);
+        assert!(result.content.contains("unknown action"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_missing_action() {
+        let handler = make_handler();
+        let result = handler.call_tool("px_compose", json!({})).await;
+        assert!(result.is_error);
+        assert!(result.content.contains("action"));
+    }
+
+    #[tokio::test]
+    async fn px_compose_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"px_compose"));
     }
 }
