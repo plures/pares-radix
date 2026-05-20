@@ -1,5 +1,8 @@
 //! TUI application state and event loop.
 
+use std::fs;
+use std::io::{BufRead, Write};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -132,6 +135,58 @@ impl InputHistory {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Default history file path: `~/.pares-radix/history`.
+    fn history_path() -> Option<PathBuf> {
+        std::env::var("HOME").ok().map(|home| {
+            PathBuf::from(home)
+                .join(".pares-radix")
+                .join("history")
+        })
+    }
+
+    /// Load history entries from disk. Silently returns empty on any error.
+    pub fn load_from_disk(&mut self) {
+        let Some(path) = Self::history_path() else {
+            return;
+        };
+        let Ok(file) = fs::File::open(&path) else {
+            return;
+        };
+        let reader = std::io::BufReader::new(file);
+        let mut entries: Vec<String> = Vec::new();
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            let trimmed = line.trim().to_string();
+            if !trimmed.is_empty() {
+                // Deduplicate consecutive on load
+                if entries.last().map(|s| s.as_str()) != Some(&trimmed) {
+                    entries.push(trimmed);
+                }
+            }
+        }
+        // Keep only the last max_entries
+        if entries.len() > self.max_entries {
+            entries = entries.split_off(entries.len() - self.max_entries);
+        }
+        self.entries = entries;
+    }
+
+    /// Persist all history entries to disk. Silently ignores errors.
+    pub fn save_to_disk(&self) {
+        let Some(path) = Self::history_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let Ok(mut file) = fs::File::create(&path) else {
+            return;
+        };
+        for entry in &self.entries {
+            let _ = writeln!(file, "{entry}");
+        }
+    }
 }
 
 /// Application state.
@@ -174,7 +229,11 @@ impl App {
             current_model: model_name,
             agent,
             event_tx,
-            history: InputHistory::new(500),
+            history: {
+                let mut h = InputHistory::new(500);
+                h.load_from_disk();
+                h
+            },
         }
     }
 
@@ -239,6 +298,7 @@ impl App {
 
         // Record in history before processing
         self.history.push(&trimmed);
+        self.history.save_to_disk();
 
         if self.handle_command(&trimmed) {
             return;
@@ -397,14 +457,13 @@ impl App {
 mod tests {
     use super::*;
     use pares_agens_core::agent::Agent;
-    use pares_agens_core::model::StreamDelta;
 
     /// Create a minimal App for testing (uses a mock agent).
     fn test_app() -> (App, mpsc::UnboundedReceiver<AppEvent>) {
         use pares_agens_core::agent::Memory;
         use pares_agens_core::model::{
             ChatMessage as CoreChatMessage, ChatOptions, ModelClient, ModelCompletion,
-            StreamSender, ToolDefinition, ToolDispatcher,
+            ToolDefinition, ToolDispatcher,
         };
         use async_trait::async_trait;
         use serde_json::Value;
@@ -572,5 +631,67 @@ mod tests {
         assert_eq!(last.content, "Direct answer");
         assert!(!app.thinking);
         assert!(!app.streaming);
+    }
+
+    #[test]
+    fn history_save_and_load_roundtrip() {
+        use std::env;
+        // Use a temp dir to avoid polluting real home
+        let tmp = std::env::temp_dir().join(format!("pares-radix-test-{}", std::process::id()));
+        let radix_dir = tmp.join(".pares-radix");
+        fs::create_dir_all(&radix_dir).unwrap();
+
+        // Temporarily override HOME
+        let orig_home = env::var("HOME").unwrap_or_default();
+        env::set_var("HOME", &tmp);
+
+        let mut hist = InputHistory::new(500);
+        hist.push("first command");
+        hist.push("second command");
+        hist.push("third");
+        hist.save_to_disk();
+
+        // Load into a fresh history
+        let mut hist2 = InputHistory::new(500);
+        hist2.load_from_disk();
+        assert_eq!(hist2.len(), 3);
+        // Verify order by navigating
+        assert_eq!(hist2.up(""), Some("third"));
+        assert_eq!(hist2.up(""), Some("second command"));
+        assert_eq!(hist2.up(""), Some("first command"));
+
+        // Cleanup
+        env::set_var("HOME", &orig_home);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn history_load_respects_max_entries() {
+        use std::env;
+        let tmp = std::env::temp_dir().join(format!("pares-radix-test-max-{}", std::process::id()));
+        let radix_dir = tmp.join(".pares-radix");
+        fs::create_dir_all(&radix_dir).unwrap();
+
+        let orig_home = env::var("HOME").unwrap_or_default();
+        env::set_var("HOME", &tmp);
+
+        // Write more entries than max
+        let mut hist = InputHistory::new(500);
+        for i in 0..10 {
+            hist.push(&format!("entry {i}"));
+        }
+        hist.save_to_disk();
+
+        // Load with small max
+        let mut hist2 = InputHistory::new(3);
+        hist2.load_from_disk();
+        assert_eq!(hist2.len(), 3);
+        // Should be the last 3
+        assert_eq!(hist2.up(""), Some("entry 9"));
+        assert_eq!(hist2.up(""), Some("entry 8"));
+        assert_eq!(hist2.up(""), Some("entry 7"));
+
+        env::set_var("HOME", &orig_home);
+        let _ = fs::remove_dir_all(&tmp);
     }
 }
