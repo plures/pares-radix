@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, RwLock};
-use tracing::info;
+use tracing::{info, instrument};
 
 use pares_agens_channels::adapter::ChannelAdapter;
 use pares_agens_channels::tauri_ipc::tauri_ipc_channel;
@@ -120,10 +120,12 @@ pub(crate) fn apply_activation_hotkey(_: &tauri::AppHandle, _: &str) -> Result<(
 struct AppModelClient {
     router: Arc<RwLock<ModelRouter>>,
     settings: Arc<Mutex<Settings>>,
+    telemetry_service: Arc<TelemetryService>,
 }
 
 #[async_trait::async_trait]
 impl ModelClient for AppModelClient {
+    #[instrument(skip_all, fields(model, provider = "router"))]
     async fn complete(
         &self,
         messages: &[ChatMessage],
@@ -139,6 +141,7 @@ impl ModelClient for AppModelClient {
                 .map(|r| r.model.clone())
                 .unwrap_or_else(|| settings.model.clone())
         };
+        tracing::Span::current().record("model", &model.as_str());
 
         let converted_messages = messages
             .iter()
@@ -194,12 +197,16 @@ impl ModelClient for AppModelClient {
             request.logprobs = Some(true);
         }
 
+        let start = std::time::Instant::now();
         let router_guard = self.router.read().await;
         let response = router_guard
             .chat(&request)
             .await
             .map_err(|e| e.to_string())?;
         drop(router_guard);
+        let latency_ms = start.elapsed().as_millis();
+        info!(latency_ms, model = %model, "model call completed");
+        self.telemetry_service.record_model_call(latency_ms as u64).await;
 
         let choice = response
             .choices
@@ -396,6 +403,7 @@ pub fn run() {
             let model_client = Arc::new(AppModelClient {
                 router: Arc::clone(&model_router),
                 settings: Arc::clone(&settings),
+                telemetry_service: Arc::clone(&telemetry_service),
             });
             let tool_dispatcher = Arc::new(McpToolDispatcher {
                 mcp_tools: Arc::clone(&mcp_tools),
