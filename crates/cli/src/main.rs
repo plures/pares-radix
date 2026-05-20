@@ -4939,6 +4939,19 @@ async fn main() {
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             let mut app = App::new(agent, model.clone(), event_tx);
 
+            // Wire session persistence via PluresDbStateStore
+            {
+                let state_path = PathBuf::from(&home).join(".pares-radix/state");
+                let state_store: Arc<dyn pares_agens_core::StateStore> =
+                    match PluresDbStateStore::open(&state_path) {
+                        Ok(s) => Arc::new(s),
+                        Err(_) => Arc::new(pares_agens_core::InMemoryStateStore::new()),
+                    };
+                let session_mgr = Arc::new(pares_agens_core::session::SessionManager::new(state_store));
+                app = app.with_session_manager(session_mgr);
+                app.load_persisted_sessions();
+            }
+
             // Restore conversation history from PluresDB for display continuity
             {
                 use pares_agens_core::memory::store::MemoryStore;
@@ -5113,12 +5126,22 @@ async fn main() {
                         }
                         AppEvent::AgentResponse(content) => {
                             app.handle_agent_response(content);
+                            // Auto-persist session after each response
+                            app.persist_current_session();
                         }
                         AppEvent::Quit => {
+                            // Persist before quitting
+                            app.persist_current_session();
                             break 'main_loop Ok(());
                         }
                         AppEvent::Redraw => {}
                         AppEvent::UserInput(_) => {}
+                        AppEvent::SessionsLoaded(sessions) => {
+                            app.handle_sessions_loaded(sessions);
+                        }
+                        AppEvent::SessionMessagesLoaded(name, turns) => {
+                            app.handle_session_messages_loaded(name, turns);
+                        }
                     }
                 }
             };
