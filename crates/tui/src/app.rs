@@ -46,6 +46,8 @@ pub struct App {
     pub user_scrolled: bool,
     pub viewport_height: u16,
     pub thinking: bool,
+    /// True while streaming chunks are arriving (after first chunk, before final response).
+    pub streaming: bool,
     pub current_model: String,
     pub agent: Arc<Agent>,
     pub event_tx: mpsc::UnboundedSender<AppEvent>,
@@ -69,6 +71,7 @@ impl App {
             user_scrolled: false,
             viewport_height: 35,
             thinking: false,
+            streaming: false,
             current_model: model_name,
             agent,
             event_tx,
@@ -219,6 +222,7 @@ impl App {
             }
             // First chunk — create the in-progress assistant message and stop showing spinner
             self.thinking = false;
+            self.streaming = true;
             self.messages.push(ChatMessage {
                 role: Role::Assistant,
                 content: chunk,
@@ -236,6 +240,7 @@ impl App {
     /// Handle the final agent response — replace streaming content with final canonical content.
     pub fn handle_agent_response(&mut self, content: String) {
         self.thinking = false;
+        self.streaming = false;
         // If the last message is an in-progress assistant message from streaming,
         // replace it with the final canonical response.
         if let Some(last) = self.messages.last_mut() {
@@ -346,8 +351,9 @@ mod tests {
 
         app.handle_stream_chunk("Hello".to_string());
 
-        // Should have created an assistant message and cleared thinking
+        // Should have created an assistant message, cleared thinking, and set streaming
         assert!(!app.thinking);
+        assert!(app.streaming);
         let last = app.messages.last().unwrap();
         assert_eq!(last.role, Role::Assistant);
         assert_eq!(last.content, "Hello");
@@ -363,6 +369,7 @@ mod tests {
 
         let last = app.messages.last().unwrap();
         assert_eq!(last.content, "Hello world");
+        assert!(app.streaming);
     }
 
     #[test]
@@ -373,11 +380,13 @@ mod tests {
         // Simulate streaming
         app.handle_stream_chunk("Hell".to_string());
         app.handle_stream_chunk("o world".to_string());
+        assert!(app.streaming);
 
         // Then final response arrives (canonical, may differ from streamed)
         app.handle_agent_response("Hello world!".to_string());
 
-        // Should have exactly one assistant message with final content
+        // Should have exactly one assistant message with final content, streaming off
+        assert!(!app.streaming);
         let assistant_msgs: Vec<_> = app
             .messages
             .iter()
@@ -399,5 +408,6 @@ mod tests {
         assert_eq!(last.role, Role::Assistant);
         assert_eq!(last.content, "Direct answer");
         assert!(!app.thinking);
+        assert!(!app.streaming);
     }
 }
