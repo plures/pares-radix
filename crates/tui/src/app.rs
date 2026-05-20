@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use pares_agens_core::agent::Agent;
 use pares_agens_core::commands::{CommandContext, CommandRegistry, CommandResult};
+use pares_agens_core::model::StreamDelta;
 use pares_agens_core::Event;
 
 /// A single chat message displayed in the TUI.
@@ -26,7 +27,9 @@ pub enum Role {
 pub enum AppEvent {
     /// User submitted input text.
     UserInput(String),
-    /// Agent finished responding.
+    /// A streaming chunk arrived from the model.
+    StreamChunk(String),
+    /// Agent finished responding (final complete content).
     AgentResponse(String),
     /// Terminal resize or redraw needed.
     Redraw,
@@ -128,9 +131,9 @@ impl App {
         self.scroll_to_bottom();
         self.thinking = true;
 
-        // Spawn agent call with timeout
+        // Spawn agent call with streaming
         let agent = Arc::clone(&self.agent);
-        let _tx = self.event_tx.clone();
+        let tx = self.event_tx.clone();
         let handle = tokio::spawn(async move {
             let event = Event::Message {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -138,19 +141,41 @@ impl App {
                 sender: "user".into(),
                 content: trimmed,
             };
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                agent.handle_event(event),
+
+            // Create streaming channel
+            let (stream_tx, mut stream_rx) = mpsc::unbounded_channel::<StreamDelta>();
+
+            // Forward stream deltas to the TUI event loop as they arrive
+            let chunk_tx = tx.clone();
+            let forwarder = tokio::spawn(async move {
+                while let Some(delta) = stream_rx.recv().await {
+                    match delta {
+                        StreamDelta::Content(content) => {
+                            let _ = chunk_tx.send(AppEvent::StreamChunk(content));
+                        }
+                        StreamDelta::Done => break,
+                        _ => {} // ToolCallStart/Delta handled internally by the agent
+                    }
+                }
+            });
+
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                agent.handle_event_streaming(event, stream_tx),
             )
-            .await
-            {
+            .await;
+
+            // Ensure forwarder completes
+            let _ = forwarder.await;
+
+            match result {
                 Ok(Some(Event::ModelResponse { content, .. })) => content,
                 Ok(Some(_other)) => "(unexpected response type)".to_string(),
                 Ok(None) => {
                     "(agent returned no response — check ~/.pares-radix/logs/pares-radix.log)"
                         .to_string()
                 }
-                Err(_timeout) => "(timed out after 30s)".to_string(),
+                Err(_timeout) => "(timed out after 120s)".to_string(),
             }
         });
         // Spawn a watcher that catches panics from the agent task
@@ -180,8 +205,47 @@ impl App {
         });
     }
 
+    /// Handle a streaming chunk: append to the current assistant message or create one.
+    pub fn handle_stream_chunk(&mut self, chunk: String) {
+        // If we're in thinking state and no assistant message is being built yet, create one.
+        if self.thinking {
+            if let Some(last) = self.messages.last_mut() {
+                if last.role == Role::Assistant {
+                    // Append to in-progress assistant message
+                    last.content.push_str(&chunk);
+                    self.scroll_to_bottom();
+                    return;
+                }
+            }
+            // First chunk — create the in-progress assistant message and stop showing spinner
+            self.thinking = false;
+            self.messages.push(ChatMessage {
+                role: Role::Assistant,
+                content: chunk,
+                timestamp: chrono::Utc::now(),
+            });
+            self.scroll_to_bottom();
+        } else if let Some(last) = self.messages.last_mut() {
+            if last.role == Role::Assistant {
+                last.content.push_str(&chunk);
+                self.scroll_to_bottom();
+            }
+        }
+    }
+
+    /// Handle the final agent response — replace streaming content with final canonical content.
     pub fn handle_agent_response(&mut self, content: String) {
         self.thinking = false;
+        // If the last message is an in-progress assistant message from streaming,
+        // replace it with the final canonical response.
+        if let Some(last) = self.messages.last_mut() {
+            if last.role == Role::Assistant {
+                last.content = content;
+                self.scroll_to_bottom();
+                return;
+            }
+        }
+        // No streaming message was created (e.g., timeout error) — add new one.
         self.messages.push(ChatMessage {
             role: Role::Assistant,
             content,
@@ -202,5 +266,138 @@ impl App {
             .sum::<u16>()
             + 2;
         self.scroll_offset = total_lines.saturating_sub(self.viewport_height);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pares_agens_core::agent::Agent;
+    use pares_agens_core::model::StreamDelta;
+
+    /// Create a minimal App for testing (uses a mock agent).
+    fn test_app() -> (App, mpsc::UnboundedReceiver<AppEvent>) {
+        use pares_agens_core::agent::Memory;
+        use pares_agens_core::model::{
+            ChatMessage as CoreChatMessage, ChatOptions, ModelClient, ModelCompletion,
+            StreamSender, ToolDefinition, ToolDispatcher,
+        };
+        use async_trait::async_trait;
+        use serde_json::Value;
+
+        struct NoopMemory;
+        #[async_trait]
+        impl Memory for NoopMemory {
+            async fn capture(&self, _content: &str) -> Result<(), String> {
+                Ok(())
+            }
+            async fn recall(&self, _query: &str) -> Result<Vec<String>, String> {
+                Ok(vec![])
+            }
+        }
+
+        struct NoopModel;
+        #[async_trait]
+        impl ModelClient for NoopModel {
+            async fn complete(
+                &self,
+                _messages: &[CoreChatMessage],
+                _tools: &[ToolDefinition],
+                _options: &ChatOptions,
+            ) -> Result<ModelCompletion, String> {
+                Ok(ModelCompletion {
+                    content: Some("hi".into()),
+                    tool_calls: vec![],
+                    logprobs: None,
+                    model: None,
+                })
+            }
+        }
+
+        struct NoopDispatcher;
+        #[async_trait]
+        impl ToolDispatcher for NoopDispatcher {
+            async fn available_tools(&self) -> Vec<ToolDefinition> {
+                vec![]
+            }
+            async fn call_tool(&self, _name: &str, _args: Value) -> String {
+                "ok".into()
+            }
+        }
+
+        let agent = Arc::new(
+            Agent::new(Arc::new(NoopMemory))
+                .with_model(
+                    Arc::new(NoopModel),
+                    Arc::new(NoopDispatcher),
+                    "test".to_string(),
+                ),
+        );
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let app = App::new(agent, "test-model".to_string(), tx);
+        (app, rx)
+    }
+
+    #[test]
+    fn stream_chunk_creates_assistant_message() {
+        let (mut app, _rx) = test_app();
+        app.thinking = true;
+
+        app.handle_stream_chunk("Hello".to_string());
+
+        // Should have created an assistant message and cleared thinking
+        assert!(!app.thinking);
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert_eq!(last.content, "Hello");
+    }
+
+    #[test]
+    fn stream_chunk_appends_to_existing_assistant() {
+        let (mut app, _rx) = test_app();
+        app.thinking = true;
+
+        app.handle_stream_chunk("Hello".to_string());
+        app.handle_stream_chunk(" world".to_string());
+
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.content, "Hello world");
+    }
+
+    #[test]
+    fn agent_response_replaces_streaming_content() {
+        let (mut app, _rx) = test_app();
+        app.thinking = true;
+
+        // Simulate streaming
+        app.handle_stream_chunk("Hell".to_string());
+        app.handle_stream_chunk("o world".to_string());
+
+        // Then final response arrives (canonical, may differ from streamed)
+        app.handle_agent_response("Hello world!".to_string());
+
+        // Should have exactly one assistant message with final content
+        let assistant_msgs: Vec<_> = app
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .collect();
+        assert_eq!(assistant_msgs.len(), 1);
+        assert_eq!(assistant_msgs[0].content, "Hello world!");
+    }
+
+    #[test]
+    fn agent_response_without_streaming_creates_message() {
+        let (mut app, _rx) = test_app();
+        app.thinking = true;
+
+        // No stream chunks — direct response (e.g., procedural route)
+        app.handle_agent_response("Direct answer".to_string());
+
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, Role::Assistant);
+        assert_eq!(last.content, "Direct answer");
+        assert!(!app.thinking);
     }
 }

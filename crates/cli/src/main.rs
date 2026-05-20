@@ -5034,6 +5034,9 @@ async fn main() {
                 // so agent responses are picked up even when no key is pressed.
                 while let Ok(ev) = event_rx.try_recv() {
                     match ev {
+                        AppEvent::StreamChunk(chunk) => {
+                            app.handle_stream_chunk(chunk);
+                        }
                         AppEvent::AgentResponse(content) => {
                             app.handle_agent_response(content);
                         }
