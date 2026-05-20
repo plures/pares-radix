@@ -70,6 +70,18 @@ fn draw_messages(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::ITALIC),
         )));
+    } else if app.streaming {
+        // Append a blinking cursor to the last line to indicate streaming in progress
+        if let Some(last_line) = lines.last_mut() {
+            let mut spans = last_line.spans.clone();
+            spans.push(Span::styled(
+                "▌",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::SLOW_BLINK),
+            ));
+            *last_line = Line::from(spans);
+        }
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -99,6 +111,8 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let status = if app.thinking {
         format!(" {} | thinking... ", app.current_model)
+    } else if app.streaming {
+        format!(" {} | streaming... ", app.current_model)
     } else {
         format!(" {} | ready ", app.current_model)
     };
