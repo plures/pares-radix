@@ -4744,10 +4744,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
- "notify",
- "pest",
- "pest_derive",
- "regex",
+ "pluresdb-px",
  "serde",
  "serde_json",
  "tempfile",
@@ -4755,7 +4752,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
- "walkdir",
 ]
 
 [[package]]
@@ -5197,6 +5193,27 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "pluresdb-px"
+version = "3.0.1"
+source = "git+https://github.com/plures/pluresdb?branch=feature%2Fpluresdb-px#a30c15d083b9d2aa061d7e4072465ca82884ac13"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures",
+ "notify",
+ "pest",
+ "pest_derive",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]
