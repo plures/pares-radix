@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use crate::model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher};
+use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
 
@@ -21,6 +22,8 @@ pub struct ModelInvoker {
     tool_dispatcher: Arc<dyn ToolDispatcher>,
     /// Default system prompt used when none is provided in the event.
     default_system_prompt: Option<String>,
+    /// Optional conversation store for multi-turn history.
+    conversation_store: Option<Arc<dyn ConversationStore>>,
 }
 
 impl ModelInvoker {
@@ -33,6 +36,7 @@ impl ModelInvoker {
             model_client,
             tool_dispatcher,
             default_system_prompt: None,
+            conversation_store: None,
         }
     }
 
@@ -46,24 +50,39 @@ impl ModelInvoker {
             model_client,
             tool_dispatcher,
             default_system_prompt: Some(system_prompt.into()),
+            conversation_store: None,
         }
+    }
+
+    /// Attach a conversation store for multi-turn history.
+    pub fn with_conversation_store(mut self, store: Arc<dyn ConversationStore>) -> Self {
+        self.conversation_store = Some(store);
+        self
     }
 
     /// Build the message list for the model from the spine event.
     ///
     /// If the event metadata contains `conversation_history`, those messages
     /// are prepended to provide full context for multi-turn tool loops.
+    /// Additionally, if `prior_history` is provided (from ConversationStore),
+    /// it is included before the current turn's messages.
     fn build_messages(
         &self,
         content: &str,
         system_prompt: Option<&str>,
         metadata: &serde_json::Value,
+        prior_history: &[ChatMessage],
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::new();
 
         // System prompt
         if let Some(sp) = system_prompt.or(self.default_system_prompt.as_deref()) {
             messages.push(ChatMessage::system(sp));
+        }
+
+        // Prior conversation history from ConversationStore (multi-turn context)
+        if !prior_history.is_empty() {
+            messages.extend(prior_history.iter().cloned());
         }
 
         // If this is a follow-up from tool_executor, include conversation history
@@ -150,9 +169,16 @@ impl SpineProcedure for ModelInvoker {
 
         debug!(event_id = %id, chat_id = %chat_id, "model_invoker: processing model request");
 
+        // Fetch conversation history from store if available
+        let prior_history = if let Some(store) = &self.conversation_store {
+            store.get_history(chat_id).await
+        } else {
+            vec![]
+        };
+
         // Build messages
         let messages =
-            self.build_messages(content, system_prompt.as_deref(), metadata);
+            self.build_messages(content, system_prompt.as_deref(), metadata, &prior_history);
 
         if messages.is_empty() || (messages.len() == 1 && messages[0].role == "system") {
             error!(event_id = %id, "model_invoker: no user content to send to model");

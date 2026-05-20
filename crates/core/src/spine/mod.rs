@@ -15,6 +15,7 @@
 //! ```
 
 pub mod channel;
+pub mod conversation;
 pub mod dispatcher;
 pub mod event;
 pub mod pipeline;

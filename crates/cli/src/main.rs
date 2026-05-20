@@ -3383,6 +3383,8 @@ async fn main() {
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
             use pares_agens_core::spine::procedures::tool_executor::ToolExecutor;
+            use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
+            use pares_agens_core::spine::conversation::{ConversationStore, PluresConversationStore};
             use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
             use pares_agens_core::spine::channel::SpineChannel;
 
@@ -3561,20 +3563,39 @@ async fn main() {
             // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
 
-            // 4. Register procedures (full pipeline: inbound → model → tools → response)
+            // 3.5. Create PluresDB-backed conversation store
+            let conversation_store: Arc<dyn ConversationStore> = Arc::new(PluresConversationStore::in_memory());
+            info!("Conversation store initialized (PluresDB CrdtStore)");
+
+            // 3.6. Load system prompt from file or use default
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let system_prompt_path = PathBuf::from(&home).join(".pares-radix/SYSTEM-PROMPT.md");
+            let system_prompt = std::fs::read_to_string(&system_prompt_path)
+                .unwrap_or_else(|_| {
+                    "You are a software engineering assistant with access to shell commands and file operations. You can execute code, read/write files, and help with development tasks. Be direct and concise.".into()
+                });
+            info!(prompt_source = %if system_prompt_path.exists() { "file" } else { "default" }, "System prompt loaded");
+
+            // 4. Register procedures (full pipeline: inbound → history → model → tools → response)
             pipeline.register(Arc::new(InboundRouter)).await;
             pipeline
-                .register(Arc::new(ModelInvoker::with_system_prompt(
-                    Arc::clone(&model_client),
-                    Arc::clone(&spine_tool_dispatcher),
-                    "You are a helpful assistant. Be concise and direct.",
-                )))
+                .register(Arc::new(HistoryRecorder::new(Arc::clone(&conversation_store))))
+                .await;
+            pipeline
+                .register(Arc::new(
+                    ModelInvoker::with_system_prompt(
+                        Arc::clone(&model_client),
+                        Arc::clone(&spine_tool_dispatcher),
+                        &system_prompt,
+                    )
+                    .with_conversation_store(Arc::clone(&conversation_store)),
+                ))
                 .await;
             pipeline
                 .register(Arc::new(ToolExecutor::new(spine_tool_dispatcher)))
                 .await;
             pipeline.register(Arc::new(ResponseRouter)).await;
-            info!("Pipeline procedures registered: inbound_router, model_invoker, tool_executor, response_router");
+            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router");
 
             // 5. Start the pipeline event loop
             let pipeline_for_loop = Arc::clone(&pipeline);
