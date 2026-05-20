@@ -4165,6 +4165,207 @@ impl RadixToolHandler {
         ToolResult::ok("rule added")
     }
 
+    async fn canvas_catalog(&self) -> ToolResult {
+        let catalog = json!({
+            "components": [
+                {
+                    "type": "Root",
+                    "description": "Top-level container for a canvas tree. Every canvas has exactly one Root.",
+                    "props": {},
+                    "children": true
+                },
+                {
+                    "type": "Container",
+                    "description": "Layout container that holds child components. Supports flex/grid layout.",
+                    "props": {
+                        "direction": {"type": "string", "enum": ["row", "column"], "default": "column"},
+                        "gap": {"type": "number", "description": "Spacing between children in px"},
+                        "padding": {"type": "number", "description": "Inner padding in px"},
+                        "align": {"type": "string", "enum": ["start", "center", "end", "stretch"]},
+                        "justify": {"type": "string", "enum": ["start", "center", "end", "between", "around"]},
+                        "wrap": {"type": "boolean", "default": false},
+                        "style": {"type": "object", "description": "CSS-like style overrides"}
+                    },
+                    "children": true
+                },
+                {
+                    "type": "Text",
+                    "description": "Renders text content. Supports markdown-like formatting.",
+                    "props": {
+                        "text": {"type": "string", "required": true, "description": "Text content to display"},
+                        "variant": {"type": "string", "enum": ["body", "heading", "caption", "code", "mono"], "default": "body"},
+                        "size": {"type": "string", "enum": ["xs", "sm", "md", "lg", "xl"]},
+                        "weight": {"type": "string", "enum": ["normal", "medium", "bold"]},
+                        "color": {"type": "string", "description": "Text color (CSS value or theme token)"},
+                        "align": {"type": "string", "enum": ["left", "center", "right"]}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Button",
+                    "description": "Interactive button that triggers procedures on click.",
+                    "props": {
+                        "label": {"type": "string", "required": true, "description": "Button label text"},
+                        "variant": {"type": "string", "enum": ["primary", "secondary", "danger", "ghost"], "default": "primary"},
+                        "size": {"type": "string", "enum": ["sm", "md", "lg"], "default": "md"},
+                        "disabled": {"type": "boolean", "default": false},
+                        "icon": {"type": "string", "description": "Optional icon name"}
+                    },
+                    "children": false,
+                    "events": ["onClick"]
+                },
+                {
+                    "type": "Input",
+                    "description": "Text input field with optional label and validation.",
+                    "props": {
+                        "label": {"type": "string", "description": "Input label"},
+                        "placeholder": {"type": "string", "description": "Placeholder text"},
+                        "type": {"type": "string", "enum": ["text", "number", "email", "password", "url"], "default": "text"},
+                        "required": {"type": "boolean", "default": false},
+                        "disabled": {"type": "boolean", "default": false},
+                        "defaultValue": {"type": "string"}
+                    },
+                    "children": false,
+                    "events": ["onChange", "onSubmit"]
+                },
+                {
+                    "type": "Select",
+                    "description": "Dropdown select with predefined options.",
+                    "props": {
+                        "label": {"type": "string", "description": "Select label"},
+                        "options": {"type": "array", "required": true, "description": "Array of {value, label} objects"},
+                        "placeholder": {"type": "string"},
+                        "multiple": {"type": "boolean", "default": false},
+                        "disabled": {"type": "boolean", "default": false}
+                    },
+                    "children": false,
+                    "events": ["onChange"]
+                },
+                {
+                    "type": "Image",
+                    "description": "Displays an image from URL or local path.",
+                    "props": {
+                        "src": {"type": "string", "required": true, "description": "Image URL or local path"},
+                        "alt": {"type": "string", "description": "Alt text for accessibility"},
+                        "width": {"type": "number"},
+                        "height": {"type": "number"},
+                        "fit": {"type": "string", "enum": ["contain", "cover", "fill", "none"], "default": "contain"}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "List",
+                    "description": "Renders a list of items, optionally bound to data.",
+                    "props": {
+                        "items": {"type": "array", "description": "Static items array, or use bindings for dynamic data"},
+                        "ordered": {"type": "boolean", "default": false},
+                        "dividers": {"type": "boolean", "default": false}
+                    },
+                    "children": true
+                },
+                {
+                    "type": "Card",
+                    "description": "A bordered container with optional header and padding.",
+                    "props": {
+                        "title": {"type": "string", "description": "Card header title"},
+                        "subtitle": {"type": "string"},
+                        "padding": {"type": "number", "default": 16},
+                        "elevated": {"type": "boolean", "default": false, "description": "Add shadow/elevation"}
+                    },
+                    "children": true
+                },
+                {
+                    "type": "Divider",
+                    "description": "A horizontal rule / visual separator.",
+                    "props": {
+                        "spacing": {"type": "number", "default": 8, "description": "Vertical margin in px"}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Badge",
+                    "description": "A small label/tag for status or categorization.",
+                    "props": {
+                        "text": {"type": "string", "required": true},
+                        "variant": {"type": "string", "enum": ["default", "success", "warning", "danger", "info"]}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Progress",
+                    "description": "A progress bar showing completion state.",
+                    "props": {
+                        "value": {"type": "number", "required": true, "description": "Progress 0-100"},
+                        "label": {"type": "string"},
+                        "variant": {"type": "string", "enum": ["default", "success", "warning", "danger"]}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Table",
+                    "description": "Renders tabular data with columns and rows.",
+                    "props": {
+                        "columns": {"type": "array", "required": true, "description": "Array of {key, label, width?} column definitions"},
+                        "rows": {"type": "array", "required": true, "description": "Array of row objects matching column keys"},
+                        "striped": {"type": "boolean", "default": false},
+                        "compact": {"type": "boolean", "default": false}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Tabs",
+                    "description": "Tabbed interface — children are tab panes.",
+                    "props": {
+                        "defaultTab": {"type": "string", "description": "ID of initially active tab"}
+                    },
+                    "children": true
+                },
+                {
+                    "type": "TabPane",
+                    "description": "A single tab pane within a Tabs component.",
+                    "props": {
+                        "id": {"type": "string", "required": true},
+                        "label": {"type": "string", "required": true, "description": "Tab label text"}
+                    },
+                    "children": true
+                },
+                {
+                    "type": "Chart",
+                    "description": "Data visualization chart.",
+                    "props": {
+                        "type": {"type": "string", "enum": ["bar", "line", "pie", "donut", "area"], "required": true},
+                        "data": {"type": "array", "required": true, "description": "Array of data points"},
+                        "xKey": {"type": "string", "description": "Key for x-axis values"},
+                        "yKey": {"type": "string", "description": "Key for y-axis values"},
+                        "title": {"type": "string"},
+                        "height": {"type": "number", "default": 300}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Code",
+                    "description": "Syntax-highlighted code block.",
+                    "props": {
+                        "code": {"type": "string", "required": true},
+                        "language": {"type": "string", "default": "plaintext"},
+                        "showLineNumbers": {"type": "boolean", "default": false},
+                        "maxHeight": {"type": "number", "description": "Max height in px before scrolling"}
+                    },
+                    "children": false
+                },
+                {
+                    "type": "Spacer",
+                    "description": "Invisible spacing element.",
+                    "props": {
+                        "size": {"type": "number", "default": 16, "description": "Space in px"}
+                    },
+                    "children": false
+                }
+            ]
+        });
+        ToolResult::ok(serde_json::to_string_pretty(&catalog).unwrap_or_default())
+    }
+
     async fn agent_ask(&self, args: &Value) -> ToolResult {
         let agent =
             match &self.agent {
@@ -5475,6 +5676,17 @@ impl ToolHandler for RadixToolHandler {
                 required: Some(vec!["rule".into()]),
             },
         });
+        tools.push(Tool {
+            name: "canvas_catalog".into(),
+            description: Some(
+                "Get the full component catalog — lists all available component types, their props, events, and whether they accept children.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: None,
+                required: None,
+            },
+        });
 
         tools
     }
@@ -5593,6 +5805,7 @@ impl RadixToolHandler {
             "canvas_set_data" => self.canvas_set_data(&arguments).await,
             "canvas_add_procedure" => self.canvas_add_procedure(&arguments).await,
             "canvas_add_rule" => self.canvas_add_rule(&arguments).await,
+            "canvas_catalog" => self.canvas_catalog().await,
             other => {
                 warn!(tool = other, "unknown tool called via MCP");
                 ToolResult::error(format!("unknown tool: {other}"))
@@ -9093,5 +9306,42 @@ mod tests {
         assert!(names.contains(&"canvas_set_data"));
         assert!(names.contains(&"canvas_add_procedure"));
         assert!(names.contains(&"canvas_add_rule"));
+        assert!(names.contains(&"canvas_catalog"));
+    }
+
+    #[tokio::test]
+    async fn canvas_catalog_returns_components() {
+        let handler = make_handler_with_state();
+        let result = handler.call_tool("canvas_catalog", json!({})).await;
+        assert!(!result.is_error);
+        let parsed: Value = serde_json::from_str(&result.content).unwrap();
+        let components = parsed["components"].as_array().unwrap();
+        assert!(components.len() >= 15, "catalog should have at least 15 components");
+
+        // Verify key component types are present
+        let types: Vec<&str> = components.iter()
+            .filter_map(|c| c["type"].as_str())
+            .collect();
+        assert!(types.contains(&"Root"));
+        assert!(types.contains(&"Container"));
+        assert!(types.contains(&"Text"));
+        assert!(types.contains(&"Button"));
+        assert!(types.contains(&"Input"));
+        assert!(types.contains(&"Select"));
+        assert!(types.contains(&"Image"));
+        assert!(types.contains(&"Table"));
+        assert!(types.contains(&"Chart"));
+        assert!(types.contains(&"Code"));
+        assert!(types.contains(&"Card"));
+        assert!(types.contains(&"Tabs"));
+        assert!(types.contains(&"TabPane"));
+
+        // Verify structure of a component
+        let btn = components.iter().find(|c| c["type"] == "Button").unwrap();
+        assert!(btn["description"].as_str().unwrap().contains("button"));
+        assert!(btn["props"].is_object());
+        assert_eq!(btn["children"], json!(false));
+        let events = btn["events"].as_array().unwrap();
+        assert!(events.contains(&json!("onClick")));
     }
 }
