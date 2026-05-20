@@ -2879,6 +2879,64 @@ impl RadixToolHandler {
         }
     }
 
+    // ── Px Status tool ──────────────────────────────────────────────────────────
+
+    async fn px_status(&self) -> ToolResult {
+        // Loaded procedures
+        let procedures_guard = self.loaded_procedures.read().await;
+        let procedure_names: Vec<&str> = procedures_guard.keys().map(|s| s.as_str()).collect();
+        let procedure_count = procedure_names.len();
+
+        // Praxis modules
+        let modules_info: Vec<Value> = self
+            .praxis_modules
+            .iter()
+            .map(|m| {
+                json!({
+                    "name": m.name(),
+                    "rule_count": m.rules().len(),
+                    "completeness_pct": m.audit().completeness_pct,
+                })
+            })
+            .collect();
+
+        let total_module_rules: usize = self.praxis_modules.iter().map(|m| m.rules().len()).sum();
+
+        // Persisted px:* keys from PluresDB
+        let (constraint_count, rule_count, fact_count, total_px_keys) =
+            if let Some(ref store) = self.state_store {
+                let constraints = store.keys_with_prefix("px:constraint/").await.len();
+                let rules = store.keys_with_prefix("px:rule/").await.len();
+                let facts = store.keys_with_prefix("px:fact/").await.len();
+                let all_px = store.keys_with_prefix("px:").await.len();
+                (constraints, rules, facts, all_px)
+            } else {
+                (0, 0, 0, 0)
+            };
+
+        ToolResult::ok(
+            json!({
+                "procedures": {
+                    "count": procedure_count,
+                    "names": procedure_names,
+                },
+                "modules": {
+                    "count": modules_info.len(),
+                    "total_rules": total_module_rules,
+                    "details": modules_info,
+                },
+                "persisted": {
+                    "constraints": constraint_count,
+                    "rules": rule_count,
+                    "facts": fact_count,
+                    "total_px_keys": total_px_keys,
+                },
+                "state_store": self.state_store.is_some(),
+            })
+            .to_string(),
+        )
+    }
+
     // ── Chronos tools ─────────────────────────────────────────────────────────
 
     async fn chronos_history(&self, args: &Value) -> ToolResult {
@@ -4478,6 +4536,19 @@ impl ToolHandler for RadixToolHandler {
             },
         });
 
+        // ── Px Status tool ────────────────────────────────────────────────────────────
+        tools.push(Tool {
+            name: "px_status".into(),
+            description: Some(
+                "Get a diagnostic overview of the Praxis subsystem: loaded procedures, persisted constraints/rules/facts, and registered modules.".into(),
+            ),
+            input_schema: ToolInputSchema {
+                schema_type: "object".into(),
+                properties: Some(json!({})),
+                required: None,
+            },
+        });
+
         // ── Chronos tools (always available) ────────────────────────────────────────
         tools.push(Tool {
             name: "chronos_history".into(),
@@ -4899,6 +4970,7 @@ impl RadixToolHandler {
             "praxis_add_rule" => self.praxis_add_rule(&arguments).await,
             "px_lint" => self.px_lint(&arguments).await,
             "px_compose" => self.px_compose(&arguments).await,
+            "px_status" => self.px_status().await,
             "chronos_history" => self.chronos_history(&arguments).await,
             "chronos_recent" => self.chronos_recent(&arguments).await,
             "chronos_by_actor" => self.chronos_by_actor(&arguments).await,
@@ -8189,5 +8261,41 @@ mod tests {
         let tools = handler.list_tools().await;
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"px_compose"));
+    }
+
+    #[tokio::test]
+    async fn px_status_returns_overview() {
+        let handler = make_handler();
+        let result = handler.call_tool("px_status", json!({})).await;
+        let v: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(v["procedures"]["count"], 0);
+        assert!(v["persisted"].is_object());
+        assert!(v["modules"].is_object());
+    }
+
+    #[tokio::test]
+    async fn px_status_reflects_registered_procedures() {
+        let handler = make_handler();
+        // Register a procedure first
+        handler
+            .call_tool(
+                "px_compose",
+                json!({"action": "register", "source": "procedure greet:\n  trigger: manual\n  echo {msg: \"hello\"} -> $out\n"}),
+            )
+            .await;
+
+        let result = handler.call_tool("px_status", json!({})).await;
+        let v: Value = serde_json::from_str(&result.content).unwrap();
+        assert_eq!(v["procedures"]["count"], 1);
+        let names = v["procedures"]["names"].as_array().unwrap();
+        assert!(names.iter().any(|n| n == "greet"));
+    }
+
+    #[tokio::test]
+    async fn px_status_in_tool_list() {
+        let handler = make_handler();
+        let tools = handler.list_tools().await;
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"px_status"));
     }
 }
