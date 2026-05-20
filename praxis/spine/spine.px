@@ -1,0 +1,36 @@
+# spine.px — The complete agent spine as praxis logic
+#
+# This file IS the spine. Not 1,700 lines of Rust. Not 5 procedure structs.
+# Not pipeline wiring. Just logic that compiles to PluresDB procedures.
+#
+# Side-effect actors (the only Rust):
+#   - telegram_adapter: network bytes ↔ PluresDB event write
+#   - model_client: HTTP request to LLM API
+#   - shell_executor: spawn process, return output
+#   - file_system: read/write bytes to disk
+#   - tool_dispatch: route tool_call.name to the correct actor
+#
+# Everything else is here.
+
+import spine/conversation
+import spine/routing
+import spine/model_invoke
+import spine/tool_execute
+import spine/heartbeat
+
+# The entire message flow, expressed as reactive procedure composition:
+#
+# 1. telegram_adapter writes Inbound event to PluresDB
+# 2. PluresDB triggers: record_user_message, reset_tool_counter, route_inbound
+# 3. route_inbound emits model_request
+# 4. PluresDB triggers: build_context, invoke_model
+# 5. invoke_model calls model_client actor (IO boundary), emits model_response
+# 6. PluresDB triggers: record_assistant_response, route_response, execute_tools
+# 7. route_response emits delivery_request (if no tool_calls)
+# 8. telegram_adapter reads delivery_request, sends to Telegram (IO boundary)
+#
+# If tool_calls: execute_tools runs actors, records results, re-emits model_request → loop
+#
+# Total Rust: ~200 lines of thin IO actors
+# Total .px: this file + 5 imports
+# Replaced: 1,700+ lines of pipeline/procedure Rust

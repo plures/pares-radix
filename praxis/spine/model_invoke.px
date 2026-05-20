@@ -1,0 +1,36 @@
+# model_invoke.px — Model invocation as a PluresDB procedure
+#
+# Replaces ModelInvoker (573 lines of Rust) with declarative logic.
+# The only Rust that remains is the HTTP call to the model API (side effect).
+
+fact model_config:
+  system_prompt: string
+  max_tool_iterations: int
+
+constraint tool_loop_safety:
+  when: event.type == "model_request" and event.metadata.iteration > model_config.max_tool_iterations
+  require: false
+  severity: error
+  message: "Tool call loop exceeded max iterations — aborting"
+
+procedure invoke_model:
+  trigger: event("model_request")
+  # Read conversation history from PluresDB
+  pluresdb_read {key: "chat:${event.chat_id}:history"} -> $history
+  # Read system prompt from PluresDB config
+  pluresdb_read {key: "config:system_prompt"} -> $system_prompt
+  # Call the model (side-effect actor — the only Rust boundary)
+  model_complete {
+    messages: "$history",
+    system_prompt: "$system_prompt",
+    content: "${event.content}"
+  } -> $response
+  # Emit result back into PluresDB
+  emit {
+    type: "model_response",
+    source: "${event.source}",
+    chat_id: "${event.chat_id}",
+    content: "${response.content}",
+    model: "${response.model}",
+    tool_calls: "${response.tool_calls}"
+  }
