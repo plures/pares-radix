@@ -4939,6 +4939,38 @@ async fn main() {
             let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
             let mut app = App::new(agent, model.clone(), event_tx);
 
+            // Restore conversation history from PluresDB for display continuity
+            {
+                use pares_agens_core::memory::store::MemoryStore;
+                let channel = "tui";
+                match store.recent_turns(channel, 50).await {
+                    Ok(turns) if !turns.is_empty() => {
+                        let display_turns: Vec<(String, String, String)> = turns
+                            .into_iter()
+                            .flat_map(|t| {
+                                let ts = t.timestamp.clone();
+                                t.messages.into_iter().filter_map(move |m| {
+                                    let role = m.role.clone();
+                                    if role == "system" || m.content.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some((role, m.content, ts.clone()))
+                                    }
+                                })
+                            })
+                            .collect();
+                        if !display_turns.is_empty() {
+                            app.load_history_from_turns(display_turns);
+                            tracing::info!(count = app.messages.len(), "restored TUI conversation history");
+                        }
+                    }
+                    Ok(_) => {} // no prior turns
+                    Err(e) => {
+                        tracing::warn!(error = %e, "failed to load conversation history for TUI");
+                    }
+                }
+            }
+
             // Main loop
             let result: Result<(), Box<dyn std::error::Error>> = 'main_loop: loop {
                 app.viewport_height = terminal

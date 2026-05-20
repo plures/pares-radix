@@ -237,6 +237,35 @@ impl App {
         }
     }
 
+    /// Load conversation history from persisted turns into the TUI message list.
+    ///
+    /// This is called once at startup to populate the chat view with previous
+    /// conversation so the user sees context from prior sessions.
+    pub fn load_history_from_turns(&mut self, turns: Vec<(String, String, String)>) {
+        // turns: Vec<(role, content, timestamp)>
+        if turns.is_empty() {
+            return;
+        }
+        let count = turns.len();
+        for (role, content, timestamp) in turns {
+            let role = match role.as_str() {
+                "user" => Role::User,
+                "assistant" => Role::Assistant,
+                _ => Role::System,
+            };
+            let ts = chrono::DateTime::parse_from_rfc3339(&timestamp)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| chrono::Utc::now());
+            self.messages.push(ChatMessage {
+                role,
+                content,
+                timestamp: ts,
+            });
+        }
+        self.push_system(&format!("↑ {count} messages restored from previous session"));
+        self.scroll_to_bottom();
+    }
+
     /// Handle a slash command. Returns true if it was a command.
     pub fn handle_command(&mut self, input: &str) -> bool {
         let registry = CommandRegistry::new();
@@ -742,6 +771,40 @@ mod tests {
 
         assert_eq!(app.input, "first line\n");
         assert_eq!(app.input_cursor, 11);
+    }
+
+    #[test]
+    fn load_history_from_turns_populates_messages() {
+        let (mut app, _rx) = test_app();
+        let initial_count = app.messages.len(); // 1 system message
+
+        let turns = vec![
+            ("user".to_string(), "hello".to_string(), "2026-05-20T10:00:00Z".to_string()),
+            ("assistant".to_string(), "hi there".to_string(), "2026-05-20T10:00:01Z".to_string()),
+            ("user".to_string(), "how are you?".to_string(), "2026-05-20T10:01:00Z".to_string()),
+            ("assistant".to_string(), "I'm good!".to_string(), "2026-05-20T10:01:01Z".to_string()),
+        ];
+
+        app.load_history_from_turns(turns);
+
+        // Should have: 1 system + 4 restored + 1 "restored" system message
+        assert_eq!(app.messages.len(), initial_count + 4 + 1);
+        assert_eq!(app.messages[1].role, Role::User);
+        assert_eq!(app.messages[1].content, "hello");
+        assert_eq!(app.messages[2].role, Role::Assistant);
+        assert_eq!(app.messages[2].content, "hi there");
+        // Last message is the "restored" notice
+        let last = app.messages.last().unwrap();
+        assert_eq!(last.role, Role::System);
+        assert!(last.content.contains("4 messages restored"));
+    }
+
+    #[test]
+    fn load_history_from_turns_empty_is_noop() {
+        let (mut app, _rx) = test_app();
+        let initial_count = app.messages.len();
+        app.load_history_from_turns(vec![]);
+        assert_eq!(app.messages.len(), initial_count);
     }
 
     #[tokio::test]
