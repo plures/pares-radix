@@ -35,16 +35,19 @@ def ssh_client():
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     # Retry connection (container may still be starting)
-    for attempt in range(10):
+    for attempt in range(3):
         try:
             client.connect(
-                SSH_HOST, port=SSH_PORT, username=SSH_USER, password=SSH_PASS, timeout=5
+                SSH_HOST, port=SSH_PORT, username=SSH_USER, password=SSH_PASS, timeout=3
             )
             break
         except Exception:
-            if attempt == 9:
-                raise
-            time.sleep(2)
+            if attempt == 2:
+                pytest.skip(
+                    f"Cannot connect to SSH at {SSH_HOST}:{SSH_PORT} — "
+                    "Docker container not running (use 'make docker-test')"
+                )
+            time.sleep(1)
 
     yield client
     client.close()
