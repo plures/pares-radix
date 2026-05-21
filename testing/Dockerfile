@@ -51,11 +51,6 @@ ENV LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 TERM=xterm-256color
 RUN mkdir -p /run/sshd && \
     sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
     sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
-    echo "AllowUsers radix" >> /etc/ssh/sshd_config && \
-    # SSH setup
-RUN mkdir -p /run/sshd && \
-    sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
     sed -i 's/#PermitUserEnvironment.*/PermitUserEnvironment yes/' /etc/ssh/sshd_config && \
     echo "AllowUsers radix" >> /etc/ssh/sshd_config && \
     echo 'TERM=xterm-256color' >> /etc/environment
