@@ -448,7 +448,7 @@ impl App {
     }
 
     /// Persist the current session's messages to the store (fire-and-forget).
-    fn persist_current_session(&self) {
+    pub fn persist_current_session(&self) {
         let Some(mgr) = self.session_manager.clone() else {
             return;
         };
@@ -488,7 +488,7 @@ impl App {
     }
 
     /// Persist the session index (list of session names and active state).
-    fn persist_session_index(&self) {
+    pub fn persist_session_index(&self) {
         let Some(mgr) = self.session_manager.clone() else {
             return;
         };
@@ -515,7 +515,7 @@ impl App {
     }
 
     /// Load messages for a named session from the store (async, results arrive via event).
-    fn load_session_messages(&self, session_name: &str) {
+    pub fn load_session_messages(&self, session_name: &str) {
         let Some(mgr) = self.session_manager.clone() else {
             return;
         };
@@ -564,6 +564,44 @@ impl App {
             self.input = entry.to_string();
             self.input_cursor = self.input.len();
         }
+    }
+
+    /// Switch to a session by its 0-based index in the sessions list.
+    /// Used for Alt+1..9 keyboard shortcuts (Alt+1 = index 0, etc.).
+    pub fn switch_to_index(&mut self, index: usize) {
+        if index >= self.sessions.len() {
+            return;
+        }
+        let target_name = self.sessions[index].0.clone();
+        if target_name == self.current_session {
+            return; // already active
+        }
+        // Persist current session before switching
+        self.persist_current_session();
+        // Mark all inactive, mark target active
+        for entry in self.sessions.iter_mut() {
+            entry.1 = entry.0 == target_name;
+        }
+        self.current_session = target_name.clone();
+        self.messages.clear();
+        self.scroll_offset = 0;
+        self.push_system(&format!("Switched to session: {target_name}"));
+        self.load_session_messages(&target_name);
+        self.persist_session_index();
+    }
+
+    /// Clear the chat display (Ctrl+L equivalent).
+    pub fn clear_chat(&mut self) {
+        self.messages.clear();
+        self.scroll_offset = 0;
+        self.user_scrolled = false;
+        self.push_system("Chat cleared.");
+    }
+
+    /// Clear the input line (Ctrl+U equivalent).
+    pub fn clear_input(&mut self) {
+        self.input.clear();
+        self.input_cursor = 0;
     }
 
     /// Insert a newline at the current cursor position (for multi-line input).
@@ -944,7 +982,7 @@ mod tests {
     fn history_save_and_load_roundtrip() {
         use std::env;
         // Use a temp dir to avoid polluting real home
-        let tmp = std::env::temp_dir().join(format!("pares-radix-test-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("pares-radix-test-roundtrip-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
         let radix_dir = tmp.join(".pares-radix");
         fs::create_dir_all(&radix_dir).unwrap();
 
