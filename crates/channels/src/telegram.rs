@@ -1641,7 +1641,9 @@ impl ChannelAdapter for TelegramAdapter {
                                 }
                                 // Preflight: check if sudo is available for nixos-rebuild
                                 let sudo_check = tokio::process::Command::new("sudo")
-                                    .args(["-n", "true"])
+                                    .args(["-n", "/run/current-system/sw/bin/nixos-rebuild", "--help"])
+                                    .stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null())
                                     .output()
                                     .await;
                                 let has_sudo = sudo_check.map(|o| o.status.success()).unwrap_or(false);
