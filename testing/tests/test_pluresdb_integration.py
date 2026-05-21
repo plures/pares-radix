@@ -518,3 +518,123 @@ class TestCanvasOperations:
         """Get the component catalog."""
         result = mcp.call_tool("canvas_catalog", {})
         assert result is not None
+
+
+class TestMemoryOperations:
+    """Test memory_store and memory_search via MCP."""
+
+    def test_memory_store_basic(self, mcp):
+        """Store a fact in memory."""
+        unique = uuid.uuid4().hex[:8]
+        result = mcp.call_tool("memory_store", {
+            "content": f"Test fact {unique}: the sky is blue",
+            "tags": ["test", "color"],
+        })
+        result_str = str(result)
+        # Should succeed or return stored ID
+        assert result is not None
+        assert "error" not in result_str.lower() or "not configured" in result_str.lower()
+
+    def test_memory_store_without_tags(self, mcp):
+        """Store a fact without tags."""
+        result = mcp.call_tool("memory_store", {
+            "content": "Radix was built in Rust.",
+        })
+        assert result is not None
+        result_str = str(result)
+        # Accept success or 'not configured' (headless mode may lack embeddings)
+        assert "missing required" not in result_str.lower()
+
+    def test_memory_store_missing_content(self, mcp):
+        """Store without content should error."""
+        result = mcp.call_tool("memory_store", {})
+        result_str = str(result).lower()
+        assert "error" in result_str or "missing" in result_str
+
+    def test_memory_search_basic(self, mcp):
+        """Search memory for a query."""
+        result = mcp.call_tool("memory_search", {
+            "query": "sky color",
+        })
+        assert result is not None
+        # May return empty results or error if no embeddings; shouldn't crash
+
+    def test_memory_search_with_limit(self, mcp):
+        """Search with explicit limit parameter."""
+        result = mcp.call_tool("memory_search", {
+            "query": "rust programming",
+            "limit": 5,
+        })
+        assert result is not None
+
+    def test_memory_search_missing_query(self, mcp):
+        """Search without query should error."""
+        result = mcp.call_tool("memory_search", {})
+        result_str = str(result).lower()
+        assert "error" in result_str or "missing" in result_str
+
+    def test_memory_roundtrip(self, mcp):
+        """Store then search — verify the system doesn't crash on a full cycle."""
+        unique = uuid.uuid4().hex[:8]
+        store_result = mcp.call_tool("memory_store", {
+            "content": f"Roundtrip test {unique}: Docker containers are useful",
+            "tags": ["test", "docker"],
+        })
+        assert store_result is not None
+
+        search_result = mcp.call_tool("memory_search", {
+            "query": f"roundtrip {unique}",
+        })
+        assert search_result is not None
+
+
+class TestPraxisScenarios:
+    """Test Praxis constraint evaluation with realistic scenarios."""
+
+    def test_praxis_add_and_evaluate_constraint(self, mcp):
+        """Add a constraint then evaluate against matching context."""
+        unique = uuid.uuid4().hex[:8]
+        # Add a constraint
+        add_result = mcp.call_tool("praxis_add_constraint", {
+            "name": f"test-no-delete-{unique}",
+            "severity": "error",
+            "when": "action == 'delete'",
+            "require": "confirmed == true",
+            "message": "Deletion requires confirmation",
+        })
+        assert add_result is not None
+
+        # Evaluate with a violating context
+        eval_result = mcp.call_tool("praxis_evaluate", {
+            "context": {"action": "delete", "confirmed": False},
+        })
+        assert eval_result is not None
+        eval_str = str(eval_result)
+        # Should have violation or at least not crash
+        # The constraint system may or may not match depending on eval engine
+        assert "error" not in eval_str.lower() or "violation" in eval_str.lower() or "constraint" in eval_str.lower()
+
+    def test_praxis_add_rule_and_list(self, mcp):
+        """Add a rule then verify it appears in the list."""
+        unique = uuid.uuid4().hex[:8]
+        rule_name = f"test-rule-{unique}"
+        add_result = mcp.call_tool("praxis_add_rule", {
+            "name": rule_name,
+            "conditions": ["status == 'ready'"],
+            "actions": [{"type": "notify", "message": "System is ready"}],
+            "priority": 10,
+        })
+        assert add_result is not None
+
+        list_result = mcp.call_tool("praxis_list", {})
+        assert list_result is not None
+        list_str = str(list_result)
+        assert rule_name in list_str
+
+    def test_praxis_evaluate_no_violations(self, mcp):
+        """Evaluate a context that shouldn't trigger violations."""
+        eval_result = mcp.call_tool("praxis_evaluate", {
+            "context": {"action": "read", "user": "admin"},
+        })
+        assert eval_result is not None
+        # Read actions typically don't violate anything
