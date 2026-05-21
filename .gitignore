@@ -14,3 +14,9 @@ plures-object
 pluresdb
 .fastembed_cache
 third_party
+
+# Testing secrets
+testing/.env
+!testing/.env.example
+htmlcov/
+.coverage

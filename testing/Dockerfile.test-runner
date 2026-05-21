@@ -1,0 +1,14 @@
+# Test Runner — Python + pexpect for TUI automation over SSH
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-client \
+    sshpass \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir pexpect paramiko pytest pytest-timeout
+
+WORKDIR /tests
+COPY testing/tests/ /tests/
+COPY testing/pytest.ini /tests/pytest.ini
+
+ENTRYPOINT ["pytest", "-v", "--timeout=120", "-m", "docker"]
