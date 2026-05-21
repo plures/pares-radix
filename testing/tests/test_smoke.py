@@ -3,8 +3,11 @@ test_smoke.py — Basic smoke tests for pares-radix in the container.
 
 These verify the binary works, SSH is functional, and core commands respond.
 No mocks. All tests run against the real running container.
+Requires Docker (SSH into container).
 """
 import pytest
+
+pytestmark = pytest.mark.docker
 
 
 class TestBinarySmoke:

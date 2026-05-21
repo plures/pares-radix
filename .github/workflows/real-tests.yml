@@ -43,28 +43,16 @@ jobs:
       - name: Verify binary
         run: ./target/release/pares-radix --version
 
-      - name: Install pytest
-        run: pip install pytest pytest-timeout
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout pexpect paramiko
 
-      - name: Run local binary tests
+      - name: Run all local tests (no Docker)
         env:
           RADIX_BINARY: ./target/release/pares-radix
-        run: pytest testing/tests/test_local_binary.py -v --tb=short
-
-      - name: Run Praxis constraint tests
-        env:
-          RADIX_BINARY: ./target/release/pares-radix
-        run: pytest testing/tests/test_praxis_constraints.py -v --tb=short
-
-      - name: Run Praxis runtime tests (px check/test)
-        env:
-          RADIX_BINARY: ./target/release/pares-radix
-        run: pytest testing/tests/test_px_runtime.py -v --tb=short
-
-      - name: Run config and serve integration tests
-        env:
-          RADIX_BINARY: ./target/release/pares-radix
-        run: pytest testing/tests/test_config_and_serve.py -v --tb=short --timeout=30
+        run: |
+          pytest testing/tests/ -v --tb=short -m "not docker" \
+            --timeout=30 --ignore=testing/tests/test_smoke.py \
+            --ignore=testing/tests/test_mcp_server.py
 
   # ─── Tier 2: Full E2E with Docker + SSH + TUI automation ────────────────
   integration-tests:

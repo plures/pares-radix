@@ -1,11 +1,13 @@
 """
-test_mcp_server.py — MCP server protocol tests.
+test_mcp_server.py — MCP server protocol tests (Docker/SSH).
 
 Tests the MCP (Model Context Protocol) server by invoking it through
-the CLI and verifying JSON-RPC responses.
+the CLI and verifying JSON-RPC responses. Requires running Docker container.
 """
 import json
 import pytest
+
+pytestmark = pytest.mark.docker
 
 
 class TestMCPProtocol:
