@@ -5016,15 +5016,10 @@ async fn main() {
                                     break 'main_loop Ok(());
                                 }
                                 KeyCode::Char('l') => {
-                                    app.messages.clear();
-                                    app.scroll_offset = 0;
-                                    app.user_scrolled = false;
-                                    app.push_system("Chat cleared.");
+                                    app.clear_chat();
                                 }
                                 KeyCode::Char('u') => {
-                                    // Clear input line (like bash Ctrl+U)
-                                    app.input.clear();
-                                    app.input_cursor = 0;
+                                    app.clear_input();
                                 }
                                 KeyCode::Char('w') if app.input_cursor > 0 => {
                                     // Delete word backwards (like bash Ctrl+W)
@@ -5045,11 +5040,16 @@ async fn main() {
                         if key.modifiers.contains(KeyModifiers::ALT)
                             && key.code == KeyCode::Enter
                         {
-                            let cursor =
-                                app.input_cursor.min(app.input.len());
-                            app.input.insert(cursor, '\n');
-                            app.input_cursor = cursor + 1;
+                            app.insert_newline();
                             continue;
+                        }
+                        // Alt+1..9 switches to session by index
+                        if key.modifiers.contains(KeyModifiers::ALT) {
+                            if let KeyCode::Char(c @ '1'..='9') = key.code {
+                                let idx = (c as u8 - b'1') as usize;
+                                app.switch_to_index(idx);
+                                continue;
+                            }
                         }
                         match key.code {
                             KeyCode::Enter => {
