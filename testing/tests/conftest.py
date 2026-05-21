@@ -2,13 +2,22 @@
 conftest.py — shared fixtures for pares-radix E2E tests.
 
 Provides SSH connection to the radix container via paramiko/pexpect.
+These fixtures are only used by Docker-based tests (test_smoke, test_tui, test_mcp_server).
+Local tests (test_local_binary, test_praxis_constraints) use --noconftest or skip these.
 """
 import os
 import time
 
-import paramiko
-import pexpect
 import pytest
+
+# Guard imports — these are only needed for Docker-based tests
+try:
+    import paramiko
+    import pexpect
+
+    HAS_SSH_DEPS = True
+except ImportError:
+    HAS_SSH_DEPS = False
 
 
 SSH_HOST = os.environ.get("RADIX_SSH_HOST", "localhost")
@@ -20,6 +29,8 @@ SSH_PASS = os.environ.get("RADIX_SSH_PASS", "radix-test-pw")
 @pytest.fixture(scope="session")
 def ssh_client():
     """Paramiko SSH client connected to the radix container."""
+    if not HAS_SSH_DEPS:
+        pytest.skip("paramiko not installed — Docker tests require: pip install paramiko pexpect")
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -56,6 +67,8 @@ def tui_session():
     Spawn an interactive TUI session over SSH using pexpect.
     Returns a pexpect.spawn instance connected to pares-radix tui.
     """
+    if not HAS_SSH_DEPS:
+        pytest.skip("pexpect not installed — Docker tests require: pip install pexpect")
     cmd = (
         f"sshpass -p '{SSH_PASS}' ssh -o StrictHostKeyChecking=no "
         f"-p {SSH_PORT} {SSH_USER}@{SSH_HOST} "

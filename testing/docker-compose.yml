@@ -43,6 +43,23 @@ services:
   #   networks:
   #     - radix-net
 
+  # Test runner — pytest suite that drives the radix container
+  test-runner:
+    build:
+      context: ..
+      dockerfile: testing/Dockerfile.test-runner
+    profiles: [test]
+    environment:
+      RADIX_SSH_HOST: pares-radix
+      RADIX_SSH_PORT: "22"
+      RADIX_SSH_USER: radix
+      RADIX_SSH_PASS: radix-test-pw
+    depends_on:
+      pares-radix:
+        condition: service_healthy
+    networks:
+      - radix-net
+
 volumes:
   radix-data:
   radix-config:

@@ -1,0 +1,42 @@
+#!/bin/bash
+# testing/run-local-tests.sh — Run tests that don't require Docker
+#
+# These tests validate:
+#   - Binary builds and responds to subcommands
+#   - Praxis .px files are well-formed
+#   - MCP server protocol (if available)
+#
+# Prerequisites: pre-built binary at target/release/pares-radix
+# Usage: ./testing/run-local-tests.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BINARY="$REPO_ROOT/target/release/pares-radix"
+
+echo "═══ Pares Radix Local Tests ═══"
+echo "Binary: $BINARY"
+
+# Check binary exists
+if [[ ! -f "$BINARY" ]]; then
+    echo "ERROR: Binary not found. Run: cargo build --release -p pares-radix-cli"
+    exit 1
+fi
+
+echo "Version: $($BINARY --version)"
+echo ""
+
+# Run local tests (skip Docker-only tests)
+export RADIX_BINARY="$BINARY"
+cd "$REPO_ROOT"
+
+echo "Running test_local_binary.py..."
+pytest testing/tests/test_local_binary.py -v --tb=short 2>&1
+
+echo ""
+echo "Running test_praxis_constraints.py..."
+pytest testing/tests/test_praxis_constraints.py -v --tb=short 2>&1
+
+echo ""
+echo "═══ All local tests passed ═══"

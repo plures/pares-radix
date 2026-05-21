@@ -1,5 +1,7 @@
 # CI: Real Integration Tests for pares-radix
-# Builds the Docker image, starts the container, runs E2E tests.
+# Two tiers:
+#   1. local-tests: Build binary + run local tests (no Docker needed)
+#   2. integration-tests: Docker image + SSH + TUI automation (full E2E)
 # No mocks. Real binary, real SSH, real TUI automation.
 
 name: Real Integration Tests
@@ -15,9 +17,48 @@ env:
   RUST_LOG: info
 
 jobs:
+  # ─── Tier 1: Local binary + Praxis constraint tests (fast, no Docker) ───
+  local-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release -p pares-radix-cli
+
+      - name: Verify binary
+        run: ./target/release/pares-radix --version
+
+      - name: Install pytest
+        run: pip install pytest pytest-timeout
+
+      - name: Run local binary tests
+        env:
+          RADIX_BINARY: ./target/release/pares-radix
+        run: pytest testing/tests/test_local_binary.py -v --tb=short
+
+      - name: Run Praxis constraint tests
+        run: pytest testing/tests/test_praxis_constraints.py -v --tb=short
+
+  # ─── Tier 2: Full E2E with Docker + SSH + TUI automation ────────────────
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: local-tests
 
     steps:
       - uses: actions/checkout@v4
@@ -32,12 +73,15 @@ jobs:
           echo "PARES_AUTOSTART=" >> testing/.env
 
       - name: Build pares-radix image
+        working-directory: testing
         run: docker compose build pares-radix
 
       - name: Start service
+        working-directory: testing
         run: docker compose up -d pares-radix
 
       - name: Wait for healthy
+        working-directory: testing
         run: |
           for i in $(seq 1 30); do
             if docker compose exec pares-radix pares-radix --version; then
@@ -51,13 +95,16 @@ jobs:
           exit 1
 
       - name: Build test runner
+        working-directory: testing
         run: docker compose --profile test build test-runner
 
       - name: Run E2E tests
+        working-directory: testing
         run: docker compose --profile test run --rm test-runner
 
       - name: Collect logs on failure
         if: failure()
+        working-directory: testing
         run: |
           docker compose logs pares-radix > /tmp/radix-logs.txt 2>&1
           cat /tmp/radix-logs.txt
@@ -71,4 +118,5 @@ jobs:
 
       - name: Teardown
         if: always()
+        working-directory: testing
         run: docker compose --profile test down -v --remove-orphans
