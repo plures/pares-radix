@@ -1639,6 +1639,26 @@ impl ChannelAdapter for TelegramAdapter {
                                         None, event_spine.as_ref(),).await;
                                     return respond(());
                                 }
+                                // Preflight: check if sudo is available for nixos-rebuild
+                                let sudo_check = tokio::process::Command::new("sudo")
+                                    .args(["-n", "true"])
+                                    .output()
+                                    .await;
+                                let has_sudo = sudo_check.map(|o| o.status.success()).unwrap_or(false);
+                                if !has_sudo {
+                                    Self::send_reply_with_fallback(
+                                        &bot,
+                                        &msg,
+                                        "⚠️ Cannot update: `sudo` access is not configured for this user.\n\n\
+                                        The `/update` command requires passwordless sudo for `nixos-rebuild` and `nix`.\n\n\
+                                        To enable, add to your NixOS config:\n```nix\nsecurity.sudo.extraRules = [{\n  users = [ \"<your-user>\" ];\n  commands = [\n    { command = \"/run/current-system/sw/bin/nixos-rebuild\"; options = [ \"NOPASSWD\" ]; }\n    { command = \"/run/current-system/sw/bin/nix\"; options = [ \"NOPASSWD\" ]; }\n  ];\n}];\n```\n\n\
+                                        ⚠️ **Security note:** This grants the pares-radix service user the ability to \
+                                        rebuild and activate system configurations. Only enable this on machines you trust \
+                                        and where the Telegram update users list (PARES_TELEGRAM_UPDATE_ALLOWED_USERS) is \
+                                        properly restricted.",
+                                        None, event_spine.as_ref(),).await;
+                                    return respond(());
+                                }
                                 Self::send_reply_with_fallback(
                                     &bot,
                                     &msg,
