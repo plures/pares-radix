@@ -4,7 +4,9 @@
 # Runs a series of diagnostic checks and returns aggregated status.
 
 procedure system_health:
-  trigger: health_check
+  trigger: manual
+  given: "Run system health diagnostics and return aggregated status"
   read_file {path: "/proc/loadavg"} -> $load
-  run_command {command: "df -h / | tail -1"} -> $disk
-  run_command {command: "free -m | grep Mem"} -> $memory
+  exec {command: "df -h / | tail -1"} -> $disk
+  exec {command: "free -m | grep Mem"} -> $memory
+  emit {event: "health.check.complete", load: $load, disk: $disk, memory: $memory}

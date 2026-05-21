@@ -125,8 +125,16 @@ class TestConstraintSyntax:
             )
 
     def test_constraints_have_when_or_require(self, all_constraints):
-        """Every constraint has at least 'when' or 'require'."""
+        """Hand-written constraints have at least 'when' or 'require'.
+        
+        Auto-generated constraints (plures-dev-guide.px) may be advisory-only
+        with just severity + message, which is valid in the .px grammar.
+        """
+        # Skip auto-generated files that are advisory-only constraints
+        generated_files = {"plures-dev-guide.px"}
         for c in all_constraints:
+            if any(g in c["file"] for g in generated_files):
+                continue
             has_when = "when" in c["fields"]
             has_require = "require" in c["fields"]
             assert has_when or has_require, (

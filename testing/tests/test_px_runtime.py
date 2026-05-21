@@ -211,9 +211,9 @@ class TestPxFileHealth:
             if code != 0:
                 errors += 1
 
-        # Known baseline: 4 files have parse errors as of initial commit.
-        # If this number INCREASES, something regressed.
-        MAX_KNOWN_ERRORS = 5  # Allow slight buffer above current 4
+        # All .px files now pass parsing (fixed 2026-05-21).
+        # If this number INCREASES, a regression was introduced.
+        MAX_KNOWN_ERRORS = 0
         assert errors <= MAX_KNOWN_ERRORS, (
             f"Parse error count ({errors}) exceeds known baseline ({MAX_KNOWN_ERRORS}). "
             f"New .px files introduced with syntax errors?"
