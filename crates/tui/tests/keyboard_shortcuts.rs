@@ -257,3 +257,99 @@ fn sequential_switches_work() {
     app.switch_to_index(0);
     assert_eq!(app.current_session, "s1");
 }
+
+// ─── Ctrl+W: delete_word_backward ─────────────────────────────────────────────
+
+#[test]
+fn delete_word_backward_removes_last_word() {
+    let (mut app, _rx) = make_app();
+    app.input = "hello world".to_string();
+    app.input_cursor = app.input.len(); // cursor at end
+
+    app.delete_word_backward();
+
+    assert_eq!(app.input, "hello ");
+    assert_eq!(app.input_cursor, 6);
+}
+
+#[test]
+fn delete_word_backward_removes_single_word() {
+    let (mut app, _rx) = make_app();
+    app.input = "hello".to_string();
+    app.input_cursor = 5;
+
+    app.delete_word_backward();
+
+    assert_eq!(app.input, "");
+    assert_eq!(app.input_cursor, 0);
+}
+
+#[test]
+fn delete_word_backward_at_start_is_noop() {
+    let (mut app, _rx) = make_app();
+    app.input = "hello world".to_string();
+    app.input_cursor = 0;
+
+    app.delete_word_backward();
+
+    assert_eq!(app.input, "hello world");
+    assert_eq!(app.input_cursor, 0);
+}
+
+#[test]
+fn delete_word_backward_on_empty_is_noop() {
+    let (mut app, _rx) = make_app();
+    app.input = String::new();
+    app.input_cursor = 0;
+
+    app.delete_word_backward();
+
+    assert_eq!(app.input, "");
+    assert_eq!(app.input_cursor, 0);
+}
+
+#[test]
+fn delete_word_backward_handles_trailing_spaces() {
+    let (mut app, _rx) = make_app();
+    app.input = "one two   ".to_string();
+    app.input_cursor = app.input.len(); // cursor after trailing spaces
+
+    app.delete_word_backward();
+
+    // Trims trailing spaces, then deletes back to previous word boundary
+    assert_eq!(app.input, "one ");
+    assert_eq!(app.input_cursor, 4);
+}
+
+#[test]
+fn delete_word_backward_cursor_midword() {
+    let (mut app, _rx) = make_app();
+    app.input = "hello world".to_string();
+    app.input_cursor = 8; // cursor after "wor"
+
+    app.delete_word_backward();
+
+    // "hello wo|rld" → trim_end of "hello wo" = "hello wo",
+    // rfind whitespace = 5 → new_end = 6
+    assert_eq!(app.input, "hello rld");
+    assert_eq!(app.input_cursor, 6);
+}
+
+#[test]
+fn delete_word_backward_multiple_times() {
+    let (mut app, _rx) = make_app();
+    app.input = "one two three".to_string();
+    app.input_cursor = app.input.len();
+
+    app.delete_word_backward();
+    assert_eq!(app.input, "one two ");
+    assert_eq!(app.input_cursor, 8);
+
+    app.delete_word_backward();
+    assert_eq!(app.input, "one ");
+    assert_eq!(app.input_cursor, 4);
+
+    app.delete_word_backward();
+    assert_eq!(app.input, "");
+    assert_eq!(app.input_cursor, 0);
+}
