@@ -604,6 +604,22 @@ impl App {
         self.input_cursor = 0;
     }
 
+    /// Delete word backward (Ctrl+W equivalent, bash-style).
+    /// Deletes from cursor back to the start of the previous word.
+    pub fn delete_word_backward(&mut self) {
+        if self.input_cursor == 0 {
+            return;
+        }
+        let before = &self.input[..self.input_cursor];
+        let trimmed = before.trim_end();
+        let new_end = trimmed
+            .rfind(char::is_whitespace)
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        self.input.drain(new_end..self.input_cursor);
+        self.input_cursor = new_end;
+    }
+
     /// Insert a newline at the current cursor position (for multi-line input).
     pub fn insert_newline(&mut self) {
         let cursor = self.input_cursor.min(self.input.len());

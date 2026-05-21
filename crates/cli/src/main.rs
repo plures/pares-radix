@@ -5021,16 +5021,8 @@ async fn main() {
                                 KeyCode::Char('u') => {
                                     app.clear_input();
                                 }
-                                KeyCode::Char('w') if app.input_cursor > 0 => {
-                                    // Delete word backwards (like bash Ctrl+W)
-                                    let before = &app.input[..app.input_cursor];
-                                    let trimmed = before.trim_end();
-                                    let new_end = trimmed
-                                        .rfind(char::is_whitespace)
-                                        .map(|i| i + 1)
-                                        .unwrap_or(0);
-                                    app.input.drain(new_end..app.input_cursor);
-                                    app.input_cursor = new_end;
+                                KeyCode::Char('w') => {
+                                    app.delete_word_backward();
                                 }
                                 _ => {}
                             }
