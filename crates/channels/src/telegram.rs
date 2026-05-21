@@ -287,9 +287,9 @@ fn build_nixos_update_command(_flake_dir: &str, _host: &str) -> String {
          echo 'Pulling latest config...'; \
          git fetch origin && git pull --ff-only; \
          echo 'Updating flake inputs...'; \
-         nix flake update pares-radix pares-cache; \
+         sudo nix flake update pares-radix pares-arca; \
          echo 'Rebuilding NixOS...'; \
-         nixos-rebuild switch --flake .#{host_q} --refresh; \
+         sudo nixos-rebuild switch --flake .#{host_q} --refresh; \
          echo 'Self-update complete.'"
     )
 }

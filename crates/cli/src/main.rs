@@ -2625,7 +2625,7 @@ fn build_nixos_update_command(flake_dir: &str, host: &str) -> String {
     let flake_dir_q = shell_single_quote(flake_dir);
     let host_q = shell_single_quote(host);
     format!(
-        "set -eu; cd {flake_dir_q}; git fetch origin && git pull --ff-only; nix flake update pares-radix pares-cache; nixos-rebuild switch --flake .#{host_q} --refresh; echo 'Self-update applied'"
+        "set -eu; cd {flake_dir_q}; git fetch origin && git pull --ff-only; sudo nix flake update pares-radix pares-arca; sudo nixos-rebuild switch --flake .#{host_q} --refresh; echo 'Self-update applied'"
     )
 }
 
