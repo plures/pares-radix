@@ -9,5 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /tests
 COPY testing/tests/ /tests/
+COPY testing/pytest.ini /tests/pytest.ini
 
-ENTRYPOINT ["pytest", "-v", "--timeout=120"]
+ENTRYPOINT ["pytest", "-v", "--timeout=120", "-m", "docker"]
