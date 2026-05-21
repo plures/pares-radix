@@ -51,4 +51,12 @@ echo "Running test_pluresdb_integration.py..."
 pytest testing/tests/test_pluresdb_integration.py -v --tb=short 2>&1
 
 echo ""
+echo "Running test_ask_subcommand.py..."
+pytest testing/tests/test_ask_subcommand.py -v --tb=short 2>&1
+
+echo ""
+echo "Running test_tui.py (local tests only)..."
+pytest testing/tests/test_tui.py -v --tb=short -m "not docker" 2>&1
+
+echo ""
 echo "═══ All local tests passed ═══"
