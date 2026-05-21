@@ -18,3 +18,5 @@ third_party
 # Testing secrets
 testing/.env
 !testing/.env.example
+htmlcov/
+.coverage

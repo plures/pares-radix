@@ -44,7 +44,7 @@ jobs:
         run: ./target/release/pares-radix --version
 
       - name: Install test dependencies
-        run: pip install pytest pytest-timeout pexpect paramiko
+        run: pip install pytest pytest-timeout pytest-cov pexpect paramiko
 
       - name: Run all local tests (no Docker)
         env:
@@ -52,7 +52,15 @@ jobs:
         run: |
           pytest testing/tests/ -v --tb=short -m "not docker" \
             --timeout=30 --ignore=testing/tests/test_smoke.py \
-            --ignore=testing/tests/test_mcp_server.py
+            --ignore=testing/tests/test_mcp_server.py \
+            --cov=testing/tests --cov-report=term-missing
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: .coverage
 
   # ─── Tier 2: Full E2E with Docker + SSH + TUI automation ────────────────
   integration-tests:

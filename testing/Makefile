@@ -22,6 +22,9 @@ build:
 test: build
 	pytest tests/ -v --tb=short -m "not docker" --timeout=30
 
+test-cov: build
+	pytest tests/ -v --tb=short -m "not docker" --timeout=30 --cov=tests --cov-report=term-missing --cov-report=html:htmlcov
+
 test-quick:
 	@test -f $(BINARY) || (echo "ERROR: Binary not found. Run 'make build' first."; exit 1)
 	pytest tests/ -v --tb=short -m "not docker" --timeout=30 -x
