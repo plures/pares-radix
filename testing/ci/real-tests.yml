@@ -1,0 +1,86 @@
+# testing/ci/real-tests.yml — GitHub Actions workflow for real testing
+# Builds the Docker image, starts the container, runs all test suites.
+# Requires secrets: OPENAI_API_KEY, GITHUB_TOKEN (for full MCP testing)
+
+name: Real Testing Infrastructure
+
+on:
+  push:
+    branches: [feature/real-testing-infra, main]
+    paths:
+      - 'crates/**'
+      - 'testing/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  RUST_LOG: info
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Create .env for testing
+        run: |
+          cat > testing/.env <<EOF
+          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+          RUST_LOG=info
+          EOF
+
+      - name: Build Docker image
+        run: |
+          docker compose -f testing/docker-compose.yml build
+          echo "BUILD_STATUS=success" >> $GITHUB_ENV
+
+      - name: Start services
+        run: |
+          docker compose -f testing/docker-compose.yml up -d
+          sleep 5
+          docker compose -f testing/docker-compose.yml ps
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass python3-pip
+          pip install pexpect
+
+      - name: Run shell test suite
+        run: |
+          chmod +x testing/scripts/run-tests.sh
+          ./testing/scripts/run-tests.sh --no-build --keep
+
+      - name: Run TUI test suite
+        run: |
+          python3 testing/scripts/tui-test.py --host localhost --port 2222
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Container logs ==="
+          docker compose -f testing/docker-compose.yml logs
+          echo "=== Container status ==="
+          docker compose -f testing/docker-compose.yml ps -a
+
+      - name: Teardown
+        if: always()
+        run: |
+          docker compose -f testing/docker-compose.yml down -v --remove-orphans

@@ -1,0 +1,53 @@
+# testing/docker-compose.yml — Full testing stack for pares-radix
+# Real services, real keys, SSH access for TUI testing
+#
+# Usage:
+#   cd testing/
+#   cp .env.example .env  # fill in real keys
+#   docker compose up -d
+#   ssh radix@localhost -p 2222  # password: radix-test
+
+services:
+  pares-radix:
+    build:
+      context: ..
+      dockerfile: testing/Dockerfile
+    ports:
+      - "2222:22"    # SSH for TUI access
+      - "3100:3100"  # MCP server
+    env_file:
+      - .env
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      TERM: xterm-256color
+    volumes:
+      - radix-data:/home/radix/.local/share/pares-radix
+      - radix-config:/home/radix/.config/pares-radix
+    healthcheck:
+      test: ["CMD", "pares-radix", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - radix-net
+
+  # PluresDB — persistent embedded storage
+  # Uncomment if radix uses an external PluresDB service
+  # pluresdb:
+  #   image: ghcr.io/plures/pluresdb:latest
+  #   ports:
+  #     - "3200:3200"
+  #   volumes:
+  #     - pluresdb-data:/data
+  #   networks:
+  #     - radix-net
+
+volumes:
+  radix-data:
+  radix-config:
+  # pluresdb-data:
+
+networks:
+  radix-net:
+    driver: bridge
