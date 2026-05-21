@@ -47,4 +47,8 @@ echo "Running test_config_and_serve.py..."
 pytest testing/tests/test_config_and_serve.py -v --tb=short 2>&1
 
 echo ""
+echo "Running test_pluresdb_integration.py..."
+pytest testing/tests/test_pluresdb_integration.py -v --tb=short 2>&1
+
+echo ""
 echo "═══ All local tests passed ═══"
