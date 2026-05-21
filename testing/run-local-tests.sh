@@ -39,4 +39,12 @@ echo "Running test_praxis_constraints.py..."
 pytest testing/tests/test_praxis_constraints.py -v --tb=short 2>&1
 
 echo ""
+echo "Running test_px_runtime.py..."
+pytest testing/tests/test_px_runtime.py -v --tb=short 2>&1
+
+echo ""
+echo "Running test_config_and_serve.py..."
+pytest testing/tests/test_config_and_serve.py -v --tb=short 2>&1
+
+echo ""
 echo "═══ All local tests passed ═══"
