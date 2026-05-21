@@ -6,7 +6,18 @@
 #   docker run -d -p 2222:22 --env-file testing/.env pares-radix-test
 
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM rust:1.87-bookworm AS builder
+# Ubuntu 24.04 (glibc 2.39) required — ort-sys prebuilt ONNX Runtime objects
+# reference __isoc23_strtoll/strtoull (glibc 2.38+), bookworm only has 2.36.
+FROM ubuntu:24.04 AS builder
+
+# Install build toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential pkg-config libssl-dev ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.87.0
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
@@ -19,7 +30,8 @@ RUN cargo build --release -p pares-radix-cli 2>&1 && \
     echo "BUILD OK"
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# Must match builder glibc (2.39) — bookworm-slim only has 2.36
+FROM ubuntu:24.04
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -43,7 +55,7 @@ RUN mkdir -p /run/sshd && \
 
 # Create test user
 RUN useradd -m -s /bin/bash radix && \
-    echo "radix:radix-test" | chpasswd && \
+    echo "radix:radix-test-pw" | chpasswd && \
     mkdir -p /home/radix/.config/pares-radix /home/radix/.local/share/pares-radix
 
 # Copy binary from builder (single CLI binary with subcommands for serve/tui/mcp)
