@@ -1,36 +1,27 @@
 #!/bin/bash
-# testing/entrypoint.sh — Start SSH and MCP server for real testing
+# entrypoint.sh — starts sshd + optionally pares-radix serve
 set -e
 
-echo "[entrypoint] Starting pares-radix testing container"
-echo "[entrypoint] RUST_LOG=${RUST_LOG:-info}"
+echo "▸ Starting SSH daemon..."
+/usr/sbin/sshd
 
-# Start SSH daemon
-/usr/sbin/sshd -D &
-SSHD_PID=$!
-echo "[entrypoint] sshd started (pid=$SSHD_PID)"
+echo "▸ pares-radix $(pares-radix --version 2>/dev/null || echo 'unknown')"
 
-# Wait for SSH to be ready
-for i in $(seq 1 10); do
-    if ssh-keyscan -p 22 localhost >/dev/null 2>&1; then
-        echo "[entrypoint] SSH ready"
-        break
-    fi
-    sleep 0.5
-done
-
-# Start MCP server as the radix user (if API keys are present)
-if [ -n "$OPENAI_API_KEY" ] || [ -n "$ANTHROPIC_API_KEY" ]; then
-    echo "[entrypoint] Starting pares-radix serve on :3100"
-    su -c "RUST_LOG=${RUST_LOG:-info} pares-radix serve --port 3100 &" radix 2>/dev/null || \
-        echo "[entrypoint] serve subcommand not available (may need telegram token)"
+# If PARES_AUTOSTART=serve, run the serve command in background
+if [ "${PARES_AUTOSTART}" = "serve" ]; then
+    echo "▸ Starting pares-radix serve..."
+    exec su -c "pares-radix serve \
+        --model-url ${PARES_MODEL_URL:-https://models.inference.ai.azure.com} \
+        --model ${PARES_MODEL:-claude-sonnet-4.5}" radix
+elif [ "${PARES_AUTOSTART}" = "tui" ]; then
+    echo "▸ Starting pares-radix tui..."
+    exec su -c "pares-radix tui \
+        --model-url ${PARES_MODEL_URL:-https://models.inference.ai.azure.com} \
+        --model ${PARES_MODEL:-claude-sonnet-4.5}" radix
 else
-    echo "[entrypoint] No API keys found, serve mode not started"
-    echo "[entrypoint] Set OPENAI_API_KEY or ANTHROPIC_API_KEY to enable"
+    # Default: keep container alive for SSH access, user starts TUI manually
+    echo "▸ Ready. SSH into port 22 as user 'radix' to use the TUI."
+    echo "▸ Or run: docker exec -it <container> pares-radix tui"
+    # Keep alive
+    exec tail -f /dev/null
 fi
-
-echo "[entrypoint] Container ready. SSH on :22, MCP on :3100"
-echo "[entrypoint] Login: ssh radix@localhost -p <mapped-port> (password: radix-test)"
-
-# Wait for sshd (keeps container alive)
-wait $SSHD_PID

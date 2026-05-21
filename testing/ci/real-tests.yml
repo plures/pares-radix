@@ -1,26 +1,21 @@
-# testing/ci/real-tests.yml — GitHub Actions workflow for real testing
-# Builds the Docker image, starts the container, runs all test suites.
-# Requires secrets: OPENAI_API_KEY, GITHUB_TOKEN (for full MCP testing)
+# CI: Real Integration Tests for pares-radix
+# Builds the Docker image, starts the container, runs E2E tests.
+# No mocks. Real binary, real SSH, real TUI automation.
 
-name: Real Testing Infrastructure
+name: Real Integration Tests
 
 on:
   push:
-    branches: [feature/real-testing-infra, main]
-    paths:
-      - 'crates/**'
-      - 'testing/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+    branches: [main, feature/real-testing-infra]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 env:
+  CARGO_TERM_COLOR: always
   RUST_LOG: info
 
 jobs:
-  build-and-test:
+  integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -30,57 +25,50 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: Create .env for testing
+      - name: Create test env file
         run: |
-          cat > testing/.env <<EOF
-          OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-          GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-          RUST_LOG=info
-          EOF
+          cp testing/.env.example testing/.env
+          # CI uses default model URL, no real API key needed for smoke tests
+          echo "PARES_AUTOSTART=" >> testing/.env
 
-      - name: Build Docker image
-        run: |
-          docker compose -f testing/docker-compose.yml build
-          echo "BUILD_STATUS=success" >> $GITHUB_ENV
+      - name: Build pares-radix image
+        run: docker compose build pares-radix
 
-      - name: Start services
-        run: |
-          docker compose -f testing/docker-compose.yml up -d
-          sleep 5
-          docker compose -f testing/docker-compose.yml ps
+      - name: Start service
+        run: docker compose up -d pares-radix
 
-      - name: Install test dependencies
+      - name: Wait for healthy
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq sshpass python3-pip
-          pip install pexpect
+          for i in $(seq 1 30); do
+            if docker compose exec pares-radix pares-radix --version; then
+              echo "Service healthy"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Service failed to start"
+          docker compose logs pares-radix
+          exit 1
 
-      - name: Run shell test suite
-        run: |
-          chmod +x testing/scripts/run-tests.sh
-          ./testing/scripts/run-tests.sh --no-build --keep
+      - name: Build test runner
+        run: docker compose --profile test build test-runner
 
-      - name: Run TUI test suite
-        run: |
-          python3 testing/scripts/tui-test.py --host localhost --port 2222
+      - name: Run E2E tests
+        run: docker compose --profile test run --rm test-runner
 
       - name: Collect logs on failure
         if: failure()
         run: |
-          echo "=== Container logs ==="
-          docker compose -f testing/docker-compose.yml logs
-          echo "=== Container status ==="
-          docker compose -f testing/docker-compose.yml ps -a
+          docker compose logs pares-radix > /tmp/radix-logs.txt 2>&1
+          cat /tmp/radix-logs.txt
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: radix-test-logs
+          path: /tmp/radix-logs.txt
 
       - name: Teardown
         if: always()
-        run: |
-          docker compose -f testing/docker-compose.yml down -v --remove-orphans
+        run: docker compose --profile test down -v --remove-orphans

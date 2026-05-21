@@ -1,82 +1,75 @@
-# Real Testing Infrastructure for pares-radix
+# pares-radix Real Testing Infrastructure
 
-**Philosophy:** No mocks. Real services, real keys, real terminal. Test like a human would.
+Real-world integration testing. No mocks. Docker container with SSH, TUI automation via pexpect.
 
 ## Quick Start
 
 ```bash
-# 1. Copy env template and fill in real API keys
+# 1. Configure secrets
 cp testing/.env.example testing/.env
-# Edit .env with your keys
+# Edit testing/.env — add your API key
 
-# 2. Build and run
-cd testing/
-docker compose up -d
+# 2. Build and run tests
+./testing/run-tests.sh
 
-# 3. SSH into the container (TUI access)
-ssh radix@localhost -p 2222
-# password: radix-test
+# 3. SSH into the running container for manual testing
+ssh -p 2222 radix@localhost
+# password: radix-test-pw
 
-# 4. Run automated tests
-./scripts/run-tests.sh
+# 4. Start TUI manually inside container
+pares-radix tui --model-url https://models.inference.ai.azure.com
 
-# 5. Run TUI automation tests
-pip install pexpect
-python scripts/tui-test.py
+# 5. Teardown
+./testing/run-tests.sh --teardown
 ```
 
 ## Architecture
 
 ```
-testing/
-├── Dockerfile          # Multi-stage: build from source → slim runtime + SSH
-├── docker-compose.yml  # Full stack: radix + (optional) pluresdb
-├── entrypoint.sh       # Starts SSH + MCP server
-├── .env.example        # Required secrets template
-├── scripts/
-│   ├── run-tests.sh    # Shell-based E2E test runner
-│   └── tui-test.py     # pexpect-based TUI automation
-└── ci/
-    └── real-tests.yml  # GitHub Actions workflow
+┌─────────────────────────────────────┐
+│  docker-compose.yml                 │
+├─────────────────────────────────────┤
+│  pares-radix service                │
+│  ├── SSH server (port 2222)         │
+│  ├── pares-radix binary             │
+│  └── UTF-8 locale + terminfo        │
+├─────────────────────────────────────┤
+│  test-runner (--profile test)       │
+│  ├── pytest + pexpect + paramiko    │
+│  ├── test_smoke.py (binary, env)    │
+│  ├── test_tui.py (interactive TUI)  │
+│  └── test_mcp_server.py (protocol) │
+└─────────────────────────────────────┘
 ```
 
-## What Gets Tested
+## Test Categories
 
-| Suite | What | How |
-|-------|------|-----|
-| Binary Verification | CLI/TUI/MCP binaries exist and respond | docker exec |
-| SSH Access | Login, locale, PATH | sshpass + assertions |
-| TUI Startup | TUI renders, responds to 'q', exits cleanly | pexpect over SSH |
-| Praxis Loading | Constraint files present, validate command works | file checks + CLI |
-| PluresDB | Put/get operations | CLI subcommands |
-| MCP Server | Server starts, responds to health checks | curl/process checks |
+| File | What it tests | Requires API key? |
+|------|---------------|-------------------|
+| `test_smoke.py` | Binary works, env correct, SSH access | No |
+| `test_tui.py` | TUI launches, responds to keys, exits cleanly | Partially (may skip) |
+| `test_mcp_server.py` | MCP JSON-RPC protocol compliance | No |
 
-## Adding Tests
+## Secrets
 
-### Shell tests (run-tests.sh)
-Add a new section following the pattern:
-```bash
-# Test N: description
-RESULT=$(docker compose exec -T pares-radix some-command 2>&1)
-if echo "$RESULT" | grep -q "expected"; then
-    pass "test description"
-else
-    fail_test "test description: $RESULT"
-fi
-```
+All secrets are injected via `testing/.env` (never baked into the image).
+Required for full test suite:
+- `PARES_API_KEY` — GitHub Models / OpenAI-compatible API key
 
-### TUI tests (tui-test.py)
-Add a method to `TUITestRunner`:
-```python
-def test_my_feature(self):
-    print("\n[Suite: My Feature]")
-    self.assert_output("does thing", "command", r"expected_regex")
-```
+Smoke tests run without any API keys.
 
 ## CI
 
-The GitHub Actions workflow (`ci/real-tests.yml`) requires these repository secrets:
-- `OPENAI_API_KEY` — for MCP server LLM operations
-- `GITHUB_TOKEN` — auto-provided, used for repo operations
+Copy `testing/ci/real-tests.yml` to `.github/workflows/` to enable on push:
 
-Copy to `.github/workflows/real-tests.yml` to activate.
+```bash
+cp testing/ci/real-tests.yml .github/workflows/real-tests.yml
+```
+
+## Design Principles
+
+1. **No mocks** — tests hit real binaries, real SSH, real protocol
+2. **SSH for TUI** — same way a human would access it remotely
+3. **pexpect for automation** — industry standard for terminal automation
+4. **Secrets at runtime** — `.env` file, never in image layers
+5. **Profile isolation** — test runner only starts with `--profile test`

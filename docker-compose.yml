@@ -1,21 +1,52 @@
-version: '3.8'
-services:
-  pares-agens:
-    build: .
-    environment:
-      RUST_LOG: info
-      PARES_MODEL_CACHE: /home/test/.cache/pares-models
-    volumes:
-      - model-cache:/home/test/.cache/pares-models
-    command: ["tui"]
-    stdin_open: true
-    tty: true
+# pares-radix Real Testing Infrastructure
+# docker-compose.yml — declarative services for integration testing
 
-  qa-test:
-    build: .
+services:
+  # ─── Main service: pares-radix with SSH access ─────────────────────────────
+  pares-radix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: radix-test
+    ports:
+      - "2222:22"       # SSH for TUI access
+      - "3100:3100"     # MCP server port (if enabled)
+    env_file:
+      - testing/.env
     environment:
-      RUST_LOG: info
-    command: ["--version"]
+      RUST_LOG: info,pares_radix=debug
+      PARES_AUTOSTART: ""  # empty = SSH-only, set "serve" or "tui"
+    volumes:
+      - radix-data:/home/radix/.pares-radix
+      - radix-cache:/home/radix/.cache
+    healthcheck:
+      test: ["CMD", "pares-radix", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ─── Test runner: executes E2E test suite against radix service ─────────────
+  test-runner:
+    build:
+      context: .
+      dockerfile: testing/Dockerfile.test-runner
+    container_name: radix-test-runner
+    depends_on:
+      pares-radix:
+        condition: service_healthy
+    env_file:
+      - testing/.env
+    environment:
+      RADIX_SSH_HOST: pares-radix
+      RADIX_SSH_PORT: "22"
+      RADIX_SSH_USER: radix
+      RADIX_SSH_PASS: radix-test-pw
+    volumes:
+      - ./testing:/tests:ro
+    profiles:
+      - test  # Only starts with --profile test
 
 volumes:
-  model-cache:
+  radix-data:
+  radix-cache:
