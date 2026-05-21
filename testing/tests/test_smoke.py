@@ -45,7 +45,7 @@ class TestEnvironment:
         assert "UTF-8" in stdout or "utf8" in stdout.lower()
 
     def test_term_set(self, ssh_exec):
-        """TERM is set to a color-capable value."""
+        """TERM is set to a color-capable value via SSH environment."""
         stdout, _, code = ssh_exec("echo $TERM")
         assert code == 0
         term = stdout.strip()
