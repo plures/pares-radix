@@ -44,7 +44,7 @@ jobs:
         run: ./target/release/pares-radix --version
 
       - name: Install test dependencies
-        run: pip install pytest pytest-timeout pytest-cov pexpect paramiko
+        run: pip install pytest pytest-timeout pytest-cov pexpect paramiko hypothesis
 
       - name: Run all local tests (no Docker)
         env:
