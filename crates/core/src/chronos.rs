@@ -750,6 +750,89 @@ mod tests {
     }
 
     #[test]
+    fn from_str_loose_all_variants() {
+        assert_eq!(ChronosLevel::from_str_loose("debug"), Some(ChronosLevel::Debug));
+        assert_eq!(ChronosLevel::from_str_loose("info"), Some(ChronosLevel::Info));
+        assert_eq!(ChronosLevel::from_str_loose("warn"), Some(ChronosLevel::Warn));
+        assert_eq!(ChronosLevel::from_str_loose("warning"), Some(ChronosLevel::Warn));
+        assert_eq!(ChronosLevel::from_str_loose("error"), Some(ChronosLevel::Error));
+        assert_eq!(ChronosLevel::from_str_loose("unknown"), None);
+        assert_eq!(ChronosLevel::from_str_loose(""), None);
+        // Case insensitivity
+        assert_eq!(ChronosLevel::from_str_loose("DEBUG"), Some(ChronosLevel::Debug));
+        assert_eq!(ChronosLevel::from_str_loose("Error"), Some(ChronosLevel::Error));
+    }
+
+    #[test]
+    fn level_display() {
+        assert_eq!(ChronosLevel::Debug.to_string(), "debug");
+        assert_eq!(ChronosLevel::Info.to_string(), "info");
+        assert_eq!(ChronosLevel::Warn.to_string(), "warn");
+        assert_eq!(ChronosLevel::Error.to_string(), "error");
+    }
+
+    #[test]
+    fn level_ordering() {
+        assert!(ChronosLevel::Debug < ChronosLevel::Info);
+        assert!(ChronosLevel::Info < ChronosLevel::Warn);
+        assert!(ChronosLevel::Warn < ChronosLevel::Error);
+    }
+
+    #[test]
+    fn action_display() {
+        assert_eq!(ChronosAction::Create.to_string(), "Create");
+        assert_eq!(ChronosAction::Update.to_string(), "Update");
+        assert_eq!(ChronosAction::Delete.to_string(), "Delete");
+        assert_eq!(ChronosAction::Move.to_string(), "Move");
+        assert_eq!(ChronosAction::MessageReceived.to_string(), "MessageReceived");
+        assert_eq!(ChronosAction::ResponseGenerated.to_string(), "ResponseGenerated");
+        assert_eq!(ChronosAction::ToolInvoked.to_string(), "ToolInvoked");
+        assert_eq!(ChronosAction::ContextManaged.to_string(), "ContextManaged");
+        assert_eq!(ChronosAction::ModelCalled.to_string(), "ModelCalled");
+        assert_eq!(ChronosAction::OutcomeRecorded.to_string(), "OutcomeRecorded");
+    }
+
+    #[test]
+    fn in_range_filter() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let e1 = timeline.build_entry("k1", "a", ChronosAction::Create, &json!(1), vec![], None);
+        timeline.record(&e1);
+        let ts = e1.timestamp;
+
+        // Should find entries within the range
+        let results = timeline.in_range(ts, ts + 1000, 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, e1.id);
+
+        // Range before entry — empty
+        let results = timeline.in_range(0, ts - 1, 10);
+        assert!(results.is_empty());
+
+        // Range after entry — empty
+        let results = timeline.in_range(ts + 1, ts + 1000, 10);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn history_empty_key() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        assert!(timeline.history("nonexistent", 10).is_empty());
+        assert!(timeline.latest("nonexistent").is_none());
+    }
+
+    #[test]
+    fn level_u8_roundtrip() {
+        for level in [ChronosLevel::Debug, ChronosLevel::Info, ChronosLevel::Warn, ChronosLevel::Error] {
+            assert_eq!(ChronosLevel::from_u8(level.as_u8()), level);
+        }
+        // Unknown u8 falls back to Info
+        assert_eq!(ChronosLevel::from_u8(99), ChronosLevel::Info);
+    }
+
+    #[test]
     fn timeline_since_filter() {
         let store = test_store();
         let timeline = ChronosTimeline::new(store);
