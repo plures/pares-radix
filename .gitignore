@@ -20,3 +20,4 @@ testing/.env
 !testing/.env.example
 htmlcov/
 .coverage
+mutants.out/
