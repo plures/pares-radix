@@ -430,6 +430,15 @@ fn execute_when(
     let mut nested_results = Vec::new();
     for (i, nested) in nested_steps.iter().enumerate() {
         let result = execute_step(nested, i, vars, handler)?;
+        // Propagate return from nested steps — the outer procedure should halt.
+        if result.kind == "return" {
+            return Ok(StepResult {
+                index,
+                kind: "return".into(),
+                output: result.output,
+                skipped: false,
+            });
+        }
         nested_results.push(result);
     }
 
