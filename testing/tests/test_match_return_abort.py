@@ -647,3 +647,96 @@ class TestCombinedControlFlow:
         assert steps[0]["kind"] == "call"
         assert steps[1]["kind"] == "return"
         assert steps[1]["output"] == "got_output"
+
+
+class TestEmptyStringComparison:
+    """Tests for empty-string comparison in conditions (bug fix).
+
+    Previously, `$x == ""` would fail to evaluate because the condition
+    parser rejected empty RHS values after stripping quotes.
+    """
+
+    def test_empty_var_equals_empty_string(self, mcp):
+        """Variable holding empty string equals ""."""
+        name = unique_name("empty_eq")
+        source = (
+            f'procedure {name}:\n'
+            f'  trigger: manual\n'
+            f'  when $val == "":\n'
+            f'    return "was_empty"\n'
+            f'  end\n'
+            f'  return "was_not_empty"\n'
+        )
+        result = run_inline(mcp, source, vars={"val": ""})
+        assert_success(result)
+        steps = get_steps(result)
+        last_return = [s for s in steps if s["kind"] == "return"]
+        assert last_return[-1]["output"] == "was_empty"
+
+    def test_nonempty_var_not_equals_empty_string(self, mcp):
+        """Variable with content does not equal ""."""
+        name = unique_name("nonempty_eq")
+        source = (
+            f'procedure {name}:\n'
+            f'  trigger: manual\n'
+            f'  when $val == "":\n'
+            f'    return "was_empty"\n'
+            f'  end\n'
+            f'  return "was_not_empty"\n'
+        )
+        result = run_inline(mcp, source, vars={"val": "hello"})
+        assert_success(result)
+        steps = get_steps(result)
+        last_return = [s for s in steps if s["kind"] == "return"]
+        assert last_return[-1]["output"] == "was_not_empty"
+
+    def test_empty_var_not_equals_empty_string(self, mcp):
+        """Empty var != "" should be false (skip when block)."""
+        name = unique_name("empty_neq")
+        source = (
+            f'procedure {name}:\n'
+            f'  trigger: manual\n'
+            f'  when $val != "":\n'
+            f'    return "has_value"\n'
+            f'  end\n'
+            f'  return "empty"\n'
+        )
+        result = run_inline(mcp, source, vars={"val": ""})
+        assert_success(result)
+        steps = get_steps(result)
+        last_return = [s for s in steps if s["kind"] == "return"]
+        assert last_return[-1]["output"] == "empty"
+
+    def test_nonempty_var_ne_returns_has_value(self, mcp):
+        """Non-empty var != "" should be true."""
+        name = unique_name("nonempty_neq")
+        source = (
+            f'procedure {name}:\n'
+            f'  trigger: manual\n'
+            f'  when $val != "":\n'
+            f'    return "has_value"\n'
+            f'  end\n'
+            f'  return "empty"\n'
+        )
+        result = run_inline(mcp, source, vars={"val": "world"})
+        assert_success(result)
+        steps = get_steps(result)
+        last_return = [s for s in steps if s["kind"] == "return"]
+        assert last_return[-1]["output"] == "has_value"
+
+    def test_empty_string_guard_with_dollar_prefix(self, mcp):
+        """$ prefix variables work with empty string comparison."""
+        name = unique_name("dollar_empty")
+        source = (
+            f'procedure {name}:\n'
+            f'  trigger: manual\n'
+            f'  when $input == "":\n'
+            f'    return "no_input"\n'
+            f'  end\n'
+            f'  return $input\n'
+        )
+        result = run_inline(mcp, source, vars={"input": ""})
+        assert_success(result)
+        steps = get_steps(result)
+        last_return = [s for s in steps if s["kind"] == "return"]
+        assert last_return[-1]["output"] == "no_input"
