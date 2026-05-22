@@ -826,9 +826,14 @@ async fn execute_parallel_async(
 /// Resolve variable references (`$var_name`) in a JSON value tree.
 fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
     match value {
-        Value::String(s) if s.starts_with('$') => {
+        Value::String(s) if s.starts_with('$') && !s.contains("${") => {
+            // Whole-string variable reference: "$name" → value of name
             let var_name = &s[1..];
             vars.get(var_name).cloned().unwrap_or_else(|| value.clone())
+        }
+        Value::String(s) if s.contains("${") => {
+            // String interpolation: "Hello, ${name}!" → "Hello, world!"
+            Value::String(super::executor::interpolate_string(s, vars))
         }
         Value::Object(map) => {
             let resolved: serde_json::Map<String, Value> = map
