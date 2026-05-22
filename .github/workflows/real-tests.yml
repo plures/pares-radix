@@ -128,3 +128,44 @@ jobs:
         if: always()
         working-directory: testing
         run: docker compose --profile test down -v --remove-orphans
+
+  # ─── Tier 3: Live inference with real API key (only when secret set) ─────
+  live-inference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: local-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release -p pares-radix-cli
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout
+
+      - name: Run live inference tests
+        if: env.PARES_API_KEY != ''
+        env:
+          RADIX_BINARY: ./target/release/pares-radix
+          PARES_API_KEY: ${{ secrets.PARES_API_KEY }}
+          PARES_MODEL_URL: ${{ secrets.PARES_MODEL_URL || 'https://api.openai.com/v1' }}
+        run: |
+          pytest testing/tests/test_ask_subcommand.py::TestAskLive -v --timeout=90
+
+      - name: Skip notice
+        if: env.PARES_API_KEY == ''
+        run: echo "::notice::Live inference tests skipped — PARES_API_KEY secret not configured"

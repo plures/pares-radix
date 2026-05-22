@@ -168,25 +168,25 @@ class TestServeDesktopMode:
 class TestServeSpineLongRunning:
     """Tests for `pares-radix serve-spine` stability."""
 
-    @pytest.mark.xfail(reason="BUG: serve-spine panics on invalid token instead of clean error exit (teloxide dispatcher)")
     def test_serve_spine_requires_telegram_token(self, radix_bin):
         """serve-spine requires --telegram-token (unlike serve)."""
+        env = {k: v for k, v in os.environ.items() if k != "PARES_TELEGRAM_TOKEN"}
         result = subprocess.run(
             [RADIX_BIN, "serve-spine"],
             capture_output=True,
             text=True,
             timeout=10,
-            env={**os.environ, "PARES_TELEGRAM_TOKEN": ""},
+            env=env,
         )
-        # Should fail with "required" error, not panic
+        # Should fail with clap "required" error, not panic
         assert result.returncode != 0
         combined = result.stdout + result.stderr
         assert "panicked" not in combined
+        # Clap emits to stderr: "required arguments were not provided"
         assert "required" in combined.lower() or "telegram" in combined.lower()
 
-    @pytest.mark.xfail(reason="BUG: serve-spine panics on invalid telegram token (teloxide dispatcher.rs:385)")
     def test_serve_spine_stable_5_seconds(self, radix_bin):
-        """serve-spine runs stable for 5 seconds with a dummy telegram token."""
+        """serve-spine exits cleanly with invalid token (no panic, no segfault)."""
         proc = subprocess.Popen(
             [RADIX_BIN, "serve-spine", "--telegram-token", "123456:FAKE_TOKEN_FOR_TEST",
              "--model-url", "http://192.0.2.1:1/v1"],
@@ -211,7 +211,6 @@ class TestServeSpineLongRunning:
             assert proc.returncode != -11, f"Segfault: {stderr}"
             assert "panicked" not in stderr, f"Panic: {stderr}"
 
-    @pytest.mark.xfail(reason="BUG: serve-spine panics on invalid telegram token before we can test shutdown")
     def test_serve_spine_graceful_shutdown(self, radix_bin):
         """serve-spine handles SIGTERM without hanging."""
         proc = subprocess.Popen(

@@ -262,6 +262,24 @@ class TestServeSpine:
             # Exit code 1 with config error is acceptable; segfault is not
             assert proc.returncode != -11, f"serve-spine segfaulted: {stderr}"
 
+    def test_serve_spine_invalid_token_no_panic(self, radix_bin):
+        """serve-spine with an invalid Telegram token exits cleanly (no panic).
+
+        Regression test for issue #323: teloxide dispatcher panicked on
+        invalid token instead of returning an error.
+        """
+        result = subprocess.run(
+            [RADIX_BIN, "serve-spine", "--telegram-token", "123456:FAKE",
+             "--model-url", "http://192.0.2.1:1/v1"],
+            capture_output=True, text=True, timeout=20,
+        )
+        combined = (result.stdout + result.stderr).lower()
+        # Must NOT panic
+        assert "panic" not in combined, f"serve-spine panicked: {result.stderr}"
+        assert result.returncode != -11, "serve-spine segfaulted"
+        # Should exit with error code (token validation failed)
+        assert result.returncode != 0, "Expected non-zero exit for invalid token"
+
 
 class TestAskSubcommand:
     """Tests for the `ask` subcommand (non-interactive single prompt)."""

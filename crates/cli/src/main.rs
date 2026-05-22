@@ -3658,6 +3658,7 @@ async fn main() {
             info!("Starting Telegram receiver — spine-driven mode active");
             if let Err(e) = receiver_channel.start_receiving(emitter).await {
                 error!(error = %e, "Telegram receiver failed");
+                std::process::exit(1);
             }
         }
 

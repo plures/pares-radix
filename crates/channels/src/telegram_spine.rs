@@ -96,7 +96,22 @@ impl SpineChannel for TelegramSpineChannel {
 
     async fn start_receiving(&self, emitter: PipelineEmitter) -> Result<(), ChannelError> {
         let bot = Bot::new(&self.config.token);
-        info!("telegram_spine: starting receiver");
+
+        // Validate token upfront — teloxide's dispatch() panics on invalid tokens
+        // (teloxide-0.17 dispatcher.rs:385 unwraps get_me). Catch it here cleanly.
+        match bot.get_me().await {
+            Ok(me) => {
+                info!(
+                    bot_username = %me.username(),
+                    "telegram_spine: token validated, starting receiver"
+                );
+            }
+            Err(e) => {
+                return Err(ChannelError::ConnectionError(format!(
+                    "Telegram token validation failed: {e}. Check your TELEGRAM_TOKEN."
+                )));
+            }
+        }
 
         let handler = Update::filter_message().endpoint(move |msg: Message| {
             let emitter = emitter.clone();
