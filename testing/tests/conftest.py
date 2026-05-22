@@ -92,6 +92,16 @@ class McpClient:
             return result
         return resp
 
+    def list_tools(self, timeout=10):
+        """List all registered MCP tools."""
+        self._send("tools/list", {})
+        resp = self._read(timeout=timeout)
+        if resp is None:
+            return []
+        if "result" in resp:
+            return resp["result"].get("tools", [])
+        return []
+
     def _send(self, method, params=None):
         req = {"jsonrpc": "2.0", "id": self._next_id, "method": method}
         if params is not None:
