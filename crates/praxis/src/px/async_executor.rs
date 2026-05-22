@@ -295,6 +295,15 @@ async fn execute_when_async(
     let mut last_output = None;
     for (i, nested) in nested_steps.iter().enumerate() {
         let result = execute_step_async(nested, i, vars, handler).await?;
+        // Propagate return from nested steps — the outer procedure should halt.
+        if result.kind == "return" {
+            return Ok(StepResult {
+                index,
+                kind: "return".into(),
+                output: result.output,
+                skipped: false,
+            });
+        }
         last_output = result.output;
     }
 
