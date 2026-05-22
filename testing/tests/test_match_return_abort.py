@@ -301,9 +301,8 @@ class TestMatchStep:
     Pattern matching (match $var { ... }) is a match_expr available in expression
     contexts only, not as a standalone step.
 
-    NOTE: The match: step has a known parser limitation where trailing content
-    after the arms can cause parse errors. Tests here use match: as the final
-    step or test via the executor's JSON format.
+    NOTE: The match: step now requires an `end` terminator (consistent with
+    when/loop/try/parallel). See test_match_termination.py for grammar tests.
     """
 
     def test_match_via_when_pattern(self, mcp):
