@@ -81,7 +81,7 @@ class TestRunCommandBasic:
 
     def test_command_with_special_chars(self, mcp):
         """Commands with special characters execute correctly."""
-        marker = uuid.uuid4().hex[:8]
+        marker = "m" + uuid.uuid4().hex[:7]
         result = mcp.call_tool("run_command", {
             "command": f"echo 'quotes \"nested\" {marker}'"
         })
@@ -109,7 +109,9 @@ class TestRunCommandWorkdir:
     def test_workdir_affects_relative_paths(self, mcp):
         """Commands using relative paths resolve against workdir."""
         # Create a temp file in /tmp
-        marker = uuid.uuid4().hex[:8]
+        # Prefix with 'm' to ensure marker never looks like scientific notation
+        # (e.g. '9595e303' would be parsed as 9.595e+306)
+        marker = "m" + uuid.uuid4().hex[:7]
         mcp.call_tool("run_command", {
             "command": f"echo {marker} > /tmp/test-workdir-{marker}.txt"
         })
@@ -134,7 +136,7 @@ class TestRunCommandEnv:
 
     def test_env_vars_available(self, mcp):
         """Custom environment variables are available to the command."""
-        marker = uuid.uuid4().hex[:8]
+        marker = "m" + uuid.uuid4().hex[:7]
         result = mcp.call_tool("run_command", {
             "command": "echo $TEST_VAR",
             "env": {"TEST_VAR": marker},
