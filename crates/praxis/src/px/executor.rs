@@ -930,7 +930,7 @@ fn resolve_vars(value: &Value, vars: &HashMap<String, Value>) -> Value {
 /// - `${result.field}` — dotted path access
 /// - `${count + 1}` — simple arithmetic (add/subtract with integer literals)
 /// - Unresolved references are left as-is
-fn interpolate_string(s: &str, vars: &HashMap<String, Value>) -> String {
+pub(crate) fn interpolate_string(s: &str, vars: &HashMap<String, Value>) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
 
