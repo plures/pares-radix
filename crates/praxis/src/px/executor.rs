@@ -2427,8 +2427,11 @@ fn split_comparison<'a>(expr: &'a str, op: &str) -> Option<(&'a str, &'a str)> {
                     continue;
                 }
                 let lhs = expr[..i].trim();
-                let rhs = expr[i + op_len..].trim().trim_matches('"');
-                if !lhs.is_empty() && !rhs.is_empty() {
+                let rhs_raw = expr[i + op_len..].trim();
+                let rhs = rhs_raw.trim_matches('"');
+                // Allow empty rhs when it came from a quoted empty string ""
+                let rhs_valid = !rhs.is_empty() || (rhs_raw.starts_with('"') && rhs_raw.ends_with('"'));
+                if !lhs.is_empty() && rhs_valid {
                     return Some((lhs, rhs));
                 }
             }
@@ -3701,6 +3704,31 @@ mod tests {
         assert!(default_evaluate_condition("count == 5", &vars));
         assert!(default_evaluate_condition("flag", &vars));
         assert!(!default_evaluate_condition("nonexistent", &vars));
+    }
+
+    #[test]
+    fn empty_string_comparison() {
+        let vars = HashMap::from([
+            ("empty".to_string(), json!("")),
+            ("nonempty".to_string(), json!("hello")),
+            ("null_val".to_string(), Value::Null),
+        ]);
+
+        // Empty string equals ""
+        assert!(default_evaluate_condition(r#"empty == """#, &vars));
+        // Non-empty string does not equal ""
+        assert!(!default_evaluate_condition(r#"nonempty == """#, &vars));
+        // Empty string != "" is false
+        assert!(!default_evaluate_condition(r#"empty != """#, &vars));
+        // Non-empty string != "" is true
+        assert!(default_evaluate_condition(r#"nonempty != """#, &vars));
+        // With $ prefix notation
+        assert!(default_evaluate_condition(r#"$empty == """#, &vars));
+        assert!(!default_evaluate_condition(r#"$nonempty == """#, &vars));
+        // Null is not equal to empty string
+        assert!(!default_evaluate_condition(r#"null_val == """#, &vars));
+        // Unresolved variable is not equal to empty string
+        assert!(!default_evaluate_condition(r#"nonexistent == """#, &vars));
     }
 
     #[test]
