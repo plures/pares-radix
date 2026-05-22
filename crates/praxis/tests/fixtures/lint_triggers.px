@@ -14,6 +14,7 @@ procedure no_wildcard:
   match:
     status == "ok" -> handle_ok
     status == "error" -> handle_error
+  end
 
 # === PX-L003: Unreachable arms after wildcard ===
 procedure unreachable_arm:
@@ -22,6 +23,7 @@ procedure unreachable_arm:
     status == "ok" -> handle_ok
     _ -> handle_default
     status == "error" -> handle_error
+  end
 
 # === PX-L004: Duplicate arm conditions ===
 procedure dup_arms:
@@ -30,6 +32,7 @@ procedure dup_arms:
     level == "high" -> alert
     level == "low" -> ignore
     level == "high" -> alert_again
+  end
 
 # === PX-L005: Unused output variable ===
 procedure unused_output:
