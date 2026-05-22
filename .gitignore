@@ -1,23 +1,22 @@
-node_modules/
-dist/
-build/
-.svelte-kit/
 
+!testing/.env.example
 # Tauri build artifacts
-src-tauri/target/
-src-tauri/gen/
+# Testing secrets
+.coverage
+.fastembed_cache
+.svelte-kit/
 /target
+build/
 chronos
+dist/
+htmlcov/
+mutants.out/
+node_modules/
 pares-agens
 pares-cache
 plures-object
 pluresdb
-.fastembed_cache
-third_party
-
-# Testing secrets
+src-tauri/gen/
+src-tauri/target/
 testing/.env
-!testing/.env.example
-htmlcov/
-.coverage
-mutants.out/
+third_party
