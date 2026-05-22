@@ -855,4 +855,143 @@ mod tests {
         let results = timeline.timeline(50, Some(0), None);
         assert_eq!(results.len(), 1);
     }
+
+    // --- Mutation testing gap coverage ---
+
+    /// Verifies that from_u8(1) specifically matches arm 1, not the wildcard.
+    /// If arm 1 is deleted, from_u8 still returns Info via default — this is an
+    /// equivalent mutant. We test the explicit mapping anyway to document intent.
+    #[test]
+    fn from_u8_each_arm_explicitly() {
+        // Each variant maps from a specific u8
+        assert_eq!(ChronosLevel::from_u8(0), ChronosLevel::Debug);
+        assert_eq!(ChronosLevel::from_u8(1), ChronosLevel::Info);
+        assert_eq!(ChronosLevel::from_u8(2), ChronosLevel::Warn);
+        assert_eq!(ChronosLevel::from_u8(3), ChronosLevel::Error);
+        // Wildcard maps to Info
+        assert_eq!(ChronosLevel::from_u8(4), ChronosLevel::Info);
+        assert_eq!(ChronosLevel::from_u8(255), ChronosLevel::Info);
+    }
+
+    /// Verifies that timeline `since` filter uses strict `<` (not `<=`).
+    /// An entry with timestamp == since MUST be included.
+    #[test]
+    fn timeline_since_boundary_inclusive() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let entry = timeline.build_entry(
+            "boundary:key",
+            "actor",
+            ChronosAction::Create,
+            &json!({"test": "boundary"}),
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+        let ts = entry.timestamp;
+
+        // since == entry.timestamp: entry MUST appear (filter is `< ts`, not `<= ts`)
+        let results = timeline.timeline(50, Some(ts), None);
+        assert_eq!(results.len(), 1, "entry at exact since boundary must be included");
+        assert_eq!(results[0].id, entry.id);
+
+        // since == entry.timestamp + 1: entry must NOT appear
+        let results = timeline.timeline(50, Some(ts + 1), None);
+        assert_eq!(results.len(), 0, "entry before since must be excluded");
+    }
+
+    /// Verifies replay returns empty when start_idx >= end_idx but start_idx < len.
+    /// This targets the `||` in `start_idx >= sorted.len() || start_idx >= end_idx`.
+    #[test]
+    fn replay_start_after_end() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        timeline.set_level(ChronosLevel::Debug);
+
+        let mut entries = Vec::new();
+        for i in 0..5 {
+            let e = timeline.build_entry(
+                &format!("replay:k{i}"),
+                "agent",
+                ChronosAction::Create,
+                &json!({"n": i}),
+                vec![],
+                None,
+            );
+            timeline.record(&e);
+            entries.push(e);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let all = timeline.replay(None, None);
+        assert_eq!(all.len(), 5);
+
+        // from_id after to_id — start_idx > end_idx, should return empty
+        let from_late = &all[3].id;
+        let to_early = &all[1].id;
+        let result = timeline.replay(Some(from_late), Some(to_early));
+        assert!(result.is_empty(), "replay with from > to must return empty");
+
+        // from_id at last position, to_id at first — also empty
+        let result = timeline.replay(Some(&all[4].id), Some(&all[0].id));
+        assert!(result.is_empty());
+    }
+
+    /// Verifies sha256_json produces a deterministic, non-empty, valid hex hash.
+    #[test]
+    fn sha256_json_deterministic() {
+        let data = json!({"key": "value", "num": 42});
+        let hash1 = sha256_json(&data);
+        let hash2 = sha256_json(&data);
+
+        // Must be deterministic
+        assert_eq!(hash1, hash2);
+
+        // Must be valid hex, 64 chars (256 bits)
+        assert_eq!(hash1.len(), 64, "SHA-256 hex should be 64 chars");
+        assert!(hash1.chars().all(|c| c.is_ascii_hexdigit()), "must be hex");
+
+        // Must NOT be empty or a trivial value
+        assert_ne!(hash1, "");
+        assert_ne!(hash1, "0".repeat(64));
+
+        // Different data must produce different hash
+        let hash3 = sha256_json(&json!({"key": "other"}));
+        assert_ne!(hash1, hash3);
+
+        // Verify against known value (JSON serialization of {"key":"value","num":42})
+        // serde_json::to_vec produces compact JSON
+        let expected = {
+            use sha2::{Digest, Sha256};
+            let bytes = serde_json::to_vec(&data).unwrap();
+            format!("{:x}", Sha256::digest(&bytes))
+        };
+        assert_eq!(hash1, expected);
+    }
+
+    /// Verifies that entries recorded have a non-empty data_hash from sha256_json.
+    #[test]
+    fn recorded_entry_has_valid_hash() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let data = json!({"important": true});
+        let entry = timeline.build_entry(
+            "hash:test",
+            "actor",
+            ChronosAction::Create,
+            &data,
+            vec![],
+            None,
+        );
+        timeline.record(&entry);
+
+        // data_hash must be a valid 64-char hex string
+        assert_eq!(entry.data_hash.len(), 64);
+        assert!(entry.data_hash.chars().all(|c| c.is_ascii_hexdigit()));
+
+        // Must match sha256_json applied to the same data
+        assert_eq!(entry.data_hash, sha256_json(&data));
+    }
 }
