@@ -20,7 +20,7 @@ procedure self_test:
   assert_ok {value: true, message: "truthy assertion"}
   emit {event: "test.pass", name: "assertions"}
   exec {command: "echo radix-self-test"} -> $echo_result
-  assert_contains {value: $echo_result, contains: "radix-self-test", message: "shell exec echo"}
+  assert_contains {value: "${echo_result.stdout}", contains: "radix-self-test", message: "shell exec echo"}
   emit {event: "test.pass", name: "shell_exec"}
   write_file {path: "/tmp/radix-self-test.txt", content: "test-data-42"}
   read_file {path: "/tmp/radix-self-test.txt"} -> $file_content
