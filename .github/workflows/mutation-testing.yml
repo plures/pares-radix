@@ -1,0 +1,141 @@
+name: Mutation Testing (Weekly)
+
+on:
+  schedule:
+    # Every Sunday at 04:00 UTC
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+    inputs:
+      target_file:
+        description: 'Specific file to test (e.g. crates/core/src/chronos.rs). Leave empty for all priority modules.'
+        required: false
+        type: string
+      package:
+        description: 'Cargo package to test (e.g. pares-agens-core, pares-radix-praxis)'
+        required: false
+        type: string
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  mutation-test:
+    name: cargo-mutants
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: praxis-rule
+            package: pares-radix-praxis
+            file: crates/praxis/src/rule.rs
+          - name: praxis-factory
+            package: pares-radix-praxis
+            file: crates/praxis/src/factory.rs
+          - name: core-chronos
+            package: pares-agens-core
+            file: crates/core/src/chronos.rs
+          - name: core-procedure
+            package: pares-agens-core
+            file: crates/core/src/procedure.rs
+          - name: core-memory-store
+            package: pares-agens-core
+            file: crates/core/src/memory/store.rs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action/setup@v1
+
+      - name: Cache cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: mutants-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            mutants-${{ runner.os }}-
+
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+
+      - name: Run mutation testing (${{ matrix.name }})
+        if: ${{ !inputs.target_file }}
+        run: |
+          cargo mutants \
+            --package ${{ matrix.package }} \
+            -f "${{ matrix.file }}" \
+            --timeout 120 \
+            -j 2 \
+            --output mutants-out
+
+      - name: Run mutation testing (custom target)
+        if: ${{ inputs.target_file }}
+        run: |
+          PACKAGE="${{ inputs.package }}"
+          if [ -z "$PACKAGE" ]; then
+            cargo mutants \
+              -f "${{ inputs.target_file }}" \
+              --timeout 120 \
+              -j 2 \
+              --output mutants-out
+          else
+            cargo mutants \
+              --package "$PACKAGE" \
+              -f "${{ inputs.target_file }}" \
+              --timeout 120 \
+              -j 2 \
+              --output mutants-out
+          fi
+
+      - name: Upload mutation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-${{ matrix.name || 'custom' }}
+          path: mutants-out/
+          retention-days: 30
+
+      - name: Report missed mutants
+        if: always()
+        run: |
+          if [ -f mutants-out/missed.txt ]; then
+            echo "## ❌ Missed Mutants (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat mutants-out/missed.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            MISSED=$(wc -l < mutants-out/missed.txt)
+            if [ "$MISSED" -gt "0" ]; then
+              echo "::warning::$MISSED mutants survived in ${{ matrix.file }}"
+            fi
+          else
+            echo "## ✅ All mutants caught (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Summary statistics
+        if: always()
+        run: |
+          echo "## Mutation Testing Summary (${{ matrix.name }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f mutants-out/caught.txt ]; then
+            CAUGHT=$(wc -l < mutants-out/caught.txt)
+            echo "- ✅ Caught: $CAUGHT" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f mutants-out/missed.txt ]; then
+            MISSED=$(wc -l < mutants-out/missed.txt)
+            echo "- ❌ Missed: $MISSED" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f mutants-out/timeout.txt ]; then
+            TIMEOUT=$(wc -l < mutants-out/timeout.txt)
+            echo "- ⏱️ Timeout: $TIMEOUT" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f mutants-out/unviable.txt ]; then
+            UNVIABLE=$(wc -l < mutants-out/unviable.txt)
+            echo "- 🚫 Unviable: $UNVIABLE" >> $GITHUB_STEP_SUMMARY
+          fi
