@@ -4,7 +4,7 @@
 # Fires when a full turn (user → model → tools → response) completes.
 # Extracts facts, decisions, entities and writes them as indexed nodes.
 
-procedure on_conversation_complete
+procedure on_conversation_complete:
   trigger: pluresdb_write("conversation:*:response:*")
   
   steps:
@@ -45,7 +45,7 @@ procedure on_conversation_complete
 # Fires when a new conversation session begins.
 # Loads relevant context from memory nodes.
 
-procedure on_session_start
+procedure on_session_start:
   trigger: pluresdb_write("session:*:start")
   
   steps:
@@ -64,7 +64,7 @@ procedure on_session_start
 ## periodic_consolidate
 # Runs on schedule (not on trigger). Merges duplicates, decays old memories.
 
-procedure periodic_consolidate
+procedure periodic_consolidate:
   trigger: cron("0 */6 * * *")  # every 6 hours
   
   steps:
@@ -91,7 +91,7 @@ procedure periodic_consolidate
 ## memory_search (tool interface)
 # This is what the agent calls — it queries the pre-indexed PluresDB nodes.
 
-procedure memory_search
+procedure memory_search:
   input: query, limit
   
   steps:
