@@ -1,0 +1,88 @@
+# px-first.px — .px-First Development Enforcement
+#
+# C-DEV-001: When building a feature for pares-radix, START with a .px file.
+# Not Rust. Not a module. Express the logic as praxis first.
+#
+# This constraint set enforces that:
+# 1. Business logic lives in .px procedures
+# 2. Rust code is ONLY for side-effect boundaries (IO, network, shell, embeddings)
+# 3. Memory is .px procedures reacting to PluresDB writes
+# 4. Tool dispatch logic is .px, tool EXECUTION is Rust
+#
+# Enforcement: compile-time test scans for violations.
+
+# ═══════════════════════════════════════════════════════════════════════
+# LOGIC LIVES IN .PX
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint logic_in_px_not_rust:
+  when: event.type == "pr_audit" or event.type == "commit_audit"
+  require: NOT (change.adds_business_logic_in_rust == true)
+  severity: error
+  message: "Business logic (routing decisions, memory organization, classification, scheduling) MUST be expressed as .px procedures first. Rust implements only the side-effect actors that .px procedures trigger. If you're writing if/else chains in Rust that aren't IO boundaries, it belongs in .px."
+
+constraint memory_is_procedures:
+  when: event.type == "pr_audit"
+  require: NOT (change.adds_memory_logic_in_rust == true)
+  severity: error
+  message: "Memory operations (store, search, consolidate, decay, index) are .px procedures that react to PluresDB writes. The Rust side only provides: compute_embedding(), cosine_similarity(), pluresdb_read/write(). Everything else is .px."
+
+constraint tool_routing_in_px:
+  when: event.type == "pr_audit"
+  require: NOT (change.hardcodes_tool_routing_in_rust == true)
+  severity: error
+  message: "Tool selection and routing decisions belong in .px procedures (or model-driven). Rust code dispatches tool calls but never decides WHICH tool to call based on content inspection."
+
+# ═══════════════════════════════════════════════════════════════════════
+# RUST IS THE SIDE-EFFECT BOUNDARY
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint rust_for_io_only:
+  when: event.type == "architecture_review"
+  require: rust_code.is_side_effect_boundary == true
+  severity: error
+  message: "Rust code exists for one reason: executing side effects that .px procedures trigger. If your Rust function doesn't touch IO, network, filesystem, GPU, or FFI, it should be a .px expression instead."
+
+constraint no_inline_business_logic:
+  when: event.type == "pr_audit"
+  require: NOT (change.contains_inline_match_routing_in_core == true)
+  severity: error
+  message: "Match/if-else routing trees in spine or core code indicate business logic that should be a .px procedure. Extract to .px, have the Rust code call the procedure."
+
+# ═══════════════════════════════════════════════════════════════════════
+# SINGLE PLURESDB
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint single_database:
+  when: event.type == "pr_audit" or event.type == "dependency_audit"
+  require: NOT (change.adds_new_storage_backend == true)
+  severity: error
+  message: "PluresDB is THE database. No SQLite, no separate sled instances, no in-memory HashMaps for persistent state, no external memory services. If it needs to survive a restart, it goes through PluresDB."
+
+constraint no_external_memory_service:
+  when: event.type == "dependency_audit"
+  require: NOT (dependency.is_memory_service == true)
+  severity: error
+  message: "No external memory services (PluresLM-as-MCP, separate embedding APIs, vector DB services). Embeddings are computed in-process (fastembed), stored in PluresDB nodes. Memory search queries PluresDB directly."
+
+constraint pluresdb_reactive_writes:
+  when: event.type == "architecture_review"
+  require: state_changes.all_through_pluresdb == true
+  severity: error
+  message: "All state mutations go through PluresDB writes, which trigger reactive .px procedures. This is how memory, indexing, consolidation, and decay happen. No background threads polling for changes."
+
+# ═══════════════════════════════════════════════════════════════════════
+# PROCEDURE-FIRST WORKFLOW
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint new_feature_starts_with_px:
+  when: event.type == "new_feature"
+  require: feature.has_px_procedure == true
+  severity: error
+  message: "Every new feature starts with a .px file expressing the logic. Then write the Rust side-effect actors. If you find yourself writing Rust that isn't a side-effect boundary, STOP — it should be .px."
+
+constraint px_before_rust_test:
+  when: event.type == "pre_push"
+  require: px_files.compile_clean == true
+  severity: error
+  message: "All .px files must parse and compile cleanly before pushing. Run the .px compiler over praxis/procedures/*.px"
