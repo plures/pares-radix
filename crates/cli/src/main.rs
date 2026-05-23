@@ -3672,14 +3672,63 @@ async fn main() {
             let conversation_store: Arc<dyn ConversationStore> =
                 Arc::new(PluresConversationStore::new(Arc::clone(&shared_store)));
 
-            // 3.6. Load system prompt from file or use default
+            // 3.6. Load system prompt — compose from context files like OpenClaw
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            let workspace = std::env::var("PARES_WORKSPACE")
+                .unwrap_or_else(|_| PathBuf::from(&home).join(".pares-radix/workspace").to_string_lossy().to_string());
+            let workspace_path = PathBuf::from(&workspace);
+
+            // Load context files in priority order
+            let mut context_parts: Vec<String> = Vec::new();
+
+            // 1. SOUL.md — persona and tone
+            let soul_path = workspace_path.join("SOUL.md");
+            if soul_path.exists() {
+                if let Ok(soul) = std::fs::read_to_string(&soul_path) {
+                    context_parts.push(format!("## Persona\n{}", soul.trim()));
+                    info!("Loaded SOUL.md");
+                }
+            }
+
+            // 2. USER.md — who we're helping
+            let user_path = workspace_path.join("USER.md");
+            if user_path.exists() {
+                if let Ok(user) = std::fs::read_to_string(&user_path) {
+                    context_parts.push(format!("## User Context\n{}", user.trim()));
+                    info!("Loaded USER.md");
+                }
+            }
+
+            // 3. AGENTS.md — workspace conventions
+            let agents_path = workspace_path.join("AGENTS.md");
+            if agents_path.exists() {
+                if let Ok(agents) = std::fs::read_to_string(&agents_path) {
+                    // Truncate AGENTS.md if it's very long (keep first 4K)
+                    let truncated = if agents.len() > 4096 {
+                        format!("{}\n...(truncated)", &agents[..4096])
+                    } else {
+                        agents
+                    };
+                    context_parts.push(format!("## Workspace Conventions\n{}", truncated.trim()));
+                    info!("Loaded AGENTS.md");
+                }
+            }
+
+            // 4. SYSTEM-PROMPT.md — explicit override (highest priority)
             let system_prompt_path = PathBuf::from(&home).join(".pares-radix/SYSTEM-PROMPT.md");
-            let system_prompt = std::fs::read_to_string(&system_prompt_path)
-                .unwrap_or_else(|_| {
-                    "You are a software engineering assistant with access to shell commands and file operations. You can execute code, read/write files, and help with development tasks. Be direct and concise.".into()
-                });
-            info!(prompt_source = %if system_prompt_path.exists() { "file" } else { "default" }, "System prompt loaded");
+            if system_prompt_path.exists() {
+                if let Ok(prompt) = std::fs::read_to_string(&system_prompt_path) {
+                    context_parts.insert(0, prompt);
+                    info!("Loaded SYSTEM-PROMPT.md (override)");
+                }
+            }
+
+            let system_prompt = if context_parts.is_empty() {
+                "You are a software engineering assistant with access to shell commands, file operations, web search, and web fetch. You can execute code, read/write files, search the web, and help with development tasks. Be direct and concise. Use tools proactively.".to_string()
+            } else {
+                context_parts.join("\n\n")
+            };
+            info!(prompt_source = %if system_prompt_path.exists() { "SYSTEM-PROMPT.md" } else if !context_parts.is_empty() { "workspace context" } else { "default" }, prompt_len = system_prompt.len(), "System prompt loaded");
 
             // 4. Register procedures (full pipeline: inbound → history → model → tools → response)
             pipeline.register(Arc::new(InboundRouter)).await;
