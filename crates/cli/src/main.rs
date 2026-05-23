@@ -2957,8 +2957,12 @@ enum Commands {
     ///
     /// Channels are thin I/O — all logic flows through the EventSpine.
     ServeSpine {
-        /// Telegram bot token.
-        #[arg(long, env = "PARES_TELEGRAM_TOKEN")]
+        /// Channel to use for I/O (stdio, telegram).
+        #[arg(long, env = "PARES_CHANNEL", default_value = "telegram")]
+        channel: String,
+
+        /// Telegram bot token (required only for --channel telegram).
+        #[arg(long, env = "PARES_TELEGRAM_TOKEN", default_value = "")]
         telegram_token: String,
 
         /// OpenAI-compatible API URL.
@@ -3374,6 +3378,7 @@ async fn main() {
         }
 
         Commands::ServeSpine {
+            channel,
             telegram_token,
             model_url,
             model,
@@ -3387,6 +3392,7 @@ async fn main() {
             use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
             use pares_agens_core::spine::conversation::{ConversationStore, PluresConversationStore};
             use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
+            use pares_agens_channels::stdio_spine::StdioSpineChannel;
             use pares_agens_core::spine::channel::SpineChannel;
 
             info!("Starting pares-radix in spine-driven mode (ADR-0001)");
@@ -3621,44 +3627,92 @@ async fn main() {
             });
             info!("Pipeline event loop started");
 
-            // 6. Start Telegram channel (delivery loop)
+            // 6. Start channel (delivery loop + receiver)
             let delivery_rx = pipeline.subscribe_deliveries();
-            let tg_channel = TelegramSpineChannel::new(TelegramSpineConfig {
-                token: telegram_token.clone(),
-            });
-            tokio::spawn(async move {
-                tg_channel.run_delivery_loop(delivery_rx).await;
-            });
-            info!("Telegram delivery loop started");
 
-            // 6.5. Start heartbeat runner (proactive behavior)
-            let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
-            {
-                let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
-                    Arc::new(pares_agens_core::state::InMemoryStateStore::default());
-                let mut heartbeat =
-                    pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
-                heartbeat.load_config().await;
-                if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
-                    let mut cfg = heartbeat.config().clone();
-                    cfg.quiet_hours_enabled = false;
-                    heartbeat.set_config(cfg).await;
+            match channel.as_str() {
+                "stdio" => {
+                    let stdio_channel = StdioSpineChannel::new();
+                    tokio::spawn(async move {
+                        stdio_channel.run_delivery_loop(delivery_rx).await;
+                    });
+                    info!("Stdio delivery loop started");
+
+                    // 6.5. Start heartbeat runner (proactive behavior)
+                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
+                    {
+                        let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
+                            Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+                        let mut heartbeat =
+                            pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                        heartbeat.load_config().await;
+                        if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
+                            let mut cfg = heartbeat.config().clone();
+                            cfg.quiet_hours_enabled = false;
+                            heartbeat.set_config(cfg).await;
+                        }
+                        tokio::spawn(async move {
+                            heartbeat.run(heartbeat_shutdown_rx).await;
+                        });
+                        info!("Heartbeat runner started (proactive behavior)");
+                    }
+
+                    // 7. Start receiving (blocks until /quit or EOF)
+                    let emitter = pipeline.emitter();
+                    let receiver = StdioSpineChannel::new();
+                    info!("Starting stdio receiver — spine-driven mode active");
+                    if let Err(e) = receiver.start_receiving(emitter).await {
+                        error!(error = %e, "Stdio receiver failed");
+                        std::process::exit(1);
+                    }
                 }
-                tokio::spawn(async move {
-                    heartbeat.run(heartbeat_shutdown_rx).await;
-                });
-                info!("Heartbeat runner started (proactive behavior)");
-            }
+                "telegram" => {
+                    if telegram_token.is_empty() {
+                        error!("--telegram-token is required for --channel telegram");
+                        std::process::exit(1);
+                    }
+                    let tg_channel = TelegramSpineChannel::new(TelegramSpineConfig {
+                        token: telegram_token.clone(),
+                    });
+                    tokio::spawn(async move {
+                        tg_channel.run_delivery_loop(delivery_rx).await;
+                    });
+                    info!("Telegram delivery loop started");
 
-            // 7. Start receiving (blocks)
-            let emitter = pipeline.emitter();
-            let receiver_channel = TelegramSpineChannel::new(TelegramSpineConfig {
-                token: telegram_token,
-            });
-            info!("Starting Telegram receiver — spine-driven mode active");
-            if let Err(e) = receiver_channel.start_receiving(emitter).await {
-                error!(error = %e, "Telegram receiver failed");
-                std::process::exit(1);
+                    // 6.5. Start heartbeat runner (proactive behavior)
+                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
+                    {
+                        let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
+                            Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+                        let mut heartbeat =
+                            pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                        heartbeat.load_config().await;
+                        if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
+                            let mut cfg = heartbeat.config().clone();
+                            cfg.quiet_hours_enabled = false;
+                            heartbeat.set_config(cfg).await;
+                        }
+                        tokio::spawn(async move {
+                            heartbeat.run(heartbeat_shutdown_rx).await;
+                        });
+                        info!("Heartbeat runner started (proactive behavior)");
+                    }
+
+                    // 7. Start receiving (blocks)
+                    let emitter = pipeline.emitter();
+                    let receiver_channel = TelegramSpineChannel::new(TelegramSpineConfig {
+                        token: telegram_token,
+                    });
+                    info!("Starting Telegram receiver — spine-driven mode active");
+                    if let Err(e) = receiver_channel.start_receiving(emitter).await {
+                        error!(error = %e, "Telegram receiver failed");
+                        std::process::exit(1);
+                    }
+                }
+                other => {
+                    error!(channel = %other, "Unknown channel. Supported: stdio, telegram");
+                    std::process::exit(1);
+                }
             }
         }
 
