@@ -60,6 +60,11 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/sync/src/lan.rs", // network peer discovery (IO boundary)
     "crates/core/src/plugins/runtime.rs", // plugin lifecycle (IO boundary)
     "crates/cli/src/main.rs", // ToolTraceStore is ephemeral debug tracing
+    "crates/agenda/src/scheduler.rs", // runtime task working set (persistence via TaskStore, HashMap is hot cache)
+    "crates/core/src/secrets.rs", // InMemorySecretStore is test/dev utility only (not used in production)
+    "crates/core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
+    "crates/core/src/spine/conversation.rs", // MemoryConversationStore is test utility (PluresConversationStore is production)
+    "crates/core/src/agent.rs", // conversation_history is hot cache; persistence via turn_store (PluresDB)
 ];
 
 /// Check that no crate introduces persistent in-memory state outside the allowlist.
