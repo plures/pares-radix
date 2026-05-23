@@ -3480,6 +3480,18 @@ async fn main() {
                 executor: Arc::clone(&shell_executor),
             }));
 
+            // Web tools
+            spine_registry.register(Box::new(WebFetchProcedure));
+            let brave_api_key = std::env::var("BRAVE_API_KEY").ok();
+            spine_registry.register(Box::new(WebSearchProcedure { brave_api_key }));
+
+            // Cron/scheduler tools
+            let scheduler = Arc::new(pares_agens_agenda::scheduler::Scheduler::new());
+            spine_registry.register(Box::new(CronListProcedure { scheduler: Arc::clone(&scheduler) }));
+            spine_registry.register(Box::new(CronAddProcedure { scheduler: Arc::clone(&scheduler) }));
+            spine_registry.register(Box::new(CronRemoveProcedure { scheduler: Arc::clone(&scheduler) }));
+            spine_registry.register(Box::new(CronToggleProcedure { scheduler: Arc::clone(&scheduler) }));
+
             let spine_registry = Arc::new(RwLock::new(spine_registry));
             let spine_tool_definitions = vec![
                 ToolDefinition {
@@ -3560,6 +3572,76 @@ async fn main() {
                             "limit": {"type": "integer"}
                         },
                         "required": ["action"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "web_fetch".into(),
+                    description: "Fetch and extract readable content from a URL (HTML → text)".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "URL to fetch"},
+                            "extractMode": {"type": "string", "enum": ["markdown", "text"], "description": "Extraction mode"},
+                            "maxChars": {"type": "integer", "description": "Max characters to return"}
+                        },
+                        "required": ["url"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "web_search".into(),
+                    description: "Search the web using Brave Search API".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query"},
+                            "count": {"type": "integer", "description": "Number of results (default 5)"}
+                        },
+                        "required": ["query"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "cron_list".into(),
+                    description: "List all scheduled cron jobs".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }),
+                },
+                ToolDefinition {
+                    name: "cron_add".into(),
+                    description: "Add a new cron job with name, schedule expression, and command".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Job name"},
+                            "schedule": {"type": "string", "description": "Cron expression (e.g. '0 */6 * * *')"},
+                            "command": {"type": "string", "description": "Shell command to run"}
+                        },
+                        "required": ["name", "schedule", "command"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "cron_remove".into(),
+                    description: "Remove a cron job by name".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Job name to remove"}
+                        },
+                        "required": ["name"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "cron_toggle".into(),
+                    description: "Enable or disable a cron job by name".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Job name"},
+                            "enabled": {"type": "boolean", "description": "Whether to enable (true) or disable (false)"}
+                        },
+                        "required": ["name", "enabled"]
                     }),
                 },
             ];
