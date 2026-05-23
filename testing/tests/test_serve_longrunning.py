@@ -169,7 +169,7 @@ class TestServeSpineLongRunning:
     """Tests for `pares-radix serve-spine` stability."""
 
     def test_serve_spine_requires_telegram_token(self, radix_bin):
-        """serve-spine requires --telegram-token (unlike serve)."""
+        """serve-spine exits non-zero without telegram token (channel=telegram default)."""
         env = {k: v for k, v in os.environ.items() if k != "PARES_TELEGRAM_TOKEN"}
         result = subprocess.run(
             [RADIX_BIN, "serve-spine"],
@@ -178,12 +178,10 @@ class TestServeSpineLongRunning:
             timeout=10,
             env=env,
         )
-        # Should fail with clap "required" error, not panic
+        # Should fail without panic — error goes to tracing log file, not captured output
         assert result.returncode != 0
         combined = result.stdout + result.stderr
         assert "panicked" not in combined
-        # Clap emits to stderr: "required arguments were not provided"
-        assert "required" in combined.lower() or "telegram" in combined.lower()
 
     def test_serve_spine_stable_5_seconds(self, radix_bin):
         """serve-spine exits cleanly with invalid token (no panic, no segfault)."""
