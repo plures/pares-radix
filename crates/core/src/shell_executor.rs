@@ -892,11 +892,17 @@ mod tests {
             .await
             .unwrap();
 
-        // Give it a moment to process
-        tokio::time::sleep(Duration::from_millis(200)).await;
-
-        let poll = executor.poll(&session_id, Some(500)).await.unwrap();
-        assert!(poll.new_output.contains("hello from stdin"));
+        // Poll with retries — cat may take time to echo back
+        let mut found = false;
+        for _ in 0..10 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let poll = executor.poll(&session_id, Some(500)).await.unwrap();
+            if poll.new_output.contains("hello from stdin") {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "Expected 'hello from stdin' in poll output");
 
         executor.kill(&session_id).await.unwrap();
     }
