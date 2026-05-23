@@ -989,4 +989,510 @@ mod tests {
         assert!(source_entries.iter().all(|m| m.content.contains("beta")));
         assert!(source_entries.iter().all(|m| !m.content.contains("alpha")));
     }
+
+    // ── Mutation-gap coverage ──────────────────────────────────────────────
+
+    // cosine_similarity
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let v = vec![1.0, 0.0, 0.0];
+        let sim = cosine_similarity(&v, &v);
+        assert!((sim - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        assert!((cosine_similarity(&a, &b)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_opposite_vectors() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        assert!((cosine_similarity(&a, &b) - (-1.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_mismatched_lengths() {
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn cosine_similarity_empty_vectors() {
+        let a: Vec<f32> = vec![];
+        let b: Vec<f32> = vec![];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+    }
+
+    #[test]
+    fn cosine_similarity_zero_norm() {
+        let a = vec![0.0, 0.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+        assert_eq!(cosine_similarity(&b, &a), 0.0);
+    }
+
+    // floor_char_boundary
+    #[test]
+    fn floor_char_boundary_at_end() {
+        let s = "hello";
+        assert_eq!(floor_char_boundary(s, 10), 5); // past end → len
+    }
+
+    #[test]
+    fn floor_char_boundary_at_valid_boundary() {
+        let s = "hello";
+        assert_eq!(floor_char_boundary(s, 3), 3);
+    }
+
+    #[test]
+    fn floor_char_boundary_multibyte() {
+        let s = "aé"; // a=1 byte, é=2 bytes → len=3
+        // idx=2 is in the middle of é, should walk back to 1
+        assert_eq!(floor_char_boundary(s, 2), 1);
+        assert_eq!(floor_char_boundary(s, 1), 1); // valid boundary
+        assert_eq!(floor_char_boundary(s, 3), 3); // end of é
+    }
+
+    #[test]
+    fn floor_char_boundary_zero() {
+        let s = "hello";
+        assert_eq!(floor_char_boundary(s, 0), 0);
+    }
+
+    // split_document_chunks
+    #[test]
+    fn split_document_chunks_empty_text() {
+        assert!(split_document_chunks("", 100, 10).is_empty());
+        assert!(split_document_chunks("   ", 100, 10).is_empty());
+    }
+
+    #[test]
+    fn split_document_chunks_zero_max_chars() {
+        assert!(split_document_chunks("hello world", 0, 0).is_empty());
+    }
+
+    #[test]
+    fn split_document_chunks_single_small_chunk() {
+        let chunks = split_document_chunks("short text", 1000, 100);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "short text");
+    }
+
+    #[test]
+    fn split_document_chunks_splits_with_overlap() {
+        // 20 chars of content, max 10, overlap 3
+        let text = "abcdefghijklmnopqrst";
+        let chunks = split_document_chunks(text, 10, 3);
+        assert!(chunks.len() >= 2);
+        // First chunk is first 10 chars
+        assert_eq!(chunks[0], "abcdefghij");
+        // Overlap means next chunk starts at 10-3=7
+        assert!(chunks[1].starts_with('h'));
+    }
+
+    #[test]
+    fn split_document_chunks_no_infinite_loop() {
+        // Overlap larger than chunk size shouldn't infinite loop
+        let text = "abcdefghij";
+        let chunks = split_document_chunks(text, 5, 10);
+        assert!(!chunks.is_empty());
+    }
+
+    // format_document_chunk_content
+    #[test]
+    fn format_document_chunk_content_includes_metadata() {
+        let result = format_document_chunk_content("/path/to/file.rs", 2, 5, "fn main() {}");
+        assert!(result.contains("/path/to/file.rs"));
+        assert!(result.contains("2/5"));
+        assert!(result.contains("fn main() {}"));
+    }
+
+    // extract_tags
+    #[test]
+    fn extract_tags_detects_languages() {
+        let exchange = Exchange {
+            user: "How do I use Rust and Python together?".into(),
+            assistant: "Use pyo3 for Rust-Python interop.".into(),
+        };
+        let tags = extract_tags(&exchange);
+        assert!(tags.contains(&"lang:rust".to_string()));
+        assert!(tags.contains(&"lang:python".to_string()));
+        assert!(!tags.contains(&"lang:go".to_string()));
+    }
+
+    #[test]
+    fn extract_tags_detects_tools() {
+        let exchange = Exchange {
+            user: "I ran cargo build and got a git error in docker.".into(),
+            assistant: "Check your Dockerfile.".into(),
+        };
+        let tags = extract_tags(&exchange);
+        assert!(tags.contains(&"tool:cargo".to_string()));
+        assert!(tags.contains(&"tool:git".to_string()));
+        assert!(tags.contains(&"tool:docker".to_string()));
+    }
+
+    #[test]
+    fn extract_tags_empty_for_unrelated() {
+        let exchange = Exchange {
+            user: "What is the meaning of life?".into(),
+            assistant: "42, according to Douglas Adams.".into(),
+        };
+        let tags = extract_tags(&exchange);
+        assert!(tags.is_empty());
+    }
+
+    // passes_quality_gate
+    #[test]
+    fn passes_quality_gate_rejects_empty() {
+        assert!(!passes_quality_gate(""));
+        assert!(!passes_quality_gate("   "));
+    }
+
+    #[test]
+    fn passes_quality_gate_rejects_heartbeat() {
+        assert!(!passes_quality_gate("HEARTBEAT_OK"));
+        assert!(!passes_quality_gate("heartbeat_ok"));
+    }
+
+    #[test]
+    fn passes_quality_gate_rejects_noise() {
+        assert!(!passes_quality_gate("ok"));
+        assert!(!passes_quality_gate("Thanks."));
+    }
+
+    #[test]
+    fn passes_quality_gate_rejects_git_noise() {
+        assert!(!passes_quality_gate(
+            "commit abc123\nAuthor: dev\nDate: 2026-01-01\n\nmessage"
+        ));
+        assert!(!passes_quality_gate("diff --git a/file.rs b/file.rs"));
+    }
+
+    #[test]
+    fn passes_quality_gate_accepts_real_content() {
+        assert!(passes_quality_gate(
+            "The tokio runtime provides async task scheduling."
+        ));
+    }
+
+    // is_git_noise
+    #[test]
+    fn is_git_noise_commit_format() {
+        assert!(is_git_noise(
+            "commit abc\nAuthor: dev\nDate: today\nsomething"
+        ));
+    }
+
+    #[test]
+    fn is_git_noise_diff_format() {
+        assert!(is_git_noise("diff --git a/foo b/foo\nindex abc..def"));
+    }
+
+    #[test]
+    fn is_git_noise_index_plus_format() {
+        assert!(is_git_noise("index abc..def\n+++ b/foo"));
+    }
+
+    #[test]
+    fn is_git_noise_not_normal_text() {
+        assert!(!is_git_noise(
+            "This is a normal discussion about git branching strategies."
+        ));
+    }
+
+    // classify_document_kind
+    #[test]
+    fn classify_markdown() {
+        assert_eq!(
+            classify_document_kind(Path::new("readme.md")),
+            Some(DocumentKind::Markdown)
+        );
+        assert_eq!(
+            classify_document_kind(Path::new("guide.markdown")),
+            Some(DocumentKind::Markdown)
+        );
+    }
+
+    #[test]
+    fn classify_text() {
+        assert_eq!(
+            classify_document_kind(Path::new("notes.txt")),
+            Some(DocumentKind::Text)
+        );
+        assert_eq!(
+            classify_document_kind(Path::new("log.text")),
+            Some(DocumentKind::Text)
+        );
+    }
+
+    #[test]
+    fn classify_source_code() {
+        for ext in &["rs", "ts", "py", "go", "java", "toml", "json", "yaml"] {
+            let path = format!("file.{ext}");
+            assert_eq!(
+                classify_document_kind(Path::new(&path)),
+                Some(DocumentKind::SourceCode),
+                "expected SourceCode for .{ext}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_unknown_extension() {
+        assert_eq!(classify_document_kind(Path::new("image.png")), None);
+        assert_eq!(classify_document_kind(Path::new("archive.tar.gz")), None);
+    }
+
+    #[test]
+    fn classify_no_extension() {
+        assert_eq!(classify_document_kind(Path::new("Makefile")), None);
+    }
+
+    // DocumentKind
+    #[test]
+    fn document_kind_as_str() {
+        assert_eq!(DocumentKind::Markdown.as_str(), "markdown");
+        assert_eq!(DocumentKind::Text.as_str(), "text");
+        assert_eq!(DocumentKind::SourceCode.as_str(), "source-code");
+    }
+
+    #[test]
+    fn document_kind_category() {
+        assert_eq!(DocumentKind::Markdown.category(), MemoryCategory::Fact);
+        assert_eq!(DocumentKind::Text.category(), MemoryCategory::Fact);
+        assert_eq!(
+            DocumentKind::SourceCode.category(),
+            MemoryCategory::CodePattern
+        );
+    }
+
+    // detect_category — additional coverage for each branch
+    #[test]
+    fn detect_category_error_keywords() {
+        assert_eq!(
+            detect_category("there was a panic in the code"),
+            MemoryCategory::ErrorFix
+        );
+        assert_eq!(
+            detect_category("how to fix this bug"),
+            MemoryCategory::ErrorFix
+        );
+    }
+
+    #[test]
+    fn detect_category_code_keywords() {
+        assert_eq!(
+            detect_category("impl Display for MyType"),
+            MemoryCategory::CodePattern
+        );
+        assert_eq!(
+            detect_category("struct Config { port: u16 }"),
+            MemoryCategory::CodePattern
+        );
+        assert_eq!(
+            detect_category("add this crate to dependencies"),
+            MemoryCategory::CodePattern
+        );
+        assert_eq!(
+            detect_category("use trait bounds for generics"),
+            MemoryCategory::CodePattern
+        );
+    }
+
+    #[test]
+    fn detect_category_preference_keywords() {
+        // "convention" keyword (avoid words containing 'fix', 'error', etc.)
+        assert_eq!(
+            detect_category("Our team convention is tab indentation."),
+            MemoryCategory::Preference
+        );
+        // "prefer" without "i prefer" (which is a correction signal)
+        assert_eq!(
+            detect_category("Most developers prefer explicit return types in Rust."),
+            MemoryCategory::Preference
+        );
+    }
+
+    #[test]
+    fn detect_category_decision_keywords() {
+        assert_eq!(
+            detect_category("we decided to go with tokio"),
+            MemoryCategory::Decision
+        );
+        assert_eq!(
+            detect_category("chose actix-web because of performance"),
+            MemoryCategory::Decision
+        );
+    }
+
+    #[test]
+    fn detect_category_correction_from_user_segment() {
+        // "don't" in user text triggers correction
+        assert_eq!(
+            detect_category("User: don't do that anymore\nAssistant: Understood."),
+            MemoryCategory::Correction
+        );
+    }
+
+    // capture_fact
+    #[tokio::test]
+    async fn capture_fact_stores_valid_fact() {
+        let lm = lm();
+        let id = lm
+            .capture_fact(
+                "The Rust borrow checker enforces memory safety at compile time.",
+                vec!["lang:rust".into()],
+            )
+            .await
+            .unwrap();
+        assert!(id.is_some());
+
+        let all = lm.scan_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].category, MemoryCategory::Fact);
+        assert!(all[0].tags.contains(&"lang:rust".to_string()));
+    }
+
+    #[tokio::test]
+    async fn capture_fact_rejects_short() {
+        let lm = lm();
+        let id = lm.capture_fact("short", vec![]).await.unwrap();
+        assert!(id.is_none());
+    }
+
+    #[tokio::test]
+    async fn capture_fact_rejects_echo() {
+        let lm = lm();
+        let fact = "The standard library provides Vec, HashMap, and other collections.";
+        let first = lm.capture_fact(fact, vec![]).await.unwrap();
+        assert!(first.is_some());
+        let second = lm.capture_fact(fact, vec![]).await.unwrap();
+        assert!(second.is_none(), "duplicate fact should be rejected");
+    }
+
+    // capture_procedure_candidate
+    #[tokio::test]
+    async fn capture_procedure_candidate_stores_valid() {
+        let lm = lm();
+        let id = lm
+            .capture_procedure_candidate(
+                "When the user asks about deployment, suggest Docker with compose.",
+                vec!["tool:docker".into()],
+            )
+            .await
+            .unwrap();
+        assert!(id.is_some());
+
+        let all = lm.scan_all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].category, MemoryCategory::Procedure);
+        assert!(all[0].tags.contains(&"procedure:candidate".to_string()));
+        assert!(all[0].tags.contains(&"tool:docker".to_string()));
+    }
+
+    #[tokio::test]
+    async fn capture_procedure_candidate_rejects_noise() {
+        let lm = lm();
+        let id = lm
+            .capture_procedure_candidate("ok sure", vec![])
+            .await
+            .unwrap();
+        assert!(id.is_none());
+    }
+
+    #[tokio::test]
+    async fn capture_procedure_candidate_rejects_echo() {
+        let lm = lm();
+        let desc = "When tests fail, run cargo test with --nocapture for output.";
+        let first = lm
+            .capture_procedure_candidate(desc, vec![])
+            .await
+            .unwrap();
+        assert!(first.is_some());
+        let second = lm
+            .capture_procedure_candidate(desc, vec![])
+            .await
+            .unwrap();
+        assert!(second.is_none());
+    }
+
+    // embed_text
+    #[tokio::test]
+    async fn embed_text_returns_vector() {
+        let lm = lm();
+        let emb = lm.embed_text("test input").await.unwrap();
+        assert!(!emb.is_empty());
+    }
+
+    // scan_all
+    #[tokio::test]
+    async fn scan_all_returns_all_entries() {
+        let lm = lm();
+        lm.capture_fact(
+            "First fact with enough content to pass the quality gate.",
+            vec![],
+        )
+        .await
+        .unwrap();
+        lm.capture_fact(
+            "Second fact with different content for the store.",
+            vec![],
+        )
+        .await
+        .unwrap();
+        let all = lm.scan_all().await.unwrap();
+        assert_eq!(all.len(), 2);
+    }
+
+    // recall scoring and ordering
+    #[tokio::test]
+    async fn recall_sets_score_field() {
+        let lm = lm();
+        lm.capture(&Exchange {
+            user: "Explain the async runtime in tokio with spawn and select.".into(),
+            assistant: "Tokio uses a multi-threaded work-stealing scheduler for tasks.".into(),
+        })
+        .await
+        .unwrap();
+        let results = lm.recall("tokio async runtime", 5, &[]).await.unwrap();
+        assert!(!results.is_empty());
+        // Score should be set (MockEmbedder produces consistent vectors)
+        assert!(results[0].score > 0.0);
+    }
+
+    // inject_context with empty memories
+    #[test]
+    fn inject_context_empty_memories() {
+        let lm = lm();
+        let ctx = lm.inject_context(&[], None);
+        assert!(ctx.contains("# Relevant memories"));
+        // Should just be the header, no numbered entries
+        assert!(!ctx.contains("1."));
+    }
+
+    // inject_context truncates at budget
+    #[test]
+    fn inject_context_truncates_multiple_entries() {
+        let lm = lm();
+        let mems: Vec<MemoryEntry> = (0..100)
+            .map(|i| MemoryEntry {
+                id: format!("{i}"),
+                content: format!("Memory entry number {i} with some padding text."),
+                category: MemoryCategory::Fact,
+                tags: vec![],
+                embedding: vec![],
+                score: 0.9,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .collect();
+        // Very tight budget of 50 tokens = 200 chars
+        let ctx = lm.inject_context(&mems, Some(50));
+        assert!(ctx.len() <= 200);
+    }
 }
