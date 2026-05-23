@@ -587,4 +587,121 @@ mod tests {
         assert!(template.contains("registry_api_version: \"1.0.0\".to_string()"));
         assert!(template.contains("impl Procedure for HelloPlugin"));
     }
+
+    // --- Mutation testing gap coverage ---
+
+    #[test]
+    fn is_empty_true_when_no_procedures() {
+        let registry = ProcedureRegistry::new();
+        assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn is_empty_false_when_procedure_registered() {
+        let mut registry = ProcedureRegistry::new();
+        registry.register(Box::new(Noop {
+            name: "p1",
+            handles: "message",
+        }));
+        assert!(!registry.is_empty());
+    }
+
+    #[test]
+    fn load_definition_rejects_name_mismatch_only() {
+        let mut registry = ProcedureRegistry::new();
+        let def = ProcedureDefinition::new("wrong_name", "message");
+
+        let err = registry
+            .load_definition(
+                def,
+                Box::new(Noop {
+                    name: "p1",
+                    handles: "message",
+                }),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ProcedureLoadError::DefinitionMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn load_definition_rejects_event_type_mismatch_only() {
+        let mut registry = ProcedureRegistry::new();
+        let def = ProcedureDefinition::new("p1", "wrong_event");
+
+        let err = registry
+            .load_definition(
+                def,
+                Box::new(Noop {
+                    name: "p1",
+                    handles: "message",
+                }),
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ProcedureLoadError::DefinitionMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn semver_compatible_same_major_higher_minor() {
+        let required = Version::new(1, 2, 0);
+        let current = Version::new(1, 3, 0);
+        assert!(is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_compatible_same_version() {
+        let required = Version::new(1, 2, 3);
+        let current = Version::new(1, 2, 3);
+        assert!(is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_incompatible_different_major() {
+        let required = Version::new(1, 0, 0);
+        let current = Version::new(2, 0, 0);
+        assert!(!is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_incompatible_current_older() {
+        let required = Version::new(1, 5, 0);
+        let current = Version::new(1, 4, 0);
+        assert!(!is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_zero_major_requires_same_minor() {
+        let required = Version::new(0, 2, 0);
+        let current = Version::new(0, 3, 0);
+        // 0.x.y versions require same minor
+        assert!(!is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_zero_major_same_minor_compatible() {
+        let required = Version::new(0, 2, 0);
+        let current = Version::new(0, 2, 5);
+        assert!(is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_zero_major_current_older_patch() {
+        let required = Version::new(0, 2, 3);
+        let current = Version::new(0, 2, 1);
+        assert!(!is_semver_compatible(&required, &current));
+    }
+
+    #[test]
+    fn semver_zero_major_different_major() {
+        let required = Version::new(0, 2, 0);
+        let current = Version::new(1, 2, 0);
+        assert!(!is_semver_compatible(&required, &current));
+    }
 }
