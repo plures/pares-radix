@@ -1495,4 +1495,122 @@ mod tests {
         let ctx = lm.inject_context(&mems, Some(50));
         assert!(ctx.len() <= 200);
     }
+
+    // --- Mutation coverage: embed_text returns correct dimensions ---
+    #[tokio::test]
+    async fn embed_text_returns_correct_dimensions() {
+        let lm = lm();
+        let vec = lm.embed_text("hello world").await.unwrap();
+        // MockEmbedder returns EMBEDDING_DIM (384) dimensions.
+        // Mutant replaces body with Ok(vec![0.0]) which is length 1.
+        assert_eq!(vec.len(), crate::memory::embed::EMBEDDING_DIM);
+    }
+
+    #[tokio::test]
+    async fn embed_text_varies_with_input() {
+        let lm = lm();
+        let v1 = lm.embed_text("alpha").await.unwrap();
+        let v2 = lm.embed_text("beta").await.unwrap();
+        // Different inputs must produce different embeddings.
+        assert_ne!(v1, v2);
+    }
+
+    // --- Mutation coverage: ingest_document_file chunk numbering starts at 1 ---
+    #[tokio::test]
+    async fn ingest_document_file_chunk_numbering_starts_at_one() {
+        let lm = lm();
+        let dir = tempdir().unwrap();
+        let file = dir.path().join("test.md");
+        std::fs::write(&file, "Hello world, this is a test document.").unwrap();
+
+        let count = lm.ingest_document_file(&file).await.unwrap();
+        assert!(count >= 1);
+
+        // Retrieve stored entries and verify chunk tag format starts at "1"
+        let entries = lm.store.all().await.unwrap();
+        let chunk_tags: Vec<&String> = entries
+            .iter()
+            .flat_map(|e| e.tags.iter())
+            .filter(|t| t.starts_with("chunk:"))
+            .collect();
+        assert!(!chunk_tags.is_empty());
+        // First chunk must be "chunk:1/N" not "chunk:0/N"
+        let first_chunk = chunk_tags.iter().find(|t| t.starts_with("chunk:1/"));
+        assert!(
+            first_chunk.is_some(),
+            "chunk numbering must start at 1, got: {:?}",
+            chunk_tags
+        );
+        // Verify no chunk:0/ exists
+        let zero_chunk = chunk_tags.iter().find(|t| t.starts_with("chunk:0/"));
+        assert!(
+            zero_chunk.is_none(),
+            "chunk numbering must not start at 0, got: {:?}",
+            chunk_tags
+        );
+    }
+
+    // --- Mutation coverage: inject_context default budget is context_window / 4, not * 4 ---
+    #[test]
+    fn inject_context_default_budget_limits_output() {
+        // Create LM with small context window so default budget is tight
+        let lm = PluresLm::new(
+            Arc::new(InMemoryStore::new()),
+            Box::new(MockEmbedder),
+            100, // context_window = 100 tokens → default budget = 25 tokens = 100 chars
+        );
+        let mems: Vec<MemoryEntry> = (0..50)
+            .map(|i| MemoryEntry {
+                id: format!("{i}"),
+                content: format!("Memory entry number {i} with lots of padding text that goes on."),
+                category: MemoryCategory::Fact,
+                tags: vec![],
+                embedding: vec![],
+                score: 0.9,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .collect();
+        let ctx = lm.inject_context(&mems, None);
+        // Default budget = 100/4 = 25 tokens = 100 chars.
+        // If mutant changes / to *, budget would be 400 tokens = 1600 chars (no truncation).
+        // With correct /, output must be ≤ 100 chars.
+        assert!(
+            ctx.len() <= 100,
+            "default budget should limit output to ~100 chars, got {} chars",
+            ctx.len()
+        );
+    }
+
+    // --- Mutation coverage: inject_context > vs >= boundary ---
+    #[test]
+    fn inject_context_boundary_exact_fit_is_included() {
+        // The condition is: if out.len() + block.len() > max_chars { break; }
+        // With >=, an entry that fits exactly would be excluded.
+        // We need to find a case where out.len() + block.len() == max_chars and verify inclusion.
+        let lm = lm(); // context_window = 128_000
+
+        // header = "# Relevant memories\n\n" = 22 chars
+        // block = "1. [fact] " + content + "\n" = 11 + content_len
+        // budget_tokens = 13 → max_chars = 52. header(22) + block(30) = 52 = max_chars.
+        // condition: 52 > 52 is FALSE → entry IS included.
+        // With >=: 52 >= 52 is TRUE → entry excluded (mutant detected).
+
+        let content2 = "Y".repeat(19); // block = 11 + 19 = 30
+        let mem = MemoryEntry {
+            id: "1".into(),
+            content: content2.clone(),
+            category: MemoryCategory::Fact,
+            tags: vec![],
+            embedding: vec![],
+            score: 0.9,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        };
+        let ctx = lm.inject_context(&[mem], Some(13)); // 13 tokens = 52 chars
+        // The entry should be included (exactly fits)
+        assert!(
+            ctx.contains(&content2),
+            "entry that exactly fits budget must be included, got: {:?}",
+            ctx
+        );
+    }
 }

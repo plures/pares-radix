@@ -20,3 +20,4 @@ src-tauri/gen/
 src-tauri/target/
 testing/.env
 third_party
+mutants.out.old/
