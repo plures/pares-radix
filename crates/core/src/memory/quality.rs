@@ -217,6 +217,35 @@ mod tests {
         assert_eq!(cosine_similarity(&a, &b), 0.0);
     }
 
+    /// Kill mutant: `dot / (norm_a * norm_b)` — the division and multiplication
+    /// in the denominator must be correct. Non-unit vectors expose swapping / and *.
+    #[test]
+    fn cosine_similarity_non_unit_vectors() {
+        // a = [3.0, 4.0] → |a| = 5.0
+        // b = [1.0, 0.0] → |b| = 1.0
+        // dot = 3.0
+        // cos = 3.0 / (5.0 * 1.0) = 0.6
+        let a = vec![3.0, 4.0];
+        let b = vec![1.0, 0.0];
+        let result = cosine_similarity(&a, &b);
+        assert!(
+            (result - 0.6).abs() < 1e-6,
+            "expected 0.6, got {result}"
+        );
+        // With mutant `/ → *`: 3.0 * (5.0 * 1.0) = 15.0 ≠ 0.6 ✓
+        // With mutant `* → /`: 3.0 / (5.0 / 1.0) = 0.6 — still passes!
+        // Need vectors where norm_a ≠ 1.0 AND norm_b ≠ 1.0:
+        let c = vec![2.0, 0.0]; // |c| = 2.0
+        let d = vec![3.0, 0.0]; // |d| = 3.0
+        // dot = 6.0, cos = 6.0 / (2.0 * 3.0) = 1.0
+        // With mutant `* → /`: 6.0 / (2.0 / 3.0) = 9.0 ≠ 1.0 ✓
+        let result2 = cosine_similarity(&c, &d);
+        assert!(
+            (result2 - 1.0).abs() < 1e-6,
+            "expected 1.0 for parallel vectors, got {result2}"
+        );
+    }
+
     /// Kill mutant: cosine_similarity returns 0.0 for zero-magnitude vectors.
     #[test]
     fn cosine_similarity_zero_vector() {
