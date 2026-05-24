@@ -243,7 +243,7 @@ fn required_px_procedures_exist() {
     let praxis_dir = root.join("praxis/procedures");
 
     let required = &[
-        ("memory.px", "Memory operations (store, search, consolidate) must be defined in .px"),
+        ("memory.px.design", "Memory operations (store, search, consolidate) must be defined in .px"),
     ];
 
     let mut missing = Vec::new();
