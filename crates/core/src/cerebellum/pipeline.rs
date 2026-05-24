@@ -959,4 +959,284 @@ mod tests {
             "sweep should detect duplicate group"
         );
     }
+
+    // ── utility function unit tests ───────────────────────────────────────────
+
+    #[test]
+    fn find_case_insensitive_basic_match() {
+        assert_eq!(find_case_insensitive("Hello World", "hello"), Some(0));
+        assert_eq!(find_case_insensitive("Hello World", "WORLD"), Some(6));
+        assert_eq!(find_case_insensitive("Hello World", "xyz"), None);
+    }
+
+    #[test]
+    fn find_case_insensitive_empty_needle() {
+        assert_eq!(find_case_insensitive("anything", ""), Some(0));
+    }
+
+    #[test]
+    fn find_case_insensitive_needle_longer_than_haystack() {
+        assert_eq!(find_case_insensitive("hi", "hello world"), None);
+    }
+
+    #[test]
+    fn find_case_insensitive_mid_string() {
+        assert_eq!(find_case_insensitive("abc DEF ghi", "def"), Some(4));
+    }
+
+    #[test]
+    fn cosine_similarity_identical_vectors() {
+        let v = vec![1.0, 2.0, 3.0];
+        let sim = cosine_similarity(&v, &v);
+        assert!((sim - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_orthogonal_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!(sim.abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_opposite_vectors() {
+        let a = vec![1.0, 0.0];
+        let b = vec![-1.0, 0.0];
+        let sim = cosine_similarity(&a, &b);
+        assert!((sim + 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn cosine_similarity_empty_vectors() {
+        let sim = cosine_similarity(&[], &[]);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn cosine_similarity_mismatched_lengths() {
+        let a = vec![1.0, 2.0];
+        let b = vec![1.0];
+        let sim = cosine_similarity(&a, &b);
+        assert_eq!(sim, 0.0);
+    }
+
+    #[test]
+    fn cosine_similarity_zero_vector() {
+        let a = vec![0.0, 0.0, 0.0];
+        let b = vec![1.0, 2.0, 3.0];
+        assert_eq!(cosine_similarity(&a, &b), 0.0);
+        assert_eq!(cosine_similarity(&b, &a), 0.0);
+    }
+
+    #[test]
+    fn sanitize_key_segment_keeps_alphanumeric() {
+        assert_eq!(sanitize_key_segment("hello-world_123"), "hello-world_123");
+    }
+
+    #[test]
+    fn sanitize_key_segment_replaces_special_chars() {
+        assert_eq!(sanitize_key_segment("foo.bar/baz"), "foo_bar_baz");
+        assert_eq!(sanitize_key_segment("a b c"), "a_b_c");
+    }
+
+    #[test]
+    fn sanitize_key_segment_empty_input() {
+        assert_eq!(sanitize_key_segment(""), "");
+    }
+
+    #[test]
+    fn primitive_to_state_change_decision() {
+        let p = Primitive::Decision {
+            text: "use rust".into(),
+            context: "we decided to use rust".into(),
+        };
+        let (key, value) = primitive_to_state_change(&p);
+        assert_eq!(key, "primitive.decision");
+        assert_eq!(value["text"], "use rust");
+        assert_eq!(value["context"], "we decided to use rust");
+    }
+
+    #[test]
+    fn primitive_to_state_change_preference() {
+        let p = Primitive::Preference {
+            text: "snake_case".into(),
+        };
+        let (key, value) = primitive_to_state_change(&p);
+        assert_eq!(key, "primitive.preference");
+        assert_eq!(value["text"], "snake_case");
+    }
+
+    #[test]
+    fn primitive_to_state_change_entity() {
+        let p = Primitive::Entity {
+            name: "rust lang".into(),
+            kind: "language".into(),
+        };
+        let (key, value) = primitive_to_state_change(&p);
+        assert_eq!(key, "primitive.entity.rust_lang");
+        assert_eq!(value["kind"], "language");
+    }
+
+    #[test]
+    fn primitive_to_state_change_fact() {
+        let p = Primitive::Fact {
+            subject: "rust".into(),
+            predicate: "is".into(),
+            object: "fast".into(),
+        };
+        let (key, value) = primitive_to_state_change(&p);
+        assert_eq!(key, "primitive.fact.rust");
+        assert_eq!(value["predicate"], "is");
+        assert_eq!(value["object"], "fast");
+    }
+
+    #[test]
+    fn find_duplicate_groups_no_duplicates() {
+        let entries = vec![
+            MemoryEntry {
+                id: "a".into(),
+                content: "x".into(),
+                category: MemoryCategory::Conversation,
+                tags: vec![],
+                embedding: vec![1.0, 0.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+            MemoryEntry {
+                id: "b".into(),
+                content: "y".into(),
+                category: MemoryCategory::Conversation,
+                tags: vec![],
+                embedding: vec![0.0, 1.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+        ];
+        let groups = find_duplicate_groups(&entries, 0.9);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn find_duplicate_groups_identical_entries() {
+        let entries = vec![
+            MemoryEntry {
+                id: "a".into(),
+                content: "x".into(),
+                category: MemoryCategory::CodePattern,
+                tags: vec![],
+                embedding: vec![1.0, 0.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+            MemoryEntry {
+                id: "b".into(),
+                content: "y".into(),
+                category: MemoryCategory::CodePattern,
+                tags: vec![],
+                embedding: vec![1.0, 0.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+        ];
+        let groups = find_duplicate_groups(&entries, 0.9);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].len(), 2);
+        assert!(groups[0].contains(&"a".to_string()));
+        assert!(groups[0].contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn find_duplicate_groups_different_categories_not_grouped() {
+        let entries = vec![
+            MemoryEntry {
+                id: "a".into(),
+                content: "x".into(),
+                category: MemoryCategory::Conversation,
+                tags: vec![],
+                embedding: vec![1.0, 0.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+            MemoryEntry {
+                id: "b".into(),
+                content: "y".into(),
+                category: MemoryCategory::CodePattern,
+                tags: vec![],
+                embedding: vec![1.0, 0.0, 0.0],
+                score: 0.0,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            },
+        ];
+        let groups = find_duplicate_groups(&entries, 0.9);
+        assert!(groups.is_empty(), "different categories should not group");
+    }
+
+    #[test]
+    fn find_duplicate_groups_empty_entries() {
+        let groups = find_duplicate_groups(&[], 0.9);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn extract_primitives_finds_fact_is() {
+        let prims = extract_primitives("Rust is a systems language.");
+        assert!(prims.iter().any(|p| matches!(
+            p,
+            Primitive::Fact { subject, predicate, object }
+            if subject == "Rust" && predicate == "is" && object.contains("systems")
+        )));
+    }
+
+    #[test]
+    fn extract_primitives_finds_fact_are() {
+        let prims = extract_primitives("Cats are great companions.");
+        assert!(prims.iter().any(|p| matches!(
+            p,
+            Primitive::Fact { predicate, .. } if predicate == "are"
+        )));
+    }
+
+    #[test]
+    fn extract_primitives_no_fact_for_long_subject() {
+        // Subject > 4 words should not produce a fact
+        let prims = extract_primitives("The very long subject phrase here is important.");
+        let facts: Vec<_> = prims
+            .iter()
+            .filter(|p| matches!(p, Primitive::Fact { .. }))
+            .collect();
+        // Any fact extracted must have subject ≤ 4 words
+        for f in &facts {
+            if let Primitive::Fact { subject, .. } = f {
+                assert!(subject.split_whitespace().count() <= 4);
+            }
+        }
+    }
+
+    #[test]
+    fn extract_primitives_never_use_prefix() {
+        let prims = extract_primitives("Never use global state in production.");
+        assert!(prims.iter().any(|p| matches!(
+            p,
+            Primitive::Preference { text } if text.contains("global")
+        )));
+    }
+
+    #[test]
+    fn extract_primitives_going_with_decision() {
+        let prims = extract_primitives("Going with tokio for the runtime.");
+        assert!(prims.iter().any(|p| matches!(
+            p,
+            Primitive::Decision { text, .. } if text.contains("tokio")
+        )));
+    }
+
+    #[test]
+    fn extract_primitives_we_chose_decision() {
+        let prims = extract_primitives("We chose PostgreSQL as our database.");
+        assert!(prims.iter().any(|p| matches!(
+            p,
+            Primitive::Decision { text, .. } if text.contains("PostgreSQL")
+        )));
+    }
 }

@@ -594,4 +594,36 @@ fact app:
         let resolved = resolve_from_source(source, base).unwrap();
         assert_eq!(resolved.document.facts.len(), 2);
     }
+
+    #[test]
+    fn display_impl_formats_all_variants() {
+        let err = ResolveError::CircularImport {
+            path: PathBuf::from("a.px"),
+            chain: vec![PathBuf::from("b.px"), PathBuf::from("a.px")],
+        };
+        let s = err.to_string();
+        assert!(s.contains("circular import"));
+        assert!(s.contains("a.px"));
+        assert!(s.contains("→"));
+
+        let err = ResolveError::IoError {
+            path: PathBuf::from("missing.px"),
+            message: "not found".into(),
+        };
+        assert!(err.to_string().contains("cannot read"));
+        assert!(err.to_string().contains("not found"));
+
+        let err = ResolveError::ParseError {
+            path: PathBuf::from("bad.px"),
+            message: "unexpected token".into(),
+        };
+        assert!(err.to_string().contains("parse error"));
+
+        let err = ResolveError::InvalidPath {
+            import_path: "../escape".into(),
+            message: "traversal".into(),
+        };
+        assert!(err.to_string().contains("invalid import path"));
+        assert!(err.to_string().contains("traversal"));
+    }
 }
