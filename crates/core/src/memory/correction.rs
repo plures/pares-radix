@@ -531,6 +531,97 @@ mod tests {
         assert_eq!(outcome.constraint_id, None);
     }
 
+    // ── derive_rule_summary edge cases ───────────────────────────────────────
+
+    /// Kill mutant: derive_rule_summary truncation at 80 chars.
+    #[test]
+    fn summary_truncation_at_80_chars() {
+        // Exactly 80 chars should NOT be truncated
+        let msg_80 = "a".repeat(80);
+        let s = derive_rule_summary(&msg_80);
+        assert!(
+            !s.contains('…'),
+            "80-char message should not be truncated"
+        );
+
+        // 81 chars SHOULD be truncated
+        let msg_81 = "a".repeat(81);
+        let s = derive_rule_summary(&msg_81);
+        assert!(
+            s.contains('…'),
+            "81-char message should be truncated"
+        );
+    }
+
+    /// Kill mutant: derive_rule_summary with "stop" prefix.
+    #[test]
+    fn summary_from_stop() {
+        let s = derive_rule_summary("stop using global variables");
+        assert_eq!(s, "avoid: using global variables");
+    }
+
+    /// Kill mutant: derive_rule_summary with "never" prefix.
+    #[test]
+    fn summary_from_never() {
+        let s = derive_rule_summary("never commit directly to main");
+        assert_eq!(s, "avoid: commit directly to main");
+    }
+
+    /// Kill mutant: derive_rule_summary with "switch to" prefix.
+    #[test]
+    fn summary_from_switch_to() {
+        let s = derive_rule_summary("switch to tokio runtime");
+        assert_eq!(s, "prefer: tokio runtime");
+    }
+
+    /// Kill mutant: derive_rule_summary with "going forward" prefix.
+    #[test]
+    fn summary_from_going_forward() {
+        let s = derive_rule_summary("going forward use clippy on every commit");
+        assert_eq!(s, "rule: use clippy on every commit");
+    }
+
+    /// Kill mutant: derive_rule_summary with "in the future" prefix.
+    #[test]
+    fn summary_from_in_the_future() {
+        let s = derive_rule_summary("in the future add tests before merging");
+        assert_eq!(s, "rule: add tests before merging");
+    }
+
+    /// Kill mutant: derive_rule_summary strips trailing punctuation.
+    #[test]
+    fn summary_strips_trailing_punctuation() {
+        let s = derive_rule_summary("don't use unwrap!!!");
+        assert_eq!(s, "avoid: use unwrap");
+    }
+
+    /// Kill mutant: derive_rule_summary with empty remainder after prefix.
+    #[test]
+    fn summary_empty_after_prefix_falls_through() {
+        // "don't " with nothing after → falls to next pattern or fallback
+        let s = derive_rule_summary("don't ");
+        // Should not crash, should produce a fallback
+        assert!(s.starts_with("follow user correction:") || s.starts_with("avoid:"));
+    }
+
+    /// Kill mutant: is_correction prefix detection for "No, " vs mid-sentence "no".
+    #[test]
+    fn correction_prefix_no_comma() {
+        assert!(is_correction("No, use the other approach"));
+        assert!(is_correction("no. I said something else"));
+        // "no" mid-sentence is NOT a correction
+        assert!(!is_correction("I have no idea what to do"));
+    }
+
+    /// Kill mutant: is_correction with "actually," prefix.
+    #[test]
+    fn correction_prefix_actually() {
+        assert!(is_correction("Actually, the return type should be Option"));
+        assert!(is_correction("actually, use Vec not slice"));
+    }
+
+    // ── CorrectionEngine: decay protection ───────────────────────────────────
+
     #[tokio::test]
     async fn correction_has_decay_protection() {
         let store = test_store();
