@@ -442,6 +442,36 @@ mod tests {
         assert_eq!(v.suggested_splits, 5);
     }
 
+    #[test]
+    fn check_word_only_violation_with_output_at_boundary() {
+        // 601 words → ceil(601/200) = 4 word_splits; output = exactly MAX (2000)
+        // output does NOT violate → output_splits = 1 → suggested = max(4,1).max(2) = 4
+        let description = "word ".repeat(601);
+        let v = TaskSizeConstraint::check(&description, Some("text"), Some(2000))
+            .expect("should violate on word count alone");
+        assert_eq!(v.suggested_splits, 4);
+        assert_eq!(v.output_chars, Some(2000));
+    }
+
+    #[test]
+    fn check_word_violation_with_zero_output_chars() {
+        // Word violation present, output_chars = Some(0) — validates edge of match guard
+        let description = "word ".repeat(201);
+        let v = TaskSizeConstraint::check(&description, Some("text"), Some(0))
+            .expect("should violate on word count");
+        assert_eq!(v.suggested_splits, 2);
+    }
+
+    #[test]
+    fn check_combined_violation_minimal() {
+        // Both word and output violate minimally: 201 words + 2001 chars
+        // word_splits = ceil(201/200) = 2, output_splits = ceil(2001/2000) = 2
+        let description = "word ".repeat(201);
+        let v = TaskSizeConstraint::check(&description, Some("text"), Some(2001))
+            .expect("both violate");
+        assert_eq!(v.suggested_splits, 2);
+    }
+
     // ── TaskSizeViolation::into_event ─────────────────────────────────────────
 
     #[test]
