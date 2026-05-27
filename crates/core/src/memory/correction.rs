@@ -551,6 +551,51 @@ mod tests {
             s.contains('…'),
             "81-char message should be truncated"
         );
+
+        // Verify exact truncation boundary: content portion is exactly 77 bytes for ASCII
+        // Full format: "follow user correction: {content}…"
+        let prefix_len = "follow user correction: ".len(); // 24
+        let content_part = &s[prefix_len..s.len() - '…'.len_utf8()];
+        assert_eq!(
+            content_part.len(),
+            77,
+            "truncation should cut at byte 77, got {}",
+            content_part.len()
+        );
+    }
+
+    #[test]
+    fn summary_truncation_boundary_with_multibyte() {
+        // Use a string where a multi-byte char straddles the boundary.
+        // 'é' is 2 bytes. Put 76 ASCII chars + 'é' = 78 bytes total, > 80 char threshold
+        // needs > 80 chars total to trigger truncation.
+        // 76 'a' + 5 'é' (each 2 bytes) = 81 chars, 86 bytes
+        let msg = format!("{}{}", "a".repeat(76), "é".repeat(5));
+        assert!(msg.chars().count() == 81);
+        let s = derive_rule_summary(&msg);
+        assert!(s.contains('…'));
+        // The last char_index < 77 for this string: indices 0..76 are 'a' (1 byte each),
+        // index 76 is the last 'a', char_indices gives (76, 'a'), and 76 < 77 → included.
+        // Next would be index 77 (first 'é'), but 77 < 77 is false → excluded.
+        // So end = 76 + 1 = 77. Content = first 77 bytes = 76 'a' + partial? No — 77 bytes = "a"*77? No.
+        // Wait: 76 'a's at indices 0..75, then 'é' at byte 76-77. char_indices:
+        // Actually let me recalculate. "a".repeat(76) = 76 bytes. "é" is 2 bytes.
+        // char_indices: (0,'a'), (1,'a'), ..., (75,'a'), (76,'é'), (78,'é'), (80,'é'), (82,'é'), (84,'é')
+        // take_while |i| < 77: includes (76, 'é') since 76 < 77. last = (76, 'é'). end = 76 + 2 = 78.
+        // So content should be 78 bytes (the 76 a's + first é)
+        let prefix_len = "follow user correction: ".len();
+        let content_part = &s[prefix_len..s.len() - '…'.len_utf8()];
+        assert_eq!(content_part.len(), 78, "should include the multi-byte char at boundary");
+        assert!(content_part.ends_with('é'));
+    }
+
+    #[test]
+    fn summary_truncation_exact_content_preserved() {
+        // 90 'x' chars → truncated to first 77 bytes
+        let msg = "x".repeat(90);
+        let s = derive_rule_summary(&msg);
+        let expected = format!("follow user correction: {}…", "x".repeat(77));
+        assert_eq!(s, expected);
     }
 
     /// Kill mutant: derive_rule_summary with "stop" prefix.
