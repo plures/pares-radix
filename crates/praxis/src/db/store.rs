@@ -324,4 +324,32 @@ mod tests {
         let err = store.remove_constraint("C-NOPE").unwrap_err();
         assert_eq!(err, StoreError::NotFound("C-NOPE".into()));
     }
+
+    #[test]
+    fn adrs_iterator_yields_all_inserted() {
+        let mut store = PraxisStore::new();
+        store.insert_adr(make_adr("ADR-0001")).unwrap();
+        store.insert_adr(make_adr("ADR-0002")).unwrap();
+        store.insert_adr(make_adr("ADR-0003")).unwrap();
+        let ids: Vec<String> = store.adrs().map(|a| a.id.clone()).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(ids.contains(&"ADR-0001".to_string()));
+        assert!(ids.contains(&"ADR-0002".to_string()));
+        assert!(ids.contains(&"ADR-0003".to_string()));
+    }
+
+    #[test]
+    fn get_evidence_returns_inserted_record() {
+        let mut store = PraxisStore::new();
+        store.insert_evidence(make_evidence("EV-0001")).unwrap();
+        let ev = store.get_evidence("EV-0001");
+        assert!(ev.is_some());
+        assert_eq!(ev.unwrap().id, "EV-0001");
+    }
+
+    #[test]
+    fn get_evidence_returns_none_for_missing() {
+        let store = PraxisStore::new();
+        assert!(store.get_evidence("EV-NOPE").is_none());
+    }
 }
