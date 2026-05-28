@@ -30,10 +30,12 @@ impl Default for StdioSpineChannel {
 }
 
 impl StdioSpineChannel {
+    /// Create a new StdioSpineChannel with default settings.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Set the sender name for outbound messages.
     pub fn with_sender(mut self, sender: impl Into<String>) -> Self {
         self.sender = sender.into();
         self
