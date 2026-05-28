@@ -505,4 +505,121 @@ mod tests {
         assert!(reg.contains("alias"));
         assert_eq!(reg.len(), 2);
     }
+
+    #[test]
+    fn registry_accessor_returns_registry() {
+        let mut registry = ProcedureRegistry::new();
+        registry.register_as(
+            "my_proc",
+            json!({ "type": "procedure", "name": "my_proc", "steps": [] }),
+        );
+        let leaf = LeafHandler::new();
+        let handler = ComposableHandler::new(registry, leaf);
+        // The registry() accessor must return the actual registry with our procedure
+        assert!(handler.registry().contains("my_proc"));
+        assert_eq!(handler.registry().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn evaluate_condition_delegates_to_inner() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        struct CondHandler {
+            called: Arc<AtomicBool>,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for CondHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                Ok(json!(null))
+            }
+            fn evaluate_condition(&self, expr: &str, _vars: &HashMap<String, Value>) -> bool {
+                self.called.store(true, Ordering::SeqCst);
+                expr == "true"
+            }
+        }
+
+        let called = Arc::new(AtomicBool::new(false));
+        let inner = CondHandler {
+            called: called.clone(),
+        };
+        let handler = ComposableHandler::new(ProcedureRegistry::new(), inner);
+
+        let vars = HashMap::new();
+        assert!(handler.evaluate_condition("true", &vars));
+        assert!(called.load(Ordering::SeqCst));
+
+        assert!(!handler.evaluate_condition("false", &vars));
+    }
+
+    #[tokio::test]
+    async fn on_step_start_and_complete_delegate_to_inner() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct TrackHandler {
+            start_calls: Arc<AtomicUsize>,
+            complete_calls: Arc<AtomicUsize>,
+        }
+
+        #[async_trait]
+        impl AsyncActionHandler for TrackHandler {
+            async fn call(&self, _name: &str, _params: &Value) -> Result<Value, ExecutionError> {
+                Ok(json!(null))
+            }
+            async fn on_step_start(&self, _step_index: usize, _kind: &str) {
+                self.start_calls.fetch_add(1, Ordering::SeqCst);
+            }
+            async fn on_step_complete(&self, _step_index: usize, _result: &StepResult) {
+                self.complete_calls.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let start_calls = Arc::new(AtomicUsize::new(0));
+        let complete_calls = Arc::new(AtomicUsize::new(0));
+        let inner = TrackHandler {
+            start_calls: start_calls.clone(),
+            complete_calls: complete_calls.clone(),
+        };
+
+        let handler = ComposableHandler::new(ProcedureRegistry::new(), inner);
+
+        handler.on_step_start(0, "call").await;
+        handler.on_step_start(1, "set").await;
+        assert_eq!(start_calls.load(Ordering::SeqCst), 2);
+
+        handler
+            .on_step_complete(0, &StepResult {
+                index: 0,
+                kind: "call".to_string(),
+                output: Some(json!("ok")),
+                skipped: false,
+            })
+            .await;
+        assert_eq!(complete_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn params_to_vars_with_object() {
+        let params = json!({ "key1": "value1", "key2": 42 });
+        let vars = params_to_vars(&params);
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars.get("key1"), Some(&json!("value1")));
+        assert_eq!(vars.get("key2"), Some(&json!(42)));
+    }
+
+    #[test]
+    fn params_to_vars_with_null_returns_empty() {
+        let vars = params_to_vars(&json!(null));
+        assert!(vars.is_empty());
+    }
+
+    #[test]
+    fn params_to_vars_with_non_object_returns_empty() {
+        let vars = params_to_vars(&json!("string"));
+        assert!(vars.is_empty());
+        let vars = params_to_vars(&json!([1, 2, 3]));
+        assert!(vars.is_empty());
+    }
 }
