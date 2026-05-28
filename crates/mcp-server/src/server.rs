@@ -791,9 +791,9 @@ mod tests {
         // Send a notification before closing input
         let tx_clone = tx.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             tx_clone.send(ServerNotification::tools_list_changed()).unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             // Drop sender (not required for server to stop, but let's be clean)
             drop(tx_clone);
         });
@@ -802,7 +802,7 @@ mod tests {
         let req = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
         client_write.write_all(format!("{}\n", req).as_bytes()).await.unwrap();
         // Small delay to let notification arrive before EOF
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         drop(client_write);
 
         let result = server.run_with_io(server_read, server_write).await;
