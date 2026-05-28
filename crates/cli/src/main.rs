@@ -3492,6 +3492,50 @@ async fn main() {
             spine_registry.register(Box::new(CronRemoveProcedure { scheduler: Arc::clone(&scheduler) }));
             spine_registry.register(Box::new(CronToggleProcedure { scheduler: Arc::clone(&scheduler) }));
 
+            // Memory tools (PluresDB + fastembed)
+            {
+                let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let memory_path = PathBuf::from(&home).join(".pares-radix/memory");
+                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH").unwrap_or_else(|_| {
+                    format!("{home}/.cache/fastembed")
+                });
+                std::fs::create_dir_all(&fastembed_cache).ok();
+                #[allow(unused_unsafe)]
+                unsafe {
+                    std::env::set_var("FASTEMBED_CACHE_PATH", &fastembed_cache);
+                }
+                let memory_store: Arc<dyn pares_agens_core::memory::store::MemoryStore> =
+                    match PluresDbStore::open_with_embeddings(&memory_path) {
+                        Ok(store) => {
+                            info!("PluresDB memory with native fastembed enabled for spine");
+                            Arc::new(store)
+                        }
+                        Err(e) => {
+                            warn!("fastembed unavailable ({e}), falling back to basic store");
+                            match PluresDbStore::open(&memory_path) {
+                                Ok(store) => Arc::new(store),
+                                Err(e2) => {
+                                    error!("failed to open memory store: {e2}");
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    };
+                use pares_agens_core::memory::embed::{EmbeddingProvider, MockEmbedder};
+                let embedder: Box<dyn EmbeddingProvider> = Box::new(MockEmbedder);
+                let plures_lm = Arc::new(PluresLm::new(
+                    memory_store,
+                    embedder,
+                    128_000,
+                ));
+                spine_registry.register(Box::new(MemorySearchProcedure {
+                    plures_lm: Arc::clone(&plures_lm),
+                }));
+                spine_registry.register(Box::new(MemoryStoreProcedure {
+                    plures_lm: Arc::clone(&plures_lm),
+                }));
+            }
+
             let spine_registry = Arc::new(RwLock::new(spine_registry));
             let spine_tool_definitions = vec![
                 ToolDefinition {
@@ -3642,6 +3686,31 @@ async fn main() {
                             "enabled": {"type": "boolean", "description": "Whether to enable (true) or disable (false)"}
                         },
                         "required": ["name", "enabled"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "memory_search".into(),
+                    description: "Search long-term memory semantically. Returns the most relevant stored memories matching the query.".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Semantic search query"},
+                            "limit": {"type": "integer", "description": "Max results to return (default 5)"},
+                            "min_score": {"type": "number", "description": "Minimum similarity score (0.0-1.0)"}
+                        },
+                        "required": ["query"]
+                    }),
+                },
+                ToolDefinition {
+                    name: "memory_store".into(),
+                    description: "Store a fact, decision, or important information in long-term memory with optional tags.".into(),
+                    parameters: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "content": {"type": "string", "description": "The content to store in memory"},
+                            "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional tags for categorization"}
+                        },
+                        "required": ["content"]
                     }),
                 },
             ];
