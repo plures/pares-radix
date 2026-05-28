@@ -143,6 +143,10 @@ impl InputHistory {
 
     /// Default history file path: `~/.pares-radix/history`.
     fn history_path() -> Option<PathBuf> {
+        // Allow override via PARES_RADIX_HISTORY_PATH for testing without env races
+        if let Ok(explicit) = std::env::var("PARES_RADIX_HISTORY_PATH") {
+            return Some(PathBuf::from(explicit));
+        }
         std::env::var("HOME").ok().map(|home| {
             PathBuf::from(home)
                 .join(".pares-radix")
@@ -155,7 +159,12 @@ impl InputHistory {
         let Some(path) = Self::history_path() else {
             return;
         };
-        let Ok(file) = fs::File::open(&path) else {
+        self.load_from_path(&path);
+    }
+
+    /// Load history entries from an explicit path (useful for testing).
+    pub fn load_from_path(&mut self, path: &std::path::Path) {
+        let Ok(file) = fs::File::open(path) else {
             return;
         };
         let reader = std::io::BufReader::new(file);
@@ -182,10 +191,15 @@ impl InputHistory {
         let Some(path) = Self::history_path() else {
             return;
         };
+        self.save_to_path(&path);
+    }
+
+    /// Save history entries to an explicit path (useful for testing).
+    pub fn save_to_path(&self, path: &std::path::Path) {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let Ok(mut file) = fs::File::create(&path) else {
+        let Ok(mut file) = fs::File::create(path) else {
             return;
         };
         for entry in &self.entries {
@@ -996,25 +1010,20 @@ mod tests {
 
     #[test]
     fn history_save_and_load_roundtrip() {
-        use std::env;
-        // Use a temp dir to avoid polluting real home
+        // Use explicit path methods for thread-safe isolation (no env var race)
         let tmp = std::env::temp_dir().join(format!("pares-radix-test-roundtrip-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
-        let radix_dir = tmp.join(".pares-radix");
-        fs::create_dir_all(&radix_dir).unwrap();
-
-        // Temporarily override HOME
-        let orig_home = env::var("HOME").unwrap_or_default();
-        env::set_var("HOME", &tmp);
+        let history_file = tmp.join("history");
+        fs::create_dir_all(&tmp).unwrap();
 
         let mut hist = InputHistory::new(500);
         hist.push("first command");
         hist.push("second command");
         hist.push("third");
-        hist.save_to_disk();
+        hist.save_to_path(&history_file);
 
         // Load into a fresh history
         let mut hist2 = InputHistory::new(500);
-        hist2.load_from_disk();
+        hist2.load_from_path(&history_file);
         assert_eq!(hist2.len(), 3);
         // Verify order by navigating
         assert_eq!(hist2.up(""), Some("third"));
@@ -1022,37 +1031,32 @@ mod tests {
         assert_eq!(hist2.up(""), Some("first command"));
 
         // Cleanup
-        env::set_var("HOME", &orig_home);
         let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn history_load_respects_max_entries() {
-        use std::env;
-        let tmp = std::env::temp_dir().join(format!("pares-radix-test-max-{}", std::process::id()));
-        let radix_dir = tmp.join(".pares-radix");
-        fs::create_dir_all(&radix_dir).unwrap();
-
-        let orig_home = env::var("HOME").unwrap_or_default();
-        env::set_var("HOME", &tmp);
+        // Use explicit path methods for thread-safe isolation
+        let tmp = std::env::temp_dir().join(format!("pares-radix-test-max-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let history_file = tmp.join("history");
+        fs::create_dir_all(&tmp).unwrap();
 
         // Write more entries than max
         let mut hist = InputHistory::new(500);
         for i in 0..10 {
             hist.push(&format!("entry {i}"));
         }
-        hist.save_to_disk();
+        hist.save_to_path(&history_file);
 
         // Load with small max
         let mut hist2 = InputHistory::new(3);
-        hist2.load_from_disk();
+        hist2.load_from_path(&history_file);
         assert_eq!(hist2.len(), 3);
         // Should be the last 3
         assert_eq!(hist2.up(""), Some("entry 9"));
         assert_eq!(hist2.up(""), Some("entry 8"));
         assert_eq!(hist2.up(""), Some("entry 7"));
 
-        env::set_var("HOME", &orig_home);
         let _ = fs::remove_dir_all(&tmp);
     }
 
