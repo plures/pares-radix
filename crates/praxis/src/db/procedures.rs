@@ -448,6 +448,27 @@ mod tests {
         assert!(matches!(c.require, Condition::Always));
     }
 
+    #[test]
+    fn compile_nl_error_keyword_alone_triggers_error_severity() {
+        // "error" alone (without "block" or "must") should still produce Severity::Error
+        let c = compile_nl("privilege_level error if above threshold", "C-ERR");
+        assert_eq!(c.severity, Severity::Error);
+    }
+
+    #[test]
+    fn compile_nl_block_keyword_alone_triggers_error_severity() {
+        // "block" alone (without "error" or "must") should still produce Severity::Error
+        let c = compile_nl("block write_ actions without owner", "C-BLK");
+        assert_eq!(c.severity, Severity::Error);
+    }
+
+    #[test]
+    fn compile_nl_warning_severity_when_no_error_keywords() {
+        // Without "error", "block", or "must" → Severity::Warning
+        let c = compile_nl("privilege_level should stay below 3", "C-WARN");
+        assert_eq!(c.severity, Severity::Warning);
+    }
+
     // ── query_gaps ───────────────────────────────────────────────────────────
 
     #[test]
