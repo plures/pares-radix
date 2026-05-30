@@ -797,4 +797,259 @@ mod tests {
         let result = run_scenario(&scenario, &procedures, &BuiltinChecker);
         assert!(result.passed, "expected pass, got: {:?}", result);
     }
+
+    // ── Mutation gap coverage tests ─────────────────────────────────────────
+
+    #[test]
+    fn builtin_checker_available_checks_returns_known_checks() {
+        // Catches: replace available_checks -> vec!["xyzzy"] / vec![""] / vec![]
+        let checks = BuiltinChecker.available_checks();
+        assert!(checks.contains(&"has_entry"));
+        assert!(checks.contains(&"event_emitted"));
+        assert!(checks.contains(&"constraint_violated"));
+        assert!(checks.contains(&"var_equals"));
+        assert!(checks.contains(&"store_value"));
+        assert!(checks.contains(&"is_healthy"));
+        assert_eq!(checks.len(), 6);
+    }
+
+    #[test]
+    fn default_trait_available_checks_returns_empty() {
+        // Catches: replace ExpectationChecker::available_checks default with vec![""]/vec!["xyzzy"]
+        struct Minimal;
+        impl ExpectationChecker for Minimal {
+            fn check(&self, _name: &str, _params: &Value, _state: &ExecutionState) -> Result<bool, String> {
+                Ok(true)
+            }
+        }
+        let checks = Minimal.available_checks();
+        assert!(checks.is_empty());
+    }
+
+    #[test]
+    fn event_emitted_check_rejects_wrong_event_name() {
+        // Catches: replace == with != at line 143 (event name comparison)
+        let state = ExecutionState {
+            emitted_events: vec![json!({"event": "cache.hit", "key": "x"})],
+            ..Default::default()
+        };
+        // Correct event matches
+        let result = BuiltinChecker
+            .check("event_emitted", &json!({"event": "cache.hit"}), &state)
+            .unwrap();
+        assert!(result);
+        // Wrong event does NOT match
+        let result = BuiltinChecker
+            .check("event_emitted", &json!({"event": "cache.miss"}), &state)
+            .unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn event_emitted_check_additional_params_must_match() {
+        // Catches: replace == with != at line 173 (additional param comparison)
+        let state = ExecutionState {
+            emitted_events: vec![json!({"event": "order.placed", "amount": 100})],
+            ..Default::default()
+        };
+        // Matching params
+        let result = BuiltinChecker
+            .check("event_emitted", &json!({"event": "order.placed", "amount": 100}), &state)
+            .unwrap();
+        assert!(result);
+        // Non-matching params
+        let result = BuiltinChecker
+            .check("event_emitted", &json!({"event": "order.placed", "amount": 999}), &state)
+            .unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn constraint_violated_check_exact_name_match() {
+        // Catches: replace == with != at line 186 (constraint name contains)
+        let state = ExecutionState {
+            constraint_violations: vec!["ttl_positive".to_string()],
+            ..Default::default()
+        };
+        assert!(BuiltinChecker
+            .check("constraint_violated", &json!({"name": "ttl_positive"}), &state)
+            .unwrap());
+        assert!(!BuiltinChecker
+            .check("constraint_violated", &json!({"name": "wrong_name"}), &state)
+            .unwrap());
+    }
+
+    #[test]
+    fn advance_time_action_is_handled() {
+        // Catches: delete match arm "advance_time" in ScenarioActionHandler
+        let handler = ScenarioActionHandler::new();
+        let result = handler.call("advance_time", &json!({"secs": 60}));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn violate_constraint_action_records_violation() {
+        // Catches: delete match arm "violate_constraint" in ScenarioActionHandler
+        let handler = ScenarioActionHandler::new();
+        handler
+            .call("violate_constraint", &json!({"name": "max_ttl"}))
+            .unwrap();
+        let state = handler.into_state();
+        assert_eq!(state.constraint_violations, vec!["max_ttl".to_string()]);
+    }
+
+    #[test]
+    fn run_scenarios_failed_count_is_total_minus_passed() {
+        // Catches: replace - with / in run_scenarios (line 441)
+        let scenarios = vec![
+            json!({"name": "p1", "setup": [], "expectations": []}),
+            json!({"name": "p2", "setup": [], "expectations": []}),
+            json!({
+                "name": "f1",
+                "setup": [],
+                "expectations": [{"check": "has_entry", "params": {"key": "x"}, "negated": false}]
+            }),
+        ];
+        let suite = run_scenarios(&scenarios, &HashMap::new(), &BuiltinChecker);
+        assert_eq!(suite.total, 3);
+        assert_eq!(suite.passed, 2);
+        assert_eq!(suite.failed, 1); // Must be 3 - 2 = 1, not 3 / 2 = 1 (catches integer division edge)
+
+        // Edge case: 5 pass, 2 fail => failed=2 (not 5/7=0)
+        let scenarios5 = vec![
+            json!({"name": "a", "setup": [], "expectations": []}),
+            json!({"name": "b", "setup": [], "expectations": []}),
+            json!({"name": "c", "setup": [], "expectations": []}),
+            json!({"name": "d", "setup": [], "expectations": []}),
+            json!({"name": "e", "setup": [], "expectations": []}),
+            json!({"name": "f", "setup": [], "expectations": [{"check": "has_entry", "params": {"key": "x"}, "negated": false}]}),
+            json!({"name": "g", "setup": [], "expectations": [{"check": "has_entry", "params": {"key": "y"}, "negated": false}]}),
+        ];
+        let suite5 = run_scenarios(&scenarios5, &HashMap::new(), &BuiltinChecker);
+        assert_eq!(suite5.total, 7);
+        assert_eq!(suite5.passed, 5);
+        assert_eq!(suite5.failed, 2); // 7 - 5 = 2, not 7 / 5 = 1
+    }
+
+    #[test]
+    fn execute_step_call_kind_invokes_handler() {
+        // Catches: delete match arm "call" in execute_step
+        let scenario = json!({
+            "name": "call_test",
+            "setup": [
+                {"kind": "call", "name": "put_entry", "params": {"key": "via_call", "value": "yes"}}
+            ],
+            "expectations": [
+                {"check": "has_entry", "params": {"key": "via_call"}, "negated": false}
+            ]
+        });
+        let result = run_scenario(&scenario, &HashMap::new(), &BuiltinChecker);
+        assert!(result.passed, "call step should invoke handler: {:?}", result);
+    }
+
+    #[test]
+    fn execute_step_when_kind_executes_conditionally() {
+        // Catches: delete match arm "when" in execute_step
+        let handler = ScenarioActionHandler::new();
+        let step = json!({
+            "kind": "when",
+            "condition": "true",
+            "steps": [
+                {"kind": "call", "name": "put_entry", "params": {"key": "when_ran", "value": "1"}}
+            ]
+        });
+        let result = execute_step(&step, &handler);
+        assert!(result.is_ok());
+        let state = handler.into_state();
+        assert!(state.store.contains_key("when_ran"), "when block should have executed");
+    }
+
+    #[test]
+    fn execute_step_loop_kind_repeats() {
+        // Catches: delete match arm "loop" in execute_step
+        let handler = ScenarioActionHandler::new();
+        let step = json!({
+            "kind": "loop",
+            "times": 3,
+            "steps": [
+                {"kind": "emit", "event": {"event": "tick"}}
+            ]
+        });
+        let result = execute_step(&step, &handler);
+        assert!(result.is_ok());
+        let state = handler.into_state();
+        assert_eq!(state.emitted_events.len(), 3, "loop should repeat 3 times");
+    }
+
+    #[test]
+    fn var_equals_check_compares_actual_to_expected() {
+        // Catches: replace == with != at line 173 (var_equals)
+        let state = ExecutionState {
+            variables: {
+                let mut m = HashMap::new();
+                m.insert("status".to_string(), json!("active"));
+                m
+            },
+            ..Default::default()
+        };
+        // Matching value
+        assert!(BuiltinChecker
+            .check("var_equals", &json!({"var": "status", "value": "active"}), &state)
+            .unwrap());
+        // Non-matching value
+        assert!(!BuiltinChecker
+            .check("var_equals", &json!({"var": "status", "value": "inactive"}), &state)
+            .unwrap());
+    }
+
+    #[test]
+    fn store_value_check_compares_stored_to_expected() {
+        // Catches: replace == with != at line 186 (store_value)
+        let state = ExecutionState {
+            store: {
+                let mut m = HashMap::new();
+                m.insert("config".to_string(), json!({"ttl": 300}));
+                m
+            },
+            ..Default::default()
+        };
+        // Matching value
+        assert!(BuiltinChecker
+            .check("store_value", &json!({"key": "config", "value": {"ttl": 300}}), &state)
+            .unwrap());
+        // Non-matching value
+        assert!(!BuiltinChecker
+            .check("store_value", &json!({"key": "config", "value": {"ttl": 999}}), &state)
+            .unwrap());
+    }
+
+    #[test]
+    fn advance_time_does_not_modify_state() {
+        // Catches: delete "advance_time" arm — verifies it doesn't trigger emit/put side effects
+        let handler = ScenarioActionHandler::new();
+        handler.call("advance_time", &json!({"secs": 60})).unwrap();
+        handler.call("advance_time", &json!({"secs": 120})).unwrap();
+        let state = handler.into_state();
+        // advance_time should NOT add events or store entries
+        assert!(state.emitted_events.is_empty());
+        assert!(state.store.is_empty());
+        assert!(state.constraint_violations.is_empty());
+    }
+
+    #[test]
+    fn execute_step_call_specifically_uses_name_field() {
+        // Catches: delete "call" arm — the _ arm also uses name, but let's verify
+        // the explicit call path works with emit (which routes differently)
+        let handler = ScenarioActionHandler::new();
+        // "call" kind with name="emit" should go through call arm → handler.call("emit", params)
+        let step = json!({
+            "kind": "call",
+            "name": "emit",
+            "params": {"event": "test.event"}
+        });
+        execute_step(&step, &handler).unwrap();
+        let state = handler.into_state();
+        assert_eq!(state.emitted_events.len(), 1);
+    }
 }
