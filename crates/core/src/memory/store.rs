@@ -1384,4 +1384,85 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, "emb-1");
     }
+
+    /// Verifies `open_with_embeddings` actually creates a store backed by
+    /// persistent storage (SledStorage) rather than a bare in-memory CrdtStore.
+    /// Catches the mutant that replaces the function body with `Ok(Default::default())`
+    /// because Default::default() yields a store without persistence, which means
+    /// the host_sea_key is None and encryption/decryption behavior differs.
+    #[cfg(feature = "embeddings")]
+    #[tokio::test]
+    async fn pluresdb_store_open_with_embeddings_has_host_sea_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PluresDbStore::open_with_embeddings(dir.path()).unwrap();
+        // A properly opened store must have a host_sea_key (generated/loaded from disk).
+        // Default::default() would leave it as None.
+        assert!(
+            store.host_sea_key.is_some(),
+            "open_with_embeddings must produce a store with a host_sea_key"
+        );
+    }
+
+    /// Verifies that `list_host_adapters` requires BOTH prefix AND suffix match.
+    /// Catches the mutant that replaces `&&` with `||` on line 384:
+    /// An entry that ends with "/adapters" but does NOT start with "host/"
+    /// must NOT appear in results.
+    #[tokio::test]
+    async fn list_host_adapters_requires_both_prefix_and_suffix() {
+        let store = PluresDbStore::in_memory();
+        // Manually insert an entry with the right suffix but wrong prefix
+        let fake_key = format!("nothost/sneaky{ADAPTERS_SUFFIX}");
+        let payload = serde_json::json!({"adapters": [{"kind": "fake", "connection_id": "x", "single_connection": false}]});
+        let sealed = seal_value_for_storage(payload, store.host_sea_key.as_ref()).unwrap();
+        store.store.put(fake_key, ACTOR, sealed);
+
+        // Also insert a valid adapter
+        store
+            .set_host_adapters(
+                "real-host",
+                vec![HostAdapterConfig {
+                    kind: "signal".to_string(),
+                    connection_id: "s1".to_string(),
+                    single_connection: true,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let adapters = store.list_host_adapters().await.unwrap();
+        // Only the real adapter should appear — the fake one has wrong prefix
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].host, "real-host");
+    }
+
+    /// Verifies that `list_host_inference_capabilities` requires BOTH prefix AND suffix.
+    /// Catches the mutant that replaces `&&` with `||` on line 439:
+    /// An entry with the right suffix but wrong prefix must NOT appear.
+    #[tokio::test]
+    async fn list_host_inference_capabilities_requires_both_prefix_and_suffix() {
+        let store = PluresDbStore::in_memory();
+        // Manually insert an entry with the right suffix but wrong prefix
+        let fake_key = format!("nothost/sneaky{INFERENCE_CAPABILITIES_SUFFIX}");
+        let payload = serde_json::json!({"capability": {"host": "1.2.3.4", "port": 80, "experts": []}});
+        let sealed = seal_value_for_storage(payload, store.host_sea_key.as_ref()).unwrap();
+        store.store.put(fake_key, ACTOR, sealed);
+
+        // Also insert a valid capability
+        store
+            .set_host_inference_capability(
+                "real-host",
+                HostInferenceCapability {
+                    host: "10.0.0.1".to_string(),
+                    port: 9090,
+                    experts: vec!["nlp".to_string()],
+                },
+            )
+            .await
+            .unwrap();
+
+        let caps = store.list_host_inference_capabilities().await.unwrap();
+        // Only the real capability should appear
+        assert_eq!(caps.len(), 1);
+        assert_eq!(caps[0].host, "real-host");
+    }
 }
