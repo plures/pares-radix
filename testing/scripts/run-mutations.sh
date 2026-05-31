@@ -25,6 +25,9 @@ declare -A MODULES=(
   ["px-compiler"]="pares-radix-praxis:crates/praxis/src/px/compiler.rs"
   ["px-lint"]="pares-radix-praxis:crates/praxis/src/px/lint.rs"
   ["px-scenario-runner"]="pares-radix-praxis:crates/praxis/src/px/scenario_runner.rs"
+  ["px-resolver"]="pares-radix-praxis:crates/praxis/src/px/resolver.rs"
+  ["px-compose"]="pares-radix-praxis:crates/praxis/src/px/compose.rs"
+  ["tool-governance"]="pares-agens-core:crates/core/src/tool_governance.rs"
 )
 
 run_module() {

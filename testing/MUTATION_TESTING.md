@@ -50,6 +50,9 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | px-compiler | pares-radix-praxis | crates/praxis/src/px/compiler.rs |
 | px-lint | pares-radix-praxis | crates/praxis/src/px/lint.rs |
 | px-scenario-runner | pares-radix-praxis | crates/praxis/src/px/scenario_runner.rs |
+| px-resolver | pares-radix-praxis | crates/praxis/src/px/resolver.rs |
+| px-compose | pares-radix-praxis | crates/praxis/src/px/compose.rs |
+| tool-governance | pares-agens-core | crates/core/src/tool_governance.rs |
 
 ## Interpretation
 
@@ -70,6 +73,9 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | px/compiler.rs | 2 | 0 | 12 | 100% |
 | px/lint.rs | 67 | 0 | 1 | 100% |
 | px/scenario_runner.rs | 28 | 2*** | 2 | 100%*** |
+| px/resolver.rs | 3 | 0 | 3 | 100% |
+| px/compose.rs | 27 | 0 | 0 | 100% |
+| tool_governance.rs | 6 | 0 | 4 | 100% |
 
 \* The 1 missed mutant in chronos.rs is an equivalent mutant: deleting `1 => Self::Info` in `from_u8` falls through to `_ => Self::Info` — identical behavior, untestable by design.
 

@@ -294,4 +294,43 @@ mod tests {
         assert!(output.contains("read_file"));
         assert!(output.contains("web_fetch"));
     }
+
+    #[test]
+    fn timeout_returns_correct_duration() {
+        let policy = ToolPolicy {
+            tool_name: "test".into(),
+            approval_required: false,
+            timeout_ms: 5_000,
+            sandboxed: false,
+            allowed_patterns: vec![],
+            blocked_patterns: vec![],
+        };
+        assert_eq!(policy.timeout(), Duration::from_millis(5_000));
+        assert_ne!(policy.timeout(), Duration::default());
+    }
+
+    #[test]
+    fn all_policies_returns_registered() {
+        let gov = ToolGovernor::with_defaults();
+        let all = gov.all_policies();
+        assert!(!all.is_empty());
+        // Must contain at least the known default policies
+        let names: Vec<&str> = all.iter().map(|p| p.tool_name.as_str()).collect();
+        assert!(names.contains(&"run_command"));
+    }
+
+    #[test]
+    fn format_policies_shows_blocked_patterns() {
+        let mut gov = ToolGovernor::with_defaults();
+        gov.set_policy(ToolPolicy {
+            tool_name: "test_tool".into(),
+            approval_required: false,
+            timeout_ms: 10_000,
+            sandboxed: false,
+            allowed_patterns: vec![],
+            blocked_patterns: vec!["dangerous_pattern".into()],
+        });
+        let output = gov.format_policies();
+        assert!(output.contains("Blocked: dangerous_pattern"), "blocked patterns must appear in formatted output");
+    }
 }
