@@ -21,6 +21,8 @@ declare -A MODULES=(
   ["core-ledger"]="pares-agens-core:crates/core/src/praxis/ledger.rs"
   ["core-cerebellum"]="pares-agens-core:crates/core/src/cerebellum/pipeline.rs"
   ["core-forgetting"]="pares-agens-core:crates/core/src/memory/forgetting/engine.rs"
+  ["modules-safety"]="pares-radix-praxis:crates/praxis/src/modules/safety.rs"
+  ["px-compiler"]="pares-radix-praxis:crates/praxis/src/px/compiler.rs"
 )
 
 run_module() {
