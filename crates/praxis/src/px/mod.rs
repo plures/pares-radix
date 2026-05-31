@@ -10,6 +10,9 @@ pub mod executor;
 pub mod lint;
 pub mod resolver;
 pub mod scenario_runner;
+
+#[cfg(test)]
+mod builder_test;
 pub mod watcher;
 
 use pest::Parser;
