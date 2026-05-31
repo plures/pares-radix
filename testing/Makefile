@@ -53,6 +53,9 @@ test-docker: docker-up
 
 # ─── Utilities ─────────────────────────────────────────────────────────────
 
+doctor:
+	@bash scripts/doctor.sh
+
 clean:
 	rm -rf .pytest_cache tests/__pycache__
 	docker compose --profile test down -v --remove-orphans 2>/dev/null || true
