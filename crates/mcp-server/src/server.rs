@@ -779,7 +779,7 @@ mod tests {
     /// Test write_notification via notification channel in run_with_io.
     #[tokio::test]
     async fn run_with_io_delivers_server_notifications() {
-        use tokio::io::{AsyncWriteExt, AsyncReadExt, duplex};
+        use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncBufReadExt, duplex};
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
@@ -788,38 +788,36 @@ mod tests {
         let (mut client_write, server_read) = duplex(8192);
         let (server_write, mut client_read) = duplex(8192);
 
-        // Send a notification before closing input
-        let tx_clone = tx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            tx_clone.send(ServerNotification::tools_list_changed()).unwrap();
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            // Drop sender (not required for server to stop, but let's be clean)
-            drop(tx_clone);
+        // Run server in background
+        let server_handle = tokio::spawn(async move {
+            server.run_with_io(server_read, server_write).await
         });
 
-        // Send a request then close
+        // Wrap client_read for line-by-line reading
+        let mut reader = tokio::io::BufReader::new(client_read);
+
+        // Send ping request
         let req = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
         client_write.write_all(format!("{}\n", req).as_bytes()).await.unwrap();
-        // Small delay to let notification arrive before EOF
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // Wait for ping response
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        assert!(line.contains("\"id\":1"), "Expected ping response, got: {}", line);
+
+        // Now send notification — server is idle waiting for next select!
+        tx.send(ServerNotification::tools_list_changed()).unwrap();
+
+        // Read the notification output
+        let mut notif_line = String::new();
+        reader.read_line(&mut notif_line).await.unwrap();
+        let v: Value = serde_json::from_str(&notif_line).unwrap_or_default();
+        assert_eq!(v["method"], "notifications/tools/list_changed",
+            "Expected tools_list_changed notification, got: {}", notif_line);
+
+        // Close input — server exits cleanly
         drop(client_write);
-
-        let result = server.run_with_io(server_read, server_write).await;
+        let result = server_handle.await.unwrap();
         assert!(result.is_ok());
-
-        let mut all_output = String::new();
-        client_read.read_to_string(&mut all_output).await.unwrap();
-
-        let lines: Vec<&str> = all_output.lines().filter(|l| !l.is_empty()).collect();
-        // Should have at least 2 lines: ping response + notification
-        assert!(lines.len() >= 2, "Expected ping response + notification, got {} lines: {:?}", lines.len(), lines);
-
-        // Find the notification
-        let has_notification = lines.iter().any(|l| {
-            let v: Value = serde_json::from_str(l).unwrap_or_default();
-            v["method"] == "notifications/tools/list_changed"
-        });
-        assert!(has_notification, "Server should have sent tools_list_changed notification");
     }
 }

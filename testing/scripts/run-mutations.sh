@@ -20,6 +20,7 @@ declare -A MODULES=(
   ["privacy"]="pares-agens-privacy:crates/privacy/src/lib.rs"
   ["core-ledger"]="pares-agens-core:crates/core/src/praxis/ledger.rs"
   ["core-cerebellum"]="pares-agens-core:crates/core/src/cerebellum/pipeline.rs"
+  ["core-forgetting"]="pares-agens-core:crates/core/src/memory/forgetting/engine.rs"
 )
 
 run_module() {
