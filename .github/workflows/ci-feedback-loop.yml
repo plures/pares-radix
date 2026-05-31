@@ -14,24 +14,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
-      - run: npm ci || npm install
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
         continue-on-error: true
 
       - name: Lint
-        run: npm run lint --if-present 2>&1
+        run: pnpm run lint 2>&1
         continue-on-error: true
         id: lint
 
       - name: Type check
-        run: npx svelte-kit sync && npx tsc --noEmit --skipLibCheck 2>&1
+        run: pnpm run check 2>&1
         continue-on-error: true
         id: typecheck
 
       - name: Test
-        run: npm test --if-present 2>&1
+        run: pnpm run --if-present test 2>&1
         continue-on-error: true
         id: test
 
