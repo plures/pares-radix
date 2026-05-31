@@ -1578,6 +1578,39 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn stderr_multi_chunk_buffer_captures_all() {
+        // Catches: replace + with * in stderr buffer guard (line 357).
+        // With the mutant `len * n <= MAX`: after first 8KB read (len=0, 0*8192=0 ≤ MAX → ok),
+        // second read (len=8192, 8192*8192=64MB > MAX → REJECTED). So >8KB stderr
+        // would be truncated to exactly one chunk. This test verifies all ~32KB arrives.
+        let executor = ShellExecutor::new();
+        // Generate 32KB on stderr using dd
+        let result = executor
+            .exec(ExecRequest {
+                command: "dd if=/dev/zero bs=1024 count=32 2>/dev/null | tr '\\0' 'E' >&2".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let poll = executor.poll(&session_id, Some(3000)).await.unwrap();
+        // With + → * mutant, only first 8KB would be captured (second chunk rejected).
+        // With correct +, all 32KB should arrive.
+        assert!(
+            poll.total_bytes >= 32768,
+            "stderr multi-chunk: expected ≥32KB, got {} bytes (mutant would give ≤8192)",
+            poll.total_bytes
+        );
+    }
+
     #[test]
     fn generate_session_id_uses_correct_adjective_noun_mapping() {
         // Catches: replace % with / and / with % in generate_session_id (lines 673-674).
