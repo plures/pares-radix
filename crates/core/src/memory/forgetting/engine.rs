@@ -1046,6 +1046,62 @@ mod tests {
         assert!(r2.soft_deleted_ids.contains(&"second".to_owned()));
     }
 
+    // ── boundary condition tests (mutation gap coverage) ─────────────────────
+
+    /// Kills mutant: replace < with <= at line 223 (entry exactly at cutoff boundary)
+    /// NOTE: This mutant is effectively equivalent because the cutoff is computed
+    /// from `now` inside dry_run, making `created == cutoff` unreachable in practice.
+    /// An entry created slightly AFTER the cutoff (1 second younger) should NOT be purged.
+    /// An entry created slightly BEFORE the cutoff (1 second older) SHOULD be purged.
+    #[tokio::test]
+    async fn dry_run_entry_just_past_cutoff_is_purged() {
+        // Entry is 30 days + 2 seconds old, cutoff = now - 30 days
+        // So created < cutoff → true → purged
+        let created_at = (Utc::now() - TimeDelta::days(30) - TimeDelta::seconds(2)).to_rfc3339();
+        let entry = MemoryEntry {
+            id: "just_past".to_owned(),
+            content: "just past cutoff".to_owned(),
+            category: MemoryCategory::Conversation,
+            tags: vec![],
+            embedding: vec![0.1, 0.2],
+            score: 0.0,
+            created_at,
+        };
+        let engine = engine_with_entries(vec![entry]).await;
+        let mut policy = RetentionPolicy::new();
+        policy.set_rule(
+            MemoryCategory::Conversation,
+            super::super::policy::RetentionRule::expire_after(30),
+        );
+        let report = engine.dry_run(&policy).await.unwrap();
+        assert_eq!(
+            report.total_affected, 1,
+            "entry just past cutoff should be purged"
+        );
+    }
+
+    /// Kills mutant: replace > with >= at line 239 (entries.len() == max_count)
+    /// When the count of entries equals max_count exactly, no entries should be
+    /// purged. The condition is `len > max_count`, not `>=`.
+    #[tokio::test]
+    async fn dry_run_entries_at_exact_max_count_not_purged() {
+        // Create exactly 3 entries with max_count=3
+        let entries = (0..3_u8)
+            .map(|i| old_entry(&format!("e{i}"), i as i64 + 1, MemoryCategory::CodePattern))
+            .collect();
+        let engine = engine_with_entries(entries).await;
+        let mut policy = RetentionPolicy::new();
+        policy.set_rule(
+            MemoryCategory::CodePattern,
+            super::super::policy::RetentionRule::limit_count(3),
+        );
+        let report = engine.dry_run(&policy).await.unwrap();
+        assert_eq!(
+            report.total_affected, 0,
+            "exactly max_count entries should not trigger purge (strict greater-than)"
+        );
+    }
+
     /// hard_purge_expired appends HardPurged audit entries
     #[tokio::test]
     async fn hard_purge_expired_creates_audit_entries() {
