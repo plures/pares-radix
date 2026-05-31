@@ -726,6 +726,258 @@ mod tests {
         ));
     }
 
+    // ── Mutation gap coverage tests ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_interval_minutes() {
+        assert_eq!(Scheduler::parse_interval_secs("5m"), Some(300));
+        assert_eq!(Scheduler::parse_interval_secs("1m"), Some(60));
+    }
+
+    #[test]
+    fn parse_interval_hours() {
+        assert_eq!(Scheduler::parse_interval_secs("2h"), Some(7200));
+        assert_eq!(Scheduler::parse_interval_secs("1h"), Some(3600));
+    }
+
+    #[test]
+    fn parse_interval_invalid_unit() {
+        assert_eq!(Scheduler::parse_interval_secs("5d"), None);
+        assert_eq!(Scheduler::parse_interval_secs("0s"), None);
+    }
+
+    #[test]
+    fn cron_part_exact_value() {
+        // Tests exact match: value == parsed
+        assert!(Scheduler::matches_cron_part("5", 5, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5", 6, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5", 4, 0, 59));
+    }
+
+    #[test]
+    fn cron_part_range() {
+        // Tests range: start <= value <= end
+        assert!(Scheduler::matches_cron_part("5-10", 5, 0, 59));
+        assert!(Scheduler::matches_cron_part("5-10", 10, 0, 59));
+        assert!(Scheduler::matches_cron_part("5-10", 7, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5-10", 4, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5-10", 11, 0, 59));
+    }
+
+    #[test]
+    fn cron_part_step_on_star() {
+        // */5 at min=0: 0, 5, 10, 15... match; 1, 2, 3, 4 don't
+        assert!(Scheduler::matches_cron_part("*/5", 0, 0, 59));
+        assert!(Scheduler::matches_cron_part("*/5", 5, 0, 59));
+        assert!(Scheduler::matches_cron_part("*/5", 10, 0, 59));
+        assert!(!Scheduler::matches_cron_part("*/5", 1, 0, 59));
+        assert!(!Scheduler::matches_cron_part("*/5", 3, 0, 59));
+    }
+
+    #[test]
+    fn cron_part_step_on_range() {
+        // 2-10/3: values 2, 5, 8 match; 3, 4, 6, 7, 9, 10 don't
+        assert!(Scheduler::matches_cron_part("2-10/3", 2, 0, 59));
+        assert!(Scheduler::matches_cron_part("2-10/3", 5, 0, 59));
+        assert!(Scheduler::matches_cron_part("2-10/3", 8, 0, 59));
+        assert!(!Scheduler::matches_cron_part("2-10/3", 3, 0, 59));
+        assert!(!Scheduler::matches_cron_part("2-10/3", 4, 0, 59));
+        assert!(!Scheduler::matches_cron_part("2-10/3", 10, 0, 59));
+    }
+
+    #[test]
+    fn cron_part_invalid_step() {
+        assert!(!Scheduler::matches_cron_part("*/0", 5, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5-10/abc", 7, 0, 59));
+    }
+
+    #[test]
+    fn cron_part_out_of_bounds() {
+        // value > max
+        assert!(!Scheduler::matches_cron_part("*", 60, 0, 59));
+        // value < min
+        assert!(!Scheduler::matches_cron_part("*", 0, 1, 31));
+    }
+
+    #[test]
+    fn cron_part_step_star_with_nonzero_min() {
+        // */3 on day field (min=1): day 1,4,7,10... match
+        // (value - min) % step == 0 → (4-1)=3, 3%3==0 ✓
+        assert!(Scheduler::matches_cron_part("*/3", 4, 1, 31));
+        assert!(Scheduler::matches_cron_part("*/3", 7, 1, 31));
+        assert!(Scheduler::matches_cron_part("*/3", 1, 1, 31));
+        // (2-1)=1, 1%3≠0
+        assert!(!Scheduler::matches_cron_part("*/3", 2, 1, 31));
+        // (3-1)=2, 2%3≠0
+        assert!(!Scheduler::matches_cron_part("*/3", 3, 1, 31));
+    }
+
+    #[test]
+    fn cron_part_step_zero_invalid() {
+        // step=0 should be rejected even though u32 >= 0
+        assert!(!Scheduler::matches_cron_part("*/0", 0, 0, 59));
+        assert!(!Scheduler::matches_cron_part("5-10/0", 5, 0, 59));
+    }
+
+    #[test]
+    fn parse_cron_add_wrong_verb() {
+        // Tests that args[1] != "add" is properly checked (|| not &&)
+        let result = Scheduler::parse_cron_add("/cron list '* * * * *' 'test'");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_cron_add_wrong_prefix() {
+        // Tests that args[0] != "/cron" is properly checked
+        let result = Scheduler::parse_cron_add("/sched add '* * * * *' 'test'");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_cron_add_invalid_empty_command() {
+        let result = Scheduler::parse_cron_add("/cron add '* * * * *' ''");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_cron_add_invalid_syntax() {
+        // Only 3 args instead of 4
+        let result = Scheduler::parse_cron_add("/cron add '* * * * *'");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_cron_add_bad_cron_field_count() {
+        // 4 fields instead of 5
+        let result = Scheduler::parse_cron_add("/cron add '* * * *' 'test'");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_cron_add_interval_minutes() {
+        let task = Scheduler::parse_cron_add("/cron add 'every 5m' 'check'").unwrap();
+        assert!(matches!(
+            task.schedule,
+            Schedule::Interval { every_secs: 300 }
+        ));
+    }
+
+    #[test]
+    fn parse_cron_add_interval_hours() {
+        let task = Scheduler::parse_cron_add("/cron add 'every 2h' 'check'").unwrap();
+        assert!(matches!(
+            task.schedule,
+            Schedule::Interval { every_secs: 7200 }
+        ));
+    }
+
+    #[tokio::test]
+    async fn remove_existing_task() {
+        let scheduler = Scheduler::new();
+        scheduler
+            .add(Task {
+                id: "r1".into(),
+                name: "removable".into(),
+                schedule: Schedule::Interval { every_secs: 60 },
+                command: "echo".into(),
+                enabled: true,
+                last_run: None,
+                last_result: None,
+            })
+            .await;
+        assert!(scheduler.remove("r1").await);
+        assert!(!scheduler.remove("r1").await);
+    }
+
+    #[tokio::test]
+    async fn get_existing_and_missing() {
+        let scheduler = Scheduler::new();
+        scheduler
+            .add(Task {
+                id: "g1".into(),
+                name: "getme".into(),
+                schedule: Schedule::Interval { every_secs: 60 },
+                command: "echo".into(),
+                enabled: true,
+                last_run: None,
+                last_result: None,
+            })
+            .await;
+        assert!(scheduler.get("g1").await.is_some());
+        assert!(scheduler.get("nonexistent").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn set_enabled_existing_and_missing() {
+        let scheduler = Scheduler::new();
+        scheduler
+            .add(Task {
+                id: "e1".into(),
+                name: "toggle".into(),
+                schedule: Schedule::Interval { every_secs: 60 },
+                command: "echo".into(),
+                enabled: true,
+                last_run: None,
+                last_result: None,
+            })
+            .await;
+        assert!(scheduler.set_enabled("e1", false).await);
+        let t = scheduler.get("e1").await.unwrap();
+        assert!(!t.enabled);
+        assert!(!scheduler.set_enabled("nonexist", true).await);
+    }
+
+    #[tokio::test]
+    async fn cron_not_due_if_ran_within_60s() {
+        let now = Utc
+            .with_ymd_and_hms(2026, 4, 20, 12, 30, 0)
+            .single()
+            .unwrap();
+        let task = Task {
+            id: "cron_dup".into(),
+            name: "cron".into(),
+            schedule: Schedule::Cron {
+                expr: "30 12 20 4 1".into(),
+            },
+            command: "echo ok".into(),
+            enabled: true,
+            last_run: Some(now - chrono::Duration::seconds(30)),
+            last_result: None,
+        };
+        assert!(!Scheduler::is_due(&task, &now));
+    }
+
+    #[tokio::test]
+    async fn with_executor_stores_executor() {
+        let executor: TaskExecutor = Arc::new(|_cmd: String| {
+            tokio::spawn(async { "done".to_string() })
+        });
+        let scheduler = Scheduler::new().with_executor(executor);
+        assert!(scheduler.executor.is_some());
+    }
+
+    #[tokio::test]
+    async fn delete_persisted_task_removes_from_store() {
+        let store = Arc::new(PluresDbTaskStore::in_memory());
+        let scheduler = Scheduler::new().with_store(store.clone());
+        scheduler
+            .add(Task {
+                id: "del1".into(),
+                name: "deletable".into(),
+                schedule: Schedule::Interval { every_secs: 60 },
+                command: "echo".into(),
+                enabled: true,
+                last_run: None,
+                last_result: None,
+            })
+            .await;
+        scheduler.remove("del1").await;
+        // Verify store doesn't have it
+        let fresh = Scheduler::new().with_store(store);
+        let loaded = fresh.load_persisted().await.unwrap();
+        assert_eq!(loaded, 0);
+    }
+
     #[tokio::test]
     async fn persisted_tasks_round_trip_through_pluresdb_store() {
         let store = Arc::new(PluresDbTaskStore::in_memory());
