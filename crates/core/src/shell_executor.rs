@@ -998,4 +998,347 @@ mod tests {
             let _ = executor.kill(id).await;
         }
     }
+
+    // ── Mutation gap coverage ─────────────────────────────────────────────────
+
+    #[test]
+    fn max_output_bytes_is_16mb() {
+        // Catches: replace * with + in MAX_OUTPUT_BYTES constant
+        assert_eq!(MAX_OUTPUT_BYTES, 16 * 1024 * 1024);
+        assert_eq!(MAX_OUTPUT_BYTES, 16_777_216);
+    }
+
+    #[tokio::test]
+    async fn background_stderr_buffer_limit_respected() {
+        // Catches: replace <= with > in stderr buffer guard (line 357)
+        // and replace + with * / - in buffer length checks
+        let executor = ShellExecutor::new();
+        // Generate output on stderr and verify it's captured
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo stderr_data >&2".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        // Wait for process to complete
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let poll = executor.poll(&session_id, Some(2000)).await.unwrap();
+        assert!(
+            poll.new_output.contains("stderr_data"),
+            "stderr should be captured in output; got: {:?}",
+            poll.new_output
+        );
+        // total_bytes should reflect both stdout+stderr correctly
+        assert!(poll.total_bytes > 0);
+    }
+
+    #[tokio::test]
+    async fn poll_total_bytes_sums_stdout_and_stderr() {
+        // Catches: replace + with - / * in poll total_bytes calculation (lines 488, 495, 532)
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo -n 'OUT12345' && echo -n 'ERR12345' >&2".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let poll = executor.poll(&session_id, Some(2000)).await.unwrap();
+        // Both streams should be present: 8 bytes stdout + 8 bytes stderr = 16
+        assert_eq!(poll.total_bytes, 16, "total_bytes should be stdout + stderr");
+        assert!(!poll.running);
+    }
+
+    #[tokio::test]
+    async fn poll_new_output_only_returns_unread_bytes() {
+        // Catches: replace > with >= in new_bytes check (line 499)
+        // and: delete ! in !session.running check
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo -n 'first' && sleep 0.2 && echo -n 'second'".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // First poll gets 'first'
+        let poll1 = executor.poll(&session_id, Some(1000)).await.unwrap();
+        assert!(
+            poll1.new_output.contains("first"),
+            "first poll should contain 'first'; got: {:?}",
+            poll1.new_output
+        );
+
+        // Wait for 'second' to appear
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        let poll2 = executor.poll(&session_id, Some(1000)).await.unwrap();
+        assert!(
+            poll2.new_output.contains("second"),
+            "second poll should contain 'second'; got: {:?}",
+            poll2.new_output
+        );
+        // 'first' should NOT be in the second poll (already read)
+        assert!(
+            !poll2.new_output.contains("first"),
+            "second poll should not re-return 'first'; got: {:?}",
+            poll2.new_output
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_with_timeout_waits_for_output() {
+        // Catches: replace match guard Instant::now() < dl with true/false
+        // and: replace < with > / == / <= in deadline comparison
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 0.3 && echo -n 'delayed'".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+
+        // Poll immediately with no timeout — should get empty output
+        let poll_immediate = executor.poll(&session_id, None).await.unwrap();
+        assert_eq!(
+            poll_immediate.new_output, "",
+            "immediate poll with no timeout should return empty"
+        );
+
+        // Poll with generous timeout — should wait and get the output
+        let poll_wait = executor.poll(&session_id, Some(5000)).await.unwrap();
+        assert!(
+            poll_wait.new_output.contains("delayed"),
+            "poll with timeout should wait for output; got: {:?}",
+            poll_wait.new_output
+        );
+    }
+
+    #[tokio::test]
+    async fn list_output_bytes_sums_correctly() {
+        // Catches: replace + with * / - in list output_bytes (line 600)
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo -n 'AAAA' && echo -n 'BB' >&2".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        let list = executor.list().await;
+        let info = list.iter().find(|s| s.id == session_id).unwrap();
+        // 4 bytes stdout + 2 bytes stderr = 6
+        assert_eq!(info.output_bytes, 6, "output_bytes should be stdout + stderr");
+    }
+
+    #[tokio::test]
+    async fn remove_running_session_returns_false() {
+        // Catches: replace ShellExecutor::remove -> bool with true
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        // Can't remove a running session
+        assert!(!executor.remove(&session_id).await);
+        // Kill it first, then remove should succeed
+        executor.kill(&session_id).await.unwrap();
+        assert!(executor.remove(&session_id).await);
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_session_returns_false() {
+        // Catches: replace ShellExecutor::remove -> bool with true
+        let executor = ShellExecutor::new();
+        assert!(!executor.remove("nonexistent-id").await);
+    }
+
+    #[tokio::test]
+    async fn cleanup_old_removes_completed_sessions() {
+        // Catches: replace ShellExecutor::cleanup_old with ()
+        // and: replace || with && in retain predicate
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo done".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+
+        // Wait for the exit detector to mark it as not running
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let list = executor.list().await;
+            if !list[0].running {
+                break;
+            }
+        }
+
+        // Session exists and is complete
+        let list = executor.list().await;
+        assert_eq!(list.len(), 1);
+        assert!(!list[0].running, "session should have exited");
+
+        // Manually age the session by setting created_at far in the past
+        {
+            let mut sessions = executor.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.created_at = Instant::now() - Duration::from_secs(7200); // 2 hours ago
+            }
+        }
+
+        executor.cleanup_old().await;
+        let list = executor.list().await;
+        assert_eq!(list.len(), 0, "cleanup_old should remove old completed sessions");
+    }
+
+    #[tokio::test]
+    async fn cleanup_old_keeps_running_sessions() {
+        // Catches: replace || with && in retain predicate
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+
+        // Age the session
+        {
+            let mut sessions = executor.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.created_at = Instant::now() - Duration::from_secs(7200);
+            }
+        }
+
+        executor.cleanup_old().await;
+        // Should NOT be removed because it's still running
+        let list = executor.list().await;
+        assert_eq!(list.len(), 1, "cleanup_old should keep running sessions even if old");
+        assert!(list[0].running);
+
+        executor.kill(&session_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn yield_exec_sets_background_flag() {
+        // Catches: delete field background from struct ExecRequest expression in yield_exec
+        let executor = ShellExecutor::new();
+        // Use yield_ms with a long-running command
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: false,
+                pty: false,
+                yield_ms: Some(100),
+            })
+            .await;
+
+        // Should have been backgrounded (yield_ms elapsed while command runs)
+        assert!(result.still_running);
+        assert!(result.session_id.is_some());
+
+        // Verify the session is tracked
+        let list = executor.list().await;
+        assert_eq!(list.len(), 1);
+        assert!(list[0].running);
+
+        executor.kill(&result.session_id.unwrap()).await.unwrap();
+    }
+
+    #[test]
+    fn generate_session_id_is_unique() {
+        let ids: Vec<String> = (0..100).map(|_| generate_session_id()).collect();
+        let unique: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(unique.len(), 100);
+    }
+
+    #[test]
+    fn generate_session_id_format() {
+        let id = generate_session_id();
+        let parts: Vec<&str> = id.split('-').collect();
+        assert_eq!(parts.len(), 3, "session id should be adjective-noun-N; got: {id}");
+    }
+
+    #[tokio::test]
+    async fn default_impl_creates_working_executor() {
+        let executor = ShellExecutor::default();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo default_works".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: Some(5),
+                background: false,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.stdout.contains("default_works"));
+    }
 }
