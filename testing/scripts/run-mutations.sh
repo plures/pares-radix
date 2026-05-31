@@ -23,6 +23,8 @@ declare -A MODULES=(
   ["core-forgetting"]="pares-agens-core:crates/core/src/memory/forgetting/engine.rs"
   ["modules-safety"]="pares-radix-praxis:crates/praxis/src/modules/safety.rs"
   ["px-compiler"]="pares-radix-praxis:crates/praxis/src/px/compiler.rs"
+  ["px-lint"]="pares-radix-praxis:crates/praxis/src/px/lint.rs"
+  ["px-scenario-runner"]="pares-radix-praxis:crates/praxis/src/px/scenario_runner.rs"
 )
 
 run_module() {

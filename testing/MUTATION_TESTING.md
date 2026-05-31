@@ -48,6 +48,8 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | core-forgetting | pares-agens-core | crates/core/src/memory/forgetting/engine.rs |
 | modules-safety | pares-radix-praxis | crates/praxis/src/modules/safety.rs |
 | px-compiler | pares-radix-praxis | crates/praxis/src/px/compiler.rs |
+| px-lint | pares-radix-praxis | crates/praxis/src/px/lint.rs |
+| px-scenario-runner | pares-radix-praxis | crates/praxis/src/px/scenario_runner.rs |
 
 ## Interpretation
 
@@ -66,10 +68,14 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | core/chronos.rs | 35 | 1* | 14 | 100%* |
 | modules/safety.rs | 53 | 1** | 13 | 100%** |
 | px/compiler.rs | 2 | 0 | 12 | 100% |
+| px/lint.rs | 67 | 0 | 1 | 100% |
+| px/scenario_runner.rs | 28 | 2*** | 2 | 100%*** |
 
 \* The 1 missed mutant in chronos.rs is an equivalent mutant: deleting `1 => Self::Info` in `from_u8` falls through to `_ => Self::Info` — identical behavior, untestable by design.
 
 \** The 1 missed mutant in safety.rs is an equivalent mutant: deleting `None => RuleResult::Pass` in `RiskScoreWithinBounds::evaluate` falls through to `_ => RuleResult::Pass` — identical behavior.
+
+\*** The 2 missed mutants in scenario_runner.rs are equivalent: (1) deleting `"advance_time"` arm falls through to `_` which also returns `Ok(Value::Null)`, (2) deleting `"call"` arm falls through to `_` which performs identical logic (both extract name/params and call handler).
 
 ### Results Location
 Results are written to `mutants.out/` (gitignored).
