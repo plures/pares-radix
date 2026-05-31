@@ -1260,4 +1260,211 @@ mod tests {
         assert!(wildcard.matches(&specific));
         assert!(specific.matches(&wildcard));
     }
+
+    // -----------------------------------------------------------------------
+    // LedgerContext session_id matching (mutation gap coverage)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn context_matches_same_session_id() {
+        let a = LedgerContext::new("telegram", "sess-1");
+        let b = LedgerContext::new("telegram", "sess-1");
+        assert!(a.matches(&b));
+    }
+
+    #[test]
+    fn context_does_not_match_different_session_id() {
+        let a = LedgerContext::new("telegram", "sess-1");
+        let b = LedgerContext::new("telegram", "sess-2");
+        assert!(!a.matches(&b));
+    }
+
+    #[test]
+    fn context_session_id_wildcard_when_one_is_none() {
+        let with_session = LedgerContext::new("telegram", "sess-1");
+        let without_session = LedgerContext::from_channel("telegram");
+        // None on either side acts as wildcard
+        assert!(with_session.matches(&without_session));
+        assert!(without_session.matches(&with_session));
+    }
+
+    #[test]
+    fn context_both_fields_must_match() {
+        // Same channel, different session → no match
+        let a = LedgerContext::new("telegram", "sess-1");
+        let b = LedgerContext::new("telegram", "sess-2");
+        assert!(!a.matches(&b));
+
+        // Different channel, same session → no match
+        let c = LedgerContext::new("telegram", "sess-1");
+        let d = LedgerContext::new("stdin", "sess-1");
+        assert!(!c.matches(&d));
+    }
+
+    #[test]
+    fn context_session_id_only_matches_same() {
+        // Both have no channel but have session_id
+        let a = LedgerContext {
+            channel: None,
+            session_id: Some("sess-1".into()),
+        };
+        let b = LedgerContext {
+            channel: None,
+            session_id: Some("sess-1".into()),
+        };
+        assert!(a.matches(&b));
+    }
+
+    #[test]
+    fn context_session_id_only_different() {
+        let a = LedgerContext {
+            channel: None,
+            session_id: Some("sess-1".into()),
+        };
+        let b = LedgerContext {
+            channel: None,
+            session_id: Some("sess-2".into()),
+        };
+        assert!(!a.matches(&b));
+    }
+
+    // -----------------------------------------------------------------------
+    // gate_with_context session filtering
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn check_gates_filters_by_session_id() {
+        let ledger = Ledger::default();
+
+        // Create gates with different session contexts on the same channel
+        ledger
+            .gate_with_context(
+                "send_email:a",
+                "reason a",
+                LedgerContext::new("telegram", "sess-1"),
+            )
+            .await
+            .unwrap();
+        ledger
+            .gate_with_context(
+                "send_email:b",
+                "reason b",
+                LedgerContext::new("telegram", "sess-2"),
+            )
+            .await
+            .unwrap();
+
+        // Query with a context that matches sess-1 only
+        let ctx = LedgerContext::new("telegram", "sess-1");
+        let pending = ledger.store.pending_gates_by_context(&ctx).await.unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].action, "send_email:a");
+    }
+
+    // -----------------------------------------------------------------------
+    // InMemoryLedgerStore: update_gate_status error on missing id
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn in_memory_store_update_gate_status_error_on_missing() {
+        let store = InMemoryLedgerStore::new();
+        let result = store
+            .update_gate_status("nonexistent", GateStatus::Approved)
+            .await;
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // PluresDbLedgerStore: update_gate_status error on missing id
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn pluresdb_store_update_gate_status_error_on_missing() {
+        let store = PluresDbLedgerStore::in_memory();
+        let result = store
+            .update_gate_status("nonexistent", GateStatus::Approved)
+            .await;
+        assert!(result.is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Ledger::insert error path (logs but doesn't panic)
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn ledger_all_entries_returns_empty_on_default() {
+        let ledger = Ledger::default();
+        assert!(ledger.all_entries().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ledger_get_returns_none_for_missing() {
+        let ledger = Ledger::default();
+        assert!(ledger.get("no-such-id").await.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // validate with store_and_policies constructor
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn validate_with_store_and_policies() {
+        let store = Arc::new(InMemoryLedgerStore::new());
+        let ledger = Ledger::with_store_and_policies(
+            store,
+            Arc::new(NoOpChannel),
+            vec!["deploy".into()],
+            vec!["nuke".into()],
+        );
+        assert_eq!(ledger.validate("deploy:prod"), ValidationStatus::GateRequired);
+        assert_eq!(ledger.validate("nuke:everything"), ValidationStatus::Denied);
+        assert_eq!(ledger.validate("read_file"), ValidationStatus::Permitted);
+    }
+
+    // -----------------------------------------------------------------------
+    // NoOpChannel notify_gate returns Ok
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn noop_channel_notify_gate_returns_ok() {
+        let ch = NoOpChannel;
+        let entry = LedgerEntry::new(
+            "gate",
+            "test_action",
+            "test_reason",
+            ValidationStatus::GateRequired,
+            GateStatus::Pending,
+            None,
+        );
+        assert!(ch.notify_gate(&entry).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // FailingChannel to exercise gate error path
+    // -----------------------------------------------------------------------
+
+    struct FailingChannel;
+
+    impl NotificationChannel for FailingChannel {
+        fn notify_gate(&self, _entry: &LedgerEntry) -> Result<(), String> {
+            Err("channel unavailable".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn gate_returns_error_when_channel_fails() {
+        let ledger = Ledger::new(Arc::new(FailingChannel));
+        let result = ledger.gate("send_email:x", "reason").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("channel unavailable"));
+    }
+
+    #[tokio::test]
+    async fn gate_with_context_returns_error_when_channel_fails() {
+        let ledger = Ledger::new(Arc::new(FailingChannel));
+        let result = ledger
+            .gate_with_context("send_email:x", "reason", LedgerContext::from_channel("test"))
+            .await;
+        assert!(result.is_err());
+    }
 }
