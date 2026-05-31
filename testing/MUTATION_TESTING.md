@@ -56,12 +56,14 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 
 ## Results
 
-### Verified (as of 2026-05-22)
+### Verified (as of 2026-05-31)
 | File | Caught | Missed | Unviable | Kill Rate |
 |------|--------|--------|----------|-----------|
 | praxis/rule.rs | 20 | 0 | 1 | 100% |
 | praxis/factory.rs | 14 | 0 | 6 | 100% |
-| core/chronos.rs | TBD | TBD | TBD | TBD |
+| core/chronos.rs | 35 | 1* | 14 | 100%* |
+
+\* The 1 missed mutant in chronos.rs is an equivalent mutant: deleting `1 => Self::Info` in `from_u8` falls through to `_ => Self::Info` — identical behavior, untestable by design.
 
 ### Results Location
 Results are written to `mutants.out/` (gitignored).
