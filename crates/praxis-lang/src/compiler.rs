@@ -466,7 +466,7 @@ pub fn compile_with_lint(doc: &PxDocument) -> CompileWithLintResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::px::{PxAction, PxDocument, PxFact, PxField, PxRule};
+    use crate::{PxAction, PxDocument, PxFact, PxField, PxRule};
     use std::collections::HashMap;
 
     fn empty_doc() -> PxDocument {

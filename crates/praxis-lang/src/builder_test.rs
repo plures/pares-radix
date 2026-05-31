@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::px::{parse, FunctionMode, PxStep};
+    use crate::{parse, FunctionMode, PxStep};
 
     // =========================================================================
     // push_pair_into_document — statement delegation, function_decl, trigger_decl
@@ -434,7 +434,7 @@ contract simple:
 
 #[cfg(test)]
 mod debug_tests {
-    use crate::px::parse;
+    use crate::parse;
     
     #[test]
     #[ignore = "contract indentation parsing not yet implemented"]
@@ -465,7 +465,7 @@ contract auto_merge_behavior:
 
 #[cfg(test)]
 mod debug_tests2 {
-    use crate::px::parse;
+    use crate::parse;
     
     #[test]
     #[ignore = "contract indentation parsing not yet implemented"]

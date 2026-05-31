@@ -20,7 +20,7 @@ use pest_derive::Parser;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
-#[grammar = "px/grammar.pest"]
+#[grammar = "grammar.pest"]
 pub struct PxParser;
 
 /// A parsed .px document.
@@ -548,7 +548,7 @@ constraint deploy_gate:
 
     #[test]
     fn parse_try_retry_compiles_to_json() {
-        use crate::px::compiler::compile;
+        use crate::compiler::compile;
 
         let source = "procedure with_retry:\n  trigger: manual\n  try retry 2 delay 500 ms backoff fixed:\n    call_api {}\n  catch:\n    handle_error {}\n  end\n";
 
@@ -587,8 +587,8 @@ constraint deploy_gate:
     #[test]
     fn full_pipeline_loop_emit_try() {
         // Parse → Compile → Execute with all new step kinds
-        use crate::px::compiler::compile;
-        use crate::px::executor::{self, ActionHandler, ExecutionError};
+        use crate::compiler::compile;
+        use crate::executor::{self, ActionHandler, ExecutionError};
         use serde_json::{json, Value};
 
         struct TestHandler;
@@ -623,8 +623,8 @@ constraint deploy_gate:
     #[test]
     fn full_pipeline_loop_key_as() {
         // Parse → Compile → Execute with key_as syntax
-        use crate::px::compiler::compile;
-        use crate::px::executor::{self, ActionHandler, ExecutionError};
+        use crate::compiler::compile;
+        use crate::executor::{self, ActionHandler, ExecutionError};
         use serde_json::{json, Value};
 
         struct KvHandler;
@@ -749,7 +749,7 @@ mod parse_step_tests {
 
     #[test]
     fn parse_parallel_branch_retry_compiles_to_json() {
-        use crate::px::compiler::compile;
+        use crate::compiler::compile;
 
         let source = "procedure with_retry:\n  trigger: manual\n  parallel -> $out:\n    branch api retry 2 delay 200 ms backoff fixed jitter:\n      call_api {}\n    end\n  end\n";
 
