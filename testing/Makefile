@@ -56,6 +56,12 @@ test-docker: docker-up
 doctor:
 	@bash scripts/doctor.sh
 
+mutation-report:
+	@bash scripts/coverage-report.sh
+
+mutations:
+	@bash scripts/run-mutations.sh all
+
 clean:
 	rm -rf .pytest_cache tests/__pycache__
 	docker compose --profile test down -v --remove-orphans 2>/dev/null || true

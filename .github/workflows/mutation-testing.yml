@@ -44,6 +44,15 @@ jobs:
           - name: core-memory-store
             package: pares-agens-core
             file: crates/core/src/memory/store.rs
+          - name: privacy
+            package: pares-agens-privacy
+            file: crates/privacy/src/lib.rs
+          - name: core-ledger
+            package: pares-agens-core
+            file: crates/core/src/praxis/ledger.rs
+          - name: core-cerebellum
+            package: pares-agens-core
+            file: crates/core/src/cerebellum/pipeline.rs
 
     steps:
       - uses: actions/checkout@v4
