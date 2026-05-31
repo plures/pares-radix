@@ -1940,4 +1940,291 @@ mod tests {
         let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
         assert_eq!(diags.len(), 0);
     }
+
+    // ─── Mutation gap coverage ────────────────────────────────────────────
+
+    #[test]
+    fn display_format_procedure_only_no_step_index() {
+        // Covers line 40: (Some(proc), None) arm in Display
+        let diag = LintDiagnostic {
+            code: "PX-TEST",
+            message: "test message".to_string(),
+            severity: LintSeverity::Warning,
+            procedure: Some("my_proc".to_string()),
+            step_index: None,
+        };
+        let s = format!("{}", diag);
+        assert!(s.contains("in `my_proc`"), "got: {s}");
+        assert!(!s.contains("step"), "should not contain step index: {s}");
+    }
+
+    #[test]
+    fn lint_step_recurses_into_when_block() {
+        // Covers line 113: PxStep::When recursion in lint_step
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_with_when",
+            vec![PxStep::When {
+                condition: "true".to_string(),
+                steps: vec![PxStep::Match {
+                    arms: vec![PxMatchArm {
+                        condition: "\"a\"".to_string(),
+                        result: "got_a".to_string(),
+                    }],
+                }],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L002").collect();
+        assert!(!diags.is_empty(), "L002 should fire for match inside when block");
+    }
+
+    #[test]
+    fn lint_step_recurses_into_parallel_branches() {
+        // Covers line 127: PxStep::Parallel recursion in lint_step
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_with_parallel",
+            vec![PxStep::Parallel {
+                branches: vec![crate::px::PxParallelBranch {
+                    name: "branch_a".into(),
+                    steps: vec![PxStep::Match {
+                        arms: vec![PxMatchArm {
+                            condition: "\"b\"".to_string(),
+                            result: "got_b".to_string(),
+                        }],
+                    }],
+                    retry: None,
+                    retry_delay_ms: None,
+                    retry_backoff: None,
+                    retry_max_delay_ms: None,
+                    retry_jitter: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L002").collect();
+        assert!(!diags.is_empty(), "L002 should fire for match inside parallel branch");
+    }
+
+    #[test]
+    fn lint_match_exhaustiveness_wildcard_with_space_prefix() {
+        // Covers line 147: the || with starts_with("_ ") in lint_match_exhaustiveness
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_wildcard_space",
+            vec![PxStep::Match {
+                arms: vec![
+                    PxMatchArm {
+                        condition: "\"x\"".to_string(),
+                        result: "got_x".to_string(),
+                    },
+                    PxMatchArm {
+                        condition: "_ default".to_string(),
+                        result: "fallback".to_string(),
+                    },
+                ],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L002").collect();
+        assert!(diags.is_empty(), "_ with space prefix should count as wildcard: {diags:?}");
+    }
+
+    #[test]
+    fn step_output_var_from_loop() {
+        // Covers line 237: PxStep::Loop output_var extraction
+        let step = PxStep::Loop {
+            over: Some("items".into()),
+            times: None,
+            item_var: "item".into(),
+            key_var: None,
+            steps: vec![PxStep::Call {
+                name: "process".into(),
+                params: serde_json::json!({"input": "$item"}),
+                output_var: None,
+            }],
+            output_var: Some("results".into()),
+        };
+        assert_eq!(step_output_var(&step), Some("results"));
+    }
+
+    #[test]
+    fn step_output_var_from_parallel() {
+        // Covers line 238: PxStep::Parallel output_var extraction
+        let step = PxStep::Parallel {
+            branches: vec![],
+            output_var: Some("combined".into()),
+        };
+        assert_eq!(step_output_var(&step), Some("combined"));
+    }
+
+    #[test]
+    fn collect_refs_from_json_array() {
+        // Covers line 326: Array arm in collect_refs_from_value
+        let val = serde_json::json!(["hello $foo", "world $bar"]);
+        let mut refs = std::collections::HashSet::new();
+        collect_refs_from_value(&val, &mut refs);
+        assert!(refs.contains("$foo"), "should find $foo in array element");
+        assert!(refs.contains("$bar"), "should find $bar in array element");
+    }
+
+    #[test]
+    fn unreachable_code_detected_inside_loop() {
+        // Covers line 511: Loop recursion in check_steps_for_unreachable
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_loop_unreachable",
+            vec![PxStep::Loop {
+                over: Some("items".into()),
+                times: None,
+                item_var: "item".into(),
+                key_var: None,
+                steps: vec![
+                    PxStep::Return { value: None },
+                    PxStep::Call {
+                        name: "unreachable".into(),
+                        params: serde_json::json!({}),
+                        output_var: None,
+                    },
+                ],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert!(!diags.is_empty(), "L009 should fire for unreachable code inside loop");
+    }
+
+    #[test]
+    fn unreachable_code_detected_inside_try() {
+        // Covers line 514: Try recursion in check_steps_for_unreachable
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_try_unreachable",
+            vec![PxStep::Try {
+                steps: vec![
+                    PxStep::Return { value: None },
+                    PxStep::Call {
+                        name: "unreachable".into(),
+                        params: serde_json::json!({}),
+                        output_var: None,
+                    },
+                ],
+                catch: vec![],
+                retry: None,
+                retry_delay_ms: None,
+                retry_backoff: None,
+                retry_max_delay_ms: None,
+                retry_jitter: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert!(!diags.is_empty(), "L009 should fire for unreachable code inside try block");
+    }
+
+    #[test]
+    fn unreachable_code_detected_inside_parallel_branch() {
+        // Covers line 518: Parallel recursion in check_steps_for_unreachable
+        let mut doc = empty_doc();
+        doc.procedures.push(make_proc(
+            "proc_parallel_unreachable",
+            vec![PxStep::Parallel {
+                branches: vec![crate::px::PxParallelBranch {
+                    name: "b1".into(),
+                    steps: vec![
+                        PxStep::Abort { value: None },
+                        PxStep::Call {
+                            name: "unreachable".into(),
+                            params: serde_json::json!({}),
+                            output_var: None,
+                        },
+                    ],
+                    retry: None,
+                    retry_delay_ms: None,
+                    retry_backoff: None,
+                    retry_max_delay_ms: None,
+                    retry_jitter: None,
+                }],
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L009").collect();
+        assert!(!diags.is_empty(), "L009 should fire for unreachable code inside parallel branch");
+    }
+
+    #[test]
+    fn arity_check_in_nested_steps() {
+        // Covers line 753: && in check_arity_in_steps
+        // Need a call inside a nested block where declared_keys is non-empty AND params is null
+        let mut doc = empty_doc();
+        let callee = make_proc(
+            "target_proc",
+            vec![PxStep::Call {
+                name: "noop".into(),
+                params: serde_json::json!({}),
+                output_var: None,
+            }],
+        );
+        // Give callee declared parameters via trigger params
+        let mut callee_with_params = callee;
+        callee_with_params.trigger = Some(PxProcedureTrigger {
+            kind: "manual".to_string(),
+            params: Some(serde_json::json!({"required_param": "string"})),
+        });
+        doc.procedures.push(callee_with_params);
+
+        // Caller inside a When block passes null params
+        doc.procedures.push(make_proc(
+            "caller_proc",
+            vec![PxStep::When {
+                condition: "true".to_string(),
+                steps: vec![PxStep::Call {
+                    name: "target_proc".into(),
+                    params: serde_json::Value::Null,
+                    output_var: None,
+                }],
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert!(!diags.is_empty(), "L012 should fire for null params calling proc with declared params: {diags:?}");
+    }
+
+    #[test]
+    fn arity_no_fire_when_target_has_empty_declared_params_and_call_is_null() {
+        // Negative test for line 753: !declared_keys.is_empty() && params.is_null()
+        // If && became ||, this would falsely fire L012 when declared_keys is empty + params is null
+        let mut doc = empty_doc();
+        // Target proc with EMPTY declared params (trigger.params = Some({}))
+        let mut target = make_proc(
+            "empty_params_proc",
+            vec![PxStep::Call {
+                name: "noop".into(),
+                params: serde_json::json!({}),
+                output_var: None,
+            }],
+        );
+        target.trigger = Some(PxProcedureTrigger {
+            kind: "manual".to_string(),
+            params: Some(serde_json::json!({})), // empty object — registers in proc_params with empty set
+        });
+        doc.procedures.push(target);
+
+        // Caller passes null params to empty_params_proc
+        doc.procedures.push(make_proc(
+            "caller_null",
+            vec![PxStep::Call {
+                name: "empty_params_proc".into(),
+                params: serde_json::Value::Null,
+                output_var: None,
+            }],
+        ));
+
+        let diags: Vec<_> = lint(&doc).into_iter().filter(|d| d.code == "PX-L012").collect();
+        assert!(diags.is_empty(), "L012 should NOT fire when target has empty declared params: {diags:?}");
+    }
 }
