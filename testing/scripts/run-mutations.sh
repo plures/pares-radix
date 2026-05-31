@@ -17,6 +17,9 @@ declare -A MODULES=(
   ["core-chronos"]="pares-agens-core:crates/core/src/chronos.rs"
   ["core-procedure"]="pares-agens-core:crates/core/src/procedure.rs"
   ["core-memory"]="pares-agens-core:crates/core/src/memory/store.rs"
+  ["privacy"]="pares-agens-privacy:crates/privacy/src/lib.rs"
+  ["core-ledger"]="pares-agens-core:crates/core/src/praxis/ledger.rs"
+  ["core-cerebellum"]="pares-agens-core:crates/core/src/cerebellum/pipeline.rs"
 )
 
 run_module() {
