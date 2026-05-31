@@ -1039,10 +1039,11 @@ mod tests {
 
     #[test]
     fn execute_step_call_specifically_uses_name_field() {
-        // Catches: delete "call" arm — the _ arm also uses name, but let's verify
-        // the explicit call path works with emit (which routes differently)
+        // The "call" arm is functionally equivalent to the _ fallback when a name
+        // field exists (both extract it). When name is missing, "call" uses
+        // "unknown" vs _ uses kind, but neither is a recognized action.
+        // This test confirms the call path works correctly.
         let handler = ScenarioActionHandler::new();
-        // "call" kind with name="emit" should go through call arm → handler.call("emit", params)
         let step = json!({
             "kind": "call",
             "name": "emit",
