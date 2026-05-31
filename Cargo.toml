@@ -11,6 +11,7 @@ members = [
     "crates/marketplace",
     "crates/agenda",
     "crates/praxis",
+    "crates/praxis-lang",
     "crates/sync",
     "crates/audit",
     "crates/tauri-app",

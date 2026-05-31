@@ -715,4 +715,128 @@ mod tests {
 
         assert!(event.undelivered_steerings.is_empty());
     }
+
+    // ── Mutation-coverage tests ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn with_parent_context_sets_value() {
+        let opts = SpawnOptions::default().with_parent_context("ctx-data");
+        assert_eq!(opts.parent_context.as_deref(), Some("ctx-data"));
+    }
+
+    #[tokio::test]
+    async fn without_timeout_clears_value() {
+        let opts = SpawnOptions::default()
+            .with_timeout(Duration::from_secs(10))
+            .without_timeout();
+        assert!(opts.timeout.is_none());
+    }
+
+    #[tokio::test]
+    async fn list_returns_all_sessions() {
+        let broker = make_broker(Arc::new(EchoModel));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let id1 = manager.spawn("echo", "a", SpawnOptions::default()).await;
+        let id2 = manager.spawn("echo", "b", SpawnOptions::default()).await;
+
+        // Wait for both to complete.
+        let _ = rx.recv().await;
+        let _ = rx.recv().await;
+
+        let all = manager.list().await;
+        assert_eq!(all.len(), 2);
+        let ids: Vec<&str> = all.iter().map(|s| s.id.as_str()).collect();
+        assert!(ids.contains(&id1.as_str()));
+        assert!(ids.contains(&id2.as_str()));
+    }
+
+    #[tokio::test]
+    async fn non_timeout_error_produces_failed_status() {
+        // A model that returns an error that doesn't contain "timed out"
+        struct FailingModel;
+
+        #[async_trait]
+        impl ModelClient for FailingModel {
+            async fn complete(
+                &self,
+                _messages: &[ChatMessage],
+                _tools: &[ToolDefinition],
+                _options: &ChatOptions,
+            ) -> Result<ModelCompletion, String> {
+                Err("connection refused".into())
+            }
+        }
+
+        let broker = make_broker(Arc::new(FailingModel));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let id = manager.spawn("echo", "fail", SpawnOptions::default()).await;
+
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout")
+            .expect("channel closed");
+
+        assert_eq!(event.session_id, id);
+        assert!(event.result.is_err());
+
+        let info = manager.get(&id).await.unwrap();
+        // Must be Failed, NOT TimedOut.
+        match &info.status {
+            SessionStatus::Failed(msg) => assert!(msg.contains("connection refused")),
+            other => panic!("expected Failed, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn steer_fails_for_completed_session() {
+        let broker = make_broker(Arc::new(EchoModel));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let id = manager.spawn("echo", "done", SpawnOptions::default()).await;
+
+        // Wait for completion.
+        let _ = rx.recv().await;
+
+        // Verify session is completed.
+        let info = manager.get(&id).await.unwrap();
+        assert_eq!(info.status, SessionStatus::Completed);
+
+        // Steering a completed session should fail.
+        let steered = manager.steer(&id, "too late").await;
+        assert!(!steered);
+    }
+
+    #[tokio::test]
+    async fn cleanup_retains_recently_completed_sessions() {
+        let broker = make_broker(Arc::new(EchoModel));
+        let (manager, mut rx) = SubAgentManager::new(broker);
+
+        let id = manager.spawn("echo", "keep", SpawnOptions::default()).await;
+        let _ = rx.recv().await;
+
+        // Cleanup with a large max_age should keep it.
+        manager.cleanup(Duration::from_secs(3600)).await;
+        assert!(manager.get(&id).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn cleanup_does_not_remove_running_sessions() {
+        let broker = make_broker(Arc::new(SlowModel {
+            delay: Duration::from_secs(60),
+        }));
+        let (manager, _rx) = SubAgentManager::new(broker);
+
+        let id = manager
+            .spawn("echo", "running", SpawnOptions::default())
+            .await;
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Even with 0 max_age, running sessions are retained.
+        manager.cleanup(Duration::from_secs(0)).await;
+        let info = manager.get(&id).await.unwrap();
+        assert_eq!(info.status, SessionStatus::Running);
+    }
 }

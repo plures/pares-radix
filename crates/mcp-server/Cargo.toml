@@ -27,6 +27,7 @@ opentelemetry = "0.28"
 pares-agens-core = { path = "../core" }
 pares-agens-agenda = { path = "../agenda" }
 pares-radix-praxis = { path = "../praxis" }
+praxis-native = { path = "../../../praxis/crates/praxis-native" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

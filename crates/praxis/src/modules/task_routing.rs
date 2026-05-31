@@ -424,6 +424,79 @@ mod tests {
         assert_eq!(r.1, RuleResult::Pass);
     }
 
+    // ── Module metadata ──────────────────────────────────────────────────────
+    #[test]
+    fn module_name_is_task_routing() {
+        assert_eq!(module().name(), "task-routing");
+    }
+
+    #[test]
+    fn module_expectations_are_populated() {
+        let exp = module().expectations();
+        assert!(!exp.is_empty(), "expectations must not be empty");
+        assert!(exp.len() >= 4);
+        assert!(exp.iter().all(|e| !e.is_empty()), "no empty expectation strings");
+        assert!(exp.iter().any(|e| e.contains("Priority")));
+    }
+
+    // ── Input: required_capability_declared ───────────────────────────────────
+    #[test]
+    fn required_capability_declared_fails_when_missing() {
+        let ctx = RuleContext::new("route_task", json!({"task_id": "t-001"}));
+        let results = module().evaluate_category(&ctx, RuleCategory::Input);
+        let r = results
+            .iter()
+            .find(|(n, _)| n == "required_capability_declared")
+            .unwrap();
+        assert!(matches!(r.1, RuleResult::Fail { .. }));
+    }
+
+    #[test]
+    fn required_capability_declared_passes_when_present() {
+        let ctx = RuleContext::new("route_task", json!({"required_capabilities": ["gpu"]}));
+        let results = module().evaluate_category(&ctx, RuleCategory::Input);
+        let r = results
+            .iter()
+            .find(|(n, _)| n == "required_capability_declared")
+            .unwrap();
+        assert_eq!(r.1, RuleResult::Pass);
+    }
+
+    // ── State: missing from/to state ─────────────────────────────────────────
+    #[test]
+    fn task_transition_fails_when_from_state_missing() {
+        let ctx = RuleContext::new("transition", json!({"to_state": "assigned"}));
+        let results = module().evaluate_category(&ctx, RuleCategory::State);
+        let r = results
+            .iter()
+            .find(|(n, _)| n == "task_state_transition_valid")
+            .unwrap();
+        assert!(matches!(r.1, RuleResult::Fail { .. }));
+    }
+
+    #[test]
+    fn task_transition_fails_when_to_state_missing() {
+        let ctx = RuleContext::new("transition", json!({"from_state": "queued"}));
+        let results = module().evaluate_category(&ctx, RuleCategory::State);
+        let r = results
+            .iter()
+            .find(|(n, _)| n == "task_state_transition_valid")
+            .unwrap();
+        assert!(matches!(r.1, RuleResult::Fail { .. }));
+    }
+
+    // ── Data: priority missing ───────────────────────────────────────────────
+    #[test]
+    fn priority_missing_warns() {
+        let ctx = RuleContext::new("route_task", json!({"task_id": "t-001"}));
+        let results = module().evaluate_category(&ctx, RuleCategory::Data);
+        let r = results
+            .iter()
+            .find(|(n, _)| n == "priority_in_range")
+            .unwrap();
+        assert!(matches!(r.1, RuleResult::Warning { .. }));
+    }
+
     // ── Audit ─────────────────────────────────────────────────────────────────
     #[test]
     fn module_audit_is_complete() {

@@ -61,4 +61,4 @@ pub use audit::CompletenessAudit;
 pub use factory::RulesFactory;
 pub use module::{CompletenessReport, PraxisModule};
 pub use rule::{Rule, RuleCategory, RuleContext, RuleResult};
-pub mod px;
+pub use praxis_native::px;

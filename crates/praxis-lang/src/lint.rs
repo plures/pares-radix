@@ -793,7 +793,7 @@ fn check_arity_in_steps(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::px::{PxDocument, PxMatchArm, PxProcedure, PxProcedureTrigger, PxStep};
+    use crate::{PxDocument, PxMatchArm, PxProcedure, PxProcedureTrigger, PxStep};
 
     fn empty_doc() -> PxDocument {
         PxDocument {
