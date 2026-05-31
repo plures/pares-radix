@@ -46,6 +46,8 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | core-ledger | pares-agens-core | crates/core/src/praxis/ledger.rs |
 | core-cerebellum | pares-agens-core | crates/core/src/cerebellum/pipeline.rs |
 | core-forgetting | pares-agens-core | crates/core/src/memory/forgetting/engine.rs |
+| modules-safety | pares-radix-praxis | crates/praxis/src/modules/safety.rs |
+| px-compiler | pares-radix-praxis | crates/praxis/src/px/compiler.rs |
 
 ## Interpretation
 
@@ -62,8 +64,12 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | praxis/rule.rs | 20 | 0 | 1 | 100% |
 | praxis/factory.rs | 14 | 0 | 6 | 100% |
 | core/chronos.rs | 35 | 1* | 14 | 100%* |
+| modules/safety.rs | 53 | 1** | 13 | 100%** |
+| px/compiler.rs | 2 | 0 | 12 | 100% |
 
 \* The 1 missed mutant in chronos.rs is an equivalent mutant: deleting `1 => Self::Info` in `from_u8` falls through to `_ => Self::Info` — identical behavior, untestable by design.
+
+\** The 1 missed mutant in safety.rs is an equivalent mutant: deleting `None => RuleResult::Pass` in `RiskScoreWithinBounds::evaluate` falls through to `_ => RuleResult::Pass` — identical behavior.
 
 ### Results Location
 Results are written to `mutants.out/` (gitignored).

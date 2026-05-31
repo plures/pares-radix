@@ -435,4 +435,94 @@ mod tests {
         assert!(!is_resource_mutation("read_config"));
         assert!(!is_resource_mutation("list_agents"));
     }
+
+    // ── Mutation-gap tests (kill missed mutants) ─────────────────────────────
+
+    /// Kills: delete ! in ActionNamePresent::evaluate (line 60)
+    /// Tests that action provided only via payload (empty ctx.action) still passes.
+    #[test]
+    fn action_name_present_passes_via_payload_fallback() {
+        let rule = ActionNamePresent;
+        let ctx = RuleContext::new("", json!({"action": "deploy"}));
+        assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
+    }
+
+    /// Kills: replace > with >= in ResourceLimitNotExceeded (line 130)
+    /// Boundary: requested == limit should PASS (not exceed).
+    #[test]
+    fn resource_limit_passes_at_exact_limit() {
+        let rule = ResourceLimitNotExceeded;
+        let ctx = RuleContext::new("compute", json!({"requested_units": 100, "resource_limit": 100}));
+        assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
+    }
+
+    /// Kills: delete match arm None in RiskScoreWithinBounds (line 152)
+    /// No risk_score field → Pass (explicitly test the None arm).
+    #[test]
+    fn risk_score_absent_passes() {
+        let rule = RiskScoreWithinBounds;
+        let ctx = RuleContext::new("deploy", json!({}));
+        assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
+    }
+
+    /// Kills: replace > with >= at 0.9 boundary (line 153)
+    /// Exactly 0.9 should NOT Fail — it should Gate.
+    #[test]
+    fn risk_score_exactly_0_9_gates_not_fails() {
+        let rule = RiskScoreWithinBounds;
+        let ctx = RuleContext::new("deploy", json!({"risk_score": 0.9}));
+        let result = rule.evaluate(&ctx);
+        assert!(matches!(result, RuleResult::Gate { .. }), "0.9 should gate, not fail: {result:?}");
+    }
+
+    /// Kills: replace > with >= at 0.7 boundary (line 158)
+    /// Exactly 0.7 should NOT Gate — it should Warn.
+    #[test]
+    fn risk_score_exactly_0_7_warns_not_gates() {
+        let rule = RiskScoreWithinBounds;
+        let ctx = RuleContext::new("deploy", json!({"risk_score": 0.7}));
+        let result = rule.evaluate(&ctx);
+        assert!(matches!(result, RuleResult::Warning { .. }), "0.7 should warn, not gate: {result:?}");
+    }
+
+    /// Kills: replace > with >= at 0.5 boundary (line 162)
+    /// Exactly 0.5 should Pass (not warn).
+    #[test]
+    fn risk_score_exactly_0_5_passes() {
+        let rule = RiskScoreWithinBounds;
+        let ctx = RuleContext::new("deploy", json!({"risk_score": 0.5}));
+        assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
+    }
+
+    /// Kills: replace RateLimitNotExceeded::name with "" or "xyzzy" (line 173)
+    #[test]
+    fn rate_limit_rule_has_correct_name() {
+        let rule = RateLimitNotExceeded;
+        assert_eq!(rule.name(), "rate_limit_not_exceeded");
+    }
+
+    /// Kills: replace > with >= in RateLimitNotExceeded (line 181)
+    /// Exactly 60 calls/min should Pass (not warn).
+    #[test]
+    fn rate_limit_exactly_at_limit_passes() {
+        let rule = RateLimitNotExceeded;
+        let ctx = RuleContext::new("call", json!({"calls_per_minute": 60}));
+        assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
+    }
+
+    /// Kills: replace SafetyModule::name with "" or "xyzzy" (line 222)
+    #[test]
+    fn module_name_is_safety() {
+        let m = module();
+        assert_eq!(PraxisModule::name(&m), "safety");
+    }
+
+    /// Kills: replace expectations with vec![String::new()] or vec!["xyzzy".into()] (line 230)
+    #[test]
+    fn module_expectations_contain_expected_content() {
+        let exps = module().expectations();
+        assert!(exps.len() >= 5, "expected at least 5 expectations, got {}", exps.len());
+        assert!(exps[0].contains("safety evaluation"), "first expectation should mention safety evaluation");
+        assert!(exps.iter().any(|e| e.contains("Privilege")), "should mention privilege levels");
+    }
 }
