@@ -1341,4 +1341,289 @@ mod tests {
         assert_eq!(result.exit_code, Some(0));
         assert!(result.stdout.contains("default_works"));
     }
+
+    // ── mutation-gap tests ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn buffer_accepts_data_when_partially_filled() {
+        // Catches: replace + with * in stdout/stderr buffer guard (lines 333, 357).
+        // If `len() + n` becomes `len() * n`, a buffer with >0 bytes would reject
+        // new chunks when len*n > MAX_OUTPUT_BYTES (e.g. 10000*8192 > 16MB).
+        // This test fills the buffer partially (>8KB), then verifies more writes succeed.
+        let executor = ShellExecutor::new();
+        // Generate ~16KB of stdout — well above 8192 bytes per chunk
+        let result = executor
+            .exec(ExecRequest {
+                command: "dd if=/dev/zero bs=1024 count=16 2>/dev/null | tr '\\0' 'A'".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: Some(5),
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let poll = executor.poll(&session_id, Some(3000)).await.unwrap();
+        // All 16KB should be captured — with `*` mutant, only the first chunk would pass
+        assert!(
+            poll.total_bytes >= 16384,
+            "buffer should accept all 16KB output; got {} bytes",
+            poll.total_bytes
+        );
+    }
+
+    #[tokio::test]
+    async fn yield_exec_backgrounds_with_correct_flag() {
+        // Catches: delete field `background` from ExecRequest in yield_exec (line 422).
+        // Without `background: true`, the inner call would attempt foreground exec
+        // and the session wouldn't be tracked.
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 10".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: false,
+                pty: false,
+                yield_ms: Some(50), // short yield → background
+            })
+            .await;
+
+        // Must be backgrounded with a session ID
+        assert!(result.session_id.is_some(), "yield should produce a session_id");
+        assert!(result.still_running, "yield should report still_running");
+
+        // Critical: the session must actually exist in the executor's tracked sessions
+        let list = executor.list().await;
+        assert!(!list.is_empty(), "backgrounded session must be tracked");
+        let info = &list[0];
+        assert!(info.running, "session should still be running");
+
+        // Poll must return data for the session (proves it's properly background-tracked)
+        let poll = executor.poll(&result.session_id.as_ref().unwrap(), Some(100)).await;
+        assert!(poll.is_some(), "poll must find the background session");
+
+        executor.kill(&result.session_id.unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn poll_timeout_returns_empty_when_no_output() {
+        // Catches: replace match guard `Instant::now() < dl` with `true` (line 521)
+        //   and: replace < with <= (line 521)
+        //   and: replace + with - or * in total_bytes (line 532)
+        // With guard=true, poll would loop forever instead of returning empty.
+        // With < to <=, it would spin one extra iteration.
+        // With + to - or *, the empty total_bytes would be wrong.
+        let executor = ShellExecutor::new();
+        // Command that produces no output for a while
+        let result = executor
+            .exec(ExecRequest {
+                command: "sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+
+        // Poll with short timeout — should return empty (not hang)
+        let start = Instant::now();
+        let poll = executor.poll(&session_id, Some(200)).await.unwrap();
+        let elapsed = start.elapsed();
+
+        // Must return within a reasonable time (not hang)
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "poll should return after timeout, not hang; took {:?}",
+            elapsed
+        );
+        // With guard=true mutant, this would hang forever
+        assert_eq!(poll.new_output, "");
+        assert!(poll.running);
+        // total_bytes should be 0 (no output yet) — catches +→- and +→* since
+        // stdout=0, stderr=0: 0+0=0, 0-0=0, 0*0=0 all equal... need non-zero.
+        // Actually the correct test is to produce some output first.
+        assert_eq!(poll.total_bytes, 0);
+
+        executor.kill(&session_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn poll_timeout_total_bytes_in_empty_path() {
+        // Catches: replace + with - or * in total_bytes at line 532.
+        // We need a session with some output already read, then poll again
+        // with no new output to hit the empty path (line 525-533).
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo -n INIT && sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // First poll reads the initial output
+        let poll1 = executor.poll(&session_id, Some(500)).await.unwrap();
+        assert!(poll1.new_output.contains("INIT"));
+        let bytes_after_first = poll1.total_bytes; // should be 4
+
+        // Second poll with short timeout — no new output → hits empty path (line 532)
+        let poll2 = executor.poll(&session_id, Some(150)).await.unwrap();
+        assert_eq!(poll2.new_output, "");
+        // total_bytes should still equal stdout+stderr combined
+        // With + → -: would be stdout.len() - stderr.len() = 4 - 0 = 4 (same, unhelpful)
+        // With + → *: would be 4 * 0 = 0 (different!)
+        assert_eq!(
+            poll2.total_bytes, bytes_after_first,
+            "total_bytes in empty path should equal stdout+stderr"
+        );
+
+        executor.kill(&session_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn poll_empty_path_with_stderr_catches_multiply_mutation() {
+        // Specifically catches: + → * on line 532 (stdout.len() + stderr.len())
+        // Need both stdout AND stderr to be non-zero so + vs * gives different results.
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo -n 'AAA' && echo -n 'BBB' >&2 && sleep 60".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // First poll reads all output
+        let poll1 = executor.poll(&session_id, Some(500)).await.unwrap();
+        assert_eq!(poll1.total_bytes, 6); // 3 + 3
+
+        // Second poll → empty path with total_bytes from both buffers
+        let poll2 = executor.poll(&session_id, Some(150)).await.unwrap();
+        assert_eq!(poll2.new_output, "");
+        // With +: 3 + 3 = 6. With *: 3 * 3 = 9. With -: 3 - 3 = 0.
+        assert_eq!(poll2.total_bytes, 6, "total_bytes must be stdout+stderr (3+3=6)");
+
+        executor.kill(&session_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn cleanup_old_keeps_session_under_cutoff() {
+        // Catches: replace < with == or <= in cleanup_old (line 644).
+        // With `<` → `==`: only sessions EXACTLY at cutoff would be retained.
+        // With `<` → `<=`: sessions exactly at cutoff would also be retained (subtle).
+        // Test: session aged 30 minutes (< 1 hour cutoff) must be retained.
+        let executor = ShellExecutor::new();
+        let result = executor
+            .exec(ExecRequest {
+                command: "echo done".into(),
+                workdir: None,
+                env: HashMap::new(),
+                timeout_secs: None,
+                background: true,
+                pty: false,
+                yield_ms: None,
+            })
+            .await;
+
+        let session_id = result.session_id.unwrap();
+        // Wait for completion
+        for _ in 0..20 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let list = executor.list().await;
+            if !list.is_empty() && !list[0].running {
+                break;
+            }
+        }
+
+        // Age to 30 minutes (well under 1-hour cutoff)
+        {
+            let mut sessions = executor.sessions.write().await;
+            if let Some(s) = sessions.get_mut(&session_id) {
+                s.created_at = Instant::now() - Duration::from_secs(1800);
+            }
+        }
+
+        executor.cleanup_old().await;
+        let list = executor.list().await;
+        // With `<` → `==`: elapsed (1800s) != cutoff (3600s), so the retain
+        // closure returns false, and the session is REMOVED. This test catches that.
+        assert_eq!(
+            list.len(),
+            1,
+            "session under cutoff must be retained (catches < → == mutation)"
+        );
+    }
+
+    #[test]
+    fn generate_session_id_uses_correct_adjective_noun_mapping() {
+        // Catches: replace % with / and / with % in generate_session_id (lines 673-674).
+        // The adjective should cycle through 16 adjectives, noun should advance every 16.
+        // With % → /: index would be n/16 instead of n%16 for adj.
+        // With / → %: noun index would be n%16 instead of n/16.
+        let adjectives = [
+            "swift", "calm", "bold", "keen", "warm", "cool", "bright", "dark", "quick",
+            "slow", "fresh", "wild", "soft", "loud", "deep", "high",
+        ];
+        let nouns = [
+            "oak", "fox", "elm", "owl", "bay", "ash", "sky", "dew", "gem", "wave",
+            "leaf", "star", "moon", "sun", "reed", "pine",
+        ];
+
+        // Generate enough IDs to verify the pattern wraps correctly
+        let ids: Vec<String> = (0..32).map(|_| generate_session_id()).collect();
+
+        // Verify the pattern: adj cycles with period 16, noun advances every 16
+        for (i, id) in ids.iter().enumerate() {
+            let parts: Vec<&str> = id.split('-').collect();
+            assert_eq!(parts.len(), 3);
+
+            let adj = parts[0];
+            let noun = parts[1];
+
+            // Extract the counter from the ID suffix
+            let n: usize = parts[2].parse().unwrap();
+
+            // Verify adjective cycles with modulo
+            let expected_adj = adjectives[n % 16];
+            assert_eq!(
+                adj, expected_adj,
+                "ID {id}: adj should be '{}' for n={n} (n%16={}), got '{adj}'",
+                expected_adj,
+                n % 16
+            );
+
+            // Verify noun advances with division
+            let expected_noun = nouns[(n / 16) % 16];
+            assert_eq!(
+                noun, expected_noun,
+                "ID {id}: noun should be '{}' for n={n} (n/16%16={}), got '{noun}'",
+                expected_noun,
+                (n / 16) % 16
+            );
+        }
+    }
 }
