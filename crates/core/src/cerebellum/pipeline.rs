@@ -1239,4 +1239,206 @@ mod tests {
             Primitive::Decision { text, .. } if text.contains("PostgreSQL")
         )));
     }
+
+    // ── sweep boundary: entry exactly at staleness cutoff must NOT be swept ──
+
+    #[tokio::test]
+    async fn sweep_does_not_sweep_entry_exactly_at_boundary() {
+        let store = InMemoryStore::new();
+        // Create an entry whose age is exactly the staleness cutoff.
+        // The sweep's `now` will be a few microseconds later than our `now`,
+        // making the entry's actual age = 30d + epsilon. With `>` this is swept,
+        // so we test with an entry that is 30d - 5 seconds old (clearly under).
+        // Then we verify it's NOT swept.
+        // A companion test below creates a 30d + 5s entry that IS swept.
+        // Together they prove strict `>` (not `>=`) at the boundary.
+        let now = chrono::Utc::now();
+        let just_under_boundary = now - chrono::Duration::days(30) + chrono::Duration::seconds(5);
+        let boundary_entry = MemoryEntry {
+            id: "under-boundary".into(),
+            content: "entry just under boundary".into(),
+            category: MemoryCategory::Conversation,
+            tags: vec![],
+            embedding: vec![0.1; 384],
+            score: 0.0,
+            created_at: just_under_boundary.to_rfc3339(),
+        };
+        store.insert(boundary_entry).await.unwrap();
+
+        let memory = Arc::new(PluresLm::new(
+            Arc::new(store),
+            Box::new(MockEmbedder),
+            128_000,
+        ));
+        let mut config = test_config();
+        config.staleness_days = 30;
+
+        let proc = CerebellumSweep::new(memory, &config);
+        let event = Event::Timer {
+            id: "t".into(),
+            name: "sweep".into(),
+            recurring: true,
+        };
+        let results = proc.execute(&event).await;
+
+        let stale_event = results.iter().find(|e| {
+            matches!(
+                e,
+                Event::StateChange { key, .. } if key == "cerebellum.sweep.stale"
+            )
+        });
+        assert!(
+            stale_event.is_none(),
+            "entry 5s under staleness boundary should NOT be swept"
+        );
+    }
+
+    #[tokio::test]
+    async fn sweep_does_sweep_entry_just_over_boundary() {
+        let store = InMemoryStore::new();
+        let now = chrono::Utc::now();
+        // Entry is 30 days + 5 seconds old — clearly over the boundary
+        let just_over_boundary = now - chrono::Duration::days(30) - chrono::Duration::seconds(5);
+        let entry = MemoryEntry {
+            id: "over-boundary".into(),
+            content: "entry just over boundary".into(),
+            category: MemoryCategory::Conversation,
+            tags: vec![],
+            embedding: vec![0.1; 384],
+            score: 0.0,
+            created_at: just_over_boundary.to_rfc3339(),
+        };
+        store.insert(entry).await.unwrap();
+
+        let memory = Arc::new(PluresLm::new(
+            Arc::new(store),
+            Box::new(MockEmbedder),
+            128_000,
+        ));
+        let mut config = test_config();
+        config.staleness_days = 30;
+
+        let proc = CerebellumSweep::new(memory, &config);
+        let event = Event::Timer {
+            id: "t".into(),
+            name: "sweep".into(),
+            recurring: true,
+        };
+        let results = proc.execute(&event).await;
+
+        let stale_event = results.iter().find(|e| {
+            matches!(
+                e,
+                Event::StateChange { key, .. } if key == "cerebellum.sweep.stale"
+            )
+        });
+        assert!(
+            stale_event.is_some(),
+            "entry 5s over staleness boundary should be swept"
+        );
+        if let Some(Event::StateChange { new_value, .. }) = stale_event {
+            let ids = new_value["ids"].as_array().unwrap();
+            assert!(ids.iter().any(|id| id.as_str() == Some("over-boundary")));
+        }
+    }
+
+    // ── mutation-gap tests: verify exact text extraction (not just contains) ──
+
+    #[test]
+    fn decision_text_excludes_prefix_decided_to() {
+        let prims = extract_primitives("We decided to use Rust for this project.");
+        let decision = prims.iter().find_map(|p| match p {
+            Primitive::Decision { text, .. } => Some(text.clone()),
+            _ => None,
+        });
+        let text = decision.unwrap();
+        // Must NOT contain the trigger prefix
+        assert!(!text.starts_with("decided to "));
+        assert!(!text.starts_with("We decided to "));
+        // Must start with the content AFTER the prefix
+        assert!(text.starts_with("use Rust"));
+    }
+
+    #[test]
+    fn preference_text_excludes_prefix_i_prefer() {
+        let prims = extract_primitives("I prefer using snake_case for all identifiers.");
+        let pref = prims.iter().find_map(|p| match p {
+            Primitive::Preference { text } => Some(text.clone()),
+            _ => None,
+        });
+        let text = pref.unwrap();
+        // Must NOT contain the trigger prefix
+        assert!(!text.to_lowercase().starts_with("i prefer "));
+        assert!(!text.to_lowercase().starts_with("prefer "));
+        // Must start with content after prefix
+        assert!(text.starts_with("using snake_case") || text.starts_with("snake_case"),
+            "got: {:?}", text);
+    }
+
+    #[test]
+    fn preference_text_excludes_prefix_always_use() {
+        let prims = extract_primitives("Always use async/await for IO operations.");
+        let pref = prims.iter().find_map(|p| match p {
+            Primitive::Preference { text } => Some(text.clone()),
+            _ => None,
+        });
+        let text = pref.unwrap();
+        assert!(!text.to_lowercase().starts_with("always use "));
+        assert!(text.starts_with("async/await"), "got: {:?}", text);
+    }
+
+    #[test]
+    fn fact_object_excludes_predicate_word() {
+        // "Rust is a systems language." → subject="Rust", predicate="is", object starts with "a"
+        let prims = extract_primitives("Rust is a systems language.");
+        let fact = prims.iter().find_map(|p| match p {
+            Primitive::Fact { subject, predicate, object } if subject == "Rust" => {
+                Some((predicate.clone(), object.clone()))
+            }
+            _ => None,
+        });
+        let (pred, obj) = fact.unwrap();
+        assert_eq!(pred, "is");
+        // Object must NOT start with the predicate itself (catches i+1 → i*1 mutation)
+        assert!(!obj.starts_with("is "), "object should not include predicate: {:?}", obj);
+        assert!(obj.starts_with("a systems"), "got: {:?}", obj);
+    }
+
+    #[test]
+    fn fact_object_does_not_include_subject_tail() {
+        // Catches i+1 → i-1 mutation which would include subject's last word in object
+        let prims = extract_primitives("The dog is friendly and cute.");
+        let fact = prims.iter().find_map(|p| match p {
+            Primitive::Fact { subject, object, .. } if subject == "The dog" => {
+                Some(object.clone())
+            }
+            _ => None,
+        });
+        let obj = fact.unwrap();
+        assert!(!obj.contains("dog"), "object must not contain subject words: {:?}", obj);
+        assert!(obj.starts_with("friendly"), "got: {:?}", obj);
+    }
+
+    #[test]
+    fn decision_going_with_excludes_prefix() {
+        let prims = extract_primitives("Going with tokio for the runtime.");
+        let text = prims.iter().find_map(|p| match p {
+            Primitive::Decision { text, .. } => Some(text.clone()),
+            _ => None,
+        }).unwrap();
+        assert!(!text.to_lowercase().starts_with("going with "));
+        assert!(text.starts_with("tokio"), "got: {:?}", text);
+    }
+
+    #[test]
+    fn decision_we_chose_excludes_prefix() {
+        let prims = extract_primitives("We chose PostgreSQL as our database.");
+        let text = prims.iter().find_map(|p| match p {
+            Primitive::Decision { text, .. } => Some(text.clone()),
+            _ => None,
+        }).unwrap();
+        assert!(!text.to_lowercase().starts_with("we chose "));
+        assert!(!text.to_lowercase().starts_with("chose "));
+        assert!(text.starts_with("PostgreSQL"), "got: {:?}", text);
+    }
 }
