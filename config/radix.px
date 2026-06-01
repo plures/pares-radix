@@ -1,0 +1,47 @@
+# radix.px — Pares Radix Configuration
+#
+# This file configures how pares-radix runs. Edit it to match your setup.
+# CLI flags and environment variables override values here.
+#
+# Docs: https://github.com/plures/pares-radix/blob/main/docs/configuration.md
+
+config radix:
+  channel: "telegram"
+  model: "claude-sonnet-4.5"
+  use_copilot: true
+
+config telegram:
+  token: "env:PARES_TELEGRAM_TOKEN"
+
+config model:
+  url: "https://models.inference.ai.azure.com"
+  fallback1: "gpt-4o"
+  fallback2: "claude-sonnet-4.5"
+  temperature: 0.7
+  max_tokens: 4096
+
+config personality:
+  name: "Radix"
+  system_prompt: "You are a helpful assistant with access to tools."
+
+config heartbeat:
+  enabled: true
+  interval_minutes: 120
+  quiet_hours_start: 23
+  quiet_hours_end: 8
+
+config tools:
+  file_ops: true
+  shell: true
+  web: true
+  memory: true
+  cron: true
+  state: true
+
+config memory:
+  path: "~/.pares-radix/memory"
+  embeddings: true
+
+config logging:
+  level: "info"
+  chronos: true
