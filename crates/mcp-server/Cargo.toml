@@ -27,7 +27,7 @@ opentelemetry = "0.28"
 pares-agens-core = { path = "../core" }
 pares-agens-agenda = { path = "../agenda" }
 pares-radix-praxis = { path = "../praxis" }
-praxis-native = { path = "../../../praxis/crates/praxis-native", default-features = false }
+praxis-native = { git = "https://github.com/plures/praxis.git", rev = "0c030c0", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
