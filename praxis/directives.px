@@ -1,0 +1,39 @@
+procedure route_code:
+  trigger: manual
+  given: "Determine which repository owns a piece of code based on its description"
+  db_get key: "plures:repos:registry" -> $registry
+  db_get key: "plures:routing:rules" -> $routing
+  $target = "UNKNOWN"
+  $reason = "No routing rule matched"
+  emit event: "routing.query" data: {registry: $registry, routing: $routing}
+
+procedure prioritize_work:
+  trigger: manual
+  given: "Determine what to work on next based on current state"
+  db_get key: "plures:prioritization:framework" -> $framework
+  $levels = $framework
+  emit event: "prioritization.query" data: {framework: $framework}
+
+procedure validate_architecture:
+  trigger: manual
+  given: "Validate a proposed change against architecture rules"
+  db_get key: "plures:repos:registry" -> $registry
+  db_get key: "plures:routing:rules" -> $routing
+  db_get key: "plures:lifecycle:seven-pillars" -> $pillars
+  emit event: "architecture.query" data: {registry: $registry, routing: $routing, pillars: $pillars}
+
+procedure guide_lifecycle:
+  trigger: manual
+  given: "Provide step-by-step guidance for building something"
+  db_get key: "plures:lifecycle:seven-pillars" -> $pillars
+  db_get key: "plures:repos:registry" -> $registry
+  emit event: "lifecycle.query" data: {pillars: $pillars, registry: $registry}
+
+procedure detect_anti_patterns:
+  trigger: manual
+  given: "Check an action for known anti-patterns from incident history"
+  db_get key: "praxis:learned:2026-05-23:pluresdb-is-foundation" -> $lesson_pluresdb
+  db_get key: "praxis:learned:px-compiler-location" -> $lesson_compiler
+  db_get key: "praxis:learned:2026-05-18" -> $lesson_general
+  db_get key: "plures:routing:rules" -> $routing
+  emit event: "anti_pattern.query" data: {lessons: $lesson_pluresdb, compiler: $lesson_compiler, general: $lesson_general}
