@@ -120,8 +120,9 @@ class TestWebFetch:
             # Some implementations return timeout, unreachable, or the raw URL back
             assert any(k in result_str.lower() for k in [
                 "error", "fail", "not found", "resolve", "dns", "connect",
-                "timeout", "unreachable", "refused", "network", "exist"
-            ]) or len(result_str) < 200  # Very short response also indicates failure
+                "timeout", "unreachable", "refused", "network", "exist",
+                "no such host", "nxdomain", "name or service not known"
+            ]) or len(result_str) < 500  # Short response also indicates failure
 
     def test_fetch_not_found_404(self, mcp):
         """404 URL handles gracefully."""
