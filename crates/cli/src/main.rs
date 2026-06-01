@@ -8,6 +8,7 @@
 //! ```
 
 mod config;
+mod px_config;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -2957,6 +2958,10 @@ enum Commands {
     ///
     /// Channels are thin I/O — all logic flows through the EventSpine.
     ServeSpine {
+        /// Path to .px config file (optional — auto-discovers radix.px).
+        #[arg(long, env = "PARES_CONFIG")]
+        config: Option<String>,
+
         /// Channel to use for I/O (stdio, telegram).
         #[arg(long, env = "PARES_CHANNEL", default_value = "telegram")]
         channel: String,
@@ -3378,6 +3383,7 @@ async fn main() {
         }
 
         Commands::ServeSpine {
+            config,
             channel,
             telegram_token,
             model_url,
@@ -3394,6 +3400,24 @@ async fn main() {
             use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
             use pares_agens_channels::stdio_spine::StdioSpineChannel;
             use pares_agens_core::spine::channel::SpineChannel;
+
+            // Load .px config (CLI flags override config file values)
+            let px_cfg = px_config::load_config(config.as_deref()).unwrap_or_default();
+
+            // Resolve effective values: CLI flag > env var > .px config > default
+            let channel = if channel != "telegram" { channel } else {
+                px_cfg.get_str("radix.channel").unwrap_or("telegram").to_string()
+            };
+            let model = if model != "gpt-4o" { model } else {
+                px_cfg.get_str("radix.model").unwrap_or("gpt-4o").to_string()
+            };
+            let model_url = if model_url != "https://models.inference.ai.azure.com" { model_url } else {
+                px_cfg.get_str("model.url").unwrap_or("https://models.inference.ai.azure.com").to_string()
+            };
+            let use_copilot = use_copilot || px_cfg.get_bool("radix.use_copilot").unwrap_or(false);
+            let telegram_token = if !telegram_token.is_empty() { telegram_token } else {
+                px_cfg.get_resolved("telegram.token").unwrap_or_default()
+            };
 
             info!("Starting pares-radix in spine-driven mode (ADR-0001)");
 
