@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-praxis-native = { git = "https://github.com/plures/praxis.git", rev = "0c030c0", default-features = false }
+praxis-native = { git = "https://github.com/plures/praxis.git", rev = "dab970c", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
