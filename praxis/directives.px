@@ -1,0 +1,478 @@
+# directives.px — Reasoning procedures over PluresDB state
+#
+# These procedures don't just look up data — they REASON over the plures
+# development knowledge graph stored in PluresDB to produce actionable guidance.
+#
+# Data sources (PluresDB keys):
+#   plures:repos:registry        — what each repo owns and depends on
+#   plures:routing:rules         — conditions → target repo mappings
+#   plures:prioritization:framework — Level 0-4 priority hierarchy
+#   plures:lifecycle:seven-pillars  — 7-pillar development lifecycle
+#   praxis:learned:*             — anti-patterns from real incidents
+#
+# Usage: praxis_run {procedure: "route_code", input: {description: "..."}}
+
+# ══════════════════════════════════════════════════════════════════════
+# PROCEDURE 1: route_code
+# "Where does this code belong?"
+# ══════════════════════════════════════════════════════════════════════
+
+procedure route_code:
+  trigger: manual
+  given: "A description of code to be written or moved"
+  input: {description: string}
+
+  # Step 1: Load the knowledge graph
+  db_get {key: "plures:repos:registry"} -> $registry
+  db_get {key: "plures:routing:rules"} -> $routing
+  db_get {key: "praxis:learned:px-compiler-location"} -> $lesson_compiler
+  db_get {key: "praxis:learned:2026-05-23:pluresdb-is-foundation"} -> $lesson_pluresdb
+
+  # Step 2: Check foundation-level matches first (highest priority)
+  # Grammar/parser/compiler → praxis
+  match $input.description:
+    contains "grammar" or "parser" or "compiler" or ".px language" or "syntax":
+      set $target = "praxis/crates/praxis-native/"
+      set $reason = "The .px language (grammar, compiler, executor) is owned by praxis. NEVER put compiler code in an application."
+      set $anti_pattern = $lesson_compiler.value.description
+      # "Compiler was trapped in pares-radix, violating separation. Fixed 2026-05-31."
+
+    contains "NativeFunction" or "native function" or "math hot path" or "physics":
+      set $target = "praxis/crates/praxis-native/src/native_functions.rs"
+      set $reason = "NativeFunctions are praxis-native registered functions callable from .px. They are domain-agnostic compute hot paths."
+      set $anti_pattern = "Don't put NativeFunctions in applications — they become trapped in one consumer."
+
+    contains "CRDT" or "storage" or "sync" or "replication" or "Hyperswarm" or "discovery" or "peer":
+      set $target = "pluresdb"
+      set $reason = "PluresDB owns ALL persistent state, sync, storage, CRDT operations, Hyperswarm networking, and peer discovery."
+      set $anti_pattern = $lesson_pluresdb.value.description
+      # "Built 1,911 lines of arca-swarm when PluresDB already does this. Third time."
+
+    contains "ActionHandler" or "side-effect" or "orchestration" or "bridge":
+      set $target = "the APPLICATION that consumes it (pares-radix, pares-agens, etc.)"
+      set $reason = "ActionHandlers are IO boundary implementations. They live in the app that provides the side-effect. Stateless, no business logic."
+      set $anti_pattern = "Don't put ActionHandler logic in foundation crates — they couple foundation to specific IO."
+
+    contains "game" or "wind-chess" or "interactive experience":
+      set $target = "inner-space (game .px files); praxis (only if grammar extensions needed)"
+      set $reason = "Game logic is expressed in .px and lives in inner-space. Only grammar changes touch praxis."
+      set $anti_pattern = "Don't hardcode game logic in Rust — express it in .px so it's inspectable and modifiable."
+
+    contains "UI" or "frontend" or "Svelte" or "component" or "rendering":
+      set $target = "the application's frontend (design-dojo for shared components, app-specific otherwise)"
+      set $reason = "UI code belongs in the consuming application or shared component library."
+      set $anti_pattern = "Don't mix UI concerns with foundation crates."
+
+    contains "utility" or "shared" or "helper" or "common crate":
+      set $target = "pedantic-rs"
+      set $reason = "General-purpose Rust utilities shared across multiple crates go in pedantic-rs."
+      set $anti_pattern = "Don't duplicate utilities across repos — extract to pedantic-rs."
+
+    contains "documentation" or "process" or "standard" or "practice":
+      set $target = "development-guide"
+      set $reason = "All documentation, standards, practices, and process definitions live in development-guide."
+      set $anti_pattern = "Don't scatter docs across repos — centralize in development-guide."
+
+    contains "ADR" or "architecture decision":
+      set $target = "praxis-business"
+      set $reason = "Architecture Decision Records and pipeline governance live in praxis-business."
+      set $anti_pattern = "Don't put ADRs in random repos — they belong in praxis-business for org-wide visibility."
+
+    default:
+      set $target = "UNKNOWN — requires manual routing analysis"
+      set $reason = "No clear routing rule matched. Check plures:repos:registry for the closest owner."
+      set $anti_pattern = "When in doubt, ask: does this extend foundation or consume it?"
+
+  # Step 3: Validate dependency direction
+  # RULE: Applications depend DOWN on foundation. Nothing depends UP.
+  set $dependency_check = "Verify: does ${target} depend on anything above it? If so, the routing is WRONG."
+
+  # Step 4: Emit structured guidance
+  emit {event: "routing.decision", data: {
+    input: $input.description,
+    target_repo: $target,
+    reasoning: $reason,
+    anti_pattern_warning: $anti_pattern,
+    dependency_rule: $registry.value.dependencyRule,
+    validation: $dependency_check
+  }}
+
+  # Example correct decisions:
+  # ✅ "Add a new CRDT type for ordered sets" → pluresdb
+  # ✅ "Write a .px grammar rule for match expressions" → praxis
+  # ✅ "Build a GitHub webhook handler" → pares-agens (ActionHandler)
+  # ✅ "Create a wind-chess piece movement rule" → inner-space (.px file)
+  #
+  # Example INCORRECT decisions (anti-patterns):
+  # ❌ "Put the .px compiler in pares-radix" → WRONG (compiler belongs in praxis)
+  # ❌ "Build custom Hyperswarm networking in a new crate" → WRONG (use PluresDB)
+  # ❌ "Hardcode chess rules in Rust" → WRONG (express in .px)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PROCEDURE 2: prioritize_work
+# "What should I work on next?"
+# ══════════════════════════════════════════════════════════════════════
+
+procedure prioritize_work:
+  trigger: manual
+  given: "Current state of work — what's done, in progress, and blocked"
+  input: {current_state: object}
+  # current_state shape: {level0: "status", level1: "status", level2: "status", ...}
+
+  # Step 1: Load prioritization framework
+  db_get {key: "plures:prioritization:framework"} -> $framework
+
+  # Step 2: Determine lowest incomplete level
+  # Rule: Level 0 > 1 > 2 > 3 > 4 (strict precedence)
+  # "Work on highest-priority item at the lowest incomplete level"
+
+  set $levels = $framework.value.levels
+  set $current = $framework.value.currentState
+
+  # Step 3: Evaluate each level's completeness
+  # Level 0: Foundation Integrity — PluresDB + Praxis correct and complete
+  #   Status from DB: "NEARLY COMPLETE (11/13)"
+  #   Action: Find the 2 remaining items. They BLOCK everything else.
+  #
+  # Level 1: Architecture Enforcement — guide, constraints, tooling prevent drift
+  #   Status from DB: "COMPLETE"
+  #   Action: None needed unless Level 0 changes invalidate it.
+  #
+  # Level 2: Testing Infrastructure — automated tests simulate real-world usage
+  #   Status from DB: "PARTIAL"
+  #   Action: After Level 0 completes, this is the priority.
+  #
+  # Level 3: Feature Development — new features following 7 pillars
+  #   BLOCKED until Levels 0-2 satisfied.
+  #
+  # Level 4: Research & Optimization
+  #   Only when Levels 0-3 are stable.
+
+  # Step 4: Identify actionable items at the lowest incomplete level
+  match $current.level0:
+    contains "COMPLETE":
+      # Level 0 done, check Level 2 (Level 1 already complete)
+      set $work_level = 2
+      set $work_items = "Testing Infrastructure: build E2E integration tests, smoke test harnesses, recovery path tests"
+      set $justification = "Level 0 is complete. Level 1 is complete. Level 2 (Testing) is PARTIAL — it's the bottleneck."
+      set $parallelizable = "E2E tests for different repos can be built in parallel. Test harnesses are independent per crate."
+
+    default:
+      # Level 0 incomplete — this takes absolute priority
+      set $work_level = 0
+      set $work_items = "Foundation Integrity: complete the remaining items (npm publish, any outstanding PluresDB/Praxis gaps)"
+      set $justification = "Level 0 is NOT complete. NOTHING else matters until foundation integrity is satisfied. This is the rule."
+      set $parallelizable = "Independent Level 0 items (e.g., npm publish vs. compiler fixes) can proceed in parallel."
+
+  # Step 5: Check for blockers
+  set $blockers = "Check: are any Level ${work_level} items blocked by external dependencies? If so, work on unblocked items first, then escalate blockers."
+
+  # Step 6: Emit prioritized work plan
+  emit {event: "prioritization.decision", data: {
+    framework_rule: $framework.value.decisionRule,
+    current_state: $current,
+    recommended_level: $work_level,
+    work_items: $work_items,
+    justification: $justification,
+    parallelizable: $parallelizable,
+    blockers_check: $blockers,
+    meta_rule: "Never serialize independent work — fan out in parallel."
+  }}
+
+  # Decision trace:
+  # BECAUSE Level 0 status = "${current.level0}"
+  # AND the rule says "lowest incomplete level first"
+  # AND Level 0 > Level 1 > Level 2 (strict precedence)
+  # THEREFORE work on Level ${work_level}
+  # SPECIFICALLY: ${work_items}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PROCEDURE 3: validate_architecture
+# "Does this change fit the architecture?"
+# ══════════════════════════════════════════════════════════════════════
+
+procedure validate_architecture:
+  trigger: manual
+  given: "A proposed change with target repo, description, and dependencies"
+  input: {repo: string, description: string, dependencies: array}
+
+  # Step 1: Load architecture knowledge
+  db_get {key: "plures:repos:registry"} -> $registry
+  db_get {key: "plures:routing:rules"} -> $routing
+  db_get {key: "plures:lifecycle:seven-pillars"} -> $pillars
+  db_get {key: "praxis:learned:2026-05-23:pluresdb-is-foundation"} -> $lesson_pluresdb
+
+  set $violations = []
+
+  # Step 2: Check dependency direction
+  # RULE: Applications depend DOWN on foundation. Foundation layers are PEERS. Nothing depends UP.
+  # If $input.repo is a foundation repo (pluresdb, praxis) and $input.dependencies contains
+  # an application (radix, agens, inner-space, etc.) → VIOLATION
+  match $input.repo:
+    equals "pluresdb" or "praxis":
+      # Foundation repo — must NOT depend on applications
+      foreach $dep in $input.dependencies:
+        match $dep:
+          equals "pares-radix" or "pares-agens" or "inner-space" or "design-dojo" or "oasis":
+            append $violations = {
+              severity: "critical",
+              rule: "dependency-direction",
+              message: "Foundation repo '${input.repo}' CANNOT depend on application '${dep}'. Dependencies flow DOWN only.",
+              fix: "Move the shared code to the foundation repo or pedantic-rs. The application should depend on foundation, not vice versa."
+            }
+
+  # Step 3: Check for foundation duplication
+  # Does this change duplicate something PluresDB already provides?
+  match $input.description:
+    contains "custom state" or "HashMap" or "in-memory store" or "custom sync" or "custom networking":
+      append $violations = {
+        severity: "critical",
+        rule: "no-reinvention",
+        message: "This appears to duplicate PluresDB functionality. PluresDB already provides: CRDT state, Hyperswarm sync, reactive triggers, content-addressed storage.",
+        fix: "Use PluresDB. If PluresDB can't do this, EXTEND PluresDB — don't build around it.",
+        evidence: $lesson_pluresdb.value.description
+      }
+
+  # Step 4: Check .px-first compliance (Pillar 1)
+  # Was a .px file written before the implementation?
+  match $input.description:
+    not contains ".px" and not contains "grammar fix" and not contains "bugfix":
+      append $violations = {
+        severity: "warning",
+        rule: "px-first",
+        message: "No .px file mentioned. Pillar 1 says: 'Start with .px. Express intent before implementation.'",
+        fix: "Write the .px declaration first — what should this code DO? Then implement."
+      }
+
+  # Step 5: Check testing infrastructure (Pillar 4)
+  match $input.description:
+    not contains "test" and not contains "spec" and not contains "verify":
+      append $violations = {
+        severity: "warning",
+        rule: "testable-development",
+        message: "No testing mentioned. Pillar 4: 'Development NOT complete without automated real-world tests.'",
+        fix: "Include test infrastructure: unit tests, integration tests, smoke tests for this change."
+      }
+
+  # Step 6: Check MCP/AI interface (Pillar 5)
+  match $input.description:
+    contains "new feature" or "new capability" or "new API":
+      match $input.description:
+        not contains "MCP" and not contains "tool" and not contains "AI":
+          append $violations = {
+            severity: "warning",
+            rule: "ai-integration",
+            message: "New capability without MCP exposure. Pillar 5: 'All code MCP-accessible.'",
+            fix: "Expose this via MCP tool so AI agents can use it. Structured output, inspectable, operable."
+          }
+
+  # Step 7: Emit validation result
+  set $passed = (length($violations) == 0)
+
+  emit {event: "architecture.validation", data: {
+    repo: $input.repo,
+    description: $input.description,
+    passed: $passed,
+    violation_count: length($violations),
+    violations: $violations,
+    dependency_rule: $registry.value.dependencyRule,
+    summary: if $passed then "✅ Architecture check passed" else "❌ ${length($violations)} violation(s) found"
+  }}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PROCEDURE 4: guide_lifecycle
+# "How do I build this?"
+# ══════════════════════════════════════════════════════════════════════
+
+procedure guide_lifecycle:
+  trigger: manual
+  given: "A description of what's being built"
+  input: {building: string}
+
+  # Step 1: Load lifecycle knowledge
+  db_get {key: "plures:lifecycle:seven-pillars"} -> $pillars
+  db_get {key: "plures:repos:registry"} -> $registry
+
+  # Step 2: Generate step-by-step guidance following the 7 pillars
+  # Each pillar produces specific, actionable instructions
+
+  # Pillar 1: Logic First (.px)
+  set $step1 = {
+    pillar: "1. Logic First (.px)",
+    instruction: "Write the .px file FIRST. Before any Rust or TypeScript.",
+    action: "Create a .px file that declares WHAT '${input.building}' should do. Express the intent, constraints, and expected behavior. This becomes the source of truth.",
+    example: "procedure ${input.building}: trigger: ... given: '...' steps: ..."
+  }
+
+  # Pillar 2: Foundation Development
+  set $step2 = {
+    pillar: "2. Foundation Development",
+    instruction: "Does this extend PluresDB or Praxis? If so, contribute to the foundation.",
+    action: "Check: does '${input.building}' need new CRDT types, new reactive triggers, new .px grammar features, or new NativeFunctions? If YES → extend the foundation crate. If NO → consume it from your application.",
+    decision_framework: $pillars.value.decisionFramework
+    # "If tempted to work around a foundation limitation, fix the foundation instead."
+  }
+
+  # Pillar 3: Side-Effect Development
+  set $step3 = {
+    pillar: "3. Side-Effect Development",
+    instruction: "IO boundary only. Stateless. Implements ActionHandler.",
+    action: "If '${input.building}' touches the outside world (HTTP, filesystem, APIs, messages), implement it as an ActionHandler in the consuming application. The handler is STATELESS — it receives input, performs IO, returns output. No business logic inside.",
+    anti_pattern: "Don't put decision-making logic in ActionHandlers. Decisions belong in .px procedures."
+  }
+
+  # Pillar 4: Testable Development
+  set $step4 = {
+    pillar: "4. Testable Development",
+    instruction: "Build test infrastructure FIRST. Not after. Not 'later'. NOW.",
+    action: "Before declaring '${input.building}' complete: (1) cargo test --workspace passes, (2) cargo clippy --workspace -- -D warnings clean, (3) build the release binary, (4) run smoke tests (start binary, hit API, verify response), (5) test recovery/error paths explicitly.",
+    rule: "Development is NOT complete without automated real-world tests."
+  }
+
+  # Pillar 5: AI Integration
+  set $step5 = {
+    pillar: "5. AI Integration",
+    instruction: "All code MCP-accessible. Structured output. Inspectable. Operable by AI.",
+    action: "Expose '${input.building}' via MCP tools so AI agents can invoke it. Return structured JSON. Make state inspectable. If it has a CLI, add --json output.",
+    requirement: "An AI should be able to USE this feature without reading source code."
+  }
+
+  # Pillar 6: Research
+  set $step6 = {
+    pillar: "6. Research",
+    instruction: "Is there a better way? Check before building.",
+    action: "Before implementing '${input.building}': (1) Does this already exist in the plures ecosystem? (2) Is there a crate that does this? (3) Does PluresDB already handle this? (4) Is there a prior art or prior attempt we can learn from?",
+    anti_pattern: "The instinct to 'just write it quick' is the instinct that created 1,911 lines of arca-swarm that PluresDB already does natively."
+  }
+
+  # Pillar 7: Strategic over Tactical
+  set $step7 = {
+    pillar: "7. Strategic over Tactical",
+    instruction: "Every decision optimizes for 6-month outcome, not 6-minute outcome.",
+    action: "Ask: 'Am I building ON the foundation, or NEXT TO it?' If next to it — STOP. Go back to the foundation. For '${input.building}': will this still be the right approach in 6 months? If not, find the approach that will be.",
+    decision: "Favor hard refactor over quick fix. Favor foundation extension over application workaround."
+  }
+
+  # Step 3: Emit complete lifecycle guide
+  emit {event: "lifecycle.guidance", data: {
+    building: $input.building,
+    steps: [$step1, $step2, $step3, $step4, $step5, $step6, $step7],
+    ts_rust_napi_pattern: $registry.value.tsRustNapiPattern,
+    summary: "Follow pillars 1→7 in order. Each pillar gates the next. Skip none."
+  }}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PROCEDURE 5: detect_anti_patterns
+# "Am I making a known mistake?"
+# ══════════════════════════════════════════════════════════════════════
+
+procedure detect_anti_patterns:
+  trigger: manual
+  given: "A description of what's being done"
+  input: {action: string}
+
+  # Step 1: Load all learned lessons
+  db_get {key: "praxis:learned:2026-05-23:pluresdb-is-foundation"} -> $lesson_pluresdb
+  db_get {key: "praxis:learned:px-compiler-location"} -> $lesson_compiler
+  db_get {key: "praxis:learned:2026-05-18"} -> $lesson_general
+  db_get {key: "plures:routing:rules"} -> $routing
+
+  set $matches = []
+
+  # Step 2: Check against known anti-patterns
+
+  # Anti-pattern: Reinventing PluresDB
+  match $input.action:
+    contains "custom sync" or "custom networking" or "custom discovery" or "Hyperswarm" or "custom storage" or "custom CRDT" or "custom replication" or "HashMap state" or "in-memory state":
+      append $matches = {
+        severity: "critical",
+        pattern: "reinventing-pluresdb",
+        description: $lesson_pluresdb.value.description,
+        corrective: $lesson_pluresdb.value.corrective,
+        incident: "arca-swarm: 1,911 lines deleted because PluresDB already did everything it tried to do. This was the THIRD time this happened.",
+        source_key: "praxis:learned:2026-05-23:pluresdb-is-foundation"
+      }
+
+  # Anti-pattern: Compiler in wrong repo
+  match $input.action:
+    contains "compiler" or "parser" or "grammar" or ".px language":
+      match $input.action:
+        contains "radix" or "agens" or "application":
+          append $matches = {
+            severity: "critical",
+            pattern: "compiler-in-application",
+            description: $lesson_compiler.value.description,
+            corrective: $lesson_compiler.value.corrective,
+            incident: "The .px compiler lived in pares-radix for months, trapping it inside one consumer. Extracted 2026-05-31.",
+            source_key: "praxis:learned:px-compiler-location"
+          }
+
+  # Anti-pattern: Building next to foundation instead of extending it
+  match $input.action:
+    contains "workaround" or "wrapper" or "shim" or "bypass" or "alternative to":
+      append $matches = {
+        severity: "high",
+        pattern: "building-next-to-foundation",
+        description: "Building 'next to' the foundation instead of extending it. If PluresDB/Praxis can't do X, extend them — don't build around.",
+        corrective: "Ask: can the foundation be extended to support this? If yes, extend it. The extension benefits the entire ecosystem.",
+        incident: "Every time we built around PluresDB, we regretted it and had to delete the workaround later.",
+        source_key: "plures:routing:rules (antiPatterns)"
+      }
+
+  # Anti-pattern: Reimplementing procedures in imperative code
+  match $input.action:
+    contains "if/else" or "state machine" or "FSM" or "imperative logic" or "hardcode":
+      match $input.action:
+        contains "business logic" or "decision" or "rule" or "workflow" or "orchestration":
+          append $matches = {
+            severity: "high",
+            pattern: "imperative-over-declarative",
+            description: "Reimplementing procedures in TypeScript/Rust when PluresDB has ProcedureEngine. Business logic belongs in .px, not in imperative code.",
+            corrective: "Express the logic as a .px procedure. Use PluresDB reactive triggers for state transitions. Imperative code is for IO boundary only.",
+            incident: "Practice constraint: 'Facts, events, and rules over finite state machines. FSMs become unwieldy when state transitions depend on multiple conditions.'",
+            source_key: "plures:routing:rules (antiPatterns)"
+          }
+
+  # Anti-pattern: No tests mentioned
+  match $input.action:
+    contains "ship" or "deploy" or "push" or "merge" or "release":
+      match $input.action:
+        not contains "test" and not contains "verify" and not contains "CI":
+          append $matches = {
+            severity: "high",
+            pattern: "ship-without-testing",
+            description: "Attempting to ship/deploy without mentioning testing. 'cargo test passes' is necessary but not sufficient.",
+            corrective: "Before push: (1) cargo test, (2) cargo clippy, (3) build release binary, (4) run smoke tests, (5) test recovery paths.",
+            incident: "Test-first strategy: 'Every product gets an automation interface on day one. Every automation interface gets a test harness.'",
+            source_key: "plures:prioritization:framework (Level 2)"
+          }
+
+  # Anti-pattern: Cron as primary mechanism
+  match $input.action:
+    contains "cron" or "schedule" or "polling" or "every N minutes":
+      match $input.action:
+        not contains "sweep" and not contains "health check":
+          append $matches = {
+            severity: "medium",
+            pattern: "cron-over-events",
+            description: "Using cron/polling as primary trigger instead of events. Event-driven beats polling beats cron.",
+            corrective: "React to events when they happen. Use cron ONLY for periodic health checks and aggregation sweeps — never as primary lifecycle trigger.",
+            incident: "Lesson: removed 21 cron-based workflows, replaced with event-driven triggers. Cron fails silently and creates stale state.",
+            source_key: "practice: reactive_architecture"
+          }
+
+  # Step 3: Emit results
+  set $safe = (length($matches) == 0)
+
+  emit {event: "anti_pattern.check", data: {
+    action: $input.action,
+    safe: $safe,
+    match_count: length($matches),
+    matches: $matches,
+    summary: if $safe then "✅ No known anti-patterns detected" else "⚠️ ${length($matches)} anti-pattern(s) detected — review before proceeding",
+    meta: "These patterns are learned from real incidents. Each has a date, a source, and a corrective action. Trust them."
+  }}
