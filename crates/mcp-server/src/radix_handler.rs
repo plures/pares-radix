@@ -1143,9 +1143,8 @@ impl RadixToolHandler {
             None => return ToolResult::error("missing required parameter: key"),
         };
 
-        // Delete by writing null — StateStore doesn't have a native delete,
-        // so we use the JSON null convention.
-        store.set(key, Value::Null).await;
+        // Use native delete which removes the key entirely.
+        store.delete(key).await;
         ToolResult::ok(format!("deleted key: {key}"))
     }
 
@@ -1161,7 +1160,15 @@ impl RadixToolHandler {
             .unwrap_or("");
 
         let keys = store.keys_with_prefix(prefix).await;
-        ToolResult::ok(serde_json::to_string_pretty(&keys).unwrap_or_default())
+        // Filter out null-valued keys (soft-deleted remnants)
+        let mut live_keys = Vec::new();
+        for key in &keys {
+            match store.get(key).await {
+                Some(v) if !v.is_null() => live_keys.push(key.clone()),
+                _ => {}
+            }
+        }
+        ToolResult::ok(serde_json::to_string_pretty(&live_keys).unwrap_or_default())
     }
 
     async fn db_dump(&self, _args: &Value) -> ToolResult {
@@ -3084,6 +3091,22 @@ impl RadixToolHandler {
         };
         let from_id = args.get("fromId").and_then(|v| v.as_str());
         let to_id = args.get("toId").and_then(|v| v.as_str());
+
+        // Validate IDs exist before replay (avoid silent empty results)
+        if from_id.is_some() || to_id.is_some() {
+            let all_entries = chronos.recent(10_000);
+            if let Some(fid) = from_id {
+                if !all_entries.iter().any(|e| e.id == fid) {
+                    return ToolResult::error(format!("fromId '{fid}' not found in timeline. Use chronos_timeline to list valid event IDs."));
+                }
+            }
+            if let Some(tid) = to_id {
+                if !all_entries.iter().any(|e| e.id == tid) {
+                    return ToolResult::error(format!("toId '{tid}' not found in timeline. Use chronos_timeline to list valid event IDs."));
+                }
+            }
+        }
+
         let entries = chronos.replay(from_id, to_id);
 
         // Dry-run: evaluate each entry through .px constraints in PluresDB
@@ -7830,6 +7853,42 @@ mod tests {
         let tools = handler.list_tools().await;
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"chronos_replay"));
+    }
+
+    #[tokio::test]
+    async fn chronos_replay_invalid_from_id_returns_error() {
+        use pares_agens_core::chronos::ChronosTimeline;
+        use pluresdb::CrdtStore;
+
+        let shell = Arc::new(ShellExecutor::new());
+        let store = Arc::new(CrdtStore::default());
+        let chronos = Arc::new(ChronosTimeline::new(store));
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(chronos);
+
+        let result = handler
+            .call_tool("chronos_replay", json!({"fromId": "nonexistent-id-abc"}))
+            .await;
+        assert!(result.is_error, "should return error for invalid fromId");
+        assert!(result.content.contains("not found in timeline"));
+    }
+
+    #[tokio::test]
+    async fn chronos_replay_invalid_to_id_returns_error() {
+        use pares_agens_core::chronos::ChronosTimeline;
+        use pluresdb::CrdtStore;
+
+        let shell = Arc::new(ShellExecutor::new());
+        let store = Arc::new(CrdtStore::default());
+        let chronos = Arc::new(ChronosTimeline::new(store));
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
+            .with_chronos(chronos);
+
+        let result = handler
+            .call_tool("chronos_replay", json!({"toId": "fake-id-xyz"}))
+            .await;
+        assert!(result.is_error, "should return error for invalid toId");
+        assert!(result.content.contains("not found in timeline"));
     }
 
     #[tokio::test]
