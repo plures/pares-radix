@@ -439,8 +439,8 @@ procedure bridge_delete:
         let result = result.expect("execution failed");
         assert!(result.success);
 
-        // Key should be null (RadixToolHandler sets Null on delete)
+        // Key should be gone (RadixToolHandler now uses store.delete)
         let stored = state.get("ephemeral").await;
-        assert_eq!(stored, Some(json!(null)));
+        assert_eq!(stored, None);
     }
 }
