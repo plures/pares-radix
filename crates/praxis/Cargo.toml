@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-praxis-native = { path = "../../../praxis/crates/praxis-native" }
+praxis-native = { path = "../../../praxis/crates/praxis-native", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
