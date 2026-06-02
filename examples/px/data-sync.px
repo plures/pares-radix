@@ -49,7 +49,7 @@ procedure resync_source:
   given: "Re-sync a single data source with retry"
 {
     let source = get_source({ name: "payments" });
-    try retry 3 delay 2000 ms backoff exponential max_delay 30000 ms jitter {
+    try {
         let batch = fetch_batch({ endpoint: "https://api.example.com", batch_size: 100 });
         let validated = validate_records({ records: "batch", schema: "default" });
         let result = upsert_records({ target: "warehouse" });

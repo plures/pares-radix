@@ -4,14 +4,14 @@ procedure dashboard_refresh:
 {
     // TODO: verify parallel syntax
     let data = parallel {
-        branch metrics {
+        metrics: {
             let m = fetch_metrics({});
             transform_metrics({ raw: m });
         }
-        branch alerts {
+        alerts: {
             fetch_alerts({});
         }
-        branch status {
+        status: {
             check_health({});
         }
     };

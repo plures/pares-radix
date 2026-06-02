@@ -14,8 +14,8 @@ procedure no_wildcard:
 {
     // TODO: verify match syntax
     match status {
-        "ok" -> handle_ok();
-        "error" -> handle_error();
+        "ok" => { handle_ok(); }
+        "error" => { handle_error(); }
     }
 }
 
@@ -24,9 +24,9 @@ procedure unreachable_arm:
   trigger: manual
 {
     match status {
-        "ok" -> handle_ok();
-        _ -> handle_default();
-        "error" -> handle_error();
+        "ok" => { handle_ok(); }
+        _ => { handle_default(); }
+        "error" => { handle_error(); }
     }
 }
 
@@ -35,9 +35,9 @@ procedure dup_arms:
   trigger: manual
 {
     match level {
-        "high" -> alert();
-        "low" -> ignore();
-        "high" -> alert_again();
+        "high" => { alert(); }
+        "low" => { ignore(); }
+        "high" => { alert_again(); }
     }
 }
 

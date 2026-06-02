@@ -66,13 +66,13 @@ procedure review_pr:
         emit("pr.review.skipped", { reason: "draft" });
     }
     let analysis = parallel {
-        branch code_review {
+        code_review: {
             let diff_analysis = analyze_diff({ pr: 42 });
         }
-        branch test_coverage {
+        test_coverage: {
             let coverage = check_coverage({ pr: 42 });
         }
-        branch changelog {
+        changelog: {
             check_changelog_entry({ pr: 42 });
         }
     };

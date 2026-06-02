@@ -27,16 +27,16 @@ procedure ci_pipeline:
     let config = resolve_build_config({});
     // TODO: verify parallel retry syntax
     let checks = parallel {
-        branch unit_tests retry 2 delay 3000 ms backoff exponential max_delay 15000 ms jitter {
+        unit_tests: {
             run_tests({ suite: "unit", service: "api" });
         }
-        branch integration_tests retry 1 delay 5000 ms {
+        integration_tests: {
             run_tests({ suite: "integration", service: "api" });
         }
-        branch lint {
+        lint: {
             run_linter({ service: "api" });
         }
-        branch security_scan {
+        security_scan: {
             let vuln_report = scan_dependencies({ image: "api" });
         }
     };

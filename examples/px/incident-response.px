@@ -35,9 +35,9 @@ procedure respond_to_incident:
     let policy = get_escalation_policy({ severity: "p1" });
     // TODO: verify match syntax
     match incident.severity {
-        "p1" -> handle_p1();
-        "p2" -> handle_p2();
-        "p3" -> handle_p3();
+        "p1" => { handle_p1(); }
+        "p2" => { handle_p2(); }
+        "p3" => { handle_p3(); }
     }
 }
 
@@ -48,10 +48,10 @@ procedure handle_p1:
     let room = create_war_room({ title: "P1 incident" });
     page_oncall({ team: "sre" });
     let notifications = parallel {
-        branch status_page {
+        status_page: {
             update_status_page({ status: "investigating" });
         }
-        branch exec_notify {
+        exec_notify: {
             notify_channel({ channel: "exec", message: "P1 incident" });
         }
     };
