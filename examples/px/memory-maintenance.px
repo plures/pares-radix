@@ -12,35 +12,40 @@ fact MemoryStats:
   duplicate_count: int
 
 procedure memory_maintenance:
-  trigger: cron {schedule: "0 */6 * * *"}
+  trigger: periodic
+    interval: "6h"
   given: "Periodically consolidate, prune, and optimize the memory store"
-  get_memory_stats {} -> $stats
-  emit {event: "memory.maintenance_started", total: 4200}
-  when stats.duplicate_count > 10:
-    consolidate_duplicates {threshold: 92} -> $merged
-    emit {event: "memory.consolidated", merged_count: 15}
-  end
-  when stats.stale_count > 50:
-    demote_stale_memories {days: 90} -> $demoted
-    emit {event: "memory.demoted", count: 23}
-  end
-  when stats.avg_quality < 70:
-    rebuild_embeddings {} -> $rebuild
-    emit {event: "memory.reindexed", duration_ms: 1500}
-  end
-  get_memory_stats {} -> $final_stats
-  emit {event: "memory.maintenance_complete", before: 4200, after: 4185}
+{
+    let stats = get_memory_stats({});
+    emit("memory.maintenance_started", { total: 4200 });
+    if stats.duplicate_count > 10 {
+        let merged = consolidate_duplicates({ threshold: 92 });
+        emit("memory.consolidated", { merged_count: 15 });
+    }
+    if stats.stale_count > 50 {
+        let demoted = demote_stale_memories({ days: 90 });
+        emit("memory.demoted", { count: 23 });
+    }
+    if stats.avg_quality < 70 {
+        let rebuild = rebuild_embeddings({});
+        emit("memory.reindexed", { duration_ms: 1500 });
+    }
+    let final_stats = get_memory_stats({});
+    emit("memory.maintenance_complete", { before: 4200, after: 4185 });
+}
 
 procedure cleanup_category:
   trigger: manual
   given: "Remove low-quality memories from a specific category"
-  list_memories {category: "stale", quality_below: 50} -> $low_quality
-  when low_quality.count == 0:
-    emit {event: "memory.cleanup_skipped", reason: "nothing_to_clean"}
-  end
-  when low_quality.count > 0:
-    loop over $items as mem:
-      archive_memory {id: "mem_001", reason: "low_quality"}
-    end
-    emit {event: "memory.cleanup_complete", archived: 12}
-  end
+{
+    let low_quality = list_memories({ category: "stale", quality_below: 50 });
+    if low_quality.count == 0 {
+        emit("memory.cleanup_skipped", { reason: "nothing_to_clean" });
+    }
+    if low_quality.count > 0 {
+        for mem in items {
+            archive_memory({ id: "mem_001", reason: "low_quality" });
+        }
+        emit("memory.cleanup_complete", { archived: 12 });
+    }
+}

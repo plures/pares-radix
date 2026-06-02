@@ -36,6 +36,9 @@ pub mod px_action_bridge;
 pub mod radix_handler;
 pub mod server;
 
+#[cfg(test)]
+mod orchestration_test;
+
 pub use handler::ToolHandler;
 pub use radix_handler::{RadixToolHandler, SharedProcedures};
 pub use server::{McpServer, McpServerError, ServerNotification, spawn_completion_forwarder};
