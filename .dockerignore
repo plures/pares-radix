@@ -1,0 +1,9 @@
+target/
+node_modules/
+.git/
+src-tauri/target/
+crates/core/.fastembed_cache/
+testing/__pycache__/
+testing/.pytest_cache/
+testing/venv/
+*.log
