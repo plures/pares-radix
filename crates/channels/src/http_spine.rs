@@ -116,8 +116,14 @@ pub struct PendingResponses {
 }
 
 impl PendingResponses {
-    pub async fn insert(&self, id: String, tx: oneshot::Sender<String>) {
-        self.inner.lock().await.insert(id, tx);
+    /// Insert a pending response. Returns false if a request is already pending for this session.
+    pub async fn insert(&self, id: String, tx: oneshot::Sender<String>) -> bool {
+        let mut inner = self.inner.lock().await;
+        if inner.contains_key(&id) {
+            return false;
+        }
+        inner.insert(id, tx);
+        true
     }
 
     pub async fn take(&self, id: &str) -> Option<oneshot::Sender<String>> {
@@ -182,7 +188,10 @@ async fn handle_chat(
 
     // Create response channel (keyed by session for delivery routing)
     let (tx, rx) = oneshot::channel();
-    state.pending.insert(session_id.clone(), tx).await;
+    if !state.pending.insert(session_id.clone(), tx).await {
+        warn!(session_id = %session_id, "http_spine: rejected concurrent request");
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
 
     // Emit inbound event
     // chat_id = session_id (for conversation history continuity)
