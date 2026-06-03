@@ -2,11 +2,28 @@
 // See docs/PX-GRAMMAR.md for the full specification
 
 WHITESPACE = _{ " " | "\t" }
-COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* }
+COMMENT = _{ ("//" ~ (!NEWLINE ~ ANY)*) | ("#" ~ (!NEWLINE ~ ANY)*) }
 
 document = { SOI ~ NEWLINE* ~ (statement ~ NEWLINE*)* ~ EOI }
 
-statement = _{ import_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl | procedure_decl | scenario_decl }
+statement = _{ import_decl | entity_decl | config_decl | fact_decl | rule_decl | constraint_decl | contract_decl | function_decl | trigger_decl | procedure_decl | scenario_decl }
+
+// === Entities ===
+entity_decl = { "entity" ~ ident ~ ":" ~ NEWLINE ~ entity_body }
+entity_body = { entity_prefix_clause? ~ entity_fields_clause }
+entity_prefix_clause = { "prefix:" ~ string ~ NEWLINE }
+entity_fields_clause = { "fields:" ~ NEWLINE ~ entity_field_list }
+entity_field_list = { (entity_field ~ NEWLINE)+ }
+entity_field = { ident ~ ":" ~ entity_type_expr }
+entity_type_expr = @{ (ASCII_ALPHA | "_" | "[" | "]" | "<" | ">" | "," | " ")+ }
+
+// === Config ===
+config_decl = { "config" ~ ident ~ ":" ~ NEWLINE ~ config_body }
+config_body = { (config_entry ~ NEWLINE?)+ }
+config_entry = { ident ~ ":" ~ (config_nested | config_value) ~ NEWLINE? }
+config_nested = { NEWLINE ~ (config_kv ~ NEWLINE)+ }
+config_kv = { ident ~ ":" ~ (config_nested | config_value) }
+config_value = { list_val | float | integer | string | boolean }
 
 // === Imports ===
 import_decl = { "import" ~ rust_path ~ ("as" ~ ident)? }
@@ -48,11 +65,17 @@ severity_level = { "error" | "warning" | "info" }
 message_clause = { "message:" ~ string ~ NEWLINE }
 ident_csv = { ident ~ ("," ~ ident)* }
 
-// === Procedures ===
+// === Procedures (supports both v1 step_list and v2 code_block syntax) ===
 procedure_decl = { "procedure" ~ ident ~ ":" ~ NEWLINE ~ procedure_body }
-procedure_body = { procedure_trigger_clause? ~ given_clause? ~ step_list }
-procedure_trigger_clause = { "trigger:" ~ procedure_trigger_kind ~ NEWLINE }
-procedure_trigger_kind = { "on_write" ~ map_val? | "before_response" | "after_response" | "cron" ~ map_val? | "manual" }
+procedure_body = { procedure_trigger_clause? ~ params_clause? ~ given_clause? ~ (code_block | step_list) }
+params_clause = { "params:" ~ "[" ~ param_ident ~ ("," ~ param_ident)* ~ "]" ~ NEWLINE }
+param_ident = @{ "$"? ~ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+procedure_trigger_clause = { "trigger:" ~ procedure_trigger_kind ~ NEWLINE ~ trigger_sub_keys? }
+procedure_trigger_kind = { "periodic" ~ map_val? | "on_write" ~ trigger_pattern? ~ map_val? | "on_event" ~ "(" ~ string ~ ")" | "startup" | "before_response" | "after_response" | "cron" ~ map_val? | "manual" }
+trigger_pattern = { "(" ~ string ~ ")" }
+trigger_sub_keys = { (trigger_sub_key ~ NEWLINE)+ }
+trigger_sub_key = { !("params:" | "given:" | "steps:" | "{") ~ ident ~ ":" ~ trigger_sub_value }
+trigger_sub_value = @{ (!NEWLINE ~ ANY)+ }
 step_list = { (step_decl ~ NEWLINE)+ }
 block_step_list = { (!("end" | "catch:") ~ step_decl ~ NEWLINE)+ }
 step_decl = { step_match | step_when | step_loop | step_emit | step_try | step_parallel | step_return | step_abort | step_call }
@@ -81,6 +104,57 @@ retry_backoff_opt = { "backoff" ~ backoff_strategy }
 backoff_strategy = { "exponential" | "fixed" }
 retry_max_delay_opt = { "max_delay" ~ integer ~ "ms" }
 retry_jitter_opt = { "jitter" }
+
+// === V2 Code Blocks (brace-delimited procedural syntax) ===
+code_block = { "{" ~ NEWLINE* ~ (code_stmt ~ NEWLINE*)* ~ "}" }
+code_stmt = { code_let_stmt | code_if_stmt | code_for_stmt | code_match_stmt | code_try_stmt | code_parallel_stmt | code_return_stmt | code_emit_stmt | code_assign_stmt | code_expr_stmt }
+code_match_stmt = { "match" ~ code_expr ~ "{" ~ NEWLINE* ~ (code_match_arm ~ NEWLINE*)+ ~ "}" }
+code_match_arm = { code_match_pattern ~ "=>" ~ (code_block | code_expr ~ ","?) }
+code_match_pattern = { "_" | code_expr }
+code_try_stmt = { "try" ~ code_block ~ ("catch" ~ ident? ~ code_block)? }
+code_parallel_stmt = { "parallel" ~ "{" ~ NEWLINE* ~ (code_parallel_branch ~ NEWLINE*)+ ~ "}" }
+code_parallel_branch = { ident ~ ":" ~ code_block }
+code_let_stmt = { "let" ~ ident ~ "=" ~ code_expr ~ ";" }
+code_assign_stmt = { code_lvalue ~ code_assign_op ~ code_expr ~ ";" }
+code_assign_op = { "+=" | "-=" | "=" }
+code_lvalue = @{ ident ~ ((".") ~ ident | ("[" ~ (ASCII_DIGIT+ | ("\"" ~ (!"\"" ~ ANY)* ~ "\"") | ("'" ~ (!"'" ~ ANY)* ~ "'")) ~ "]"))* }
+code_if_stmt = { "if" ~ code_expr ~ code_block ~ ("else" ~ (code_if_stmt | code_block))? }
+code_for_stmt = { "for" ~ ident ~ "in" ~ code_expr ~ code_block }
+code_return_stmt = { "return" ~ code_expr? ~ ";" }
+code_emit_stmt = { "emit" ~ "(" ~ code_expr ~ ("," ~ code_expr)? ~ ")" ~ ";" }
+code_expr_stmt = { code_expr ~ ";" }
+
+// === V2 Expressions (richer than v1, supports operators inside code blocks) ===
+code_expr = { code_inline_if | code_logic }
+code_inline_if = { "if" ~ code_logic ~ "{" ~ code_expr ~ "}" ~ "else" ~ "{" ~ code_expr ~ "}" }
+code_logic = { code_comparison ~ (code_logic_op ~ code_comparison)* }
+code_logic_op = { "&&" | "||" }
+code_comparison = { code_additive ~ (code_comp_op ~ code_additive)? }
+code_comp_op = { "==" | "!=" | ">=" | "<=" | ">" | "<" }
+code_additive = { code_multiplicative ~ (code_add_op ~ code_multiplicative)* }
+code_add_op = { "+" | "-" }
+code_multiplicative = { code_power ~ (code_mul_op ~ code_power)* }
+code_mul_op = { "*" | "/" | "%" }
+code_power = { code_unary ~ ("^" ~ code_unary)* }
+code_unary = { code_neg | code_not | code_atom }
+code_neg = { "-" ~ code_atom }
+code_not = { "!" ~ code_atom }
+code_atom = { code_parallel_expr | code_object_literal | code_closure | code_call_expr | code_float | code_integer | code_string | code_boolean | code_null | "(" ~ code_expr ~ ")" | code_access_expr }
+code_parallel_expr = { "parallel" ~ "{" ~ NEWLINE* ~ (code_parallel_branch ~ NEWLINE*)+ ~ "}" }
+code_call_expr = { ident ~ "(" ~ (code_expr ~ ("," ~ code_expr)*)? ~ ")" ~ code_access_chain? }
+code_access_expr = { code_dotted_ident ~ code_access_chain? }
+code_access_chain = { (code_bracket_access | code_dot_access)+ }
+code_bracket_access = { "[" ~ code_expr ~ "]" }
+code_dot_access = { "." ~ ident }
+code_dotted_ident = @{ ident ~ ("." ~ ident)* }
+code_object_literal = { "{" ~ NEWLINE* ~ (code_obj_field ~ ("," ~ NEWLINE* ~ code_obj_field)* ~ ","?)? ~ NEWLINE* ~ "}" }
+code_obj_field = { ident ~ ":" ~ code_expr }
+code_closure = { "|" ~ ident ~ ("," ~ ident)* ~ "|" ~ code_expr }
+code_string = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" | "'" ~ (!"'" ~ ANY)* ~ "'" }
+code_float = @{ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+code_integer = @{ ASCII_DIGIT+ }
+code_boolean = { "true" | "false" }
+code_null = { "null" }
 
 // === Scenarios ===
 scenario_decl = { "scenario" ~ ident ~ ":" ~ NEWLINE ~ scenario_body }
