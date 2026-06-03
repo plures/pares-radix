@@ -4861,17 +4861,20 @@ name = "pares-agens-channels"
 version = "1.44.3"
 dependencies = [
  "async-trait",
+ "axum 0.8.9",
  "pares-agens-agenda",
  "pares-agens-core",
  "pares-radix-marketplace",
  "pares-rector",
  "pluresdb 2.9.10",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "teloxide",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "tower-http",
  "tracing",
  "uuid",
 ]
