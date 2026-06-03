@@ -15,14 +15,9 @@ uuid.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 tokio = { workspace = true, features = ["time"] }
-pest = "2"
-pest_derive = "2"
-notify = "8"
-walkdir = "2"
 tracing = "0.1"
 futures = "0.3"
 regex = "1"
-praxis-lang = { path = "../praxis-lang" }
 
 [dev-dependencies]
 futures = "0.3"
