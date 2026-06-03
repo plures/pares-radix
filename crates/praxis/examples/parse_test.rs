@@ -1,5 +1,5 @@
-//! Quick .px parser test binary
-use praxis_lang::parse;
+//! Quick .px parser test binary (uses praxis-native)
+use pares_radix_praxis::px::parse;
 fn main() {
     for path in std::env::args().skip(1) {
         let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
