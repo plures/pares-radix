@@ -2962,13 +2962,17 @@ enum Commands {
         #[arg(long, env = "PARES_CONFIG")]
         config: Option<String>,
 
-        /// Channel to use for I/O (stdio, telegram).
+        /// Channel to use for I/O (stdio, telegram, http).
         #[arg(long, env = "PARES_CHANNEL", default_value = "telegram")]
         channel: String,
 
         /// Telegram bot token (required only for --channel telegram).
         #[arg(long, env = "PARES_TELEGRAM_TOKEN", default_value = "")]
         telegram_token: String,
+
+        /// HTTP channel port (used with --channel http).
+        #[arg(long, env = "PARES_HTTP_PORT", default_value = "3200")]
+        http_port: u16,
 
         /// OpenAI-compatible API URL.
         #[arg(
@@ -3386,6 +3390,7 @@ async fn main() {
             config,
             channel,
             telegram_token,
+            http_port,
             model_url,
             model,
             use_copilot,
@@ -3950,8 +3955,33 @@ async fn main() {
                         std::process::exit(1);
                     }
                 }
+                "http" => {
+                    use pares_agens_channels::http_spine::{HttpSpineChannel, HttpSpineConfig, PendingResponses, start_http_server};
+
+                    let http_config = HttpSpineConfig {
+                        port: http_port,
+                        bearer_token: None,
+                        timeout_seconds: 120,
+                    };
+                    let pending = Arc::new(PendingResponses::default());
+
+                    // Delivery loop routes responses to pending HTTP requests
+                    let pending_for_delivery = Arc::clone(&pending);
+                    tokio::spawn(async move {
+                        let channel = HttpSpineChannel::new(HttpSpineConfig::default());
+                        channel.run_delivery_loop(delivery_rx, pending_for_delivery).await;
+                    });
+
+                    // Start HTTP server (blocks)
+                    let emitter = pipeline.emitter();
+                    info!(port = http_port, "Starting HTTP channel — POST /v1/chat to interact");
+                    if let Err(e) = start_http_server(emitter, pending, http_config).await {
+                        error!(error = %e, "HTTP server failed");
+                        std::process::exit(1);
+                    }
+                }
                 other => {
-                    error!(channel = %other, "Unknown channel. Supported: stdio, telegram");
+                    error!(channel = %other, "Unknown channel. Supported: stdio, telegram, http");
                     std::process::exit(1);
                 }
             }

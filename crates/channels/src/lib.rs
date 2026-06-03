@@ -13,6 +13,7 @@
 
 pub mod adapter;
 pub mod group_context;
+pub mod http_spine;
 pub mod stdin;
 pub mod tauri_ipc;
 pub mod telegram;
