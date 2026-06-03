@@ -1641,11 +1641,11 @@ mod tests {
     #[test]
     fn lint_l011_call_to_function_no_diagnostic() {
         let mut doc = empty_doc();
-        doc.functions.push(crate::px::PxFunction {
+        doc.functions.push(crate::PxFunction {
             name: "compute_hash".to_string(),
             params: vec![],
             return_type: "string".to_string(),
-            mode: crate::px::FunctionMode::Deterministic,
+            mode: crate::FunctionMode::Deterministic,
             docstring: String::new(),
         });
         doc.procedures.push(make_proc(
@@ -1815,14 +1815,14 @@ mod tests {
     #[test]
     fn lint_l012_function_arity_mismatch() {
         let mut doc = empty_doc();
-        doc.functions.push(crate::px::PxFunction {
+        doc.functions.push(crate::PxFunction {
             name: "compute".to_string(),
             params: vec![
-                crate::px::PxField { name: "input".to_string(), type_expr: "string".to_string() },
-                crate::px::PxField { name: "mode".to_string(), type_expr: "string".to_string() },
+                crate::PxField { name: "input".to_string(), type_expr: "string".to_string() },
+                crate::PxField { name: "mode".to_string(), type_expr: "string".to_string() },
             ],
             return_type: "string".to_string(),
-            mode: crate::px::FunctionMode::Deterministic,
+            mode: crate::FunctionMode::Deterministic,
             docstring: String::new(),
         });
         // Call passes {input, mode, extra}
@@ -1986,7 +1986,7 @@ mod tests {
         doc.procedures.push(make_proc(
             "proc_with_parallel",
             vec![PxStep::Parallel {
-                branches: vec![crate::px::PxParallelBranch {
+                branches: vec![crate::PxParallelBranch {
                     name: "branch_a".into(),
                     steps: vec![PxStep::Match {
                         arms: vec![PxMatchArm {
@@ -2132,7 +2132,7 @@ mod tests {
         doc.procedures.push(make_proc(
             "proc_parallel_unreachable",
             vec![PxStep::Parallel {
-                branches: vec![crate::px::PxParallelBranch {
+                branches: vec![crate::PxParallelBranch {
                     name: "b1".into(),
                     steps: vec![
                         PxStep::Abort { value: None },

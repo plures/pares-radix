@@ -56,29 +56,32 @@ rule auto_assign_reviewer:
     - fact: "Auto-assigned praxis reviewer" category: audit tags: ["pr", "review"]
 
 procedure review_pr:
-  trigger: on_write {event: "pr.opened"}
+  trigger: on_write
+    pattern: "pr:*"
   given: "Perform automated review checks on a new PR"
-  get_pull_request {number: 42} -> $pr
-  when pr.draft == true:
-    add_comment {pr: 42, message: "Draft PR — skipping review"}
-    emit {event: "pr.review.skipped", reason: "draft"}
-  end
-  parallel -> $analysis:
-    branch code_review:
-      analyze_diff {pr: 42} -> $diff_analysis
-    end
-    branch test_coverage:
-      check_coverage {pr: 42} -> $coverage
-    end
-    branch changelog:
-      check_changelog_entry {pr: 42}
-    end
-  end
-  when analysis.test_coverage.delta < 0:
-    add_comment {pr: 42, message: "Test coverage decreased"}
-  end
-  when pr.additions < 50 && analysis.code_review.risk == "low":
-    approve_pr {pr: 42, message: "Auto-approved: small low-risk change"}
-    emit {event: "pr.auto_approved", pr: 42}
-  end
-  emit {event: "pr.reviewed", pr: 42}
+{
+    let pr = get_pull_request({ number: 42 });
+    if pr.draft == true {
+        add_comment({ pr: 42, message: "Draft PR — skipping review" });
+        emit("pr.review.skipped", { reason: "draft" });
+    }
+    let analysis = parallel {
+        code_review: {
+            let diff_analysis = analyze_diff({ pr: 42 });
+        }
+        test_coverage: {
+            let coverage = check_coverage({ pr: 42 });
+        }
+        changelog: {
+            check_changelog_entry({ pr: 42 });
+        }
+    };
+    if analysis.test_coverage.delta < 0 {
+        add_comment({ pr: 42, message: "Test coverage decreased" });
+    }
+    if pr.additions < 50 && analysis.code_review.risk == "low" {
+        approve_pr({ pr: 42, message: "Auto-approved: small low-risk change" });
+        emit("pr.auto_approved", { pr: 42 });
+    }
+    emit("pr.reviewed", { pr: 42 });
+}

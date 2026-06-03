@@ -188,4 +188,20 @@ config telegram:
         let config = parse_config("").expect("parse failed");
         assert!(config.entries.is_empty());
     }
+
+    #[test]
+    fn test_list_values_in_config() {
+        let source = r#"
+config model:
+  fallbacks: ["gpt-4o", "claude-sonnet-4.5"]
+  temperature: 0.7
+"#;
+        let config = parse_config(source).expect("parse failed");
+        let fallbacks = config.entries.get("model.fallbacks").expect("fallbacks missing");
+        assert!(fallbacks.is_array(), "expected array, got: {:?}", fallbacks);
+        let arr = fallbacks.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0].as_str(), Some("gpt-4o"));
+        assert_eq!(arr[1].as_str(), Some("claude-sonnet-4.5"));
+    }
 }

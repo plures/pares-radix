@@ -455,7 +455,7 @@ topic_key = ""
 
 #[test]
 fn parse_personality_px() {
-    let input = include_str!("../../../config/radix-personality.px");
+    let input = include_str!("../../../config/radix-personality.toml");
     let px = parse(input).expect("personality.px should parse");
     assert_eq!(px.safety.len(), 5);
     assert_eq!(px.personality.len(), 14);

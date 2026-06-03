@@ -3816,6 +3816,23 @@ async fn main() {
                 }
             }
 
+            // 5. .px config personality (supplements workspace files)
+            if let Some(name) = px_cfg.get_str("personality.name") {
+                context_parts.push(format!("## Identity\nYour name is {}.", name));
+                info!(name = %name, "Loaded personality name from .px config");
+            }
+            if let Some(prompt) = px_cfg.get_str("personality.system_prompt") {
+                // Only use .px system_prompt as fallback if no workspace files loaded it
+                if context_parts.is_empty() {
+                    context_parts.push(prompt.to_string());
+                    info!("Using personality.system_prompt from .px config as base prompt");
+                } else {
+                    // Append as supplementary instruction
+                    context_parts.push(format!("## Additional Instructions\n{}", prompt));
+                    info!("Appended personality.system_prompt from .px config");
+                }
+            }
+
             let system_prompt = if context_parts.is_empty() {
                 "You are a software engineering assistant with access to shell commands, file operations, web search, and web fetch. You can execute code, read/write files, search the web, and help with development tasks. Be direct and concise. Use tools proactively.".to_string()
             } else {

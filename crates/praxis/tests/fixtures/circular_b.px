@@ -4,4 +4,6 @@ import circular_a
 
 procedure proc_b:
   trigger: manual
-  do_b {} -> $result
+{
+    let result = do_b({});
+}
