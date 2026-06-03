@@ -171,6 +171,10 @@ async fn handle_chat(
     State(state): State<AppState>,
     Json(req): Json<ChatRequest>,
 ) -> Result<Json<ChatResponse>, StatusCode> {
+    // Reject empty messages
+    if req.message.trim().is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let request_id = Uuid::new_v4().to_string();
     let sender = req.sender.unwrap_or_else(|| "user".into());
     // Stable session for multi-turn: explicit session_id > sender-based default
