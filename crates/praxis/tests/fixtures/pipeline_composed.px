@@ -16,8 +16,10 @@ constraint timeout_sane:
 
 procedure process_request:
   trigger: manual
-  validate_input {data: "$request"} -> $validation
-  when validation.valid == true:
-    sanitize {input: "$request.body"} -> $clean
-    double {input: "$clean"} -> $result
-  end
+{
+    let validation = validate_input({ data: request });
+    if validation.valid == true {
+        let clean = sanitize({ input: request.body });
+        let result = double({ input: clean });
+    }
+}

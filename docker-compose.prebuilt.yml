@@ -1,0 +1,46 @@
+# docker-compose.prebuilt.yml — Uses pre-built binary (fast, no in-Docker compilation)
+# Requires: cargo build --release -p pares-radix-cli (run on host first)
+
+services:
+  pares-radix:
+    build:
+      context: .
+      dockerfile: Dockerfile.prebuilt
+    container_name: radix-test
+    ports:
+      - "2222:22"
+      - "3100:3100"
+    environment:
+      RUST_LOG: info,pares_radix=debug
+      PARES_AUTOSTART: ""
+    volumes:
+      - radix-data:/home/radix/.pares-radix
+      - radix-cache:/home/radix/.cache
+    healthcheck:
+      test: ["CMD", "pares-radix", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: testing/Dockerfile.test-runner
+    container_name: radix-test-runner
+    depends_on:
+      pares-radix:
+        condition: service_healthy
+    environment:
+      RADIX_SSH_HOST: pares-radix
+      RADIX_SSH_PORT: "22"
+      RADIX_SSH_USER: radix
+      RADIX_SSH_PASS: radix-test-pw
+    volumes:
+      - ./testing:/tests:ro
+    profiles:
+      - test
+
+volumes:
+  radix-data:
+  radix-cache:

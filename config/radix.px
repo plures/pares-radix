@@ -15,8 +15,7 @@ config telegram:
 
 config model:
   url: "https://models.inference.ai.azure.com"
-  fallback1: "gpt-4o"
-  fallback2: "claude-sonnet-4.5"
+  fallbacks: ["gpt-4o", "claude-sonnet-4.5"]
   temperature: 0.7
   max_tokens: 4096
 

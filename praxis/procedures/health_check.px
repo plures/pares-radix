@@ -6,7 +6,9 @@
 procedure system_health:
   trigger: manual
   given: "Run system health diagnostics and return aggregated status"
-  read_file {path: "/proc/loadavg"} -> $load
-  exec {command: "df -h / | tail -1"} -> $disk
-  exec {command: "free -m | grep Mem"} -> $memory
-  emit {event: "health.check.complete", load: $load, disk: $disk, memory: $memory}
+{
+    let load = read_file({ path: "/proc/loadavg" });
+    let disk = exec({ command: "df -h / | tail -1" });
+    let memory = exec({ command: "free -m | grep Mem" });
+    emit("health.check.complete", { load: load, disk: disk, memory: memory });
+}
