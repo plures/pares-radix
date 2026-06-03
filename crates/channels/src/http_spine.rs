@@ -83,15 +83,15 @@ impl HttpSpineChannel {
                     if channel != "http" {
                         continue;
                     }
-                    // Route response to the waiting request by chat_id (which is the request_id)
-                    let request_id = chat_id.clone();
-                    if let Some(tx) = pending.take(&request_id).await {
+                    // Route response to the waiting request by session chat_id
+                    let session_id = chat_id.clone();
+                    if let Some(tx) = pending.take(&session_id).await {
                         let _ = tx.send(content.clone());
-                        debug!(request_id = %request_id, "http_spine: delivered response");
+                        debug!(session_id = %session_id, "http_spine: delivered response");
                     } else {
                         warn!(
                             id = %id,
-                            request_id = %request_id,
+                            session_id = %session_id,
                             "http_spine: no pending request for delivery"
                         );
                     }
@@ -140,6 +140,8 @@ struct ChatRequest {
     message: String,
     /// Optional sender name (default: "user")
     sender: Option<String>,
+    /// Optional session ID for multi-turn conversation (default: sender-based)
+    session_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -171,19 +173,23 @@ async fn handle_chat(
 ) -> Result<Json<ChatResponse>, StatusCode> {
     let request_id = Uuid::new_v4().to_string();
     let sender = req.sender.unwrap_or_else(|| "user".into());
+    // Stable session for multi-turn: explicit session_id > sender-based default
+    let session_id = req.session_id.unwrap_or_else(|| format!("http:{}", sender));
 
-    // Create response channel
+    // Create response channel (keyed by session for delivery routing)
     let (tx, rx) = oneshot::channel();
-    state.pending.insert(request_id.clone(), tx).await;
+    state.pending.insert(session_id.clone(), tx).await;
 
     // Emit inbound event
+    // chat_id = session_id (for conversation history continuity)
+    // metadata.request_id = unique per request (for response routing)
     let event = SpineEvent::Inbound {
         id: Uuid::new_v4().to_string(),
         source: "http".into(),
-        chat_id: request_id.clone(),
+        chat_id: session_id.clone(),
         sender,
         content: req.message,
-        metadata: serde_json::json!({}),
+        metadata: serde_json::json!({ "request_id": request_id }),
     };
     state.emitter.emit(event).await;
 
@@ -200,7 +206,7 @@ async fn handle_chat(
         }
         Err(_) => {
             // Clean up pending
-            state.pending.take(&request_id).await;
+            state.pending.take(&session_id).await;
             error!(request_id = %request_id, "http_spine: response timeout");
             Err(StatusCode::GATEWAY_TIMEOUT)
         }
