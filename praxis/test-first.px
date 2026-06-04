@@ -1,5 +1,11 @@
 # test-first.px — Test-First Development Constraints
 #
+# NOTE: These constraints are POLICY DOCUMENTATION, not compiled enforcement.
+# They guide AI agents reading this repo. The Condition evaluator cannot parse
+# freeform domain expressions (e.g. design.has_automation_interface).
+# Enforcement happens through the agent's system prompt and .px procedure
+# guards, not through runtime constraint evaluation.
+#
 # Enforces the principle that every product is designed for automated
 # testing from day one. Testing is a first-class engineering concern,
 # not an afterthought.

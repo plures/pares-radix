@@ -1,5 +1,10 @@
 # plures-dev-guide.px — Auto-generated from plures/development-guide
 #
+# NOTE: These constraints are POLICY DOCUMENTATION, not compiled enforcement.
+# They guide AI agents reading this repo. The Condition evaluator cannot parse
+# freeform domain expressions. Enforcement happens through the agent's system
+# prompt and .px procedure guards, not through runtime constraint evaluation.
+#
 # This file is produced by scripts/generate-px-constraints.mjs
 # Do not edit manually — edit the source .md files and re-run the generator.
 #

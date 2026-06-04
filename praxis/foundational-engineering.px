@@ -1,5 +1,11 @@
 # foundational-engineering.px — Foundational Software Engineering Principles
 #
+# NOTE: These constraints are POLICY DOCUMENTATION, not compiled enforcement.
+# They guide AI agents reading this repo. The Condition evaluator cannot parse
+# freeform domain expressions (e.g. change.duplicates_logic_across_modules).
+# Enforcement happens through the agent's system prompt and .px procedure
+# guards, not through runtime constraint evaluation.
+#
 # These are not opinions or preferences. They are tested, universal principles
 # of functional software development, codified as enforceable constraints.
 #

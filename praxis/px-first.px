@@ -1,5 +1,11 @@
 # px-first.px — .px-First Development Enforcement
 #
+# NOTE: These constraints are POLICY DOCUMENTATION, not compiled enforcement.
+# They guide AI agents reading this repo. The Condition evaluator cannot parse
+# freeform domain expressions (e.g. change.adds_business_logic_in_rust).
+# Enforcement happens through the agent's system prompt and .px procedure
+# guards, not through runtime constraint evaluation.
+#
 # C-DEV-001: When building a feature for pares-radix, START with a .px file.
 # Not Rust. Not a module. Express the logic as praxis first.
 #
