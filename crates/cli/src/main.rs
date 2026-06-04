@@ -3866,12 +3866,55 @@ async fn main() {
             pipeline.register(Arc::new(ResponseRouter)).await;
             info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router");
 
+            // 4.5. Load .px procedures from praxis/procedures/
+            {
+                use pares_agens_core::px_adapter::{load_px_directory, ToolDispatchActionHandler, AsyncActionHandler};
+
+                let px_action_handler = Arc::new(ToolDispatchActionHandler::new_lazy());
+                let praxis_dir = PathBuf::from(&home).join(".pares-radix/praxis/procedures");
+                if praxis_dir.is_dir() {
+                    let adapters = load_px_directory(
+                        &praxis_dir,
+                        px_action_handler.clone() as Arc<dyn AsyncActionHandler>,
+                    );
+                    if !adapters.is_empty() {
+                        info!(
+                            count = adapters.len(),
+                            dir = %praxis_dir.display(),
+                            "Loaded .px procedures for spine pipeline"
+                        );
+                        for adapter in adapters {
+                            pipeline.register(Arc::new(adapter)).await;
+                        }
+                    }
+                } else {
+                    debug!(dir = %praxis_dir.display(), ".px procedures directory not found, skipping");
+                }
+            }
+
             // 5. Start the pipeline event loop
             let pipeline_for_loop = Arc::clone(&pipeline);
             tokio::spawn(async move {
                 pipeline_for_loop.run(rx).await;
             });
             info!("Pipeline event loop started");
+
+            // 5.5. Periodic task evaluation timer (60s)
+            {
+                use pares_agens_core::spine::event::SpineEvent;
+                let timer_emitter = pipeline.emitter();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        timer_emitter.emit(SpineEvent::Timer {
+                            id: SpineEvent::new_id(),
+                            name: "task_eval".into(),
+                        }).await;
+                    }
+                });
+                info!("Task evaluation timer started (60s interval)");
+            }
 
             // 6. Start channel (delivery loop + receiver)
             let delivery_rx = pipeline.subscribe_deliveries();
