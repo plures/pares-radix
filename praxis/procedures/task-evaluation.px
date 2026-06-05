@@ -28,10 +28,10 @@ procedure execute_shell_task:
   trigger: manual
   given: "Execute a shell-type task"
 {
-    let result = exec({ command: $args.task.value.command });
+    let result = exec({ command: input.task.value.command });
     let now = timestamp_now({});
-    db_put({ key: $args.task.key, value: { status: "completed", completed_at: now, result: result.stdout, exit_code: result.exit_code } });
-    emit("task.completed", { task_id: $args.task.key, type: "shell" });
+    db_put({ key: input.task.key, value: { status: "completed", completed_at: now, result: result.stdout, exit_code: result.exit_code } });
+    emit("task.completed", { task_id: input.task.key, type: "shell" });
 }
 
 procedure execute_procedure_task:
