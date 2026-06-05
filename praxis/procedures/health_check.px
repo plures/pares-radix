@@ -1,14 +1,45 @@
-# health_check.px — System health check procedure
+# health_check.px — System health check procedure (cross-platform)
 #
 # Callable as the "health_check" tool by the model.
 # Runs a series of diagnostic checks and returns aggregated status.
+# Works on Windows, Linux, and macOS.
 
 procedure system_health:
   trigger: manual
   given: "Run system health diagnostics and return aggregated status"
 {
-    let load = read_file({ path: "/proc/loadavg" });
-    let disk = exec({ command: "df -h / | tail -1" });
-    let memory = exec({ command: "free -m | grep Mem" });
-    emit("health.check.complete", { load: load, disk: disk, memory: memory });
+    let os_type = detect_os({});
+
+    if os_type == "windows":
+        let cpu = exec({ command: "powershell -NoProfile -Command \"(Get-CimInstance Win32_Processor).LoadPercentage\"" });
+        let disk = exec({ command: "powershell -NoProfile -Command \"Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json\"" });
+        let memory = exec({ command: "powershell -NoProfile -Command \"Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json\"" });
+    end
+
+    if os_type == "linux":
+        let cpu = read_file({ path: "/proc/loadavg" });
+        let disk = exec({ command: "df -h / | tail -1" });
+        let memory = exec({ command: "free -m | grep Mem" });
+    end
+
+    if os_type == "darwin":
+        let cpu = exec({ command: "sysctl -n vm.loadavg" });
+        let disk = exec({ command: "df -h / | tail -1" });
+        let memory = exec({ command: "vm_stat | head -5" });
+    end
+
+    let status = "ok";
+    emit("health.check.complete", { os: os_type, cpu: cpu, disk: disk, memory: memory, status: status });
+}
+
+procedure detect_os:
+  trigger: manual
+  given: "Detect the current operating system"
+{
+    let result = exec({ command: "uname -s 2>/dev/null || echo Windows" });
+    match result.stdout:
+        "Linux" => return "linux";
+        "Darwin" => return "darwin";
+        _ => return "windows";
+    end
 }

@@ -1,12 +1,51 @@
+# directives.px — Core plures org development directives
+#
+# These procedures implement the key decision-making logic for working
+# within the plures org. They are callable by agents and enforce the
+# development guide's rules procedurally.
+
 procedure route_code:
   trigger: manual
   given: "Determine which repository owns a piece of code based on its description"
 {
     let registry = db_get({ key: "plures:repos:registry" });
     let routing = db_get({ key: "plures:routing:rules" });
+
+    # Build a decision context from the registry and routing rules
     let target = "UNKNOWN";
     let reason = "No routing rule matched";
-    emit("routing.query", { registry: registry, routing: routing });
+    let confidence = "low";
+
+    # Check explicit routing rules first (highest priority)
+    for $rule in routing.rules:
+        if $rule.matches_description == true:
+            let target = $rule.target_repo;
+            let reason = $rule.rationale;
+            let confidence = "high";
+        end
+    end
+
+    # If no explicit rule, check repo ownership domains
+    if target == "UNKNOWN":
+        for $repo in registry.repos:
+            if $repo.domain_match == true:
+                let target = $repo.name;
+                let reason = "Domain ownership: " + $repo.domain;
+                let confidence = "medium";
+            end
+        end
+    end
+
+    # Emit result with actionable guidance
+    if target == "UNKNOWN":
+        emit("routing.unresolved", {
+            suggestion: "Check development-guide/design/PLURES-FOUNDATION.md for repo responsibilities",
+            action: "Create an issue in development-guide proposing a routing rule"
+        });
+    end
+
+    emit("routing.resolved", { target: target, reason: reason, confidence: confidence });
+    return { repo: target, reason: reason, confidence: confidence };
 }
 
 procedure prioritize_work:
@@ -14,8 +53,54 @@ procedure prioritize_work:
   given: "Determine what to work on next based on current state"
 {
     let framework = db_get({ key: "plures:prioritization:framework" });
-    let levels = framework;
-    emit("prioritization.query", { framework: framework });
+    let active_issues = db_get({ key: "plures:issues:assigned" });
+    let blocked_items = db_get({ key: "plures:issues:blocked" });
+
+    # Priority levels (from WORK-PRIORITIZATION.md):
+    # P0: Broken production / security incident
+    # P1: Blocking other work / CI red
+    # P2: Committed sprint work
+    # P3: Backlog improvements
+    # P4: Nice-to-haves / exploration
+
+    let recommendations = [];
+
+    # Check P0 first — anything broken?
+    for $item in active_issues:
+        if $item.priority == 0 and $item.status != "resolved":
+            let recommendations = append(recommendations, {
+                item: $item,
+                reason: "P0: Production/security issue — fix immediately"
+            });
+        end
+    end
+
+    # If no P0, check P1
+    if length(recommendations) == 0:
+        for $item in active_issues:
+            if $item.priority == 1 and $item.status != "resolved":
+                let recommendations = append(recommendations, {
+                    item: $item,
+                    reason: "P1: Blocking work — unblock before continuing"
+                });
+            end
+        end
+    end
+
+    # If no P0/P1, work committed sprint items (P2)
+    if length(recommendations) == 0:
+        for $item in active_issues:
+            if $item.priority == 2 and $item.status == "in_progress":
+                let recommendations = append(recommendations, {
+                    item: $item,
+                    reason: "P2: Active sprint work — continue"
+                });
+            end
+        end
+    end
+
+    emit("prioritization.resolved", { recommendations: recommendations, framework: framework });
+    return { next_items: recommendations };
 }
 
 procedure validate_architecture:
@@ -25,7 +110,42 @@ procedure validate_architecture:
     let registry = db_get({ key: "plures:repos:registry" });
     let routing = db_get({ key: "plures:routing:rules" });
     let pillars = db_get({ key: "plures:lifecycle:seven-pillars" });
-    emit("architecture.query", { registry: registry, routing: routing, pillars: pillars });
+    let violations = [];
+
+    # Check 1: Is this code going in the right repo?
+    let route_result = route_code({});
+    if route_result.confidence == "low":
+        let violations = append(violations, {
+            check: "repo_routing",
+            severity: "warning",
+            message: "Could not confidently determine correct repo. Verify with development-guide."
+        });
+    end
+
+    # Check 2: Does this violate single-source-of-truth?
+    let existing_impls = db_get({ key: "plures:functions:" + change.function_name });
+    if existing_impls != null and length(existing_impls) > 0:
+        let violations = append(violations, {
+            check: "single_source_of_truth",
+            severity: "error",
+            message: "Function already exists in: " + existing_impls[0].repo + ". Delegate, don't duplicate (ADR-0010)."
+        });
+    end
+
+    # Check 3: Does this follow the 7 pillars lifecycle?
+    for $pillar in pillars:
+        if $pillar.required == true and change[$pillar.check_field] == false:
+            let violations = append(violations, {
+                check: "lifecycle_pillar_" + $pillar.name,
+                severity: "error",
+                message: "Missing pillar: " + $pillar.name + " — " + $pillar.guidance
+            });
+        end
+    end
+
+    let passed = length(violations) == 0;
+    emit("architecture.validated", { passed: passed, violations: violations });
+    return { valid: passed, violations: violations };
 }
 
 procedure guide_lifecycle:
@@ -34,16 +154,66 @@ procedure guide_lifecycle:
 {
     let pillars = db_get({ key: "plures:lifecycle:seven-pillars" });
     let registry = db_get({ key: "plures:repos:registry" });
-    emit("lifecycle.query", { pillars: pillars, registry: registry });
+
+    # The 7 pillars define the build lifecycle:
+    # 1. Design (ADR + .px constraints)
+    # 2. Prototype (TS spike)
+    # 3. Core (Rust implementation)
+    # 4. Bridge (NAPI bindings)
+    # 5. Integration (wire into system)
+    # 6. Test (automated verification)
+    # 7. Ship (CI/CD + release)
+
+    let current_stage = detect_current_stage({});
+    let guidance = [];
+
+    for $pillar in pillars:
+        if $pillar.order >= current_stage:
+            let guidance = append(guidance, {
+                step: $pillar.order,
+                name: $pillar.name,
+                description: $pillar.description,
+                checklist: $pillar.checklist,
+                repo: $pillar.primary_repo
+            });
+        end
+    end
+
+    emit("lifecycle.guidance", { current_stage: current_stage, remaining_steps: guidance });
+    return { stage: current_stage, steps: guidance };
 }
 
 procedure detect_anti_patterns:
   trigger: manual
   given: "Check an action for known anti-patterns from incident history"
 {
-    let lesson_pluresdb = db_get({ key: "praxis:learned:2026-05-23:pluresdb-is-foundation" });
-    let lesson_compiler = db_get({ key: "praxis:learned:px-compiler-location" });
-    let lesson_general = db_get({ key: "praxis:learned:2026-05-18" });
+    let lessons = db_get({ key: "praxis:lessons:all" });
     let routing = db_get({ key: "plures:routing:rules" });
-    emit("anti_pattern.query", { lessons: lesson_pluresdb, compiler: lesson_compiler, general: lesson_general });
+    let warnings = [];
+
+    # Check against known lessons learned
+    for $lesson in lessons:
+        if $lesson.pattern_matches == true:
+            let warnings = append(warnings, {
+                lesson: $lesson.id,
+                date: $lesson.date,
+                pattern: $lesson.anti_pattern,
+                correction: $lesson.correct_approach,
+                severity: $lesson.severity
+            });
+        end
+    end
+
+    # Specific known anti-patterns:
+    # - Building in wrong repo (2026-05-23: pluresdb-is-foundation)
+    # - Duplicating logic across crates (ADR-0010)
+    # - Hardcoding repo lists instead of dynamic discovery
+    # - Testing only happy paths
+    # - Embedding volatile logic in binaries
+
+    if length(warnings) > 0:
+        emit("anti_pattern.detected", { count: length(warnings), warnings: warnings });
+    end
+
+    return { detected: length(warnings) > 0, warnings: warnings };
 }
