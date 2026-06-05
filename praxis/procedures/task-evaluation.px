@@ -58,22 +58,22 @@ procedure create_task:
   trigger: manual
   given: "Create a new task for deferred execution"
 {
-    let id = generate_id({ prefix: "task" });
+    let id = "task:" + generate_id({});
     let now = timestamp_now({});
     let task = {
         status: "pending",
-        type: $args.type,
+        type: input.type,
         created_at: now,
-        delay_seconds: $args.delay_seconds,
-        command: $args.command,
-        procedure: $args.procedure,
-        chat_id: $args.chat_id,
-        text: $args.text,
-        args: $args.args,
-        priority: $args.priority
+        delay_seconds: input.delay_seconds,
+        command: input.command,
+        procedure: input.procedure,
+        chat_id: input.chat_id,
+        text: input.text,
+        args: input.args,
+        priority: input.priority
     };
     db_put({ key: id, value: task });
-    emit("task.created", { task_id: id, type: $args.type });
+    emit("task.created", { task_id: id, type: input.type });
     return id;
 }
 
