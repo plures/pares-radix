@@ -1,8 +1,8 @@
 //! Task model — Praxis-driven task tracking with completion conditions.
 //!
 //! Every user request creates a [`Task`] in PluresDB. Tasks have measurable
-//! [`CompletionCondition`]s. The [`TaskLoop`](super::task_loop) cycles open
-//! tasks on idle and acts on them, replacing the simple heartbeat timer.
+//! [`CompletionCondition`]s. Task evaluation is driven by `.px` procedures
+//! triggered via SpineEvent::Timer.
 
 use serde::{Deserialize, Serialize};
 

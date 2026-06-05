@@ -113,8 +113,6 @@ pub mod plugins;
 pub mod session;
 /// Praxis-driven task model — tracked units of work with completion conditions.
 pub mod task;
-/// Task loop — idle-time evaluator that cycles open tasks.
-pub mod task_loop;
 /// Task manager — CRUD and lifecycle for tasks backed by PluresDB.
 pub mod task_manager;
 
