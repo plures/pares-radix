@@ -91,6 +91,13 @@ pub enum SpineEvent {
         chat_id: String,
         error: String,
     },
+
+    /// A periodic timer tick (used to trigger task evaluation).
+    Timer {
+        id: String,
+        /// The timer's logical name (e.g. "task_eval").
+        name: String,
+    },
 }
 
 impl SpineEvent {
@@ -109,7 +116,8 @@ impl SpineEvent {
             | Self::DeliverySuccess { id, .. }
             | Self::DeliveryFailure { id, .. }
             | Self::ToolRequest { id, .. }
-            | Self::ToolResult { id, .. } => id,
+            | Self::ToolResult { id, .. }
+            | Self::Timer { id, .. } => id,
         }
     }
 
@@ -124,6 +132,7 @@ impl SpineEvent {
             Self::DeliveryFailure { .. } => "delivery_failure",
             Self::ToolRequest { .. } => "tool_request",
             Self::ToolResult { .. } => "tool_result",
+            Self::Timer { .. } => "timer",
         }
     }
 }
