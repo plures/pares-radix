@@ -38,10 +38,10 @@ procedure execute_procedure_task:
   trigger: manual
   given: "Execute a procedure-type task by running another .px procedure"
 {
-    let result = praxis_run({ procedure: $args.task.value.procedure, args: $args.task.value.args });
+    let result = praxis_run({ procedure: input.task.value.procedure, vars: input.task.value.args });
     let now = timestamp_now({});
-    db_put({ key: $args.task.key, value: { status: "completed", completed_at: now, result: result } });
-    emit("task.completed", { task_id: $args.task.key, type: "procedure" });
+    db_put({ key: input.task.key, value: { status: "completed", completed_at: now, result: result } });
+    emit("task.completed", { task_id: input.task.key, type: "procedure" });
 }
 
 procedure execute_message_task:
