@@ -64,7 +64,7 @@ procedure get_active_commitments:
 }
 
 procedure inject_commitment_context:
-  trigger: on_event("model_request")
+  trigger: model_request
   given: "Before model calls, inject active commitments as system context"
 {
     let active = get_active_commitments({});
