@@ -48,10 +48,10 @@ procedure execute_message_task:
   trigger: manual
   given: "Execute a message-type task by sending a message"
 {
-    send_message({ chat_id: $args.task.value.chat_id, text: $args.task.value.text });
+    send_message({ chat_id: input.task.value.chat_id, text: input.task.value.text });
     let now = timestamp_now({});
-    db_put({ key: $args.task.key, value: { status: "completed", completed_at: now } });
-    emit("task.completed", { task_id: $args.task.key, type: "message" });
+    db_put({ key: input.task.key, value: { status: "completed", completed_at: now } });
+    emit("task.completed", { task_id: input.task.key, type: "message" });
 }
 
 procedure create_task:
