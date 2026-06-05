@@ -8,24 +8,21 @@ procedure evaluate_tasks:
 {
     let now = timestamp_now({});
     let tasks = db_get_prefix({ prefix: "task:" });
-    
-    for $task in tasks.items:
-        if $task.value.status == "pending":
-            let age_seconds = now - $task.value.created_at;
-            if age_seconds > $task.value.delay_seconds:
+
+    for task in tasks.items {
+        if task.value.status == "pending" {
+            let age_seconds = now - task.value.created_at;
+            if age_seconds >= task.value.delay_seconds {
                 # Mark as running
-                db_put({ key: $task.key, value: { status: "running", started_at: now, original: $task.value } });
-                
+                db_put({ key: task.key, value: { status: "running", started_at: now, original: task.value } });
+
                 # Execute based on task type
-                match:
-                    $task.value.type == "shell" -> execute_shell_task({ task: $task })
-                    $task.value.type == "procedure" -> execute_procedure_task({ task: $task })
-                    $task.value.type == "message" -> execute_message_task({ task: $task })
-                end
-            end
-        end
-    end
-}
+                if task.value.type == "shell" { execute_shell_task({ task: task }); }
+                if task.value.type == "procedure" { execute_procedure_task({ task: task }); }
+                if task.value.type == "message" { execute_message_task({ task: task }); }
+            }
+        }
+    }
 
 procedure execute_shell_task:
   trigger: manual
