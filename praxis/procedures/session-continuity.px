@@ -1,0 +1,79 @@
+# session-continuity.px — Track commitments radix makes and inject as context
+# Ensures "I'll do X" results in X actually happening
+
+procedure track_commitment:
+  trigger: manual
+  given: "Record a commitment made by radix during conversation"
+{
+    let id = generate_id({ prefix: "commit" });
+    let now = timestamp_now({});
+    let commitment = {
+        text: $args.text,
+        chat_id: $args.chat_id,
+        created_at: now,
+        status: "active",
+        deadline: $args.deadline,
+        context: $args.context
+    };
+    db_put({ key: id, value: commitment });
+    emit("commitment.created", { id: id, text: $args.text });
+    return id;
+}
+
+procedure check_commitments:
+  trigger: timer
+  given: "Check all active commitments and flag overdue ones"
+{
+    let now = timestamp_now({});
+    let commitments = db_get_prefix({ prefix: "commit:" });
+    
+    for $c in commitments.items:
+        if $c.value.status == "active":
+            if $c.value.deadline > 0:
+                if now > $c.value.deadline:
+                    db_put({ key: $c.key, value: { status: "overdue", original: $c.value, overdue_at: now } });
+                    emit("commitment.overdue", { id: $c.key, text: $c.value.text, chat_id: $c.value.chat_id });
+                end
+            end
+        end
+    end
+}
+
+procedure fulfill_commitment:
+  trigger: manual
+  given: "Mark a commitment as fulfilled"
+{
+    let now = timestamp_now({});
+    let existing = db_get({ key: $args.commitment_id });
+    db_put({ key: $args.commitment_id, value: { status: "fulfilled", fulfilled_at: now, original: existing } });
+    emit("commitment.fulfilled", { id: $args.commitment_id });
+}
+
+procedure get_active_commitments:
+  trigger: manual
+  given: "Get all active commitments for context injection"
+{
+    let commitments = db_get_prefix({ prefix: "commit:" });
+    let active = [];
+    for $c in commitments.items:
+        if $c.value.status == "active" || $c.value.status == "overdue":
+            active = active + [$c];
+        end
+    end
+    return active;
+}
+
+procedure inject_commitment_context:
+  trigger: on_event("model_request")
+  given: "Before model calls, inject active commitments as system context"
+{
+    let active = get_active_commitments({});
+    if active.length > 0:
+        let context_lines = "Active commitments you made:\n";
+        for $c in active:
+            let status_tag = $c.value.status;
+            context_lines = context_lines + "- [" + status_tag + "] " + $c.value.text + "\n";
+        end
+        emit("context.inject", { role: "system", content: context_lines });
+    end
+}
