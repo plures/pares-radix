@@ -12,25 +12,19 @@ describe('tauri platform bridge', () => {
 		// Dynamic import to get the full module
 		const tauri = await import('./tauri.js');
 
-		it('navigate() resolves without error', async () => {
-			if (tauri.navigate) {
-				await expect(tauri.navigate('/test')).resolves.not.toThrow();
-			}
+		it('tauriNavigate() resolves without error', async () => {
+			await expect(tauri.tauriNavigate('/test')).resolves.not.toThrow();
 		});
 
-		it('saveWindowState() resolves without error', async () => {
-			if (tauri.saveWindowState) {
-				await expect(
-					tauri.saveWindowState({ x: 0, y: 0, width: 800, height: 600, maximized: false })
-				).resolves.not.toThrow();
-			}
+		it('tauriSaveWindowState() resolves without error', async () => {
+			await expect(
+				tauri.tauriSaveWindowState({ x: 0, y: 0, width: 800, height: 600, maximized: false })
+			).resolves.not.toThrow();
 		});
 
-		it('getWindowState() resolves to null or undefined', async () => {
-			if (tauri.getWindowState) {
-				const state = await tauri.getWindowState();
-				expect(state).toBeNull();
-			}
+		it('tauriGetWindowState() resolves to null', async () => {
+			const state = await tauri.tauriGetWindowState();
+			expect(state).toBeNull();
 		});
 	});
 });
