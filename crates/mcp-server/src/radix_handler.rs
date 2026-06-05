@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -24,8 +24,11 @@ use pares_agens_core::delegation::{SpawnOptions, SubAgentManager};
 use pares_agens_core::memory::PluresLm;
 use pares_agens_core::plugins::PluginRuntime;
 use pares_agens_core::shell_executor::ShellExecutor;
+use pares_agens_core::spine::event::SpineEvent;
+use pares_agens_core::spine::pipeline::PipelineEmitter;
 use pares_agens_core::StateStore;
 use pares_radix_mcp_client::protocol::{Tool, ToolInputSchema};
+use uuid::Uuid;
 
 use crate::app_metrics::AppMetrics;
 use pares_agens_agenda::scheduler::Scheduler;
@@ -194,6 +197,8 @@ pub struct RadixToolHandler {
     metrics: Mutex<ToolMetrics>,
     /// OpenTelemetry application metrics (no-op without a configured exporter).
     otel_metrics: AppMetrics,
+    /// Pipeline emitter for sending spine events (e.g., DeliveryRequest from send_message).
+    pipeline_emitter: Option<PipelineEmitter>,
 }
 
 impl RadixToolHandler {
@@ -219,6 +224,7 @@ impl RadixToolHandler {
             notification_tx: None,
             metrics: Mutex::new(ToolMetrics::new()),
             otel_metrics: AppMetrics::new(),
+            pipeline_emitter: None,
         }
     }
 
@@ -295,6 +301,12 @@ impl RadixToolHandler {
         tx: tokio::sync::mpsc::UnboundedSender<crate::server::ServerNotification>,
     ) -> Self {
         self.notification_tx = Some(tx);
+        self
+    }
+
+    /// Attach a pipeline emitter for sending spine events (used by send_message tool).
+    pub fn with_pipeline_emitter(mut self, emitter: PipelineEmitter) -> Self {
+        self.pipeline_emitter = Some(emitter);
         self
     }
 
@@ -1190,6 +1202,95 @@ impl RadixToolHandler {
         ToolResult::ok(
             serde_json::to_string_pretty(&Value::Object(entries)).unwrap_or_default(),
         )
+    }
+
+    // ── Task Action tools ────────────────────────────────────────────────────────
+
+    async fn timestamp_now(&self) -> ToolResult {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        ToolResult::ok(json!(now).to_string())
+    }
+
+    async fn generate_id(&self, args: &Value) -> ToolResult {
+        let prefix = args
+            .get("prefix")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let uuid_simple = Uuid::new_v4().simple().to_string();
+        let id = if prefix.is_empty() {
+            uuid_simple
+        } else {
+            format!("{prefix}_{uuid_simple}")
+        };
+
+        ToolResult::ok(json!(id).to_string())
+    }
+
+    async fn db_get_prefix(&self, args: &Value) -> ToolResult {
+        let store = match &self.state_store {
+            Some(s) => s,
+            None => return ToolResult::error("state store not configured"),
+        };
+
+        let prefix = match args.get("prefix").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return ToolResult::error("missing required parameter: prefix"),
+        };
+
+        let keys = store.keys_with_prefix(prefix).await;
+        let mut items = Vec::new();
+        for key in &keys {
+            if let Some(value) = store.get(key).await {
+                if !value.is_null() {
+                    items.push(json!({ "key": key, "value": value }));
+                }
+            }
+        }
+
+        let count = items.len();
+        ToolResult::ok(
+            serde_json::to_string_pretty(&json!({ "items": items, "count": count }))
+                .unwrap_or_default(),
+        )
+    }
+
+    async fn send_message(&self, args: &Value) -> ToolResult {
+        let emitter = match &self.pipeline_emitter {
+            Some(e) => e,
+            None => return ToolResult::error("pipeline emitter not configured"),
+        };
+
+        let chat_id = match args.get("chat_id").and_then(|v| v.as_str()) {
+            Some(c) => c.to_string(),
+            None => return ToolResult::error("missing required parameter: chat_id"),
+        };
+
+        let text = match args.get("text").and_then(|v| v.as_str()) {
+            Some(t) => t.to_string(),
+            None => return ToolResult::error("missing required parameter: text"),
+        };
+
+        let channel = args
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default")
+            .to_string();
+
+        let event = SpineEvent::DeliveryRequest {
+            id: SpineEvent::new_id(),
+            channel,
+            chat_id: chat_id.clone(),
+            content: text.clone(),
+            metadata: json!({}),
+        };
+
+        emitter.emit(event).await;
+
+        ToolResult::ok(format!("message sent to chat_id={chat_id}"))
     }
 
     // ── Config & Runtime tools ──────────────────────────────────────────────────
@@ -4821,6 +4922,59 @@ impl ToolHandler for RadixToolHandler {
                     required: None,
                 },
             },
+            // Task Action tools
+            Tool {
+                name: "timestamp_now".into(),
+                description: Some(
+                    "Returns the current Unix timestamp in seconds.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: None,
+                    required: None,
+                },
+            },
+            Tool {
+                name: "generate_id".into(),
+                description: Some(
+                    "Generate a unique ID with an optional prefix. Returns prefix_<uuid> or just <uuid>.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "prefix": {"type": "string", "description": "Optional prefix prepended to the UUID (e.g. 'task' produces 'task_<uuid>')"}
+                    })),
+                    required: None,
+                },
+            },
+            Tool {
+                name: "db_get_prefix".into(),
+                description: Some(
+                    "Prefix scan of the state store. Returns all key-value pairs matching the prefix.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "prefix": {"type": "string", "description": "The key prefix to scan (e.g. 'task:')"}
+                    })),
+                    required: Some(vec!["prefix".into()]),
+                },
+            },
+            Tool {
+                name: "send_message".into(),
+                description: Some(
+                    "Send a message to a chat via the spine pipeline. Emits a DeliveryRequest event.".into(),
+                ),
+                input_schema: ToolInputSchema {
+                    schema_type: "object".into(),
+                    properties: Some(json!({
+                        "chat_id": {"type": "string", "description": "Target chat/conversation ID"},
+                        "text": {"type": "string", "description": "Message text to send"},
+                        "channel": {"type": "string", "description": "Delivery channel (e.g. 'telegram', 'discord'). Defaults to 'default'."}
+                    })),
+                    required: Some(vec!["chat_id".into(), "text".into()]),
+                },
+            },
             // ── Config & Runtime tools ────────────────────────────────────
             Tool {
                 name: "config_get".into(),
@@ -5868,6 +6022,10 @@ impl RadixToolHandler {
             "db_delete" => self.db_delete(&arguments).await,
             "db_keys" => self.db_keys(&arguments).await,
             "db_dump" => self.db_dump(&arguments).await,
+            "db_get_prefix" => self.db_get_prefix(&arguments).await,
+            "timestamp_now" => self.timestamp_now().await,
+            "generate_id" => self.generate_id(&arguments).await,
+            "send_message" => self.send_message(&arguments).await,
             "config_get" => self.config_get(&arguments).await,
             "config_set" => self.config_set(&arguments).await,
             "config_list" => self.config_list(&arguments).await,
