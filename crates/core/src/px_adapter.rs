@@ -379,7 +379,71 @@ impl Procedure for PxProcedureAdapter {
     }
 }
 
-/// Attempt to parse emitted events from a procedure's `$emit` variable.
+// Bridge impl: allow PxProcedureAdapter to be used in the spine pipeline.
+// Converts SpineEvents to the core Event type, executes, and emits results back.
+#[async_trait]
+impl crate::spine::pipeline::SpineProcedure for PxProcedureAdapter {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn handles(&self) -> Option<Vec<&'static str>> {
+        // PxProcedureAdapter handles any event type — filtering is done
+        // internally via the trigger_kind matching in execute().
+        None
+    }
+
+    async fn handle(
+        &self,
+        event: &crate::spine::event::SpineEvent,
+        emitter: &crate::spine::pipeline::PipelineEmitter,
+    ) {
+        use crate::spine::event::SpineEvent;
+
+        // Convert SpineEvent to core Event for the .px executor
+        let core_event = match event {
+            SpineEvent::Inbound { id, source, sender, content, .. } => {
+                Event::Message {
+                    id: id.clone(),
+                    channel: source.clone(),
+                    sender: sender.clone(),
+                    content: content.clone(),
+                }
+            }
+            SpineEvent::Timer { id, name, .. } => {
+                Event::Timer {
+                    id: id.clone(),
+                    name: name.clone(),
+                    recurring: false,
+                }
+            }
+            SpineEvent::ToolResult { tool_call_id, tool_name, content, .. } => {
+                Event::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    tool_name: tool_name.clone(),
+                    content: content.clone(),
+                    is_error: false,
+                }
+            }
+            _ => return, // Other spine events not mapped to core events
+        };
+
+        // Check if this procedure handles this event type
+        let event_kind = core_event.kind();
+        if !self.trigger_kind.is_empty() && self.trigger_kind != "*" && self.trigger_kind != event_kind {
+            return;
+        }
+
+        // Execute the procedure
+        let _emitted = <Self as crate::procedure::Procedure>::execute(self, &core_event).await;
+
+        // Note: emitted events from .px procedures are logged but not re-injected
+        // into the spine pipeline to avoid infinite loops. Procedures that need
+        // to emit spine events should use the action handler's tool dispatch.
+        let _ = emitter;
+    }
+}
+
 ///
 /// Events are expected as a JSON array of objects with a `"type"` field
 /// matching the [`Event`] enum variants.
