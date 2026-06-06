@@ -26,17 +26,17 @@ procedure check_commitments:
 {
     let now = timestamp_now({});
     let commitments = db_get_prefix({ prefix: "commit:" });
-    
-    for $c in commitments.items:
-        if $c.value.status == "active":
-            if $c.value.deadline > 0:
-                if now > $c.value.deadline:
+
+    for $c in commitments.items {
+        if $c.value.status == "active" {
+            if $c.value.deadline > 0 {
+                if now > $c.value.deadline {
                     db_put({ key: $c.key, value: { status: "overdue", original: $c.value, overdue_at: now } });
                     emit("commitment.overdue", { id: $c.key, text: $c.value.text, chat_id: $c.value.chat_id });
-                end
-            end
-        end
-    end
+                }
+            }
+        }
+    }
 }
 
 procedure fulfill_commitment:
@@ -55,11 +55,11 @@ procedure get_active_commitments:
 {
     let commitments = db_get_prefix({ prefix: "commit:" });
     let active = [];
-    for $c in commitments.items:
-        if $c.value.status == "active" || $c.value.status == "overdue":
+    for $c in commitments.items {
+        if $c.value.status == "active" || $c.value.status == "overdue" {
             active = active + [$c];
-        end
-    end
+        }
+    }
     return active;
 }
 
@@ -68,12 +68,12 @@ procedure inject_commitment_context:
   given: "Before model calls, inject active commitments as system context"
 {
     let active = get_active_commitments({});
-    if active.length > 0:
+    if active.length > 0 {
         let context_lines = "Active commitments you made:\n";
-        for $c in active:
+        for $c in active {
             let status_tag = $c.value.status;
             context_lines = context_lines + "- [" + status_tag + "] " + $c.value.text + "\n";
-        end
+        }
         emit("context.inject", { role: "system", content: context_lines });
-    end
+    }
 }

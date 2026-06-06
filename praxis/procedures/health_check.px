@@ -10,23 +10,23 @@ procedure system_health:
 {
     let os_type = detect_os({});
 
-    if os_type == "windows":
+    if os_type == "windows" {
         let cpu = exec({ command: "powershell -NoProfile -Command \"(Get-CimInstance Win32_Processor).LoadPercentage\"" });
         let disk = exec({ command: "powershell -NoProfile -Command \"Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json\"" });
         let memory = exec({ command: "powershell -NoProfile -Command \"Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json\"" });
-    end
+    }
 
-    if os_type == "linux":
+    if os_type == "linux" {
         let cpu = read_file({ path: "/proc/loadavg" });
         let disk = exec({ command: "df -h / | tail -1" });
         let memory = exec({ command: "free -m | grep Mem" });
-    end
+    }
 
-    if os_type == "darwin":
+    if os_type == "darwin" {
         let cpu = exec({ command: "sysctl -n vm.loadavg" });
         let disk = exec({ command: "df -h / | tail -1" });
         let memory = exec({ command: "vm_stat | head -5" });
-    end
+    }
 
     let status = "ok";
     emit("health.check.complete", { os: os_type, cpu: cpu, disk: disk, memory: memory, status: status });
@@ -37,9 +37,9 @@ procedure detect_os:
   given: "Detect the current operating system"
 {
     let result = exec({ command: "uname -s 2>/dev/null || echo Windows" });
-    match result.stdout:
+    match result.stdout {
         "Linux" => return "linux";
         "Darwin" => return "darwin";
         _ => return "windows";
-    end
+    }
 }
