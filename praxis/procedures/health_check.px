@@ -11,9 +11,9 @@ procedure system_health:
     let os_type = detect_os({});
 
     if os_type == "windows" {
-        let cpu = exec({ command: "powershell -NoProfile -Command \"(Get-CimInstance Win32_Processor).LoadPercentage\"" });
-        let disk = exec({ command: "powershell -NoProfile -Command \"Get-PSDrive C | Select-Object Used,Free | ConvertTo-Json\"" });
-        let memory = exec({ command: "powershell -NoProfile -Command \"Get-CimInstance Win32_OperatingSystem | Select-Object TotalVisibleMemorySize,FreePhysicalMemory | ConvertTo-Json\"" });
+        let cpu = exec({ command: "powershell -NoProfile -File health-cpu.ps1" });
+        let disk = exec({ command: "powershell -NoProfile -File health-disk.ps1" });
+        let memory = exec({ command: "powershell -NoProfile -File health-memory.ps1" });
     }
 
     if os_type == "linux" {

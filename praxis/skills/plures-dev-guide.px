@@ -30,7 +30,7 @@ constraint practice.work-prioritization:
 constraint practice.automation-first-1:
   severity: warning
   source: "practices/automation-first.md"
-  message: "Fresh environment → one command → success. No manual steps, no \"now open this file and change line 42.\""
+  message: "Fresh environment, one command, success. No manual steps, no 'now open this file and change line 42.'"
 
 constraint practice.automation-first-2:
   severity: error
@@ -135,7 +135,7 @@ constraint practice.org-anomaly-detection-6:
 constraint practice.praxis-logic-1:
   severity: warning
   source: "practices/praxis-logic.md"
-  message: "Facts, events, and rules over finite state machines. FSMs become unwieldy when state transitions depend on multiple conditions, business rules change independently of state flow, or you need to explain \"why did this happen?\""
+  message: "Facts, events, and rules over finite state machines. FSMs become unwieldy when state transitions depend on multiple conditions, business rules change independently of state flow, or you need to explain 'why did this happen?'"
 
 constraint practice.praxis-logic-2:
   severity: error
@@ -150,7 +150,7 @@ constraint practice.praxis-logic-3:
 constraint practice.praxis-logic-4:
   severity: warning
   source: "practices/praxis-logic.md"
-  message: "Hypotheses are first-class. When evidence is incomplete, the system proposes hypotheses (`praxis_kind: \"hypothesis\"`) and records confidence. Hypotheses decay if not confirmed."
+  message: "Hypotheses are first-class. When evidence is incomplete, the system proposes hypotheses (praxis_kind: hypothesis) and records confidence. Hypotheses decay if not confirmed."
 
 constraint practice.praxis-logic-5:
   severity: warning
@@ -165,7 +165,7 @@ constraint practice.reactive-architecture-1:
 constraint practice.reactive-architecture-2:
   severity: warning
   source: "practices/reactive-architecture.md"
-  message: "Events over state polling. React to events when they happen. Do not check \"what is the current state?\" on a schedule."
+  message: "Events over state polling. React to events when they happen. Do not check 'what is the current state?' on a schedule."
 
 constraint practice.reactive-architecture-3:
   severity: warning
@@ -289,7 +289,7 @@ constraint lesson.2026-03-double-vlan-tagging-1:
 constraint lesson.2026-03-double-vlan-tagging-2:
   severity: error
   source: "lessons-learned/2026-03-double-vlan-tagging.md"
-  message: "Removed the VLAN ID from the physical NIC / NIC team. The vSwitch external port was set to \"no VLAN\" (untagged / access mode at the host NIC level)."
+  message: "Removed the VLAN ID from the physical NIC / NIC team. The vSwitch external port was set to 'no VLAN' (untagged / access mode at the host NIC level)."
 
 constraint lesson.2026-03-double-vlan-tagging-3:
   severity: error
@@ -334,7 +334,7 @@ constraint lesson.2026-03-double-vlan-tagging-10:
 constraint lesson.2026-03-double-vlan-tagging-11:
   severity: error
   source: "lessons-learned/2026-03-double-vlan-tagging.md"
-  message: "Added \"NIC VLAN = 0 (untagged)\" as a required pre-deployment verification step for Hyper-V hosts joining an Azure Local cluster"
+  message: "Added 'NIC VLAN = 0 (untagged)' as a required pre-deployment verification step for Hyper-V hosts joining an Azure Local cluster"
 
 constraint lesson.2026-03-double-vlan-tagging-12:
   severity: error

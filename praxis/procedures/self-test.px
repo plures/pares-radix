@@ -65,7 +65,7 @@ procedure test_process_lifecycle:
     let port = 19876;
 
     if os_type == "windows" {
-        let server = start_process({ command: "powershell -NoProfile -Command \"$l=[System.Net.HttpListener]::new();$l.Prefixes.Add('http://+:19876/');$l.Start();while($l.IsListening){$c=$l.GetContext();$r=$c.Response;$b=[Text.Encoding]::UTF8.GetBytes('OK');$r.OutputStream.Write($b,0,$b.Length);$r.Close()}\"" });
+        let server = start_process({ command: "powershell -NoProfile -File test-server.ps1" });
     }
     if os_type != "windows" {
         let server = start_process({ command: "python3 -m http.server 19876" });
