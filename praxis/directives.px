@@ -17,32 +17,32 @@ procedure route_code:
     let confidence = "low";
 
     # Check explicit routing rules first (highest priority)
-    for $rule in routing.rules:
-        if $rule.matches_description == true:
+    for $rule in routing.rules {
+        if $rule.matches_description == true {
             let target = $rule.target_repo;
             let reason = $rule.rationale;
             let confidence = "high";
-        end
-    end
+        }
+    }
 
     # If no explicit rule, check repo ownership domains
-    if target == "UNKNOWN":
-        for $repo in registry.repos:
-            if $repo.domain_match == true:
+    if target == "UNKNOWN" {
+        for $repo in registry.repos {
+            if $repo.domain_match == true {
                 let target = $repo.name;
                 let reason = "Domain ownership: " + $repo.domain;
                 let confidence = "medium";
-            end
-        end
-    end
+            }
+        }
+    }
 
     # Emit result with actionable guidance
-    if target == "UNKNOWN":
+    if target == "UNKNOWN" {
         emit("routing.unresolved", {
             suggestion: "Check development-guide/design/PLURES-FOUNDATION.md for repo responsibilities",
             action: "Create an issue in development-guide proposing a routing rule"
         });
-    end
+    }
 
     emit("routing.resolved", { target: target, reason: reason, confidence: confidence });
     return { repo: target, reason: reason, confidence: confidence };
@@ -66,38 +66,38 @@ procedure prioritize_work:
     let recommendations = [];
 
     # Check P0 first — anything broken?
-    for $item in active_issues:
-        if $item.priority == 0 and $item.status != "resolved":
+    for $item in active_issues {
+        if $item.priority == 0 && $item.status != "resolved" {
             let recommendations = append(recommendations, {
                 item: $item,
                 reason: "P0: Production/security issue — fix immediately"
             });
-        end
-    end
+        }
+    }
 
     # If no P0, check P1
-    if length(recommendations) == 0:
-        for $item in active_issues:
-            if $item.priority == 1 and $item.status != "resolved":
+    if length(recommendations) == 0 {
+        for $item in active_issues {
+            if $item.priority == 1 && $item.status != "resolved" {
                 let recommendations = append(recommendations, {
                     item: $item,
                     reason: "P1: Blocking work — unblock before continuing"
                 });
-            end
-        end
-    end
+            }
+        }
+    }
 
     # If no P0/P1, work committed sprint items (P2)
-    if length(recommendations) == 0:
-        for $item in active_issues:
-            if $item.priority == 2 and $item.status == "in_progress":
+    if length(recommendations) == 0 {
+        for $item in active_issues {
+            if $item.priority == 2 && $item.status == "in_progress" {
                 let recommendations = append(recommendations, {
                     item: $item,
                     reason: "P2: Active sprint work — continue"
                 });
-            end
-        end
-    end
+            }
+        }
+    }
 
     emit("prioritization.resolved", { recommendations: recommendations, framework: framework });
     return { next_items: recommendations };
@@ -114,34 +114,34 @@ procedure validate_architecture:
 
     # Check 1: Is this code going in the right repo?
     let route_result = route_code({});
-    if route_result.confidence == "low":
+    if route_result.confidence == "low" {
         let violations = append(violations, {
             check: "repo_routing",
             severity: "warning",
             message: "Could not confidently determine correct repo. Verify with development-guide."
         });
-    end
+    }
 
     # Check 2: Does this violate single-source-of-truth?
     let existing_impls = db_get({ key: "plures:functions:" + change.function_name });
-    if existing_impls != null and length(existing_impls) > 0:
+    if existing_impls != null && length(existing_impls) > 0 {
         let violations = append(violations, {
             check: "single_source_of_truth",
             severity: "error",
             message: "Function already exists in: " + existing_impls[0].repo + ". Delegate, don't duplicate (ADR-0010)."
         });
-    end
+    }
 
     # Check 3: Does this follow the 7 pillars lifecycle?
-    for $pillar in pillars:
-        if $pillar.required == true and change[$pillar.check_field] == false:
+    for $pillar in pillars {
+        if $pillar.required == true && change[$pillar.check_field] == false {
             let violations = append(violations, {
                 check: "lifecycle_pillar_" + $pillar.name,
                 severity: "error",
                 message: "Missing pillar: " + $pillar.name + " — " + $pillar.guidance
             });
-        end
-    end
+        }
+    }
 
     let passed = length(violations) == 0;
     emit("architecture.validated", { passed: passed, violations: violations });
@@ -167,8 +167,8 @@ procedure guide_lifecycle:
     let current_stage = detect_current_stage({});
     let guidance = [];
 
-    for $pillar in pillars:
-        if $pillar.order >= current_stage:
+    for $pillar in pillars {
+        if $pillar.order >= current_stage {
             let guidance = append(guidance, {
                 step: $pillar.order,
                 name: $pillar.name,
@@ -176,8 +176,8 @@ procedure guide_lifecycle:
                 checklist: $pillar.checklist,
                 repo: $pillar.primary_repo
             });
-        end
-    end
+        }
+    }
 
     emit("lifecycle.guidance", { current_stage: current_stage, remaining_steps: guidance });
     return { stage: current_stage, steps: guidance };
@@ -192,8 +192,8 @@ procedure detect_anti_patterns:
     let warnings = [];
 
     # Check against known lessons learned
-    for $lesson in lessons:
-        if $lesson.pattern_matches == true:
+    for $lesson in lessons {
+        if $lesson.pattern_matches == true {
             let warnings = append(warnings, {
                 lesson: $lesson.id,
                 date: $lesson.date,
@@ -201,8 +201,8 @@ procedure detect_anti_patterns:
                 correction: $lesson.correct_approach,
                 severity: $lesson.severity
             });
-        end
-    end
+        }
+    }
 
     # Specific known anti-patterns:
     # - Building in wrong repo (2026-05-23: pluresdb-is-foundation)
@@ -211,9 +211,9 @@ procedure detect_anti_patterns:
     # - Testing only happy paths
     # - Embedding volatile logic in binaries
 
-    if length(warnings) > 0:
+    if length(warnings) > 0 {
         emit("anti_pattern.detected", { count: length(warnings), warnings: warnings });
-    end
+    }
 
     return { detected: length(warnings) > 0, warnings: warnings };
 }
