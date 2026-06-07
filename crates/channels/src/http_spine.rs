@@ -55,10 +55,12 @@ impl Default for HttpSpineConfig {
 
 /// HTTP spine channel — local REST API access.
 pub struct HttpSpineChannel {
+    /// Channel configuration.
     pub config: HttpSpineConfig,
 }
 
 impl HttpSpineChannel {
+    /// Create a new HTTP spine channel with the given configuration.
     pub fn new(config: HttpSpineConfig) -> Self {
         Self { config }
     }
@@ -126,6 +128,7 @@ impl PendingResponses {
         true
     }
 
+    /// Take and remove a pending response sender by ID.
     pub async fn take(&self, id: &str) -> Option<oneshot::Sender<String>> {
         self.inner.lock().await.remove(id)
     }
