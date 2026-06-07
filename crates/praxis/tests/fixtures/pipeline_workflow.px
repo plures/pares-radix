@@ -1,9 +1,7 @@
-# pipeline_workflow.px — Complex procedure with loops, bracket paths, try/catch, match
+# pipeline_workflow.px — Complex procedure with loops, bracket paths, try/catch
 #
 # Tests the full executor pipeline with real-world patterns:
-# - Loop over array with bracket-indexed conditions
 # - Nested when guards using bracket paths
-# - Match with bracket-path comparisons
 # - Try/catch around fallible actions
 # - Variable threading through multiple steps
 
@@ -23,19 +21,16 @@ constraint prod_stage_requires_approval:
 
 procedure run_pipeline:
   trigger: manual
-{
-    let health = check_stage_health({ stage: "first" });
-    if health.status == "degraded" {
-        emit("pipeline_warning", { reason: "degraded" });
-    }
-    if health.status == "down" {
-        emit("pipeline_blocked", { reason: "down" });
-    }
-    // TODO: verify try/catch syntax
-    try {
-        deploy_stage({ name: "prod" });
-    } catch {
-        let rollback = rollback_stage({ name: "prod" });
-        emit("stage_failed", { rollback: "true" });
-    }
-}
+  check_stage_health {stage: "first"} -> $health
+  when health.status == "degraded":
+    emit {type: "pipeline_warning", reason: "degraded"}
+  end
+  when health.status == "down":
+    emit {type: "pipeline_blocked", reason: "down"}
+  end
+  try:
+    deploy_stage {name: "prod"}
+  catch:
+    rollback_stage {name: "prod"} -> $rollback
+    emit {type: "stage_failed", rollback: "true"}
+  end

@@ -7,39 +7,17 @@
 procedure system_health:
   trigger: manual
   given: "Run system health diagnostics and return aggregated status"
-{
-    let os_type = detect_os({});
-
-    if os_type == "windows" {
-        let cpu = exec({ command: "powershell -NoProfile -File health-cpu.ps1" });
-        let disk = exec({ command: "powershell -NoProfile -File health-disk.ps1" });
-        let memory = exec({ command: "powershell -NoProfile -File health-memory.ps1" });
-    }
-
-    if os_type == "linux" {
-        let cpu = read_file({ path: "/proc/loadavg" });
-        let disk = exec({ command: "df -h / | tail -1" });
-        let memory = exec({ command: "free -m | grep Mem" });
-    }
-
-    if os_type == "darwin" {
-        let cpu = exec({ command: "sysctl -n vm.loadavg" });
-        let disk = exec({ command: "df -h / | tail -1" });
-        let memory = exec({ command: "vm_stat | head -5" });
-    }
-
-    let status = "ok";
-    emit("health.check.complete", { os: os_type, cpu: cpu, disk: disk, memory: memory, status: status });
-}
+  detect_os {} -> $os_type
+  gather_system_metrics {os: $os_type} -> $metrics
+  emit {type: "health.check.complete", os: $os_type, status: "ok"}
+  return $metrics
 
 procedure detect_os:
   trigger: manual
   given: "Detect the current operating system"
-{
-    let result = exec({ command: "uname -s 2>/dev/null || echo Windows" });
-    match result.stdout {
-        "Linux" => return "linux";
-        "Darwin" => return "darwin";
-        _ => return "windows";
-    }
-}
+  exec {command: "uname -s"} -> $result
+  match:
+    "Linux" -> linux
+    "Darwin" -> darwin
+    _ -> windows
+  end

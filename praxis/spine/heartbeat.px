@@ -9,19 +9,13 @@ fact heartbeat_config:
   quiet_end_hour: int
 
 constraint respect_quiet_hours:
-  when: event.type == "heartbeat_tick" and current_hour() >= heartbeat_config.quiet_start_hour and current_hour() < heartbeat_config.quiet_end_hour
+  when: event.type == "heartbeat_tick" and heartbeat_config.in_quiet_hours
   require: false
-  severity: warn
+  severity: warning
   message: "Heartbeat suppressed during quiet hours"
 
 procedure heartbeat_tick:
-  trigger: schedule(interval: "heartbeat_config.interval_ms")
-  # Check system health
+  trigger: cron {schedule: "*/5 * * * *"}
   run_command {command: "cat /proc/loadavg"} -> $load
-  # Store observation
-  pluresdb_write {
-    key: "heartbeat:last_check",
-    value: {timestamp: "${now()}", load: "$load"}
-  }
-  # Emit for any downstream procedures that want to react
-  emit {type: "heartbeat_complete", load: "$load"}
+  pluresdb_write {key: "heartbeat:last_check", value: $load}
+  emit {type: "heartbeat_complete", load: $load}

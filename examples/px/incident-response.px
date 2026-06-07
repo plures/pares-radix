@@ -27,58 +27,48 @@ rule auto_triage_payments:
     - action: notify message: "P1 incident detected"
 
 procedure respond_to_incident:
-  trigger: on_write
-    pattern: "incident:*"
+  trigger: on_write {pattern: "incident:*"}
   given: "Triage a new incident, notify teams, and track resolution"
-{
-    let incident = get_incident({ id: "inc_001" });
-    let policy = get_escalation_policy({ severity: "p1" });
-    // TODO: verify match syntax
-    match incident.severity {
-        "p1" => { handle_p1(); }
-        "p2" => { handle_p2(); }
-        "p3" => { handle_p3(); }
-    }
-}
+  get_incident {id: "inc_001"} -> $incident
+  get_escalation_policy {severity: "p1"} -> $policy
+  match:
+    "p1" -> handle_p1
+    "p2" -> handle_p2
+    "p3" -> handle_p3
+  end
 
 procedure handle_p1:
   trigger: manual
   given: "P1: All hands, war room, executive notification"
-{
-    let room = create_war_room({ title: "P1 incident" });
-    page_oncall({ team: "sre" });
-    let notifications = parallel {
-        status_page: {
-            update_status_page({ status: "investigating" });
-        }
-        exec_notify: {
-            notify_channel({ channel: "exec", message: "P1 incident" });
-        }
-    };
-    for svc in services {
-        let status = check_service_health({ service: "api" });
-        if status.healthy == false {
-            isolate_service({ service: "api" });
-            emit("service.isolated", { service: "api" });
-        }
-    }
-    emit("incident.triaged", { severity: "p1" });
-}
+  create_war_room {title: "P1 incident"} -> $room
+  page_oncall {team: "sre"}
+  parallel:
+    branch status_page:
+      update_status_page {status: "investigating"}
+    end
+    branch exec_notify:
+      notify_channel {channel: "exec", message: "P1 incident"}
+    end
+  end
+  loop over $services as svc:
+    check_service_health {service: "api"} -> $status
+    when status.healthy == false:
+      isolate_service {service: "api"}
+      emit {type: "service.isolated", service: "api"}
+    end
+  end
+  emit {type: "incident.triaged", severity: "p1"}
 
 procedure handle_p2:
   trigger: manual
   given: "P2: Page oncall, create ticket, notify channel"
-{
-    page_oncall({ team: "sre" });
-    let ticket = create_ticket({ title: "P2 incident", priority: "high" });
-    notify_channel({ channel: "ops", message: "P2 incident" });
-    emit("incident.triaged", { severity: "p2" });
-}
+  page_oncall {team: "sre"}
+  create_ticket {title: "P2 incident", priority: "high"} -> $ticket
+  notify_channel {channel: "ops", message: "P2 incident"}
+  emit {type: "incident.triaged", severity: "p2"}
 
 procedure handle_p3:
   trigger: manual
   given: "P3: Create ticket, notify during business hours"
-{
-    let ticket = create_ticket({ title: "P3 incident", priority: "medium" });
-    emit("incident.triaged", { severity: "p3" });
-}
+  create_ticket {title: "P3 incident", priority: "medium"} -> $ticket
+  emit {type: "incident.triaged", severity: "p3"}

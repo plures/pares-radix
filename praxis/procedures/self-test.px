@@ -3,91 +3,53 @@
 # These procedures exercise the pares-radix MCP server and .px runtime
 # using the built-in test actions. Run via:
 #   praxis_run {procedure: "self_test"}
-#
-# Test 1: Assert actions (equality, contains, truthy)
-# Test 2: Shell execution (echo)
-# Test 3: File I/O (write, read, cleanup)
-# Test 4: JSON parsing (structured data)
-# Test 5: Sleep (timing action)
-# Test 6: Process lifecycle (HTTP server)
-#
-# All tests use cross-platform paths and commands.
 
 procedure self_test:
   trigger: manual
   given: "Full self-test of pares-radix .px runtime and built-in actions"
-{
-    emit("test.suite.start", { suite: "self_test" });
-
-    # Test 1: Assertions
-    assert_eq({ actual: 1, expected: 1, message: "basic integer equality" });
-    assert_eq({ actual: "hello", expected: "hello", message: "string equality" });
-    assert_contains({ value: "hello world", contains: "world", message: "substring check" });
-    assert_ok({ value: true, message: "truthy assertion" });
-    emit("test.pass", { name: "assertions" });
-
-    # Test 2: Shell exec (cross-platform echo)
-    let os_type = detect_os({});
-    let echo_result = exec({ command: "echo radix-self-test" });
-    assert_contains({ value: echo_result.stdout, contains: "radix-self-test", message: "shell exec echo" });
-    emit("test.pass", { name: "shell_exec" });
-
-    # Test 3: File I/O (use temp dir appropriate to platform)
-    let temp_dir = get_temp_dir({});
-    let test_file = join_path({ base: temp_dir, name: "radix-self-test.txt" });
-    write_file({ path: test_file, content: "test-data-42" });
-    let file_content = read_file({ path: test_file });
-    assert_contains({ value: file_content, contains: "test-data-42", message: "file roundtrip" });
-    delete_file({ path: test_file });
-    emit("test.pass", { name: "file_io" });
-
-    # Test 4: Sleep
-    sleep({ ms: 50 });
-    emit("test.pass", { name: "sleep" });
-
-    emit("test.suite.complete", { suite: "self_test", passed: 4 });
-}
+  emit {type: "test.suite.start", suite: "self_test"}
+  assert_eq {actual: 1, expected: 1, message: "basic integer equality"}
+  assert_eq {actual: "hello", expected: "hello", message: "string equality"}
+  assert_contains {value: "hello world", contains: "world", message: "substring check"}
+  assert_ok {value: true, message: "truthy assertion"}
+  emit {type: "test.pass", name: "assertions"}
+  detect_os {} -> $os_type
+  exec {command: "echo radix-self-test"} -> $echo_result
+  assert_contains {value: $echo_result, contains: "radix-self-test", message: "shell exec echo"}
+  emit {type: "test.pass", name: "shell_exec"}
+  get_temp_dir {} -> $temp_dir
+  join_path {base: $temp_dir, name: "radix-self-test.txt"} -> $test_file
+  write_file {path: $test_file, content: "test-data-42"}
+  read_file {path: $test_file} -> $file_content
+  assert_contains {value: $file_content, contains: "test-data-42", message: "file roundtrip"}
+  delete_file {path: $test_file}
+  emit {type: "test.pass", name: "file_io"}
+  sleep {ms: 50}
+  emit {type: "test.pass", name: "sleep"}
+  emit {type: "test.suite.complete", suite: "self_test", passed: 4}
 
 procedure smoke_test_mcp:
   trigger: manual
   given: "Verify the MCP server is responsive and tools are registered"
-{
-    let ping = echo({ status: "mcp_alive" });
-    assert_contains({ value: ping, contains: "mcp_alive", message: "MCP echo roundtrip" });
-    emit("test.pass", { name: "mcp_responsive" });
-}
+  echo {status: "mcp_alive"} -> $ping
+  assert_contains {value: $ping, contains: "mcp_alive", message: "MCP echo roundtrip"}
+  emit {type: "test.pass", name: "mcp_responsive"}
 
 procedure test_process_lifecycle:
   trigger: manual
   given: "Verify start_process and stop_process work correctly"
-{
-    let os_type = detect_os({});
-    let port = 19876;
-
-    if os_type == "windows" {
-        let server = start_process({ command: "powershell -NoProfile -File test-server.ps1" });
-    }
-    if os_type != "windows" {
-        let server = start_process({ command: "python3 -m http.server 19876" });
-    }
-
-    assert_ok({ value: server, message: "server started" });
-    wait_for_ready({ url: "http://localhost:19876", timeout_secs: 5 });
-    let response = http_get({ url: "http://localhost:19876" });
-    assert_contains({ value: response, contains: "200", message: "server responds" });
-    stop_process({ pid: server });
-    sleep({ ms: 500 });
-    emit("test.pass", { name: "process_lifecycle" });
-}
+  detect_os {} -> $os_type
+  start_process {command: "python3 -m http.server 19876"} -> $server
+  assert_ok {value: $server, message: "server started"}
+  wait_for_ready {url: "http://localhost:19876", timeout_secs: 5}
+  http_get {url: "http://localhost:19876"} -> $response
+  assert_contains {value: $response, contains: "200", message: "server responds"}
+  stop_process {pid: $server}
+  sleep {ms: 500}
+  emit {type: "test.pass", name: "process_lifecycle"}
 
 procedure get_temp_dir:
   trigger: manual
   given: "Return platform-appropriate temp directory"
-{
-    let os_type = detect_os({});
-    if os_type == "windows" {
-        let result = exec({ command: "echo %TEMP%" });
-        return result.stdout;
-    }
-    return "/tmp";
-}
+  exec {command: "echo /tmp"} -> $result
+  return $result

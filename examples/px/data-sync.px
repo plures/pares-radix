@@ -5,7 +5,6 @@
 # - Loop over dynamic collections
 # - Try/catch inside loops for per-item error isolation
 # - Variable accumulation pattern
-# - Try-level retry with exponential backoff
 
 fact SyncSource:
   name: string
@@ -19,42 +18,37 @@ fact SyncResult:
   errors: int
 
 procedure nightly_data_sync:
-  trigger: periodic
-    interval: "1d"
+  trigger: cron {schedule: "0 0 * * *"}
   given: "Sync all configured data sources nightly with per-source error isolation"
-{
-    let sources = list_sync_sources({});
-    emit("sync.started", { source_count: 5 });
-    for source in sources {
-        try {
-            let batch = fetch_batch({ endpoint: "https://api.example.com", batch_size: 100 });
-            let validated = validate_records({ records: "batch", schema: "default" });
-            if validated.invalid_count > 0 {
-                quarantine_records({ source: "default" });
-                emit("sync.quarantined", { count: 3 });
-            }
-            let result = upsert_records({ target: "warehouse" });
-            emit("sync.source_complete", { records: 100 });
-        } catch {
-            log_sync_error({ source: "default", error: "unknown" });
-            emit("sync.source_failed", { source: "default" });
-        }
-    }
-    let report = compile_sync_report({ results: "all" });
-    emit("sync.complete", { synced: 500, errors: 2 });
-}
+  list_sync_sources {} -> $sources
+  emit {type: "sync.started", source_count: 5}
+  loop over $sources as source:
+    try:
+      fetch_batch {endpoint: "https://api.example.com", batch_size: 100} -> $batch
+      validate_records {records: "batch", schema: "default"} -> $validated
+      when validated.invalid_count > 0:
+        quarantine_records {source: "default"}
+        emit {type: "sync.quarantined", count: 3}
+      end
+      upsert_records {target: "warehouse"} -> $result
+      emit {type: "sync.source_complete", records: 100}
+    catch:
+      log_sync_error {source: "default", error: "unknown"}
+      emit {type: "sync.source_failed", source: "default"}
+    end
+  end
+  compile_sync_report {results: "all"} -> $report
+  emit {type: "sync.complete", synced: 500, errors: 2}
 
 procedure resync_source:
   trigger: manual
   given: "Re-sync a single data source with retry"
-{
-    let source = get_source({ name: "payments" });
-    try {
-        let batch = fetch_batch({ endpoint: "https://api.example.com", batch_size: 100 });
-        let validated = validate_records({ records: "batch", schema: "default" });
-        let result = upsert_records({ target: "warehouse" });
-    } catch {
-        notify_channel({ channel: "data_eng", message: "Re-sync failed after 3 retries" });
-        emit("sync.resync_failed", { source: "payments" });
-    }
-}
+  get_source {name: "payments"} -> $source
+  try:
+    fetch_batch {endpoint: "https://api.example.com", batch_size: 100} -> $batch
+    validate_records {records: "batch", schema: "default"} -> $validated
+    upsert_records {target: "warehouse"} -> $result
+  catch:
+    notify_channel {channel: "data_eng", message: "Re-sync failed after 3 retries"}
+    emit {type: "sync.resync_failed", source: "payments"}
+  end

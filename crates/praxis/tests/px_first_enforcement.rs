@@ -55,6 +55,7 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/tauri-app/", // GUI state
     "crates/mcp-server/", // connection state (IO boundary)
     "crates/mcp-client/", // connection state (IO boundary)
+    "crates/mcp-server/", // connection state (IO boundary)
     "crates/praxis/src/px/async_executor.rs", // runtime execution state
     "crates/praxis/src/px/watcher.rs", // filesystem watcher (IO boundary)
     "crates/sync/src/lan.rs", // network peer discovery (IO boundary)
@@ -78,9 +79,9 @@ fn no_persistent_in_memory_state_outside_allowlist() {
     let mut violations = Vec::new();
 
     for file in &files {
-        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
 
-        // Skip allowlisted paths
+        // Skip allowlisted paths (normalize separators for cross-platform)
         if STATE_ALLOWLIST.iter().any(|allowed| rel_path.contains(allowed)) {
             continue;
         }
@@ -137,7 +138,7 @@ fn no_external_storage_backends() {
     let mut violations = Vec::new();
 
     for file in &files {
-        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
 
         // Skip test files
         if rel_path.contains("/tests/") {
@@ -243,7 +244,7 @@ fn required_px_procedures_exist() {
     let praxis_dir = root.join("praxis/procedures");
 
     let required = &[
-        ("memory.px.design", "Memory operations (store, search, consolidate) must be defined in .px"),
+        ("memory.px", "Memory operations (store, search, consolidate) must be defined in .px"),
     ];
 
     let mut missing = Vec::new();

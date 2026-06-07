@@ -20,8 +20,6 @@ constraint prod_replica_minimum:
 
 procedure deploy_check:
   trigger: manual
-{
-    if deployment_targets.environments[0].healthy {
-        emit("deploy_ok", { target: "dev" });
-    }
-}
+  when deployment_targets.environments[0].healthy:
+    emit {type: "deploy_ok", target: "dev"}
+  end

@@ -13,10 +13,8 @@ constraint ttl_positive:
 procedure invalidate_expired:
   trigger: manual
   given: "Remove cache entries that have exceeded their TTL"
-{
-    delete_entry("old");
-    emit("cache.invalidated", { key: "old" });
-}
+  delete_entry {key: "old"}
+  emit {type: "cache.invalidated", key: "old"}
 
 scenario expired_entries_removed:
   given: "Cache has entries with expired TTLs"

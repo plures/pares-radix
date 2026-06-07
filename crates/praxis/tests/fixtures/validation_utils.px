@@ -2,15 +2,11 @@
 
 procedure validate_input:
   trigger: manual
-{
-    let valid = check_not_empty({ value: data });
-    if valid == false {
-        emit("validation_failed", { reason: "empty_input" });
-    }
-}
+  check_not_empty {value: data} -> $valid
+  when $valid == false:
+    emit {type: "validation_failed", reason: "empty_input"}
+  end
 
 procedure sanitize:
   trigger: manual
-{
-    let output = strip_html({ text: input });
-}
+  strip_html {text: input} -> $output

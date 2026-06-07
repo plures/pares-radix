@@ -1,0 +1,3 @@
+procedure test:
+  trigger: manual
+  do_thing {val: $foo}

@@ -5,23 +5,12 @@
 
 # Route inbound messages to model invocation
 procedure route_inbound:
-  trigger: event("inbound")
-  emit {
-    type: "model_request",
-    source: "${event.source}",
-    chat_id: "${event.chat_id}",
-    sender: "${event.sender}",
-    content: "${event.content}"
-  }
+  trigger: on_write {pattern: "inbound:*"}
+  emit {type: "model_request", source: "inbound"}
 
 # Route model responses to channel delivery
 procedure route_response:
-  trigger: event("model_response")
-  when event.tool_calls.length == 0:
-    emit {
-      type: "delivery_request",
-      channel: "${event.source}",
-      chat_id: "${event.chat_id}",
-      content: "${event.content}"
-    }
+  trigger: on_write {pattern: "model_response:*"}
+  when event.tool_calls_empty:
+    emit {type: "delivery_request", channel: "default"}
   end

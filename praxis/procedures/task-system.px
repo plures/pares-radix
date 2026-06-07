@@ -1,14 +1,18 @@
 # task-system.px — Architectural constraints for the task system
 # Enforces C-DEV-001: logic in .px, Rust only for IO boundaries
+#
+# These constraints use freeform domain expressions that guide AI agent behavior.
+# They are not compiled by the Condition evaluator at runtime — they serve as
+# architectural guardrails readable by both humans and AI agents reviewing changes.
 
 constraint task_logic_in_px:
-  when: change.modifies("crates/") && change.adds_business_logic
+  when: change.modifies_crates && change.adds_business_logic
   require: change.has_corresponding_px_procedure
   severity: error
   message: "Task logic must be expressed as .px procedures (C-DEV-001). Rust handles only IO boundaries."
 
 constraint no_standalone_task_state:
-  when: change.adds("HashMap") && change.in_path("task")
+  when: change.adds_hashmap && change.in_task_path
   require: change.uses_state_store
   severity: error
   message: "Task state must go through PluresDB StateStore, not standalone HashMaps (C-PLURES-003)."
@@ -23,9 +27,4 @@ constraint commitment_tracking_required:
   when: model_response.contains_future_tense_promise
   require: commitment.is_tracked
   severity: warning
-  message: "Model promises ('I will...', 'I'll...') should be tracked as commitments."
-
-# Policy documentation header:
-# These constraints use freeform domain expressions that guide AI agent behavior.
-# They are not compiled by the Condition evaluator at runtime — they serve as
-# architectural guardrails readable by both humans and AI agents reviewing changes.
+  message: "Model promises should be tracked as commitments."

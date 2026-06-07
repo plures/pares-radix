@@ -1,9 +1,7 @@
-# circular_b.px — Circular import test (B → A → cycle)
+# circular_b.px
 
 import circular_a
 
 procedure proc_b:
   trigger: manual
-{
-    let result = do_b({});
-}
+  do_b {} -> $result

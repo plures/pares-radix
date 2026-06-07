@@ -12,11 +12,11 @@
 #
 # Everything else is here.
 
-import spine/conversation
-import spine/routing
-import spine/model_invoke
-import spine/tool_execute
-import spine/heartbeat
+import spine::conversation
+import spine::routing
+import spine::model_invoke
+import spine::tool_execute
+import spine::heartbeat
 
 # The entire message flow, expressed as reactive procedure composition:
 #
