@@ -120,32 +120,85 @@ fn resolve_config_path(explicit: Option<&str>) -> Option<PathBuf> {
 }
 
 /// Parse a .px source string into a PxConfig.
+///
+/// Config blocks (`config <name>: ...`) are a pares-radix extension, not part
+/// of the core pluresdb-px grammar.  We extract them with a lightweight
+/// line-oriented parser rather than routing through the full grammar so the
+/// CLI config loader stays self-contained.
 fn parse_config(source: &str) -> Result<PxConfig, String> {
-    // Use praxis-native (via pares-radix-praxis re-export) to parse
-    let doc = pares_radix_praxis::px::parse(source)
-        .map_err(|e| format!("parse error: {e}"))?;
-
-    let doc_json = serde_json::to_value(&doc)
-        .map_err(|e| format!("json error: {e}"))?;
-
     let mut entries = HashMap::new();
+    let mut current_block: Option<String> = None;
 
-    if let Some(configs) = doc_json.get("configs").and_then(|v| v.as_array()) {
-        for config in configs {
-            let block_name = config.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            if let Some(config_entries) = config.get("entries").and_then(|v| v.as_array()) {
-                for entry in config_entries {
-                    let key = entry.get("key").and_then(|v| v.as_str()).unwrap_or("");
-                    if let Some(value) = entry.get("value") {
-                        let dotted_key = format!("{}.{}", block_name, key);
-                        entries.insert(dotted_key, value.clone());
-                    }
-                }
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        // Skip blank lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
+            continue;
+        }
+
+        // Detect "config <name>:" block header
+        if let Some(rest) = trimmed.strip_prefix("config ") {
+            if let Some(name) = rest.strip_suffix(':') {
+                current_block = Some(name.trim().to_string());
+                continue;
+            }
+        }
+
+        // Inside a config block: parse "key: value" entries
+        if let Some(ref block) = current_block {
+            // Un-indented non-config line ends the block
+            if !line.starts_with(' ') && !line.starts_with('\t') {
+                current_block = None;
+                continue;
+            }
+
+            if let Some((key, raw_value)) = trimmed.split_once(':') {
+                let key = key.trim();
+                let raw_value = raw_value.trim();
+                let value = parse_value(raw_value);
+                let dotted_key = format!("{}.{}", block, key);
+                entries.insert(dotted_key, value);
             }
         }
     }
 
     Ok(PxConfig { entries, source: None })
+}
+
+/// Parse a raw value string into a `serde_json::Value`.
+fn parse_value(raw: &str) -> Value {
+    // Boolean literals
+    if raw.eq_ignore_ascii_case("true") {
+        return Value::Bool(true);
+    }
+    if raw.eq_ignore_ascii_case("false") {
+        return Value::Bool(false);
+    }
+
+    // Number literals
+    if let Ok(n) = raw.parse::<f64>() {
+        if let Some(v) = serde_json::Number::from_f64(n) {
+            return Value::Number(v);
+        }
+    }
+
+    // JSON array (e.g. ["a", "b"])
+    if raw.starts_with('[') {
+        if let Ok(arr) = serde_json::from_str::<Value>(raw) {
+            return arr;
+        }
+    }
+
+    // Quoted string — strip quotes
+    if (raw.starts_with('"') && raw.ends_with('"'))
+        || (raw.starts_with('\'') && raw.ends_with('\''))
+    {
+        return Value::String(raw[1..raw.len() - 1].to_string());
+    }
+
+    // Bare string
+    Value::String(raw.to_string())
 }
 
 #[cfg(test)]
