@@ -1405,7 +1405,7 @@ mod tests {
         assert!(info.running, "session should still be running");
 
         // Poll must return data for the session (proves it's properly background-tracked)
-        let poll = executor.poll(&result.session_id.as_ref().unwrap(), Some(100)).await;
+        let poll = executor.poll(result.session_id.as_ref().unwrap(), Some(100)).await;
         assert!(poll.is_some(), "poll must find the background session");
 
         executor.kill(&result.session_id.unwrap()).await.unwrap();
@@ -1630,7 +1630,7 @@ mod tests {
         let ids: Vec<String> = (0..32).map(|_| generate_session_id()).collect();
 
         // Verify the pattern: adj cycles with period 16, noun advances every 16
-        for (i, id) in ids.iter().enumerate() {
+        for id in ids.iter() {
             let parts: Vec<&str> = id.split('-').collect();
             assert_eq!(parts.len(), 3);
 
