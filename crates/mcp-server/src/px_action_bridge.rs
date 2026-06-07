@@ -52,8 +52,10 @@ impl ActionHandler for PxActionBridge {
         } else {
             // Return the content as a JSON string value.
             // Attempt to parse as JSON first; fall back to string.
-            let value = serde_json::from_str(&result.content)
-                .unwrap_or_else(|_| Value::String(result.content));
+            let value = match serde_json::from_str(&result.content) {
+                Ok(v) => v,
+                Err(_) => Value::String(result.content),
+            };
             Ok(value)
         }
     }
