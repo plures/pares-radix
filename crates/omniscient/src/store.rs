@@ -162,7 +162,7 @@ impl OmniscientStore for MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_node::{FileNodeBuilder, NodeIdentity};
+    use crate::file_node::FileNodeBuilder;
 
     fn make_test_node(name: &str) -> FileNode {
         let dir = tempfile::tempdir().unwrap();
