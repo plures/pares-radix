@@ -36,6 +36,7 @@ impl PxConfig {
     }
 
     /// Get a number value by dotted path
+    #[allow(dead_code)]
     pub fn get_f64(&self, path: &str) -> Option<f64> {
         self.entries.get(path).and_then(|v| v.as_f64())
     }
