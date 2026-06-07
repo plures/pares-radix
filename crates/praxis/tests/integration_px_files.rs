@@ -203,10 +203,10 @@ fn compile_and_execute_pipeline_workflow() {
     assert!(emit.is_some(), "emit should have captured events");
     let emit_arr = emit.unwrap().as_array().unwrap();
     // Should have pipeline_warning + stage_failed events
-    assert!(emit_arr.len() >= 1, "should have at least 1 emitted event, got {}", emit_arr.len());
+    assert!(!emit_arr.is_empty(), "should have at least 1 emitted event, got {}", emit_arr.len());
 
     // Try/catch should have recovered — rollback result captured
-    assert!(result.variables.get("rollback").is_some() || result.variables.get("error").is_some(),
+    assert!(result.variables.contains_key("rollback") || result.variables.contains_key("error"),
         "try/catch should have captured rollback or error");
 }
 

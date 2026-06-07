@@ -660,7 +660,7 @@ mod tests {
     /// Test run_with_io processes JSON-RPC initialize, tools/list, tools/call.
     #[tokio::test]
     async fn run_with_io_processes_initialize_and_tools() {
-        use tokio::io::{AsyncBufReadExt, BufReader, duplex};
+        use tokio::io::duplex;
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
@@ -676,10 +676,6 @@ mod tests {
             "params": {"name": "test_tool", "arguments": {"input": "hello"}}
         });
         let input_data = format!("{}\n{}\n{}\n", init_req, list_req, call_req);
-        let input_cursor = std::io::Cursor::new(input_data.into_bytes());
-
-        // Output buffer
-        let mut output_buf: Vec<u8> = Vec::new();
 
         // run_with_io needs AsyncRead + AsyncWrite — use tokio duplex
         let (mut client_write, server_read) = duplex(8192);
@@ -687,7 +683,7 @@ mod tests {
 
         // Write input and close
         use tokio::io::AsyncWriteExt;
-        client_write.write_all(format!("{}\n{}\n{}\n", init_req, list_req, call_req).as_bytes()).await.unwrap();
+        client_write.write_all(input_data.as_bytes()).await.unwrap();
         drop(client_write); // EOF
 
         // Run server
@@ -779,14 +775,14 @@ mod tests {
     /// Test write_notification via notification channel in run_with_io.
     #[tokio::test]
     async fn run_with_io_delivers_server_notifications() {
-        use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncBufReadExt, duplex};
+        use tokio::io::{AsyncWriteExt, duplex};
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
         let (tx, server) = server.with_notification_channel();
 
         let (mut client_write, server_read) = duplex(8192);
-        let (server_write, mut client_read) = duplex(8192);
+        let (server_write, client_read) = duplex(8192);
 
         // Run server in background
         let server_handle = tokio::spawn(async move {
