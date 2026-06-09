@@ -1,0 +1,155 @@
+# heartbeat-logic.px — Heartbeat scheduling and quiet-hours procedure
+#
+# Replaces: ~200 lines scattered across heartbeat handling in Rust
+# This is PURE LOGIC — no IO needed.
+#
+# Decides whether to execute heartbeat checks and which ones,
+# based on time-of-day, day-of-week, and last-check timestamps.
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONFIGURATION CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════
+
+# Quiet hours: suppress non-urgent checks during sleep time
+let quiet_start = 23   # 11 PM
+let quiet_end = 8      # 8 AM
+
+# Check intervals (milliseconds)
+let email_interval = 7200000       # 2 hours
+let calendar_interval = 3600000    # 1 hour
+let weather_interval = 86400000    # 24 hours (once per day)
+let social_interval = 14400000     # 4 hours
+
+# Weather check window (only check during morning hours)
+let weather_window_start = 7
+let weather_window_end = 9
+
+# Reach-out threshold: minutes of silence before proactive contact
+let reach_out_threshold_minutes = 480   # 8 hours
+
+# Maximum checks per heartbeat (prevent batching too many)
+let max_batch_size = 3
+
+# ═══════════════════════════════════════════════════════════════════════
+# HEARTBEAT EVALUATION PROCEDURE
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure evaluate_heartbeat:
+  description: "Decides whether to execute heartbeat checks and which ones based on time/state"
+  input:
+    - current_hour: number            # 0-23
+    - current_day: string             # "monday", "tuesday", etc.
+    - last_checks: object             # {email: timestamp, calendar: timestamp, weather: timestamp, social: timestamp}
+    - minutes_since_last_msg: number  # Minutes since last user message
+    - now_ms: number                  # Current timestamp in milliseconds
+  output: heartbeat_decision
+
+  steps:
+    # ── Determine quiet hours ─────────────────────────────────
+    - set is_quiet = current_hour >= $quiet_start OR current_hour < $quiet_end
+
+    # ── Determine which checks are due ────────────────────────
+    - set checks_to_run = []
+
+    - when:
+        - NOT is_quiet:
+            # Email — every 2 hours
+            - set email_elapsed = subtract($now_ms, get($last_checks, "email", 0))
+            - when:
+                - email_elapsed > $email_interval:
+                    - append $checks_to_run "email"
+
+            # Calendar — every hour
+            - set calendar_elapsed = subtract($now_ms, get($last_checks, "calendar", 0))
+            - when:
+                - calendar_elapsed > $calendar_interval:
+                    - append $checks_to_run "calendar"
+
+            # Weather — once per day, morning window only
+            - when:
+                - current_hour >= $weather_window_start AND current_hour <= $weather_window_end:
+                    - set weather_elapsed = subtract($now_ms, get($last_checks, "weather", 0))
+                    - when:
+                        - weather_elapsed > $weather_interval:
+                            - append $checks_to_run "weather"
+
+            # Social/mentions — every 4 hours
+            - set social_elapsed = subtract($now_ms, get($last_checks, "social", 0))
+            - when:
+                - social_elapsed > $social_interval:
+                    - append $checks_to_run "social"
+
+    # ── Should we proactively reach out? ──────────────────────
+    - set should_reach_out = false
+    - set reach_out_reason = ""
+    - when:
+        - minutes_since_last_msg > $reach_out_threshold_minutes AND NOT is_quiet:
+            - set should_reach_out = true
+            - set reach_out_reason = "no_contact_8h"
+
+    # ── Weekend adjustments ───────────────────────────────────
+    - set is_weekend = current_day == "saturday" OR current_day == "sunday"
+    - when:
+        - is_weekend:
+            # On weekends, skip social and reduce email frequency
+            - set checks_to_run = filter_not($checks_to_run, "social")
+
+    # ── Batch size limiting ───────────────────────────────────
+    - set batch_size = min(length($checks_to_run), $max_batch_size)
+    - set batched_checks = slice($checks_to_run, 0, $batch_size)
+
+    # ── Determine suppress reason ─────────────────────────────
+    - set suppress_reason = ""
+    - when:
+        - is_quiet:
+            - set suppress_reason = "quiet_hours"
+        - length($checks_to_run) == 0 AND NOT is_quiet:
+            - set suppress_reason = "all_checks_recent"
+
+    # ── Build result ──────────────────────────────────────────
+    - return:
+        checks: $batched_checks
+        is_quiet: $is_quiet
+        is_weekend: $is_weekend
+        should_reach_out: $should_reach_out
+        reach_out_reason: $reach_out_reason
+        suppress_reason: $suppress_reason
+        deferred_count: subtract(length($checks_to_run), $batch_size)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# NEXT-CHECK SCHEDULING
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure calculate_next_heartbeat:
+  description: "Calculates optimal delay until next heartbeat poll"
+  input:
+    - current_hour: number
+    - is_quiet: boolean
+    - checks_just_ran: list
+    - deferred_count: number
+  output: schedule
+
+  steps:
+    # Base interval: 30 minutes
+    - set interval_ms = 1800000
+
+    # During quiet hours, slow down to 2 hours
+    - when:
+        - is_quiet:
+            - set interval_ms = 7200000
+
+    # If we deferred checks, come back sooner (15 min)
+    - when:
+        - deferred_count > 0:
+            - set interval_ms = 900000
+
+    # If we just ran checks, use standard interval
+    # If nothing was due, extend slightly (45 min)
+    - when:
+        - length($checks_just_ran) == 0 AND NOT is_quiet:
+            - set interval_ms = 2700000
+
+    - return:
+        next_poll_ms: $interval_ms
+        reason: when($is_quiet, "quiet_hours_extended", when($deferred_count > 0, "deferred_checks_pending", "standard"))
