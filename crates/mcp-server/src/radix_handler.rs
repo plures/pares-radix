@@ -6378,6 +6378,23 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     }
                 } else if let Some(arr) = value.as_array() {
                     arr.contains(contains)
+                } else if value.is_object() {
+                    // For objects (e.g. shell results), check stdout/output fields first,
+                    // then fall back to stringified representation
+                    if let Some(needle) = contains.as_str() {
+                        // Check common output fields
+                        let stdout_match = value.get("stdout")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.contains(needle))
+                            .unwrap_or(false);
+                        let output_match = value.get("output")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.contains(needle))
+                            .unwrap_or(false);
+                        stdout_match || output_match || value.to_string().contains(needle)
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
