@@ -18,4 +18,9 @@ procedure invoke_model:
   pluresdb_read {key: "chat:history"} -> $history
   pluresdb_read {key: "config:system_prompt"} -> $system_prompt
   model_complete {messages: $history, system_prompt: $system_prompt} -> $response
-  emit {type: "model_response", content: $response}
+  # Emit response with structured tool_calls (preserves array type for downstream)
+  when response.has_tool_calls:
+    emit {type: "model_response", content: response.content, tool_calls: response.tool_calls, has_tool_calls: true}
+  else:
+    emit {type: "model_response", content: response.content, has_tool_calls: false}
+  end

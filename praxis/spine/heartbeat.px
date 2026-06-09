@@ -16,6 +16,16 @@ constraint respect_quiet_hours:
 
 procedure heartbeat_tick:
   trigger: cron {schedule: "*/5 * * * *"}
-  run_command {command: "cat /proc/loadavg"} -> $load
+  # Cross-platform load check (delegates to OS-appropriate command)
+  detect_os {} -> $os
+  when os == "linux":
+    run_command {command: "cat /proc/loadavg"} -> $load
+  when os == "macos":
+    run_command {command: "sysctl -n vm.loadavg"} -> $load
+  when os == "windows":
+    run_command {command: "wmic cpu get loadpercentage /value"} -> $load
+  else:
+    set $load = "unknown"
+  end
   pluresdb_write {key: "heartbeat:last_check", value: $load}
   emit {type: "heartbeat_complete", load: $load}

@@ -10,10 +10,13 @@ procedure execute_tools:
     pluresdb_read {key: "chat:tool_iterations"} -> $iteration
     when iteration > 25:
       emit {type: "delivery_request", content: "Tool loop limit reached"}
+      return  # Hard stop: do not execute tools or re-invoke model
     end
-    loop over $tool_calls as tool_call:
-      tool_dispatch {name: "dispatch", call_id: "call"} -> $result
-      pluresdb_append {key: "chat:history", value: $result}
+    # Record assistant message with tool_calls for API correlation
+    pluresdb_append {key: "chat:history", value: {role: "assistant", tool_calls: event.tool_calls}}
+    loop over event.tool_calls as tool_call:
+      tool_dispatch {name: tool_call.function.name, call_id: tool_call.id, arguments: tool_call.function.arguments} -> $result
+      pluresdb_append {key: "chat:history", value: {role: "tool", tool_call_id: tool_call.id, content: $result}}
     end
     emit {type: "model_request", source: "tool_executor"}
   end
