@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-pluresdb-px = { git = "https://github.com/plures/pluresdb", rev = "a12e6af" }
+pluresdb-px = { git = "https://github.com/plures/pluresdb", rev = "fe79e34" }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
