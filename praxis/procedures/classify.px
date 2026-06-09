@@ -1,0 +1,143 @@
+# classify.px — Message classification procedure
+#
+# Replaces: crates/core/src/cerebellum/classifier.rs (431 lines of Rust)
+# This is PURE LOGIC — no IO needed except optional LLM backend call.
+#
+# Returns a classification object with:
+#   intent: command | question | feedback | task | chat
+#   complexity: 1-5
+#   topic: extracted topic string
+#   topic_shift: boolean
+#   needs_tools: boolean
+#   needs_deep_model: boolean
+#   plugin_match: optional plugin name
+#   completion_hint: optional string
+
+# ═══════════════════════════════════════════════════════════════════════
+# WORD LISTS (data, not logic)
+# ═══════════════════════════════════════════════════════════════════════
+
+let question_starters = ["what", "how", "why", "when", "where", "who", "is", "are", "can", "do", "does", "will", "would", "should", "could"]
+
+let feedback_starters = ["ok", "yes", "no", "thanks", "thank", "good", "great", "perfect", "done", "approved", "lgtm", "nice", "cool", "sure", "agree", "correct", "right", "wrong", "nope"]
+
+let task_keywords = ["build", "create", "fix", "implement", "deploy", "set up", "install", "configure", "write", "add", "remove", "delete", "update", "change", "move", "migrate", "refactor", "test", "review", "check", "scan", "index", "push", "pull", "commit", "merge"]
+
+let tool_keywords = ["file", "run", "command", "search", "code", "git", "build", "deploy", "install", "read", "write", "edit", "list", "directory", "ls", "cat", "grep"]
+
+let stopwords = ["the", "a", "an", "is", "are", "was", "were", "be", "been", "to", "of", "in", "for", "on", "with", "at", "by", "this", "that", "it", "my", "your", "i", "you", "we", "he", "she", "they", "me", "us", "and", "or", "but", "not", "can", "do", "does", "will", "would", "should", "could", "please", "just", "also"]
+
+# ═══════════════════════════════════════════════════════════════════════
+# CLASSIFICATION PROCEDURE
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure classify_message:
+  description: "Classify an incoming message by intent, complexity, and routing needs"
+  input:
+    - message: string      # The raw message text
+    - plugins: list        # Available plugin names
+    - last_topic: string   # Previous topic (for shift detection)
+  output: classification
+
+  steps:
+    # Normalize input
+    - set lower = lowercase($message)
+    - set trimmed = trim($lower)
+    - set words = split($message, " ")
+    - set word_count = length($words)
+
+    # ── Intent Detection ──────────────────────────────────────
+    - set intent = "chat"
+    - when:
+        - trimmed starts_with "/":
+            - set intent = "command"
+        - trimmed ends_with "?" OR any_starts_with($trimmed, $question_starters):
+            - set intent = "question"
+        - any_starts_with($trimmed, $feedback_starters):
+            - set intent = "feedback"
+        - any_contains($trimmed, $task_keywords):
+            - set intent = "task"
+
+    # ── Complexity Scoring ────────────────────────────────────
+    - set complexity = 1
+    - when:
+        - word_count >= 6 AND word_count <= 15:
+            - set complexity = 2
+        - word_count >= 16 AND word_count <= 30:
+            - set complexity = 3
+        - word_count >= 31 AND word_count <= 60:
+            - set complexity = 4
+        - word_count > 60:
+            - set complexity = 5
+
+    # ── Tool Detection ────────────────────────────────────────
+    - set needs_tools = any_contains($trimmed, $tool_keywords)
+
+    # ── Plugin Matching ───────────────────────────────────────
+    - set plugin_match = ""
+    - for plugin in $plugins:
+        - set plugin_lower = replace($plugin, "-", " ")
+        - when:
+            - trimmed contains $plugin_lower:
+                - set plugin_match = $plugin
+
+    # ── Topic Extraction ──────────────────────────────────────
+    - set topic_words = filter_not_in($words, $stopwords, 3)
+    - set topic = join($topic_words, " ")
+
+    # ── Topic Shift Detection ─────────────────────────────────
+    - set topic_shift = false
+    - when:
+        - topic != "" AND last_topic != "" AND NOT contains($last_topic, $topic) AND NOT contains($topic, $last_topic):
+            - set topic_shift = true
+
+    # ── Build Result ──────────────────────────────────────────
+    - set needs_deep_model = false
+    - when:
+        - complexity >= 4:
+            - set needs_deep_model = true
+
+    - set completion_hint = ""
+    - when:
+        - intent == "task":
+            - set completion_hint = "task completed successfully"
+
+    - return:
+        intent: $intent
+        complexity: $complexity
+        topic: $topic
+        topic_shift: $topic_shift
+        needs_tools: $needs_tools
+        needs_deep_model: $needs_deep_model
+        plugin_match: $plugin_match
+        completion_hint: $completion_hint
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# LLM-ENHANCED CLASSIFICATION (optional upgrade path)
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure classify_with_llm:
+  description: "Attempt LLM classification first, fall back to heuristic"
+  input:
+    - message: string
+    - plugins: list
+    - last_topic: string
+    - use_llm: boolean
+  output: classification
+
+  steps:
+    - when:
+        - use_llm == true:
+            # Call LLM backend (this is the IO boundary — Rust action)
+            - set llm_result = classify_llm("You are a message classifier...", $message)
+            - when:
+                - llm_result != "":
+                    - set parsed = parse_json($llm_result)
+                    - when:
+                        - parsed.intent != "":
+                            - return $parsed
+
+    # Fallback to heuristic
+    - set result = call classify_message($message, $plugins, $last_topic)
+    - return $result
