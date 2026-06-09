@@ -2962,8 +2962,8 @@ enum Commands {
         #[arg(long, env = "PARES_CONFIG")]
         config: Option<String>,
 
-        /// Channel to use for I/O (stdio, telegram, http). Omit for headless/API-only.
-        #[arg(long, env = "PARES_CHANNEL", default_value = "stdio")]
+        /// Channel to use for I/O (stdio, telegram, http).
+        #[arg(long, env = "PARES_CHANNEL", default_value = "telegram")]
         channel: String,
 
         /// Telegram bot token (required only for --channel telegram).
@@ -3410,8 +3410,8 @@ async fn main() {
             let px_cfg = px_config::load_config(config.as_deref()).unwrap_or_default();
 
             // Resolve effective values: CLI flag > env var > .px config > default
-            let channel = if channel != "stdio" { channel } else {
-                px_cfg.get_str("radix.channel").unwrap_or("stdio").to_string()
+            let channel = if channel != "telegram" { channel } else {
+                px_cfg.get_str("radix.channel").unwrap_or("telegram").to_string()
             };
             let model = if model != "gpt-4o" { model } else {
                 px_cfg.get_str("radix.model").unwrap_or("gpt-4o").to_string()
