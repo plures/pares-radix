@@ -256,8 +256,7 @@ mod tests {
         let source = r#"
 procedure test_proc:
   trigger: manual
-  steps:
-    - return "hello"
+  return "hello"
 "#;
         let count = bridge.load_from_source(source).await.unwrap();
         // May or may not parse depending on grammar support for simple return
