@@ -163,6 +163,22 @@ impl ShellExecutor {
         }
     }
 
+    /// Create a platform-appropriate shell command.
+    #[cfg(not(target_os = "windows"))]
+    fn shell_command(command: &str) -> Command {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(command);
+        cmd
+    }
+
+    /// Create a platform-appropriate shell command (Windows).
+    #[cfg(target_os = "windows")]
+    fn shell_command(command: &str) -> Command {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg(command);
+        cmd
+    }
+
     /// Execute a command (foreground or background based on request).
     pub async fn exec(&self, req: ExecRequest) -> ExecResult {
         if req.background {
@@ -178,8 +194,7 @@ impl ShellExecutor {
     async fn foreground_exec(&self, req: ExecRequest) -> ExecResult {
         let timeout = Duration::from_secs(req.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS));
 
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(&req.command);
+        let mut cmd = Self::shell_command(&req.command);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.kill_on_drop(true);
@@ -261,8 +276,7 @@ impl ShellExecutor {
 
         let session_id = generate_session_id();
 
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(&req.command);
+        let mut cmd = Self::shell_command(&req.command);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.stdin(Stdio::piped());
