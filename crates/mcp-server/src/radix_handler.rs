@@ -6576,6 +6576,67 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                 Ok(parsed)
             }
 
+            // Built-in: detect OS type
+            "detect_os" => {
+                let os = if cfg!(target_os = "linux") {
+                    "linux"
+                } else if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(target_os = "windows") {
+                    "windows"
+                } else {
+                    "unknown"
+                };
+                Ok(Value::String(os.to_string()))
+            }
+
+            // Built-in: get platform temp directory
+            "get_temp_dir" | "temp_dir" => {
+                Ok(Value::String(std::env::temp_dir().to_string_lossy().to_string()))
+            }
+
+            // Built-in: join path components
+            "join_path" | "path_join" => {
+                let base = params.get("base").and_then(|v| v.as_str()).unwrap_or("");
+                let name = params.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'name' parameter".into(),
+                    }
+                })?;
+                let joined = PathBuf::from(base).join(name);
+                Ok(Value::String(joined.to_string_lossy().to_string()))
+            }
+
+            // Built-in: delete a file
+            "delete_file" | "remove_file" | "rm" => {
+                let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'path' parameter".into(),
+                    }
+                })?;
+                let full_path = if std::path::Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    self.workdir.join(path)
+                };
+                tokio::fs::remove_file(&full_path).await.map_err(|e| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("delete failed: {e}"),
+                    }
+                })?;
+                Ok(json!({"status": "ok", "deleted": full_path.display().to_string()}))
+            }
+
+            // Built-in: emit event (log/noop in procedure context)
+            "emit" => {
+                // In procedure context, emit is a structured event log.
+                // We just return the params as acknowledgment.
+                Ok(params.clone())
+            }
+
             // Default: treat the step name as a shell command with params as JSON env
             other => {
                 let params_str = serde_json::to_string(params).unwrap_or_default();
