@@ -810,8 +810,8 @@ impl RadixToolHandler {
 
     async fn web_fetch(&self, args: &Value) -> ToolResult {
         let url = match args.get("url").and_then(|v| v.as_str()) {
-            Some(u) => u,
-            None => return ToolResult::error("missing required parameter: url"),
+            Some(u) if !u.is_empty() => u,
+            _ => return ToolResult::error("missing required parameter: url"),
         };
 
         let max_chars = args

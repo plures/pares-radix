@@ -97,17 +97,34 @@ impl PxBridge {
 
     /// Load .px procedures from a directory synchronously (for non-async contexts).
     ///
-    /// Uses blocking RwLock access — safe to call from sync code at startup.
+    /// If called from within a tokio runtime, uses `try_write` with a spin loop
+    /// to avoid the blocking_write panic. Safe in both sync and async contexts.
     pub fn load_from_directory_sync(&self, dir: &std::path::Path) -> usize {
         let adapters = crate::px_adapter::load_px_directory(dir, self.handler.clone());
         let count = adapters.len();
 
-        // Use blocking write since we're in a sync context
-        let mut procs = self.procedures.blocking_write();
-        for adapter in adapters {
-            let name = adapter.name().to_string();
-            debug!(procedure = %name, "px_bridge: registered procedure from directory (sync)");
-            procs.insert(name, Arc::new(adapter));
+        // If we're inside a tokio runtime, blocking_write() panics.
+        // Use try_write() in a loop instead (lock is uncontended at startup).
+        let in_runtime = tokio::runtime::Handle::try_current().is_ok();
+        if in_runtime {
+            loop {
+                if let Ok(mut procs) = self.procedures.try_write() {
+                    for adapter in adapters {
+                        let name = adapter.name().to_string();
+                        debug!(procedure = %name, "px_bridge: registered procedure from directory (sync)");
+                        procs.insert(name, Arc::new(adapter));
+                    }
+                    break;
+                }
+                std::thread::yield_now();
+            }
+        } else {
+            let mut procs = self.procedures.blocking_write();
+            for adapter in adapters {
+                let name = adapter.name().to_string();
+                debug!(procedure = %name, "px_bridge: registered procedure from directory (sync)");
+                procs.insert(name, Arc::new(adapter));
+            }
         }
 
         if count > 0 {
