@@ -51,9 +51,7 @@ impl StdioSpineChannel {
         loop {
             match delivery_rx.recv().await {
                 Ok(SpineEvent::DeliveryRequest {
-                    channel,
-                    content,
-                    ..
+                    channel, content, ..
                 }) => {
                     if channel != "stdio" {
                         continue;

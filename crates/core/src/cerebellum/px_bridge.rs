@@ -189,7 +189,10 @@ impl PxBridge {
         let mut vars = HashMap::new();
         vars.insert("message".to_string(), Value::String(message.to_string()));
         vars.insert("plugins".to_string(), json!(plugins));
-        vars.insert("last_topic".to_string(), Value::String(last_topic.to_string()));
+        vars.insert(
+            "last_topic".to_string(),
+            Value::String(last_topic.to_string()),
+        );
 
         self.call("classify_message", vars).await
     }
@@ -206,7 +209,10 @@ impl PxBridge {
         complexity_threshold: f64,
     ) -> Option<Result<Value, String>> {
         let mut vars = HashMap::new();
-        vars.insert("event_type".to_string(), Value::String(event_type.to_string()));
+        vars.insert(
+            "event_type".to_string(),
+            Value::String(event_type.to_string()),
+        );
         vars.insert("content".to_string(), Value::String(content.to_string()));
         vars.insert(
             "learned_context".to_string(),
@@ -259,9 +265,7 @@ mod tests {
     async fn bridge_returns_none_for_unknown_procedure() {
         let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoOpHandler);
         let bridge = PxBridge::new(handler);
-        let result = bridge
-            .classify_message("hello", &[], "")
-            .await;
+        let result = bridge.classify_message("hello", &[], "").await;
         assert!(result.is_none());
     }
 

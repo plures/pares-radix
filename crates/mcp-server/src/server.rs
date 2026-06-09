@@ -179,10 +179,7 @@ impl McpServer {
                                 .write_all(response_json.as_bytes())
                                 .await
                                 .map_err(McpServerError::Io)?;
-                            output
-                                .write_all(b"\n")
-                                .await
-                                .map_err(McpServerError::Io)?;
+                            output.write_all(b"\n").await.map_err(McpServerError::Io)?;
                             output.flush().await.map_err(McpServerError::Io)?;
                             continue;
                         }
@@ -200,8 +197,7 @@ impl McpServer {
                         }
                     };
 
-                    let response =
-                        self.handle_request(&request.method, request.params).await;
+                    let response = self.handle_request(&request.method, request.params).await;
 
                     let json_response = match response {
                         Ok(result) => JsonRpcResponse {
@@ -218,17 +214,13 @@ impl McpServer {
                         },
                     };
 
-                    let response_json =
-                        serde_json::to_string(&json_response).unwrap_or_default();
+                    let response_json = serde_json::to_string(&json_response).unwrap_or_default();
                     debug!(response = %response_json, "sending response");
                     output
                         .write_all(response_json.as_bytes())
                         .await
                         .map_err(McpServerError::Io)?;
-                    output
-                        .write_all(b"\n")
-                        .await
-                        .map_err(McpServerError::Io)?;
+                    output.write_all(b"\n").await.map_err(McpServerError::Io)?;
                     output.flush().await.map_err(McpServerError::Io)?;
                 }
                 StdioAction::Notification(notif) => {
@@ -514,7 +506,10 @@ mod tests {
         assert_eq!(params["data"]["status"], "completed");
         assert_eq!(params["data"]["output"], "LGTM, no issues found.");
         assert_eq!(params["data"]["duration_secs"], 45.2);
-        assert!(params["data"]["undelivered_steerings"].as_array().unwrap().is_empty());
+        assert!(params["data"]["undelivered_steerings"]
+            .as_array()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -529,7 +524,10 @@ mod tests {
         let params = notif.params.unwrap();
         assert_eq!(params["level"], "error");
         assert_eq!(params["data"]["status"], "failed");
-        assert_eq!(params["data"]["output"], "cargo build failed: missing dependency");
+        assert_eq!(
+            params["data"]["output"],
+            "cargo build failed: missing dependency"
+        );
         let steerings = params["data"]["undelivered_steerings"].as_array().unwrap();
         assert_eq!(steerings.len(), 2);
         assert_eq!(steerings[0], "hurry up");
@@ -605,7 +603,11 @@ mod tests {
         let server = McpServer::new(handler);
         // tools/call with no params should error
         let err = server.handle_request("tools/call", None).await.unwrap_err();
-        assert!(err.code < 0, "JSON-RPC error codes must be negative, got {}", err.code);
+        assert!(
+            err.code < 0,
+            "JSON-RPC error codes must be negative, got {}",
+            err.code
+        );
         assert_eq!(err.code, -32602);
     }
 
@@ -614,8 +616,15 @@ mod tests {
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
         let params = Some(json!({"arguments": {}}));
-        let err = server.handle_request("tools/call", params).await.unwrap_err();
-        assert!(err.code < 0, "JSON-RPC error codes must be negative, got {}", err.code);
+        let err = server
+            .handle_request("tools/call", params)
+            .await
+            .unwrap_err();
+        assert!(
+            err.code < 0,
+            "JSON-RPC error codes must be negative, got {}",
+            err.code
+        );
         assert_eq!(err.code, -32602);
     }
 
@@ -653,7 +662,11 @@ mod tests {
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
         let err = server.handle_request("unknown", None).await.unwrap_err();
-        assert!(err.code < 0, "JSON-RPC error codes must be negative, got {}", err.code);
+        assert!(
+            err.code < 0,
+            "JSON-RPC error codes must be negative, got {}",
+            err.code
+        );
         assert_eq!(err.code, -32601);
     }
 
@@ -713,13 +726,16 @@ mod tests {
         // Verify tools/call response
         let resp3: Value = serde_json::from_str(lines[2]).unwrap();
         assert_eq!(resp3["id"], 3);
-        assert!(resp3["result"]["content"][0]["text"].as_str().unwrap().contains("test_tool"));
+        assert!(resp3["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("test_tool"));
     }
 
     /// Test that invalid JSON returns parse error with negative code via run_with_io.
     #[tokio::test]
     async fn run_with_io_returns_parse_error_for_invalid_json() {
-        use tokio::io::{AsyncWriteExt, AsyncReadExt, duplex};
+        use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
@@ -738,13 +754,16 @@ mod tests {
 
         let resp: Value = serde_json::from_str(all_output.trim()).unwrap();
         assert_eq!(resp["error"]["code"], -32700);
-        assert!(resp["error"]["message"].as_str().unwrap().contains("Parse error"));
+        assert!(resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Parse error"));
     }
 
     /// Test that notifications (no id) are handled without response.
     #[tokio::test]
     async fn run_with_io_handles_notification_without_response() {
-        use tokio::io::{AsyncWriteExt, AsyncReadExt, duplex};
+        use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
@@ -755,7 +774,10 @@ mod tests {
         // Notification (no id) followed by a normal request
         let notif = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
         let req = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-        client_write.write_all(format!("{}\n{}\n", notif, req).as_bytes()).await.unwrap();
+        client_write
+            .write_all(format!("{}\n{}\n", notif, req).as_bytes())
+            .await
+            .unwrap();
         drop(client_write);
 
         let result = server.run_with_io(server_read, server_write).await;
@@ -775,7 +797,7 @@ mod tests {
     /// Test write_notification via notification channel in run_with_io.
     #[tokio::test]
     async fn run_with_io_delivers_server_notifications() {
-        use tokio::io::{AsyncWriteExt, duplex};
+        use tokio::io::{duplex, AsyncWriteExt};
 
         let handler: Arc<dyn ToolHandler> = Arc::new(MockHandler);
         let server = McpServer::new(handler);
@@ -785,21 +807,27 @@ mod tests {
         let (server_write, client_read) = duplex(8192);
 
         // Run server in background
-        let server_handle = tokio::spawn(async move {
-            server.run_with_io(server_read, server_write).await
-        });
+        let server_handle =
+            tokio::spawn(async move { server.run_with_io(server_read, server_write).await });
 
         // Wrap client_read for line-by-line reading
         let mut reader = tokio::io::BufReader::new(client_read);
 
         // Send ping request
         let req = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-        client_write.write_all(format!("{}\n", req).as_bytes()).await.unwrap();
+        client_write
+            .write_all(format!("{}\n", req).as_bytes())
+            .await
+            .unwrap();
 
         // Wait for ping response
         let mut line = String::new();
         reader.read_line(&mut line).await.unwrap();
-        assert!(line.contains("\"id\":1"), "Expected ping response, got: {}", line);
+        assert!(
+            line.contains("\"id\":1"),
+            "Expected ping response, got: {}",
+            line
+        );
 
         // Now send notification — server is idle waiting for next select!
         tx.send(ServerNotification::tools_list_changed()).unwrap();
@@ -808,8 +836,11 @@ mod tests {
         let mut notif_line = String::new();
         reader.read_line(&mut notif_line).await.unwrap();
         let v: Value = serde_json::from_str(&notif_line).unwrap_or_default();
-        assert_eq!(v["method"], "notifications/tools/list_changed",
-            "Expected tools_list_changed notification, got: {}", notif_line);
+        assert_eq!(
+            v["method"], "notifications/tools/list_changed",
+            "Expected tools_list_changed notification, got: {}",
+            notif_line
+        );
 
         // Close input — server exits cleanly
         drop(client_write);

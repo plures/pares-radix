@@ -1416,7 +1416,10 @@ mod tests {
             vec!["deploy".into()],
             vec!["nuke".into()],
         );
-        assert_eq!(ledger.validate("deploy:prod"), ValidationStatus::GateRequired);
+        assert_eq!(
+            ledger.validate("deploy:prod"),
+            ValidationStatus::GateRequired
+        );
         assert_eq!(ledger.validate("nuke:everything"), ValidationStatus::Denied);
         assert_eq!(ledger.validate("read_file"), ValidationStatus::Permitted);
     }
@@ -1463,7 +1466,11 @@ mod tests {
     async fn gate_with_context_returns_error_when_channel_fails() {
         let ledger = Ledger::new(Arc::new(FailingChannel));
         let result = ledger
-            .gate_with_context("send_email:x", "reason", LedgerContext::from_channel("test"))
+            .gate_with_context(
+                "send_email:x",
+                "reason",
+                LedgerContext::from_channel("test"),
+            )
             .await;
         assert!(result.is_err());
     }

@@ -19,9 +19,9 @@ pub fn draw(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),              // chat area
+            Constraint::Min(3),               // chat area
             Constraint::Length(input_height), // input area (dynamic)
-            Constraint::Length(1),           // status bar
+            Constraint::Length(1),            // status bar
         ])
         .split(f.area());
 
@@ -115,11 +115,7 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     let cursor_col = if text_before_cursor.ends_with('\n') {
         0
     } else {
-        text_before_cursor
-            .lines()
-            .last()
-            .unwrap_or("")
-            .len() as u16
+        text_before_cursor.lines().last().unwrap_or("").len() as u16
     };
 
     f.set_cursor_position((area.x + cursor_col + 1, area.y + cursor_row + 1));

@@ -163,7 +163,10 @@ fn parse_config(source: &str) -> Result<PxConfig, String> {
         }
     }
 
-    Ok(PxConfig { entries, source: None })
+    Ok(PxConfig {
+        entries,
+        source: None,
+    })
 }
 
 /// Parse a raw value string into a `serde_json::Value`.
@@ -233,7 +236,10 @@ config telegram:
 "#;
         std::env::set_var("TEST_PX_TOKEN", "bot123456");
         let config = parse_config(source).expect("parse failed");
-        assert_eq!(config.get_resolved("telegram.token"), Some("bot123456".to_string()));
+        assert_eq!(
+            config.get_resolved("telegram.token"),
+            Some("bot123456".to_string())
+        );
         std::env::remove_var("TEST_PX_TOKEN");
     }
 
@@ -251,7 +257,10 @@ config model:
   temperature: 0.7
 "#;
         let config = parse_config(source).expect("parse failed");
-        let fallbacks = config.entries.get("model.fallbacks").expect("fallbacks missing");
+        let fallbacks = config
+            .entries
+            .get("model.fallbacks")
+            .expect("fallbacks missing");
         assert!(fallbacks.is_array(), "expected array, got: {:?}", fallbacks);
         let arr = fallbacks.as_array().unwrap();
         assert_eq!(arr.len(), 2);

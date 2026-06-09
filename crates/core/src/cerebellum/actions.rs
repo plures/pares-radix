@@ -100,52 +100,49 @@ impl CerebellumActionHandler {
     // ── Action implementations ───────────────────────────────────────────────
 
     async fn compute_embedding(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let text = params
-            .get("text")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let text = params.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "compute_embedding".to_string(),
                 message: "missing required param: text (string)".to_string(),
+            }
+        })?;
+
+        let embedder = self
+            .embedder
+            .as_ref()
+            .ok_or_else(|| ExecutionError::ActionFailed {
+                action: "compute_embedding".to_string(),
+                message: "no embedding provider configured".to_string(),
             })?;
 
-        let embedder = self.embedder.as_ref().ok_or_else(|| ExecutionError::ActionFailed {
-            action: "compute_embedding".to_string(),
-            message: "no embedding provider configured".to_string(),
-        })?;
-
-        let embedding = embedder.embed(text).await.map_err(|e| ExecutionError::ActionFailed {
-            action: "compute_embedding".to_string(),
-            message: e.to_string(),
-        })?;
+        let embedding = embedder
+            .embed(text)
+            .await
+            .map_err(|e| ExecutionError::ActionFailed {
+                action: "compute_embedding".to_string(),
+                message: e.to_string(),
+            })?;
 
         Ok(json!({ "embedding": embedding }))
     }
 
     fn cosine_similarity_impl(params: &Value) -> Result<Value, ExecutionError> {
-        let a = params
-            .get("a")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let a = params.get("a").and_then(|v| v.as_array()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "cosine_similarity".to_string(),
                 message: "missing required param: a (array of floats)".to_string(),
-            })?;
+            }
+        })?;
 
-        let b = params
-            .get("b")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let b = params.get("b").and_then(|v| v.as_array()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "cosine_similarity".to_string(),
                 message: "missing required param: b (array of floats)".to_string(),
-            })?;
+            }
+        })?;
 
-        let a_vec: Vec<f32> = a
-            .iter()
-            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-            .collect();
-        let b_vec: Vec<f32> = b
-            .iter()
-            .map(|v| v.as_f64().unwrap_or(0.0) as f32)
-            .collect();
+        let a_vec: Vec<f32> = a.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
+        let b_vec: Vec<f32> = b.iter().map(|v| v.as_f64().unwrap_or(0.0) as f32).collect();
 
         if a_vec.len() != b_vec.len() {
             return Err(ExecutionError::ActionFailed {
@@ -163,13 +160,12 @@ impl CerebellumActionHandler {
     }
 
     async fn read_state(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let key = params
-            .get("key")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "read_state".to_string(),
                 message: "missing required param: key (string)".to_string(),
-            })?;
+            }
+        })?;
 
         let state = self.state.read().await;
         let value = state.get(key).cloned().unwrap_or(Value::Null);
@@ -177,13 +173,12 @@ impl CerebellumActionHandler {
     }
 
     async fn write_state(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let key = params
-            .get("key")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "write_state".to_string(),
                 message: "missing required param: key (string)".to_string(),
-            })?;
+            }
+        })?;
 
         let value = params.get("value").cloned().unwrap_or(Value::Null);
 
@@ -205,20 +200,22 @@ impl CerebellumActionHandler {
     }
 
     async fn emit_event(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let event_type = params
-            .get("type")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let event_type = params.get("type").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "emit_event".to_string(),
                 message: "missing required param: type (string)".to_string(),
-            })?;
+            }
+        })?;
 
         let payload = params.get("payload").cloned().unwrap_or_else(|| json!({}));
 
-        let tx = self.event_tx.as_ref().ok_or_else(|| ExecutionError::ActionFailed {
-            action: "emit_event".to_string(),
-            message: "no event channel configured".to_string(),
-        })?;
+        let tx = self
+            .event_tx
+            .as_ref()
+            .ok_or_else(|| ExecutionError::ActionFailed {
+                action: "emit_event".to_string(),
+                message: "no event channel configured".to_string(),
+            })?;
 
         // Construct a SpineEvent based on the requested type.
         // For now, all cerebellum-emitted events are modelled as ModelRequest
@@ -258,10 +255,12 @@ impl CerebellumActionHandler {
             },
         };
 
-        tx.send(spine_event).await.map_err(|e| ExecutionError::ActionFailed {
-            action: "emit_event".to_string(),
-            message: format!("failed to send event to pipeline: {e}"),
-        })?;
+        tx.send(spine_event)
+            .await
+            .map_err(|e| ExecutionError::ActionFailed {
+                action: "emit_event".to_string(),
+                message: format!("failed to send event to pipeline: {e}"),
+            })?;
 
         Ok(json!({ "emitted": true }))
     }
@@ -293,12 +292,12 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         return 0.0;
     }
 
-    let (dot, norm_a_sq, norm_b_sq) =
-        a.iter()
-            .zip(b.iter())
-            .fold((0.0f32, 0.0f32, 0.0f32), |(dot, na, nb), (&x, &y)| {
-                (dot + x * y, na + x * x, nb + y * y)
-            });
+    let (dot, norm_a_sq, norm_b_sq) = a
+        .iter()
+        .zip(b.iter())
+        .fold((0.0f32, 0.0f32, 0.0f32), |(dot, na, nb), (&x, &y)| {
+            (dot + x * y, na + x * x, nb + y * y)
+        });
 
     let norm_a = norm_a_sq.sqrt();
     let norm_b = norm_b_sq.sqrt();
@@ -323,7 +322,10 @@ mod tests {
     fn cosine_similarity_identical_vectors() {
         let v = vec![1.0, 2.0, 3.0];
         let sim = cosine_similarity(&v, &v);
-        assert!((sim - 1.0).abs() < 1e-6, "identical vectors should have similarity 1.0, got {sim}");
+        assert!(
+            (sim - 1.0).abs() < 1e-6,
+            "identical vectors should have similarity 1.0, got {sim}"
+        );
     }
 
     #[test]
@@ -331,7 +333,10 @@ mod tests {
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![0.0, 1.0, 0.0];
         let sim = cosine_similarity(&a, &b);
-        assert!(sim.abs() < 1e-6, "orthogonal vectors should have similarity 0.0, got {sim}");
+        assert!(
+            sim.abs() < 1e-6,
+            "orthogonal vectors should have similarity 0.0, got {sim}"
+        );
     }
 
     #[test]
@@ -339,7 +344,10 @@ mod tests {
         let a = vec![1.0, 2.0, 3.0];
         let b = vec![-1.0, -2.0, -3.0];
         let sim = cosine_similarity(&a, &b);
-        assert!((sim + 1.0).abs() < 1e-6, "opposite vectors should have similarity -1.0, got {sim}");
+        assert!(
+            (sim + 1.0).abs() < 1e-6,
+            "opposite vectors should have similarity -1.0, got {sim}"
+        );
     }
 
     #[test]
@@ -414,7 +422,10 @@ mod tests {
     #[tokio::test]
     async fn read_state_returns_null_for_missing_key() {
         let handler = CerebellumActionHandler::for_testing();
-        let result = handler.call("read_state", &json!({"key": "missing"})).await.unwrap();
+        let result = handler
+            .call("read_state", &json!({"key": "missing"}))
+            .await
+            .unwrap();
         assert_eq!(result["value"], Value::Null);
     }
 
@@ -443,7 +454,10 @@ mod tests {
         let complex = json!({"nested": {"array": [1, 2, 3]}, "flag": true});
 
         handler
-            .call("write_state", &json!({"key": "config", "value": complex.clone()}))
+            .call(
+                "write_state",
+                &json!({"key": "config", "value": complex.clone()}),
+            )
             .await
             .unwrap();
 
@@ -460,16 +474,25 @@ mod tests {
         let result = handler.call("get_current_time", &json!({})).await.unwrap();
         let ts = result["timestamp_ms"].as_i64().unwrap();
         // Should be after 2024-01-01 (1704067200000 ms)
-        assert!(ts > 1_704_067_200_000, "timestamp should be recent, got {ts}");
+        assert!(
+            ts > 1_704_067_200_000,
+            "timestamp should be recent, got {ts}"
+        );
         // Should be before 2030-01-01 (1893456000000 ms)
-        assert!(ts < 1_893_456_000_000, "timestamp should not be in the far future, got {ts}");
+        assert!(
+            ts < 1_893_456_000_000,
+            "timestamp should not be in the far future, got {ts}"
+        );
     }
 
     #[tokio::test]
     async fn emit_event_without_channel_returns_error() {
         let handler = CerebellumActionHandler::for_testing();
         let result = handler
-            .call("emit_event", &json!({"type": "model_request", "payload": {}}))
+            .call(
+                "emit_event",
+                &json!({"type": "model_request", "payload": {}}),
+            )
             .await;
         assert!(result.is_err());
     }

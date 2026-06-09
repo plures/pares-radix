@@ -10,8 +10,8 @@ mod tests {
 
     use serde_json::{json, Value};
 
-    use praxis_native::px::{parse, compiler::compile};
     use praxis_native::px::executor::{execute, ActionHandler, ExecutionError};
+    use praxis_native::px::{compiler::compile, parse};
 
     // ── Mock ActionHandler for Testing ──────────────────────────────────────────
 
@@ -62,13 +62,12 @@ mod tests {
 
             match name {
                 "db_get" => {
-                    let key = params
-                        .get("key")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| ExecutionError::ActionFailed {
+                    let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+                        ExecutionError::ActionFailed {
                             action: name.to_string(),
                             message: "missing required parameter: key".into(),
-                        })?;
+                        }
+                    })?;
 
                     let db = self.db.lock().unwrap();
                     let value = db.get(key).cloned().unwrap_or(Value::Null);
@@ -76,13 +75,12 @@ mod tests {
                 }
 
                 "db_put" => {
-                    let key = params
-                        .get("key")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| ExecutionError::ActionFailed {
+                    let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+                        ExecutionError::ActionFailed {
                             action: name.to_string(),
                             message: "missing required parameter: key".into(),
-                        })?;
+                        }
+                    })?;
 
                     let value = params.get("value").cloned().ok_or_else(|| {
                         ExecutionError::ActionFailed {
@@ -98,10 +96,7 @@ mod tests {
 
                 "string_upper" => {
                     // Simple native function that uppercases a string
-                    let input = params
-                        .get("input")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let input = params.get("input").and_then(|v| v.as_str()).unwrap_or("");
                     Ok(Value::String(input.to_uppercase()))
                 }
 
@@ -270,10 +265,7 @@ procedure test_unknown:
         // Execute the procedure — should fail
         let result = execute(&record.data, &handler);
 
-        assert!(
-            result.is_err(),
-            "should fail when calling unknown action"
-        );
+        assert!(result.is_err(), "should fail when calling unknown action");
 
         if let Err(ExecutionError::UnknownAction(name)) = result {
             assert_eq!(name, "nonexistent_action");
@@ -336,8 +328,8 @@ mod bridge_integration_tests {
 
     use serde_json::json;
 
-    use praxis_native::px::{parse, compiler::compile};
     use praxis_native::px::executor::execute;
+    use praxis_native::px::{compiler::compile, parse};
 
     use pares_agens_core::shell_executor::ShellExecutor;
     use pares_agens_core::InMemoryStateStore;
@@ -350,8 +342,7 @@ mod bridge_integration_tests {
         let shell = Arc::new(ShellExecutor::new());
         let state = Arc::new(InMemoryStateStore::new());
         let handler = Arc::new(
-            RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-                .with_state_store(state.clone()),
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_state_store(state.clone()),
         );
         (PxActionBridge::new(handler), state)
     }
@@ -372,9 +363,9 @@ procedure bridge_roundtrip:
         let compiled = compile(&doc);
         let record_data = compiled[0].data.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            execute(&record_data, &bridge)
-        }).await.expect("spawn_blocking panicked");
+        let result = tokio::task::spawn_blocking(move || execute(&record_data, &bridge))
+            .await
+            .expect("spawn_blocking panicked");
 
         let result = result.expect("execution failed");
         assert!(result.success, "procedure should succeed");
@@ -402,9 +393,9 @@ procedure bridge_overwrite:
         let compiled = compile(&doc);
         let record_data = compiled[0].data.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            execute(&record_data, &bridge)
-        }).await.expect("spawn_blocking panicked");
+        let result = tokio::task::spawn_blocking(move || execute(&record_data, &bridge))
+            .await
+            .expect("spawn_blocking panicked");
 
         let result = result.expect("execution failed");
         assert!(result.success);
@@ -432,9 +423,9 @@ procedure bridge_delete:
         let compiled = compile(&doc);
         let record_data = compiled[0].data.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            execute(&record_data, &bridge)
-        }).await.expect("spawn_blocking panicked");
+        let result = tokio::task::spawn_blocking(move || execute(&record_data, &bridge))
+            .await
+            .expect("spawn_blocking panicked");
 
         let result = result.expect("execution failed");
         assert!(result.success);

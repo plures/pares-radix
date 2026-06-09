@@ -187,7 +187,10 @@ impl SubAgentManager {
 
         // Create steering channel for this session.
         let (steering_tx, steering_rx) = steering::channel();
-        self.steering_txs.write().await.insert(id.clone(), steering_tx);
+        self.steering_txs
+            .write()
+            .await
+            .insert(id.clone(), steering_tx);
 
         // Keep a clone of the rx so we can drain undelivered messages post-completion.
         let post_completion_rx = steering_rx.clone();
@@ -678,9 +681,7 @@ mod tests {
         }));
         let (manager, mut rx) = SubAgentManager::new(broker);
 
-        let id = manager
-            .spawn("echo", "task", SpawnOptions::default())
-            .await;
+        let id = manager.spawn("echo", "task", SpawnOptions::default()).await;
 
         // Wait for the model to start executing, then steer.
         // The steering message arrives mid-model-call, so it won't be drained

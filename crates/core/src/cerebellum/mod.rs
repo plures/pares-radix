@@ -213,7 +213,10 @@ impl Cerebellum {
     }
 
     /// Attach a conversation store for fallback context when autorecall returns no hits.
-    pub fn with_conversation_store(mut self, store: Arc<dyn crate::spine::conversation::ConversationStore>) -> Self {
+    pub fn with_conversation_store(
+        mut self,
+        store: Arc<dyn crate::spine::conversation::ConversationStore>,
+    ) -> Self {
         self.conversation_store = Some(store);
         self
     }
@@ -410,13 +413,16 @@ impl Cerebellum {
             if bridge.is_active() {
                 let event_type = event.kind().to_string();
                 let content = extract_query(event).unwrap_or_default();
-                match bridge.route_event(
-                    &event_type,
-                    &content,
-                    &learned_context,
-                    self.config.enable_subconscious,
-                    f64::from(self.config.complexity_threshold),
-                ).await {
+                match bridge
+                    .route_event(
+                        &event_type,
+                        &content,
+                        &learned_context,
+                        self.config.enable_subconscious,
+                        f64::from(self.config.complexity_threshold),
+                    )
+                    .await
+                {
                     Some(Ok(val)) => {
                         // Parse .px result into Route enum
                         parse_px_route(&val).unwrap_or_else(|| {

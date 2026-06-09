@@ -267,8 +267,14 @@ mod tests {
     #[test]
     fn retention_rule_equality() {
         assert_eq!(RetentionRule::keep_forever(), RetentionRule::default());
-        assert_ne!(RetentionRule::expire_after(7), RetentionRule::keep_forever());
-        assert_ne!(RetentionRule::limit_count(10), RetentionRule::keep_forever());
+        assert_ne!(
+            RetentionRule::expire_after(7),
+            RetentionRule::keep_forever()
+        );
+        assert_ne!(
+            RetentionRule::limit_count(10),
+            RetentionRule::keep_forever()
+        );
         assert_ne!(
             RetentionRule::expire_after(7),
             RetentionRule::expire_after(8)
@@ -348,14 +354,8 @@ mod tests {
     #[test]
     fn policy_different_categories_independent() {
         let mut policy = RetentionPolicy::new();
-        policy.set_rule(
-            MemoryCategory::Conversation,
-            RetentionRule::expire_after(7),
-        );
-        policy.set_rule(
-            MemoryCategory::CodePattern,
-            RetentionRule::limit_count(100),
-        );
+        policy.set_rule(MemoryCategory::Conversation, RetentionRule::expire_after(7));
+        policy.set_rule(MemoryCategory::CodePattern, RetentionRule::limit_count(100));
         // Conversation should NOT have CodePattern's rule
         assert_eq!(
             policy.rule_for(&MemoryCategory::Conversation).max_count,
@@ -512,9 +512,6 @@ mod tests {
             p2.rule_for(&MemoryCategory::Conversation).max_age_days,
             Some(30)
         );
-        assert_eq!(
-            p2.rule_for(&MemoryCategory::ErrorFix).max_count,
-            Some(200)
-        );
+        assert_eq!(p2.rule_for(&MemoryCategory::ErrorFix).max_count, Some(200));
     }
 }

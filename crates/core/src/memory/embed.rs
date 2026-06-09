@@ -91,7 +91,10 @@ mod tests {
         let embedder = MockEmbedder;
         let v = embedder.embed("test normalization").await.unwrap();
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((norm - 1.0).abs() < 1e-5, "vector not unit-normalized: norm={norm}");
+        assert!(
+            (norm - 1.0).abs() < 1e-5,
+            "vector not unit-normalized: norm={norm}"
+        );
     }
 
     #[tokio::test]
@@ -101,10 +104,7 @@ mod tests {
         let embedder = MockEmbedder;
         let v = embedder.embed("testing positive values").await.unwrap();
         for (i, &val) in v.iter().enumerate() {
-            assert!(
-                val >= 0.0,
-                "expected non-negative at index {i}, got {val}"
-            );
+            assert!(val >= 0.0, "expected non-negative at index {i}, got {val}");
         }
     }
 
@@ -168,7 +168,10 @@ mod tests {
         let embedder = MockEmbedder;
         let v_ab = embedder.embed("ab").await.unwrap();
         let v_ba = embedder.embed("ba").await.unwrap();
-        assert_ne!(v_ab, v_ba, "different bigrams should produce different vectors");
+        assert_ne!(
+            v_ab, v_ba,
+            "different bigrams should produce different vectors"
+        );
     }
 
     #[tokio::test]
@@ -288,7 +291,7 @@ impl EmbeddingProvider for OpenAiEmbedder {
 #[cfg(test)]
 mod openai_tests {
     use super::*;
-    use wiremock::matchers::{method, path, header_exists};
+    use wiremock::matchers::{header_exists, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn make_embedding_response(embedding: Vec<f32>) -> serde_json::Value {
@@ -308,9 +311,9 @@ mod openai_tests {
         let embedding = vec![0.5; EMBEDDING_DIM];
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                make_embedding_response(embedding),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(make_embedding_response(embedding)),
+            )
             .mount(&server)
             .await;
 
@@ -327,9 +330,10 @@ mod openai_tests {
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
             .and(header_exists("authorization"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                make_embedding_response(vec![1.0; EMBEDDING_DIM]),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(make_embedding_response(vec![1.0; EMBEDDING_DIM])),
+            )
             .mount(&server)
             .await;
 
@@ -343,9 +347,10 @@ mod openai_tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                make_embedding_response(vec![0.3; EMBEDDING_DIM]),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(make_embedding_response(vec![0.3; EMBEDDING_DIM])),
+            )
             .mount(&server)
             .await;
 
@@ -367,7 +372,10 @@ mod openai_tests {
         let result = embedder.embed("test").await;
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
-        assert!(err_msg.contains("500"), "error should contain status code: {err_msg}");
+        assert!(
+            err_msg.contains("500"),
+            "error should contain status code: {err_msg}"
+        );
     }
 
     #[tokio::test]
@@ -410,9 +418,7 @@ mod openai_tests {
         full[1] = 4.0;
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                make_embedding_response(full),
-            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(make_embedding_response(full)))
             .mount(&server)
             .await;
 
@@ -433,9 +439,10 @@ mod openai_tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/v1/embeddings"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(
-                make_embedding_response(vec![1.0; EMBEDDING_DIM]),
-            ))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(make_embedding_response(vec![1.0; EMBEDDING_DIM])),
+            )
             .mount(&server)
             .await;
 

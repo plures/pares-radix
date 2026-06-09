@@ -1142,7 +1142,10 @@ mod tests {
                 }],
             )
             .await;
-        assert!(result.is_err(), "hostname with control char must be rejected");
+        assert!(
+            result.is_err(),
+            "hostname with control char must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -1239,7 +1242,10 @@ mod tests {
                 },
             )
             .await;
-        assert!(result.is_err(), "hostname with control char must be rejected");
+        assert!(
+            result.is_err(),
+            "hostname with control char must be rejected"
+        );
     }
 
     #[tokio::test]
@@ -1443,7 +1449,8 @@ mod tests {
         let store = PluresDbStore::in_memory();
         // Manually insert an entry with the right suffix but wrong prefix
         let fake_key = format!("nothost/sneaky{INFERENCE_CAPABILITIES_SUFFIX}");
-        let payload = serde_json::json!({"capability": {"host": "1.2.3.4", "port": 80, "experts": []}});
+        let payload =
+            serde_json::json!({"capability": {"host": "1.2.3.4", "port": 80, "experts": []}});
         let sealed = seal_value_for_storage(payload, store.host_sea_key.as_ref()).unwrap();
         store.store.put(fake_key, ACTOR, sealed);
 

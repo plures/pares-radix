@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 use tracing::debug;
 
+use crate::model::ChatMessage;
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
-use crate::model::ChatMessage;
 
 /// Records user and assistant messages into a ConversationStore for multi-turn context.
 pub struct HistoryRecorder {
@@ -63,8 +63,8 @@ impl SpineProcedure for HistoryRecorder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spine::conversation::MemoryConversationStore;
     use crate::model::ToolCall;
+    use crate::spine::conversation::MemoryConversationStore;
     use serde_json::json;
     use tokio::sync::mpsc;
 

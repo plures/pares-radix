@@ -621,10 +621,7 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(matches!(
-            err,
-            ProcedureLoadError::DefinitionMismatch { .. }
-        ));
+        assert!(matches!(err, ProcedureLoadError::DefinitionMismatch { .. }));
     }
 
     #[test]
@@ -642,10 +639,7 @@ mod tests {
             )
             .unwrap_err();
 
-        assert!(matches!(
-            err,
-            ProcedureLoadError::DefinitionMismatch { .. }
-        ));
+        assert!(matches!(err, ProcedureLoadError::DefinitionMismatch { .. }));
     }
 
     #[test]

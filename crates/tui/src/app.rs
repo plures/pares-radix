@@ -147,11 +147,9 @@ impl InputHistory {
         if let Ok(explicit) = std::env::var("PARES_RADIX_HISTORY_PATH") {
             return Some(PathBuf::from(explicit));
         }
-        std::env::var("HOME").ok().map(|home| {
-            PathBuf::from(home)
-                .join(".pares-radix")
-                .join("history")
-        })
+        std::env::var("HOME")
+            .ok()
+            .map(|home| PathBuf::from(home).join(".pares-radix").join("history"))
     }
 
     /// Load history entries from disk. Silently returns empty on any error.
@@ -348,7 +346,9 @@ impl App {
                 timestamp: ts,
             });
         }
-        self.push_system(&format!("↑ {count} messages restored from previous session"));
+        self.push_system(&format!(
+            "↑ {count} messages restored from previous session"
+        ));
         self.scroll_to_bottom();
     }
 
@@ -426,7 +426,9 @@ impl App {
                 // Check if session exists
                 let exists = self.sessions.iter().any(|(n, _)| *n == name);
                 if !exists {
-                    self.push_system(&format!("Session not found: {name}. Use /session list to see available sessions."));
+                    self.push_system(&format!(
+                        "Session not found: {name}. Use /session list to see available sessions."
+                    ));
                     return;
                 }
                 // Persist current session before switching
@@ -814,12 +816,12 @@ mod tests {
 
     /// Create a minimal App for testing (uses a mock agent).
     fn test_app() -> (App, mpsc::UnboundedReceiver<AppEvent>) {
+        use async_trait::async_trait;
         use pares_agens_core::agent::Memory;
         use pares_agens_core::model::{
             ChatMessage as CoreChatMessage, ChatOptions, ModelClient, ModelCompletion,
             ToolDefinition, ToolDispatcher,
         };
-        use async_trait::async_trait;
         use serde_json::Value;
 
         struct NoopMemory;
@@ -862,21 +864,19 @@ mod tests {
             }
         }
 
-        let agent = Arc::new(
-            Agent::new(Arc::new(NoopMemory))
-                .with_model(
-                    Arc::new(NoopModel),
-                    Arc::new(NoopDispatcher),
-                    "test".to_string(),
-                ),
-        );
+        let agent = Arc::new(Agent::new(Arc::new(NoopMemory)).with_model(
+            Arc::new(NoopModel),
+            Arc::new(NoopDispatcher),
+            "test".to_string(),
+        ));
 
         let (tx, rx) = mpsc::unbounded_channel();
         // Create app with empty history (don't load from disk in tests)
         let app = App {
             messages: vec![ChatMessage {
                 role: Role::System,
-                content: "Pares Radix TUI — model: test-model. Type /help for commands.".to_string(),
+                content: "Pares Radix TUI — model: test-model. Type /help for commands."
+                    .to_string(),
                 timestamp: chrono::Utc::now(),
             }],
             input: String::new(),
@@ -1011,7 +1011,11 @@ mod tests {
     #[test]
     fn history_save_and_load_roundtrip() {
         // Use explicit path methods for thread-safe isolation (no env var race)
-        let tmp = std::env::temp_dir().join(format!("pares-radix-test-roundtrip-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let tmp = std::env::temp_dir().join(format!(
+            "pares-radix-test-roundtrip-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
         let history_file = tmp.join("history");
         fs::create_dir_all(&tmp).unwrap();
 
@@ -1037,7 +1041,11 @@ mod tests {
     #[test]
     fn history_load_respects_max_entries() {
         // Use explicit path methods for thread-safe isolation
-        let tmp = std::env::temp_dir().join(format!("pares-radix-test-max-{}-{}", std::process::id(), chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)));
+        let tmp = std::env::temp_dir().join(format!(
+            "pares-radix-test-max-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
         let history_file = tmp.join("history");
         fs::create_dir_all(&tmp).unwrap();
 
@@ -1090,10 +1098,26 @@ mod tests {
         let initial_count = app.messages.len(); // 1 system message
 
         let turns = vec![
-            ("user".to_string(), "hello".to_string(), "2026-05-20T10:00:00Z".to_string()),
-            ("assistant".to_string(), "hi there".to_string(), "2026-05-20T10:00:01Z".to_string()),
-            ("user".to_string(), "how are you?".to_string(), "2026-05-20T10:01:00Z".to_string()),
-            ("assistant".to_string(), "I'm good!".to_string(), "2026-05-20T10:01:01Z".to_string()),
+            (
+                "user".to_string(),
+                "hello".to_string(),
+                "2026-05-20T10:00:00Z".to_string(),
+            ),
+            (
+                "assistant".to_string(),
+                "hi there".to_string(),
+                "2026-05-20T10:00:01Z".to_string(),
+            ),
+            (
+                "user".to_string(),
+                "how are you?".to_string(),
+                "2026-05-20T10:01:00Z".to_string(),
+            ),
+            (
+                "assistant".to_string(),
+                "I'm good!".to_string(),
+                "2026-05-20T10:01:01Z".to_string(),
+            ),
         ];
 
         app.load_history_from_turns(turns);
@@ -1167,7 +1191,9 @@ mod tests {
         assert!(app.sessions.iter().find(|(n, _)| n == "work").unwrap().1);
         // Messages should be cleared (only the system notice remains)
         assert_eq!(app.messages.len(), 1);
-        assert!(app.messages[0].content.contains("New session created: work"));
+        assert!(app.messages[0]
+            .content
+            .contains("New session created: work"));
     }
 
     #[test]
@@ -1214,7 +1240,9 @@ mod tests {
         assert!(app.session_manager.is_none());
 
         let store = Arc::new(InMemoryStateStore::new());
-        let mgr = Arc::new(SessionManager::new(store as Arc<dyn pares_agens_core::StateStore>));
+        let mgr = Arc::new(SessionManager::new(
+            store as Arc<dyn pares_agens_core::StateStore>,
+        ));
         // Rebuild with session manager
         let (mut app2, _rx2) = test_app();
         app2.session_manager = Some(mgr);
@@ -1241,13 +1269,25 @@ mod tests {
         app.current_session = "work".to_string();
 
         let turns = vec![
-            ("user".to_string(), "hello".to_string(), "2026-05-20T10:00:00Z".to_string()),
-            ("assistant".to_string(), "hi".to_string(), "2026-05-20T10:00:01Z".to_string()),
+            (
+                "user".to_string(),
+                "hello".to_string(),
+                "2026-05-20T10:00:00Z".to_string(),
+            ),
+            (
+                "assistant".to_string(),
+                "hi".to_string(),
+                "2026-05-20T10:00:01Z".to_string(),
+            ),
         ];
         app.handle_session_messages_loaded("work".to_string(), turns);
 
         // Should have loaded the messages
-        let user_msgs: Vec<_> = app.messages.iter().filter(|m| m.role == Role::User).collect();
+        let user_msgs: Vec<_> = app
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::User)
+            .collect();
         assert_eq!(user_msgs.len(), 1);
         assert_eq!(user_msgs[0].content, "hello");
     }
@@ -1259,9 +1299,14 @@ mod tests {
         let initial_count = app.messages.len();
 
         // Load arrives for a different session (user switched away)
-        app.handle_session_messages_loaded("old".to_string(), vec![
-            ("user".to_string(), "stale".to_string(), "2026-05-20T10:00:00Z".to_string()),
-        ]);
+        app.handle_session_messages_loaded(
+            "old".to_string(),
+            vec![(
+                "user".to_string(),
+                "stale".to_string(),
+                "2026-05-20T10:00:00Z".to_string(),
+            )],
+        );
 
         // Should be unchanged
         assert_eq!(app.messages.len(), initial_count);

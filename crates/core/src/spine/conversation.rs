@@ -55,9 +55,8 @@ impl PluresConversationStore {
     /// in-memory if the path cannot be opened.
     pub fn persistent(path: impl AsRef<std::path::Path>) -> Result<Self, String> {
         use pluresdb::{SledStorage, StorageEngine};
-        let storage: Arc<dyn StorageEngine> = Arc::new(
-            SledStorage::open(path).map_err(|e| format!("open conversation store: {e}"))?
-        );
+        let storage: Arc<dyn StorageEngine> =
+            Arc::new(SledStorage::open(path).map_err(|e| format!("open conversation store: {e}"))?);
         let store = Arc::new(CrdtStore::default().with_persistence(storage));
         Ok(Self { store })
     }
@@ -94,7 +93,8 @@ impl ConversationStore for PluresConversationStore {
             .store
             .get(&key)
             .and_then(|record| {
-                record.data
+                record
+                    .data
                     .get("messages")
                     .and_then(|m| m.as_array().cloned())
             })
@@ -205,12 +205,8 @@ mod tests {
     async fn memory_separate_chats_are_isolated() {
         let store = MemoryConversationStore::new();
 
-        store
-            .add_message("chat-1", ChatMessage::user("msg1"))
-            .await;
-        store
-            .add_message("chat-2", ChatMessage::user("msg2"))
-            .await;
+        store.add_message("chat-1", ChatMessage::user("msg1")).await;
+        store.add_message("chat-2", ChatMessage::user("msg2")).await;
 
         assert_eq!(store.get_history("chat-1").await.len(), 1);
         assert_eq!(store.get_history("chat-2").await.len(), 1);

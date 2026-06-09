@@ -19,7 +19,9 @@ use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, instrument, warn};
 
-use crate::delegation::{context::AgentContext, registry::AgentRegistry, steering::SteeringRx, DelegationError};
+use crate::delegation::{
+    context::AgentContext, registry::AgentRegistry, steering::SteeringRx, DelegationError,
+};
 use crate::model::{ChatOptions, ModelClient, ToolDefinition, ToolDispatcher};
 
 // ── SubTask ──────────────────────────────────────────────────────────────────
@@ -362,7 +364,7 @@ mod tests {
                         arguments: serde_json::json!({"path": "foo.txt"}),
                     }],
                     logprobs: None,
-                model: None,
+                    model: None,
                 })
             } else {
                 // Second call — produce the final answer
@@ -371,7 +373,7 @@ mod tests {
                     content: Some("final answer after tool".into()),
                     tool_calls: vec![],
                     logprobs: None,
-                model: None,
+                    model: None,
                 })
             }
         }
@@ -532,7 +534,7 @@ mod tests {
                     content: Some(system_content),
                     tool_calls: vec![],
                     logprobs: None,
-                model: None,
+                    model: None,
                 })
             }
         }

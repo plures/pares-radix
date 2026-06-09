@@ -86,7 +86,10 @@ impl ModelInvoker {
         }
 
         // If this is a follow-up from tool_executor, include conversation history
-        if let Some(history) = metadata.get("conversation_history").and_then(|h| h.as_array()) {
+        if let Some(history) = metadata
+            .get("conversation_history")
+            .and_then(|h| h.as_array())
+        {
             for entry in history {
                 let role = entry["role"].as_str().unwrap_or("user");
                 let msg_content = entry["content"].as_str().unwrap_or("");
@@ -130,10 +133,7 @@ impl ModelInvoker {
                 .and_then(|s| s.as_str())
                 .unwrap_or("");
             if source == "tool_executor" {
-                messages.push(ChatMessage::user(format!(
-                    "Tool results:\n\n{}",
-                    content
-                )));
+                messages.push(ChatMessage::user(format!("Tool results:\n\n{}", content)));
             } else {
                 messages.push(ChatMessage::user(content));
             }
@@ -190,7 +190,10 @@ impl SpineProcedure for ModelInvoker {
 
         // Call the model
         let options = ChatOptions::default();
-        let result = self.model_client.complete(&messages, &tool_defs, &options).await;
+        let result = self
+            .model_client
+            .complete(&messages, &tool_defs, &options)
+            .await;
 
         match result {
             Ok(completion) => {
@@ -441,10 +444,7 @@ mod tests {
     #[tokio::test]
     async fn emits_model_response_with_tool_calls() {
         let (emitter, mut rx) = make_emitter();
-        let invoker = ModelInvoker::new(
-            Arc::new(ToolCallingModelClient),
-            Arc::new(MockTools),
-        );
+        let invoker = ModelInvoker::new(Arc::new(ToolCallingModelClient), Arc::new(MockTools));
 
         let event = SpineEvent::ModelRequest {
             source: "test".into(),
@@ -477,10 +477,7 @@ mod tests {
     #[tokio::test]
     async fn emits_delivery_request_on_error() {
         let (emitter, mut rx) = make_emitter();
-        let invoker = ModelInvoker::new(
-            Arc::new(FailingModelClient),
-            Arc::new(MockTools),
-        );
+        let invoker = ModelInvoker::new(Arc::new(FailingModelClient), Arc::new(MockTools));
 
         let event = SpineEvent::ModelRequest {
             source: "test".into(),
@@ -618,8 +615,7 @@ mod tests {
         invoker.handle(&event, &emitter).await;
 
         // No events should be emitted
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
         assert!(result.is_err(), "should timeout — no events emitted");
     }
 }

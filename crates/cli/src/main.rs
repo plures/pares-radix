@@ -39,8 +39,8 @@ use pares_agens_channels::telegram::{
 };
 use pares_agens_core::agent::{Agent, Memory};
 use pares_agens_core::auth::copilot::{CopilotAuth, CopilotModelClient};
-use pares_agens_core::cerebellum::{Cerebellum, CerebellumConfig};
 use pares_agens_core::cerebellum::px_bridge::PxBridge;
+use pares_agens_core::cerebellum::{Cerebellum, CerebellumConfig};
 use pares_agens_core::delegation::{broker::DelegationBroker, registry::AgentRegistry};
 use pares_agens_core::memory::{
     embed::{EmbeddingProvider, MockEmbedder, OpenAiEmbedder},
@@ -3427,32 +3427,51 @@ async fn main() {
             model,
             use_copilot,
         } => {
+            use pares_agens_channels::stdio_spine::StdioSpineChannel;
+            use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
+            use pares_agens_core::spine::channel::SpineChannel;
+            use pares_agens_core::spine::conversation::{
+                ConversationStore, PluresConversationStore,
+            };
             use pares_agens_core::spine::pipeline::Pipeline;
+            use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
             use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
             use pares_agens_core::spine::procedures::tool_executor::ToolExecutor;
-            use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
-            use pares_agens_core::spine::conversation::{ConversationStore, PluresConversationStore};
-            use pares_agens_channels::telegram_spine::{TelegramSpineChannel, TelegramSpineConfig};
-            use pares_agens_channels::stdio_spine::StdioSpineChannel;
-            use pares_agens_core::spine::channel::SpineChannel;
 
             // Load .px config (CLI flags override config file values)
             let px_cfg = px_config::load_config(config.as_deref()).unwrap_or_default();
 
             // Resolve effective values: CLI flag > env var > .px config > default
-            let channel = if channel != "telegram" { channel } else {
-                px_cfg.get_str("radix.channel").unwrap_or("telegram").to_string()
+            let channel = if channel != "telegram" {
+                channel
+            } else {
+                px_cfg
+                    .get_str("radix.channel")
+                    .unwrap_or("telegram")
+                    .to_string()
             };
-            let model = if model != "gpt-4o" { model } else {
-                px_cfg.get_str("radix.model").unwrap_or("gpt-4o").to_string()
+            let model = if model != "gpt-4o" {
+                model
+            } else {
+                px_cfg
+                    .get_str("radix.model")
+                    .unwrap_or("gpt-4o")
+                    .to_string()
             };
-            let model_url = if model_url != "https://models.inference.ai.azure.com" { model_url } else {
-                px_cfg.get_str("model.url").unwrap_or("https://models.inference.ai.azure.com").to_string()
+            let model_url = if model_url != "https://models.inference.ai.azure.com" {
+                model_url
+            } else {
+                px_cfg
+                    .get_str("model.url")
+                    .unwrap_or("https://models.inference.ai.azure.com")
+                    .to_string()
             };
             let use_copilot = use_copilot || px_cfg.get_bool("radix.use_copilot").unwrap_or(false);
-            let telegram_token = if !telegram_token.is_empty() { telegram_token } else {
+            let telegram_token = if !telegram_token.is_empty() {
+                telegram_token
+            } else {
                 px_cfg.get_resolved("telegram.token").unwrap_or_default()
             };
 
@@ -3505,11 +3524,9 @@ async fn main() {
                 let auth = CopilotAuth::new(oauth_token);
                 let model_name_arc = Arc::new(RwLock::new(model.clone()));
                 Arc::new(
-                    CopilotModelClient::new_with_model_handle(auth, model_name_arc)
-                        .with_fallbacks(vec![
-                            "claude-sonnet-4.5".to_string(),
-                            "gpt-4o".to_string(),
-                        ]),
+                    CopilotModelClient::new_with_model_handle(auth, model_name_arc).with_fallbacks(
+                        vec!["claude-sonnet-4.5".to_string(), "gpt-4o".to_string()],
+                    ),
                 )
             } else {
                 let provider_config = ProviderConfig::new(&model_url, None);
@@ -3548,18 +3565,25 @@ async fn main() {
 
             // Cron/scheduler tools
             let scheduler = Arc::new(pares_agens_agenda::scheduler::Scheduler::new());
-            spine_registry.register(Box::new(CronListProcedure { scheduler: Arc::clone(&scheduler) }));
-            spine_registry.register(Box::new(CronAddProcedure { scheduler: Arc::clone(&scheduler) }));
-            spine_registry.register(Box::new(CronRemoveProcedure { scheduler: Arc::clone(&scheduler) }));
-            spine_registry.register(Box::new(CronToggleProcedure { scheduler: Arc::clone(&scheduler) }));
+            spine_registry.register(Box::new(CronListProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            spine_registry.register(Box::new(CronAddProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            spine_registry.register(Box::new(CronRemoveProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
+            spine_registry.register(Box::new(CronToggleProcedure {
+                scheduler: Arc::clone(&scheduler),
+            }));
 
             // Memory tools (PluresDB + fastembed)
             {
                 let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
                 let memory_path = PathBuf::from(&home).join(".pares-radix/memory");
-                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH").unwrap_or_else(|_| {
-                    format!("{home}/.cache/fastembed")
-                });
+                let fastembed_cache = std::env::var("FASTEMBED_CACHE_PATH")
+                    .unwrap_or_else(|_| format!("{home}/.cache/fastembed"));
                 std::fs::create_dir_all(&fastembed_cache).ok();
                 #[allow(unused_unsafe)]
                 unsafe {
@@ -3584,11 +3608,7 @@ async fn main() {
                     };
                 use pares_agens_core::memory::embed::{EmbeddingProvider, MockEmbedder};
                 let embedder: Box<dyn EmbeddingProvider> = Box::new(MockEmbedder);
-                let plures_lm = Arc::new(PluresLm::new(
-                    memory_store,
-                    embedder,
-                    128_000,
-                ));
+                let plures_lm = Arc::new(PluresLm::new(memory_store, embedder, 128_000));
                 spine_registry.register(Box::new(MemorySearchProcedure {
                     plures_lm: Arc::clone(&plures_lm),
                 }));
@@ -3804,8 +3824,12 @@ async fn main() {
 
             // 3.6. Load system prompt — compose from context files like OpenClaw
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let workspace = std::env::var("PARES_WORKSPACE")
-                .unwrap_or_else(|_| PathBuf::from(&home).join(".pares-radix/workspace").to_string_lossy().to_string());
+            let workspace = std::env::var("PARES_WORKSPACE").unwrap_or_else(|_| {
+                PathBuf::from(&home)
+                    .join(".pares-radix/workspace")
+                    .to_string_lossy()
+                    .to_string()
+            });
             let workspace_path = PathBuf::from(&workspace);
 
             // Load context files in priority order
@@ -3880,7 +3904,9 @@ async fn main() {
             // 4. Register procedures (full pipeline: inbound → history → model → tools → response)
             pipeline.register(Arc::new(InboundRouter)).await;
             pipeline
-                .register(Arc::new(HistoryRecorder::new(Arc::clone(&conversation_store))))
+                .register(Arc::new(HistoryRecorder::new(Arc::clone(
+                    &conversation_store,
+                ))))
                 .await;
             pipeline
                 .register(Arc::new(
@@ -3900,7 +3926,9 @@ async fn main() {
 
             // 4.5. Load .px procedures from praxis/procedures/
             {
-                use pares_agens_core::px_adapter::{load_px_directory, ToolDispatchActionHandler, AsyncActionHandler};
+                use pares_agens_core::px_adapter::{
+                    load_px_directory, AsyncActionHandler, ToolDispatchActionHandler,
+                };
 
                 let px_action_handler = Arc::new(ToolDispatchActionHandler::new_lazy());
                 let praxis_dir = PathBuf::from(&home).join(".pares-radix/praxis/procedures");
@@ -3939,10 +3967,12 @@ async fn main() {
                     let mut interval = tokio::time::interval(Duration::from_secs(60));
                     loop {
                         interval.tick().await;
-                        timer_emitter.emit(SpineEvent::Timer {
-                            id: SpineEvent::new_id(),
-                            name: "task_eval".into(),
-                        }).await;
+                        timer_emitter
+                            .emit(SpineEvent::Timer {
+                                id: SpineEvent::new_id(),
+                                name: "task_eval".into(),
+                            })
+                            .await;
                     }
                 });
                 info!("Task evaluation timer started (60s interval)");
@@ -3960,7 +3990,8 @@ async fn main() {
                     info!("Stdio delivery loop started");
 
                     // 6.5. Start heartbeat runner (proactive behavior)
-                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
+                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) =
+                        tokio::sync::watch::channel(false);
                     {
                         let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
                             Arc::new(pares_agens_core::state::InMemoryStateStore::default());
@@ -4001,7 +4032,8 @@ async fn main() {
                     info!("Telegram delivery loop started");
 
                     // 6.5. Start heartbeat runner (proactive behavior)
-                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) = tokio::sync::watch::channel(false);
+                    let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) =
+                        tokio::sync::watch::channel(false);
                     {
                         let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
                             Arc::new(pares_agens_core::state::InMemoryStateStore::default());
@@ -4031,7 +4063,9 @@ async fn main() {
                     }
                 }
                 "http" => {
-                    use pares_agens_channels::http_spine::{HttpSpineChannel, HttpSpineConfig, PendingResponses, start_http_server};
+                    use pares_agens_channels::http_spine::{
+                        start_http_server, HttpSpineChannel, HttpSpineConfig, PendingResponses,
+                    };
 
                     let http_config = HttpSpineConfig {
                         port: http_port,
@@ -4044,12 +4078,17 @@ async fn main() {
                     let pending_for_delivery = Arc::clone(&pending);
                     tokio::spawn(async move {
                         let channel = HttpSpineChannel::new(HttpSpineConfig::default());
-                        channel.run_delivery_loop(delivery_rx, pending_for_delivery).await;
+                        channel
+                            .run_delivery_loop(delivery_rx, pending_for_delivery)
+                            .await;
                     });
 
                     // Start HTTP server (blocks)
                     let emitter = pipeline.emitter();
-                    info!(port = http_port, "Starting HTTP channel — POST /v1/chat to interact");
+                    info!(
+                        port = http_port,
+                        "Starting HTTP channel — POST /v1/chat to interact"
+                    );
                     if let Err(e) = start_http_server(emitter, pending, http_config).await {
                         error!(error = %e, "HTTP server failed");
                         std::process::exit(1);
@@ -5331,10 +5370,15 @@ async fn main() {
                     let local_dir = std::path::PathBuf::from("praxis/procedures");
                     let loaded_local = bridge.load_from_directory_sync(&local_dir);
                     if loaded_local > 0 {
-                        tracing::info!(count = loaded_local, "px_bridge: loaded cerebellum procedures (local/spine)");
+                        tracing::info!(
+                            count = loaded_local,
+                            "px_bridge: loaded cerebellum procedures (local/spine)"
+                        );
                         cerebellum.with_px_bridge(bridge)
                     } else {
-                        tracing::debug!("px_bridge: no .px procedures found (spine), using Rust fallback");
+                        tracing::debug!(
+                            "px_bridge: no .px procedures found (spine), using Rust fallback"
+                        );
                         cerebellum
                     }
                 }
@@ -5377,7 +5421,8 @@ async fn main() {
                         Ok(s) => Arc::new(s),
                         Err(_) => Arc::new(pares_agens_core::InMemoryStateStore::new()),
                     };
-                let session_mgr = Arc::new(pares_agens_core::session::SessionManager::new(state_store));
+                let session_mgr =
+                    Arc::new(pares_agens_core::session::SessionManager::new(state_store));
                 app = app.with_session_manager(session_mgr);
                 app.load_persisted_sessions();
             }
@@ -5404,7 +5449,10 @@ async fn main() {
                             .collect();
                         if !display_turns.is_empty() {
                             app.load_history_from_turns(display_turns);
-                            tracing::info!(count = app.messages.len(), "restored TUI conversation history");
+                            tracing::info!(
+                                count = app.messages.len(),
+                                "restored TUI conversation history"
+                            );
                         }
                     }
                     Ok(_) => {} // no prior turns
@@ -5459,9 +5507,7 @@ async fn main() {
                             continue;
                         }
                         // Alt+Enter inserts a newline for multi-line input
-                        if key.modifiers.contains(KeyModifiers::ALT)
-                            && key.code == KeyCode::Enter
-                        {
+                        if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Enter {
                             app.insert_newline();
                             continue;
                         }
@@ -5756,12 +5802,20 @@ async fn main() {
                         Ok(source) => match pares_radix_praxis::px::parse(&source) {
                             Ok(_) => println!("  \x1b[32m\u{2713}\x1b[0m {}", path.display()),
                             Err(e) => {
-                                eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} {}", path.display(), e);
+                                eprintln!(
+                                    "  \x1b[31m\u{2717}\x1b[0m {} \u{2014} {}",
+                                    path.display(),
+                                    e
+                                );
                                 errors += 1;
                             }
                         },
                         Err(e) => {
-                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}", path.display(), e);
+                            eprintln!(
+                                "  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}",
+                                path.display(),
+                                e
+                            );
                             errors += 1;
                         }
                     }
@@ -5789,7 +5843,11 @@ async fn main() {
                     let source = match std::fs::read_to_string(path) {
                         Ok(s) => s,
                         Err(e) => {
-                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}", path.display(), e);
+                            eprintln!(
+                                "  \x1b[31m\u{2717}\x1b[0m {} \u{2014} read error: {}",
+                                path.display(),
+                                e
+                            );
                             total_failed += 1;
                             continue;
                         }
@@ -5798,7 +5856,11 @@ async fn main() {
                     let doc = match pares_radix_praxis::px::parse(&source) {
                         Ok(d) => d,
                         Err(e) => {
-                            eprintln!("  \x1b[31m\u{2717}\x1b[0m {} \u{2014} parse error: {}", path.display(), e);
+                            eprintln!(
+                                "  \x1b[31m\u{2717}\x1b[0m {} \u{2014} parse error: {}",
+                                path.display(),
+                                e
+                            );
                             total_failed += 1;
                             continue;
                         }
@@ -5838,7 +5900,8 @@ async fn main() {
                             for exp in &result.expectations {
                                 if !exp.passed {
                                     let neg = if exp.negated { "NOT " } else { "" };
-                                    println!("    - {}{}: {}",
+                                    println!(
+                                        "    - {}{}: {}",
                                         neg,
                                         exp.check,
                                         exp.reason.as_deref().unwrap_or("failed")
@@ -5855,9 +5918,15 @@ async fn main() {
 
                 println!();
                 if total_failed == 0 {
-                    println!("\x1b[32m\u{2713} {} scenario(s) passed\x1b[0m", total_passed);
+                    println!(
+                        "\x1b[32m\u{2713} {} scenario(s) passed\x1b[0m",
+                        total_passed
+                    );
                 } else {
-                    println!("\x1b[31m\u{2717} {}/{} scenario(s) failed\x1b[0m", total_failed, total_scenarios);
+                    println!(
+                        "\x1b[31m\u{2717} {}/{} scenario(s) failed\x1b[0m",
+                        total_failed, total_scenarios
+                    );
                 }
                 if total_failed > 0 {
                     std::process::exit(1);

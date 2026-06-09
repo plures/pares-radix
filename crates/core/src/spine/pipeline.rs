@@ -92,7 +92,10 @@ impl Pipeline {
 
     /// Register a procedure with the pipeline.
     pub async fn register(&self, procedure: Arc<dyn SpineProcedure>) {
-        info!(procedure = procedure.name(), "pipeline: registered procedure");
+        info!(
+            procedure = procedure.name(),
+            "pipeline: registered procedure"
+        );
         self.procedures.write().await.push(procedure);
     }
 
@@ -219,13 +222,10 @@ mod tests {
             .await;
 
         // Should receive a delivery request from the echo procedure
-        let delivered = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            delivery_rx.recv(),
-        )
-        .await
-        .expect("timeout")
-        .expect("recv error");
+        let delivered = tokio::time::timeout(std::time::Duration::from_secs(2), delivery_rx.recv())
+            .await
+            .expect("timeout")
+            .expect("recv error");
 
         if let SpineEvent::DeliveryRequest { content, .. } = delivered {
             assert_eq!(content, "echo: hello");
@@ -262,13 +262,11 @@ mod tests {
             .await;
 
         // The delivery_rx should get the event (broadcast), but no new echo event
-        let delivered = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            delivery_rx.recv(),
-        )
-        .await
-        .expect("timeout")
-        .expect("recv error");
+        let delivered =
+            tokio::time::timeout(std::time::Duration::from_millis(500), delivery_rx.recv())
+                .await
+                .expect("timeout")
+                .expect("recv error");
 
         if let SpineEvent::DeliveryRequest { content, .. } = delivered {
             assert_eq!(content, "passthrough"); // Original, not "echo: ..."
@@ -277,11 +275,8 @@ mod tests {
         }
 
         // No second event should arrive
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            delivery_rx.recv(),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), delivery_rx.recv()).await;
         assert!(result.is_err(), "should timeout — no extra events");
 
         handle.abort();

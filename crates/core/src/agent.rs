@@ -30,7 +30,9 @@ use crate::event::Event;
 use crate::memory::entry::Exchange;
 use crate::memory::store::MemoryStore;
 use crate::memory::{passes_quality_gate, PluresLm};
-use crate::model::{ChatMessage, ChatOptions, ModelClient, StreamDelta, StreamSender, ToolDispatcher};
+use crate::model::{
+    ChatMessage, ChatOptions, ModelClient, StreamDelta, StreamSender, ToolDispatcher,
+};
 use crate::pii_guard::PiiGuard;
 use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
 use crate::procedure::ProcedureRegistry;
@@ -509,32 +511,31 @@ impl Agent {
         }
 
         // Cerebellum preprocessing (same as handle_event)
-        let (route, learned_context, clear_history) = if let (Some(cerebellum), Some(plures_lm)) =
-            (&self.cerebellum, &self.plures_lm)
-        {
-            match cerebellum
-                .preprocess(&event, plures_lm, &self.procedure_registry)
-                .await
-            {
-                Ok(ctx) => {
-                    if ctx.route == Route::Drop {
-                        let _ = stream_tx.send(StreamDelta::Done);
-                        return None;
+        let (route, learned_context, clear_history) =
+            if let (Some(cerebellum), Some(plures_lm)) = (&self.cerebellum, &self.plures_lm) {
+                match cerebellum
+                    .preprocess(&event, plures_lm, &self.procedure_registry)
+                    .await
+                {
+                    Ok(ctx) => {
+                        if ctx.route == Route::Drop {
+                            let _ = stream_tx.send(StreamDelta::Done);
+                            return None;
+                        }
+                        (ctx.route, ctx.learned_context, ctx.clear_history)
                     }
-                    (ctx.route, ctx.learned_context, ctx.clear_history)
+                    Err(e) => {
+                        error!(error = %e, "cerebellum preprocess failed (streaming)");
+                        (Route::Conscious, String::new(), false)
+                    }
                 }
-                Err(e) => {
-                    error!(error = %e, "cerebellum preprocess failed (streaming)");
-                    (Route::Conscious, String::new(), false)
-                }
-            }
-        } else {
-            let default_route = match event {
-                Event::Timer { .. } | Event::StateChange { .. } => Route::Procedural,
-                _ => Route::Conscious,
+            } else {
+                let default_route = match event {
+                    Event::Timer { .. } | Event::StateChange { .. } => Route::Procedural,
+                    _ => Route::Conscious,
+                };
+                (default_route, String::new(), false)
             };
-            (default_route, String::new(), false)
-        };
 
         if route == Route::Drop {
             let _ = stream_tx.send(StreamDelta::Done);
@@ -685,7 +686,7 @@ impl Agent {
         let options = ChatOptions {
             temperature: None,
             logprobs: true,
-                model: None,
+            model: None,
         };
 
         let (mut reply, logprobs, mut messages) = match self
@@ -718,7 +719,7 @@ impl Agent {
                 let deep_options = ChatOptions {
                     temperature: None,
                     logprobs: false,
-                model: None,
+                    model: None,
                 };
                 match self
                     .run_model_loop(

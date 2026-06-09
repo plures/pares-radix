@@ -41,4 +41,4 @@ mod orchestration_test;
 
 pub use handler::ToolHandler;
 pub use radix_handler::{RadixToolHandler, SharedProcedures};
-pub use server::{McpServer, McpServerError, ServerNotification, spawn_completion_forwarder};
+pub use server::{spawn_completion_forwarder, McpServer, McpServerError, ServerNotification};

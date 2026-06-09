@@ -3,9 +3,9 @@
 //! These tests validate the full pipeline: parse → compile → execute
 //! using real .px fixture files, including bracket indexing paths.
 
-use pares_radix_praxis::px::parse;
 use pares_radix_praxis::px::compiler::compile;
 use pares_radix_praxis::px::executor::default_evaluate_condition;
+use pares_radix_praxis::px::parse;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
@@ -151,8 +151,16 @@ fn parse_pipeline_workflow_px() {
     assert_eq!(doc.constraints.len(), 2);
     assert_eq!(doc.constraints[0].name, "all_stages_named");
     assert_eq!(doc.constraints[1].name, "prod_stage_requires_approval");
-    assert!(doc.constraints[0].require_expr.as_ref().unwrap().contains("[0]"));
-    assert!(doc.constraints[1].when_expr.as_ref().unwrap().contains("[2]"));
+    assert!(doc.constraints[0]
+        .require_expr
+        .as_ref()
+        .unwrap()
+        .contains("[0]"));
+    assert!(doc.constraints[1]
+        .when_expr
+        .as_ref()
+        .unwrap()
+        .contains("[2]"));
 
     // Procedure with when, try/catch, emit
     assert_eq!(doc.procedures.len(), 1);
@@ -187,14 +195,16 @@ fn compile_and_execute_pipeline_workflow() {
     let records = compile(&doc);
 
     // Find the procedure record
-    let proc_record = records.iter().find(|r| {
-        r.data.get("name").and_then(|v| v.as_str()) == Some("run_pipeline")
-    }).expect("procedure record not found");
+    let proc_record = records
+        .iter()
+        .find(|r| r.data.get("name").and_then(|v| v.as_str()) == Some("run_pipeline"))
+        .expect("procedure record not found");
 
     // Execute with pre-seeded health variable
-    let vars = HashMap::from([
-        ("health".to_string(), json!({"status": "degraded", "uptime": 99.2})),
-    ]);
+    let vars = HashMap::from([(
+        "health".to_string(),
+        json!({"status": "degraded", "uptime": 99.2}),
+    )]);
     let result = executor::execute_with_vars(&proc_record.data, &PipelineHandler, vars).unwrap();
     assert!(result.success);
 
@@ -203,11 +213,17 @@ fn compile_and_execute_pipeline_workflow() {
     assert!(emit.is_some(), "emit should have captured events");
     let emit_arr = emit.unwrap().as_array().unwrap();
     // Should have pipeline_warning + stage_failed events
-    assert!(!emit_arr.is_empty(), "should have at least 1 emitted event, got {}", emit_arr.len());
+    assert!(
+        !emit_arr.is_empty(),
+        "should have at least 1 emitted event, got {}",
+        emit_arr.len()
+    );
 
     // Try/catch should have recovered — rollback result captured
-    assert!(result.variables.contains_key("rollback") || result.variables.contains_key("error"),
-        "try/catch should have captured rollback or error");
+    assert!(
+        result.variables.contains_key("rollback") || result.variables.contains_key("error"),
+        "try/catch should have captured rollback or error"
+    );
 }
 
 #[test]
@@ -265,12 +281,21 @@ fn loop_with_bracket_indexed_conditions() {
     // Now verify bracket indexing works on the loop output
     let vars = result.variables.clone();
     use pares_radix_praxis::px::executor::default_evaluate_condition;
-    assert!(default_evaluate_condition("servers[0].host == web-01", &vars));
-    assert!(default_evaluate_condition("servers[1].healthy == false", &vars));
+    assert!(default_evaluate_condition(
+        "servers[0].host == web-01",
+        &vars
+    ));
+    assert!(default_evaluate_condition(
+        "servers[1].healthy == false",
+        &vars
+    ));
     assert!(!default_evaluate_condition("servers[1].healthy", &vars));
     assert!(default_evaluate_condition("servers[0].load < 50", &vars));
     assert!(default_evaluate_condition("servers[1].load > 90", &vars));
-    assert!(default_evaluate_condition("servers[2].load < 20 && servers[0].healthy", &vars));
+    assert!(default_evaluate_condition(
+        "servers[2].load < 20 && servers[0].healthy",
+        &vars
+    ));
 }
 
 #[test]
@@ -418,10 +443,7 @@ fn bracket_indexing_in_logical_combinations() {
     ));
 
     // Negation with bracket indexing
-    assert!(default_evaluate_condition(
-        "!cluster.nodes[2].ready",
-        &vars
-    ));
+    assert!(default_evaluate_condition("!cluster.nodes[2].ready", &vars));
 }
 
 #[test]
@@ -437,7 +459,10 @@ fn parse_parallel_workflow_px() {
     assert_eq!(proc.steps.len(), 2);
 
     match &proc.steps[0] {
-        pares_radix_praxis::px::PxStep::Parallel { branches, output_var } => {
+        pares_radix_praxis::px::PxStep::Parallel {
+            branches,
+            output_var,
+        } => {
             assert_eq!(branches.len(), 3);
             assert_eq!(branches[0].name, "metrics");
             assert_eq!(branches[1].name, "alerts");

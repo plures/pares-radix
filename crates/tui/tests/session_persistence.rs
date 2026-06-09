@@ -11,10 +11,7 @@ use pares_agens_core::{PluresDbStateStore, StateStore};
 
 fn temp_db_path() -> std::path::PathBuf {
     let mut path = std::env::temp_dir();
-    path.push(format!(
-        "pares-radix-session-test-{}",
-        std::process::id()
-    ));
+    path.push(format!("pares-radix-session-test-{}", std::process::id()));
     path
 }
 
@@ -131,7 +128,10 @@ async fn multiple_sessions_persist_independently() {
             .await
             .expect("personal session should exist");
         assert_eq!(personal.messages.len(), 3);
-        assert_eq!(personal.metadata.topic_summary, Some("personal".to_string()));
+        assert_eq!(
+            personal.metadata.topic_summary,
+            Some("personal".to_string())
+        );
     }
 
     let _ = std::fs::remove_dir_all(&db_path);

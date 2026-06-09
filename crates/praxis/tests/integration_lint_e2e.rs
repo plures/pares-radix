@@ -38,8 +38,8 @@ fn lint_triggers_fixture_produces_parseable_codes() {
     // L001 and L007 cannot be triggered from parsed .px (grammar requires non-empty
     // procedure bodies and catch blocks). They're validated in unit tests instead.
     let expected = [
-        "PX-L002", "PX-L003", "PX-L004", "PX-L005", "PX-L006",
-        "PX-L008", "PX-L009", "PX-L010", "PX-L011", "PX-L012",
+        "PX-L002", "PX-L003", "PX-L004", "PX-L005", "PX-L006", "PX-L008", "PX-L009", "PX-L010",
+        "PX-L011", "PX-L012",
     ];
 
     for code in &expected {
@@ -52,7 +52,11 @@ fn lint_triggers_fixture_produces_parseable_codes() {
     }
 
     // Verify that at least 10 of 12 rules fire from parsed text
-    assert!(codes.len() >= 10, "Expected at least 10 unique codes, got {}", codes.len());
+    assert!(
+        codes.len() >= 10,
+        "Expected at least 10 unique codes, got {}",
+        codes.len()
+    );
 }
 
 #[test]
@@ -79,7 +83,9 @@ fn l002_non_exhaustive_match_from_fixture() {
 
     // no_wildcard procedure should trigger L002, and dup_arms (no wildcard either)
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("no_wildcard")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("no_wildcard")),
         "no_wildcard procedure should trigger PX-L002"
     );
 }
@@ -94,7 +100,9 @@ fn l003_unreachable_arm_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("unreachable_arm")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("unreachable_arm")),
         "unreachable_arm procedure should trigger PX-L003"
     );
 }
@@ -109,7 +117,9 @@ fn l004_duplicate_arms_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("dup_arms")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("dup_arms")),
         "dup_arms procedure should trigger PX-L004"
     );
 }
@@ -124,7 +134,9 @@ fn l005_unused_output_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("unused_output")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("unused_output")),
         "unused_output procedure should trigger PX-L005"
     );
 }
@@ -139,7 +151,9 @@ fn l006_unused_loop_var_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("unused_loop_var")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("unused_loop_var")),
         "unused_loop_var procedure should trigger PX-L006"
     );
 }
@@ -167,7 +181,9 @@ fn l008_shadowed_output_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("shadowed_var")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("shadowed_var")),
         "shadowed_var procedure should trigger PX-L008"
     );
 }
@@ -182,7 +198,9 @@ fn l009_unreachable_after_return_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("dead_code")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("dead_code")),
         "dead_code procedure should trigger PX-L009"
     );
 }
@@ -197,7 +215,9 @@ fn l010_unused_param_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("unused_param")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("unused_param")),
         "unused_param procedure should trigger PX-L010"
     );
 }
@@ -212,7 +232,9 @@ fn l011_undefined_call_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("calls_undefined")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("calls_undefined")),
         "calls_undefined procedure should trigger PX-L011"
     );
 }
@@ -227,7 +249,9 @@ fn l012_arity_mismatch_from_fixture() {
         .collect();
 
     assert!(
-        diags.iter().any(|d| d.procedure.as_deref() == Some("caller")),
+        diags
+            .iter()
+            .any(|d| d.procedure.as_deref() == Some("caller")),
         "caller procedure should trigger PX-L012 (arity mismatch)"
     );
 }
@@ -239,8 +263,14 @@ fn lint_triggers_diagnostic_summary() {
     let doc = parse(&source).unwrap();
     let diags = lint(&doc);
 
-    let warnings = diags.iter().filter(|d| d.severity == LintSeverity::Warning).count();
-    let errors = diags.iter().filter(|d| d.severity == LintSeverity::Error).count();
+    let warnings = diags
+        .iter()
+        .filter(|d| d.severity == LintSeverity::Warning)
+        .count();
+    let errors = diags
+        .iter()
+        .filter(|d| d.severity == LintSeverity::Error)
+        .count();
 
     // All our lint rules produce warnings (no errors in this fixture)
     assert!(warnings > 0, "Should have at least some warnings");
@@ -253,7 +283,12 @@ fn lint_triggers_diagnostic_summary() {
     );
 
     eprintln!("=== Lint Summary ===");
-    eprintln!("Total: {} diagnostics ({} warnings, {} errors)", diags.len(), warnings, errors);
+    eprintln!(
+        "Total: {} diagnostics ({} warnings, {} errors)",
+        diags.len(),
+        warnings,
+        errors
+    );
     for d in &diags {
         eprintln!("  {}", d);
     }

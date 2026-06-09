@@ -801,8 +801,14 @@ mod tests {
             // Retry once more if still running (CI load)
             tokio::time::sleep(Duration::from_millis(1000)).await;
             let poll2 = executor.poll(&session_id, Some(3000)).await.unwrap();
-            assert!(!poll2.running, "process still running after 4.3s for a 0.1s command");
-            assert!(poll2.new_output.contains("background_output") || poll.new_output.contains("background_output"));
+            assert!(
+                !poll2.running,
+                "process still running after 4.3s for a 0.1s command"
+            );
+            assert!(
+                poll2.new_output.contains("background_output")
+                    || poll.new_output.contains("background_output")
+            );
         } else {
             assert!(poll.new_output.contains("background_output"));
         }
@@ -1075,7 +1081,10 @@ mod tests {
 
         let poll = executor.poll(&session_id, Some(2000)).await.unwrap();
         // Both streams should be present: 8 bytes stdout + 8 bytes stderr = 16
-        assert_eq!(poll.total_bytes, 16, "total_bytes should be stdout + stderr");
+        assert_eq!(
+            poll.total_bytes, 16,
+            "total_bytes should be stdout + stderr"
+        );
         assert!(!poll.running);
     }
 
@@ -1180,7 +1189,10 @@ mod tests {
         let list = executor.list().await;
         let info = list.iter().find(|s| s.id == session_id).unwrap();
         // 4 bytes stdout + 2 bytes stderr = 6
-        assert_eq!(info.output_bytes, 6, "output_bytes should be stdout + stderr");
+        assert_eq!(
+            info.output_bytes, 6,
+            "output_bytes should be stdout + stderr"
+        );
     }
 
     #[tokio::test]
@@ -1257,7 +1269,11 @@ mod tests {
 
         executor.cleanup_old().await;
         let list = executor.list().await;
-        assert_eq!(list.len(), 0, "cleanup_old should remove old completed sessions");
+        assert_eq!(
+            list.len(),
+            0,
+            "cleanup_old should remove old completed sessions"
+        );
     }
 
     #[tokio::test]
@@ -1289,7 +1305,11 @@ mod tests {
         executor.cleanup_old().await;
         // Should NOT be removed because it's still running
         let list = executor.list().await;
-        assert_eq!(list.len(), 1, "cleanup_old should keep running sessions even if old");
+        assert_eq!(
+            list.len(),
+            1,
+            "cleanup_old should keep running sessions even if old"
+        );
         assert!(list[0].running);
 
         executor.kill(&session_id).await.unwrap();
@@ -1335,7 +1355,11 @@ mod tests {
     fn generate_session_id_format() {
         let id = generate_session_id();
         let parts: Vec<&str> = id.split('-').collect();
-        assert_eq!(parts.len(), 3, "session id should be adjective-noun-N; got: {id}");
+        assert_eq!(
+            parts.len(),
+            3,
+            "session id should be adjective-noun-N; got: {id}"
+        );
     }
 
     #[tokio::test]
@@ -1409,7 +1433,10 @@ mod tests {
             .await;
 
         // Must be backgrounded with a session ID
-        assert!(result.session_id.is_some(), "yield should produce a session_id");
+        assert!(
+            result.session_id.is_some(),
+            "yield should produce a session_id"
+        );
         assert!(result.still_running, "yield should report still_running");
 
         // Critical: the session must actually exist in the executor's tracked sessions
@@ -1419,7 +1446,9 @@ mod tests {
         assert!(info.running, "session should still be running");
 
         // Poll must return data for the session (proves it's properly background-tracked)
-        let poll = executor.poll(result.session_id.as_ref().unwrap(), Some(100)).await;
+        let poll = executor
+            .poll(result.session_id.as_ref().unwrap(), Some(100))
+            .await;
         assert!(poll.is_some(), "poll must find the background session");
 
         executor.kill(&result.session_id.unwrap()).await.unwrap();
@@ -1539,7 +1568,10 @@ mod tests {
         let poll2 = executor.poll(&session_id, Some(150)).await.unwrap();
         assert_eq!(poll2.new_output, "");
         // With +: 3 + 3 = 6. With *: 3 * 3 = 9. With -: 3 - 3 = 0.
-        assert_eq!(poll2.total_bytes, 6, "total_bytes must be stdout+stderr (3+3=6)");
+        assert_eq!(
+            poll2.total_bytes, 6,
+            "total_bytes must be stdout+stderr (3+3=6)"
+        );
 
         executor.kill(&session_id).await.unwrap();
     }
@@ -1632,12 +1664,12 @@ mod tests {
         // With % → /: index would be n/16 instead of n%16 for adj.
         // With / → %: noun index would be n%16 instead of n/16.
         let adjectives = [
-            "swift", "calm", "bold", "keen", "warm", "cool", "bright", "dark", "quick",
-            "slow", "fresh", "wild", "soft", "loud", "deep", "high",
+            "swift", "calm", "bold", "keen", "warm", "cool", "bright", "dark", "quick", "slow",
+            "fresh", "wild", "soft", "loud", "deep", "high",
         ];
         let nouns = [
-            "oak", "fox", "elm", "owl", "bay", "ash", "sky", "dew", "gem", "wave",
-            "leaf", "star", "moon", "sun", "reed", "pine",
+            "oak", "fox", "elm", "owl", "bay", "ash", "sky", "dew", "gem", "wave", "leaf", "star",
+            "moon", "sun", "reed", "pine",
         ];
 
         // Generate enough IDs to verify the pattern wraps correctly
@@ -1657,7 +1689,8 @@ mod tests {
             // Verify adjective cycles with modulo
             let expected_adj = adjectives[n % 16];
             assert_eq!(
-                adj, expected_adj,
+                adj,
+                expected_adj,
                 "ID {id}: adj should be '{}' for n={n} (n%16={}), got '{adj}'",
                 expected_adj,
                 n % 16
@@ -1666,7 +1699,8 @@ mod tests {
             // Verify noun advances with division
             let expected_noun = nouns[(n / 16) % 16];
             assert_eq!(
-                noun, expected_noun,
+                noun,
+                expected_noun,
                 "ID {id}: noun should be '{}' for n={n} (n/16%16={}), got '{noun}'",
                 expected_noun,
                 (n / 16) % 16

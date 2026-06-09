@@ -477,8 +477,7 @@ mod tests {
             _name: &str,
             _params: &Value,
         ) -> Result<Value, pares_radix_praxis::px::executor::ExecutionError> {
-            self.count
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(Value::Null)
         }
     }
@@ -497,7 +496,6 @@ mod tests {
             },
             "steps": []
         });
-        PxProcedureAdapter::from_compiled(compiled, handler)
-            .expect("test adapter should be valid")
+        PxProcedureAdapter::from_compiled(compiled, handler).expect("test adapter should be valid")
     }
 }

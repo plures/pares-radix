@@ -429,16 +429,15 @@ mod tests {
     #[test]
     fn check_output_at_boundary_exactly_max_plus_one_splits_to_2() {
         // 2001 chars → ceil(2001/2000) = 2; max(1,2).max(2) = 2
-        let v = TaskSizeConstraint::check("ok", Some("text"), Some(2001))
-            .expect("should violate");
+        let v = TaskSizeConstraint::check("ok", Some("text"), Some(2001)).expect("should violate");
         assert_eq!(v.suggested_splits, 2);
     }
 
     #[test]
     fn check_output_large_value_computes_correct_splits() {
         // 10000 chars → ceil(10000/2000) = 5
-        let v = TaskSizeConstraint::check("ok", Some("text"), Some(10_000))
-            .expect("should violate");
+        let v =
+            TaskSizeConstraint::check("ok", Some("text"), Some(10_000)).expect("should violate");
         assert_eq!(v.suggested_splits, 5);
     }
 

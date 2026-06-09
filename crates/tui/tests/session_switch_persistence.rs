@@ -90,10 +90,7 @@ async fn switch_away_persists_then_switch_back_sees_updates() {
     let mgr = SessionManager::new(Arc::new(store) as Arc<dyn StateStore>);
 
     // Save initial "work" session with 2 messages
-    let initial_msgs = vec![
-        ChatMessage::user("hello"),
-        ChatMessage::assistant("hi!"),
-    ];
+    let initial_msgs = vec![ChatMessage::user("hello"), ChatMessage::assistant("hi!")];
     mgr.save_session("tui:work", &initial_msgs, metadata(2, "work"))
         .await;
 
@@ -155,7 +152,10 @@ async fn switch_to_archived_session_returns_none() {
 
     // Attempting to load active session should return None (it's archived)
     let result = mgr.load_active_session("tui:old").await;
-    assert!(result.is_none(), "archived session should not be loadable as active");
+    assert!(
+        result.is_none(),
+        "archived session should not be loadable as active"
+    );
 
     let _ = std::fs::remove_dir_all(&db_path);
 }
@@ -268,10 +268,7 @@ async fn rapid_session_switching_preserves_integrity() {
                 .unwrap_or_else(|| panic!("s{i} should exist on round {round}"));
             // Each session should have i+1 messages
             assert_eq!(loaded.messages.len(), i + 1);
-            assert_eq!(
-                loaded.messages[0].content,
-                format!("session-{i} message-0")
-            );
+            assert_eq!(loaded.messages[0].content, format!("session-{i} message-0"));
         }
     }
 

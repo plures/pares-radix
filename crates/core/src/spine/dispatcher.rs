@@ -43,7 +43,10 @@ impl SpineProcedureDispatcher {
     }
 
     /// Create a dispatcher with an initial set of tool definitions.
-    pub fn with_tools(registry: Arc<RwLock<ProcedureRegistry>>, tools: Vec<ToolDefinition>) -> Self {
+    pub fn with_tools(
+        registry: Arc<RwLock<ProcedureRegistry>>,
+        tools: Vec<ToolDefinition>,
+    ) -> Self {
         Self {
             registry,
             tool_definitions: RwLock::new(tools),
@@ -74,12 +77,18 @@ impl ToolDispatcher for SpineProcedureDispatcher {
         let handler = match registry.matching(name).next() {
             Some(h) => h,
             None => {
-                warn!(tool = name, "spine dispatcher: no procedure registered for tool");
+                warn!(
+                    tool = name,
+                    "spine dispatcher: no procedure registered for tool"
+                );
                 return format!("Error: no procedure registered for tool '{name}'");
             }
         };
 
-        debug!(tool = name, "spine dispatcher: executing tool via procedure");
+        debug!(
+            tool = name,
+            "spine dispatcher: executing tool via procedure"
+        );
 
         // Create a tool-invocation event with arguments as content
         let event = Event::Message {
@@ -112,9 +121,9 @@ impl ToolDispatcher for SpineProcedureDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::event::Event;
     use crate::procedure::Procedure;
+    use async_trait::async_trait;
     use serde_json::json;
 
     /// A test procedure that echoes back its arguments.
@@ -198,9 +207,7 @@ mod tests {
         let registry = make_registry_with_echo();
         let dispatcher = SpineProcedureDispatcher::new(registry);
 
-        let result = dispatcher
-            .call_tool("echo", json!({"msg": "hello"}))
-            .await;
+        let result = dispatcher.call_tool("echo", json!({"msg": "hello"})).await;
         assert!(result.contains("echoed:"));
         assert!(result.contains("hello"));
     }
@@ -210,9 +217,7 @@ mod tests {
         let registry = make_registry_with_echo();
         let dispatcher = SpineProcedureDispatcher::new(registry);
 
-        let result = dispatcher
-            .call_tool("nonexistent", json!({}))
-            .await;
+        let result = dispatcher.call_tool("nonexistent", json!({})).await;
         assert!(result.contains("no procedure registered"));
         assert!(result.contains("nonexistent"));
     }
@@ -222,9 +227,7 @@ mod tests {
         let registry = make_registry_with_echo();
         let dispatcher = SpineProcedureDispatcher::new(registry);
 
-        let result = dispatcher
-            .call_tool("failing_tool", json!({}))
-            .await;
+        let result = dispatcher.call_tool("failing_tool", json!({})).await;
         assert!(result.contains("Tool error:"));
         assert!(result.contains("something went wrong"));
     }
@@ -234,9 +237,7 @@ mod tests {
         let registry = make_registry_with_echo();
         let dispatcher = SpineProcedureDispatcher::new(registry);
 
-        let result = dispatcher
-            .call_tool("silent_tool", json!({}))
-            .await;
+        let result = dispatcher.call_tool("silent_tool", json!({})).await;
         assert_eq!(result, "");
     }
 

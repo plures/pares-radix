@@ -1052,7 +1052,7 @@ mod tests {
     #[test]
     fn floor_char_boundary_multibyte() {
         let s = "aé"; // a=1 byte, é=2 bytes → len=3
-        // idx=2 is in the middle of é, should walk back to 1
+                      // idx=2 is in the middle of é, should walk back to 1
         assert_eq!(floor_char_boundary(s, 2), 1);
         assert_eq!(floor_char_boundary(s, 1), 1); // valid boundary
         assert_eq!(floor_char_boundary(s, 3), 3); // end of é
@@ -1410,15 +1410,9 @@ mod tests {
     async fn capture_procedure_candidate_rejects_echo() {
         let lm = lm();
         let desc = "When tests fail, run cargo test with --nocapture for output.";
-        let first = lm
-            .capture_procedure_candidate(desc, vec![])
-            .await
-            .unwrap();
+        let first = lm.capture_procedure_candidate(desc, vec![]).await.unwrap();
         assert!(first.is_some());
-        let second = lm
-            .capture_procedure_candidate(desc, vec![])
-            .await
-            .unwrap();
+        let second = lm.capture_procedure_candidate(desc, vec![]).await.unwrap();
         assert!(second.is_none());
     }
 
@@ -1440,12 +1434,9 @@ mod tests {
         )
         .await
         .unwrap();
-        lm.capture_fact(
-            "Second fact with different content for the store.",
-            vec![],
-        )
-        .await
-        .unwrap();
+        lm.capture_fact("Second fact with different content for the store.", vec![])
+            .await
+            .unwrap();
         let all = lm.scan_all().await.unwrap();
         assert_eq!(all.len(), 2);
     }
@@ -1606,7 +1597,7 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
         };
         let ctx = lm.inject_context(&[mem], Some(13)); // 13 tokens = 52 chars
-        // The entry should be included (exactly fits)
+                                                       // The entry should be included (exactly fits)
         assert!(
             ctx.contains(&content2),
             "entry that exactly fits budget must be included, got: {:?}",

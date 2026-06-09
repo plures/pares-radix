@@ -1371,8 +1371,11 @@ mod tests {
         assert!(!text.to_lowercase().starts_with("i prefer "));
         assert!(!text.to_lowercase().starts_with("prefer "));
         // Must start with content after prefix
-        assert!(text.starts_with("using snake_case") || text.starts_with("snake_case"),
-            "got: {:?}", text);
+        assert!(
+            text.starts_with("using snake_case") || text.starts_with("snake_case"),
+            "got: {:?}",
+            text
+        );
     }
 
     #[test]
@@ -1392,15 +1395,21 @@ mod tests {
         // "Rust is a systems language." → subject="Rust", predicate="is", object starts with "a"
         let prims = extract_primitives("Rust is a systems language.");
         let fact = prims.iter().find_map(|p| match p {
-            Primitive::Fact { subject, predicate, object } if subject == "Rust" => {
-                Some((predicate.clone(), object.clone()))
-            }
+            Primitive::Fact {
+                subject,
+                predicate,
+                object,
+            } if subject == "Rust" => Some((predicate.clone(), object.clone())),
             _ => None,
         });
         let (pred, obj) = fact.unwrap();
         assert_eq!(pred, "is");
         // Object must NOT start with the predicate itself (catches i+1 → i*1 mutation)
-        assert!(!obj.starts_with("is "), "object should not include predicate: {:?}", obj);
+        assert!(
+            !obj.starts_with("is "),
+            "object should not include predicate: {:?}",
+            obj
+        );
         assert!(obj.starts_with("a systems"), "got: {:?}", obj);
     }
 
@@ -1409,23 +1418,30 @@ mod tests {
         // Catches i+1 → i-1 mutation which would include subject's last word in object
         let prims = extract_primitives("The dog is friendly and cute.");
         let fact = prims.iter().find_map(|p| match p {
-            Primitive::Fact { subject, object, .. } if subject == "The dog" => {
-                Some(object.clone())
-            }
+            Primitive::Fact {
+                subject, object, ..
+            } if subject == "The dog" => Some(object.clone()),
             _ => None,
         });
         let obj = fact.unwrap();
-        assert!(!obj.contains("dog"), "object must not contain subject words: {:?}", obj);
+        assert!(
+            !obj.contains("dog"),
+            "object must not contain subject words: {:?}",
+            obj
+        );
         assert!(obj.starts_with("friendly"), "got: {:?}", obj);
     }
 
     #[test]
     fn decision_going_with_excludes_prefix() {
         let prims = extract_primitives("Going with tokio for the runtime.");
-        let text = prims.iter().find_map(|p| match p {
-            Primitive::Decision { text, .. } => Some(text.clone()),
-            _ => None,
-        }).unwrap();
+        let text = prims
+            .iter()
+            .find_map(|p| match p {
+                Primitive::Decision { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap();
         assert!(!text.to_lowercase().starts_with("going with "));
         assert!(text.starts_with("tokio"), "got: {:?}", text);
     }
@@ -1433,10 +1449,13 @@ mod tests {
     #[test]
     fn decision_we_chose_excludes_prefix() {
         let prims = extract_primitives("We chose PostgreSQL as our database.");
-        let text = prims.iter().find_map(|p| match p {
-            Primitive::Decision { text, .. } => Some(text.clone()),
-            _ => None,
-        }).unwrap();
+        let text = prims
+            .iter()
+            .find_map(|p| match p {
+                Primitive::Decision { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .unwrap();
         assert!(!text.to_lowercase().starts_with("we chose "));
         assert!(!text.to_lowercase().starts_with("chose "));
         assert!(text.starts_with("PostgreSQL"), "got: {:?}", text);

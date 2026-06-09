@@ -36,10 +36,7 @@ impl TelegramSpineChannel {
 
     /// Run the delivery loop — subscribes to pipeline delivery events
     /// and sends them via Telegram.
-    pub async fn run_delivery_loop(
-        &self,
-        mut delivery_rx: broadcast::Receiver<SpineEvent>,
-    ) {
+    pub async fn run_delivery_loop(&self, mut delivery_rx: broadcast::Receiver<SpineEvent>) {
         let bot = Bot::new(&self.config.token);
         info!("telegram_spine: delivery loop started");
 
