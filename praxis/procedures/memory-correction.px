@@ -1,0 +1,61 @@
+procedure evaluate_correction:
+  description: "Determines if a new statement corrects an existing memory"
+  trigger: manual
+  
+  inputs:
+    - new_statement: string      # The incoming statement
+    - existing_memories: list    # Candidate memories that might be contradicted
+    - similarity_scores: list    # Cosine similarities between new statement and each memory
+    - contradiction_threshold: number  # typically 0.6
+    
+  steps:
+    # Identify potential corrections
+    - set corrections = []
+    
+    - for i in range(0, length(existing_memories)):
+        - set memory = existing_memories[i]
+        - set sim = similarity_scores[i]
+        
+        # High similarity + semantic difference = correction candidate
+        - when sim >= contradiction_threshold and sim < 0.95:
+            # Check for negation patterns
+            - set is_negation = false
+            - when contains(new_statement, "not") or contains(new_statement, "no longer"):
+                - set is_negation = true
+            - when contains(new_statement, "actually") or contains(new_statement, "instead"):
+                - set is_negation = true
+            - when contains(new_statement, "wrong") or contains(new_statement, "incorrect"):
+                - set is_negation = true
+                
+            # Check for update patterns
+            - set is_update = false
+            - when contains(new_statement, "now") or contains(new_statement, "changed"):
+                - set is_update = true
+            - when contains(new_statement, "updated") or contains(new_statement, "moved"):
+                - set is_update = true
+                
+            - when is_negation or is_update:
+                - append corrections {
+                    memory_id: memory.id,
+                    memory_content: memory.content,
+                    correction_type: when(is_negation, "negation", "update"),
+                    confidence: sim,
+                    new_content: new_statement
+                  }
+                  
+    # Quality scoring for the correction itself
+    - for correction in corrections:
+        - set quality = 0.5
+        # Longer, more specific corrections are higher quality
+        - when length(new_statement) > 50:
+            - set quality = quality + 0.2
+        # Multiple correction signals boost confidence
+        - when correction.confidence > 0.7:
+            - set quality = quality + 0.15
+        - set correction.quality_score = min(quality, 1.0)
+        
+    - return {
+        corrections: corrections,
+        has_corrections: length(corrections) > 0,
+        highest_confidence: when(length(corrections) > 0, max_by(corrections, confidence).confidence, 0.0)
+      }
