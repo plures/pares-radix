@@ -1,0 +1,403 @@
+# constraint-eval.px — Constraint evaluation engine + authorization gate
+#
+# Replaces: crates/core/src/praxis/constraints.rs (~776 lines of Rust)
+# The constraint evaluation system expressed as a .px procedure.
+# Constraints evaluate constraints — this is the meta-hosting that
+# makes the praxis system self-referential.
+#
+# ADR-0012: 5-level brain-first authorization gate
+# ADR-0013: Task-decomposition size constraints (C-0009, C-0010)
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════
+
+let MAX_DESCRIPTION_WORD_COUNT = 200
+let MAX_OUTPUT_CHARS = 2000
+
+# ═══════════════════════════════════════════════════════════════════════
+# AUTHORIZATION GATE (ADR-0012)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# 5-level brain-first authorization gate. Every action dispatched to a
+# subagent (conscious or subconscious) must pass through in order.
+# First matching level wins — strict priority.
+#
+# | Level | Trigger                     | Outcome                    |
+# |-------|-----------------------------|----------------------------|
+# | 1     | blocked_by_constraint: true | block (hard constraint)    |
+# | 2     | completed_recently: true    | skip (duplicate)           |
+# | 3     | known_failure: true         | warn (proceed with caution)|
+# | 4     | is_destructive/is_external  | gate (require approval)    |
+# | 5     | (none of the above)         | allow (auto-approve)       |
+
+procedure authorization_gate:
+  description: "5-level brain-first authorization gate (ADR-0012)"
+  trigger: manual
+  input:
+    - action: string           # Action name being dispatched
+    - blocked_by_constraint: boolean
+    - completed_recently: boolean
+    - known_failure: boolean
+    - is_destructive: boolean
+    - is_external: boolean
+  output: gate_result
+
+  steps:
+    # Level 1: hard constraint block → Fail
+    - when blocked_by_constraint:
+        - emit {type: "authorization.blocked", action: $action, level: 1}
+        - return: {
+            level: 1,
+            result: "block",
+            reason: concat("action `", $action, "` is blocked by a hard constraint (ADR-0012 level 1)")
+          }
+
+    # Level 2: duplicate check → skip
+    - when completed_recently:
+        - emit {type: "authorization.skipped", action: $action, level: 2}
+        - return: {
+            level: 2,
+            result: "skip",
+            reason: concat("skip: action `", $action, "` was completed recently — duplicate work suppressed (ADR-0012 level 2)")
+          }
+
+    # Level 3: known failure → warn
+    - when known_failure:
+        - emit {type: "authorization.warned", action: $action, level: 3}
+        - return: {
+            level: 3,
+            result: "warn",
+            reason: concat("known_failure: action `", $action, "` has previously failed — proceed with caution (ADR-0012 level 3)")
+          }
+
+    # Level 4: destructive or external → require approval
+    - when is_destructive and is_external:
+        - emit {type: "authorization.gated", action: $action, level: 4, kind: "destructive and external"}
+        - return: {
+            level: 4,
+            result: "gate",
+            reason: concat("destructive and external action `", $action, "` requires explicit human approval before dispatch (ADR-0012 level 4)")
+          }
+    - when is_destructive:
+        - emit {type: "authorization.gated", action: $action, level: 4, kind: "destructive"}
+        - return: {
+            level: 4,
+            result: "gate",
+            reason: concat("destructive action `", $action, "` requires explicit human approval before dispatch (ADR-0012 level 4)")
+          }
+    - when is_external:
+        - emit {type: "authorization.gated", action: $action, level: 4, kind: "external"}
+        - return: {
+            level: 4,
+            result: "gate",
+            reason: concat("external action `", $action, "` requires explicit human approval before dispatch (ADR-0012 level 4)")
+          }
+
+    # Level 5: auto-approve (safe action)
+    - emit {type: "authorization.approved", action: $action, level: 5}
+    - return: {
+        level: 5,
+        result: "allow",
+        reason: "auto-approved (safe action)"
+      }
+
+# ═══════════════════════════════════════════════════════════════════════
+# TASK SIZE CONSTRAINT (ADR-0013)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Enforces task decomposition rules proven by 2026-04-10 sub-agent tests:
+#   C-0009: Task description word count ≤ 200
+#   C-0010: Expected text output ≤ 2000 chars
+
+procedure check_task_size:
+  description: "Enforce task size limits (ADR-0013, C-0009/C-0010)"
+  trigger: manual
+  input:
+    - description: string              # Raw task description text
+    - output_type: string              # e.g. "text", "binary", "json"
+    - estimated_output_chars: number   # Estimated output character count
+  output: size_result
+
+  steps:
+    - word_count {text: $description} -> $word_count
+
+    # C-0009: word count check
+    - set $word_violation = false
+    - when $word_count > MAX_DESCRIPTION_WORD_COUNT:
+        - set $word_violation = true
+
+    # C-0010: output chars check (only for text output type)
+    - set $output_violation = false
+    - when $output_type == "text" and $estimated_output_chars > MAX_OUTPUT_CHARS:
+        - set $output_violation = true
+
+    # No violations — pass
+    - when not $word_violation and not $output_violation:
+        - return: {
+            passed: true,
+            word_count: $word_count,
+            output_chars: $estimated_output_chars
+          }
+
+    # Calculate suggested splits
+    - set $word_splits = 1
+    - when $word_violation:
+        - set $word_splits = ceil(div($word_count, MAX_DESCRIPTION_WORD_COUNT))
+
+    - set $output_splits = 1
+    - when $output_violation:
+        - set $output_splits = ceil(div($estimated_output_chars, MAX_OUTPUT_CHARS))
+
+    - set $suggested_splits = max($word_splits, $output_splits)
+    - when $suggested_splits < 2:
+        - set $suggested_splits = 2
+
+    # Emit decomposition event
+    - emit {type: "task.decomposition.required", word_count: $word_count, output_chars: $estimated_output_chars, suggested_splits: $suggested_splits}
+
+    - return: {
+        passed: false,
+        word_count: $word_count,
+        output_chars: $estimated_output_chars,
+        word_violation: $word_violation,
+        output_violation: $output_violation,
+        suggested_splits: $suggested_splits,
+        constraint_ids: ["C-0009", "C-0010"]
+      }
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONSTRAINT EVALUATION ENGINE
+# ═══════════════════════════════════════════════════════════════════════
+#
+# General-purpose constraint evaluator. Receives an action context,
+# matches against registered constraints, evaluates conditions, and
+# produces a verdict: allow, warn, block, or require-approval.
+
+procedure evaluate_constraints:
+  description: "Evaluate praxis constraints against a proposed action"
+  trigger: manual
+  input:
+    - action: string           # Action name (e.g. "dispatch_task", "delete_file")
+    - agent_id: string         # Agent performing the action
+    - session_type: string     # "sub_agent" | "main" | "background"
+    - metadata: object         # Arbitrary key-value metadata for condition evaluation
+  output: evaluation_result
+
+  steps:
+    # Load all registered constraints from the store
+    - db_get_prefix {prefix: "constraint:"} -> $all_constraints
+
+    # Filter to those whose `when` condition matches
+    - set $violations = []
+    - set $has_error = false
+
+    - loop over $all_constraints as constraint:
+        # Evaluate the `when` condition
+        - evaluate_condition {condition: $constraint.when, action: $action, metadata: $metadata} -> $when_met
+        - when $when_met:
+            # Check if the `require` condition is satisfied
+            - evaluate_condition {condition: $constraint.require, action: $action, metadata: $metadata} -> $require_met
+            - when not $require_met:
+                # Violation: constraint triggered and requirement not satisfied
+                - append $violations {
+                    constraint_id: $constraint.id,
+                    description: $constraint.description,
+                    severity: $constraint.severity,
+                    fix: $constraint.fix,
+                    evidence: $constraint.evidence
+                  }
+                - when $constraint.severity == "error":
+                    - set $has_error = true
+      end
+
+    # Determine overall result
+    - when $has_error:
+        - emit {type: "constraint.evaluation.blocked", action: $action, violations: $violations}
+        - return: {
+            allowed: false,
+            result: "block",
+            violations: $violations,
+            total_constraints: length($all_constraints),
+            violated_count: length($violations)
+          }
+
+    - when length($violations) > 0:
+        - emit {type: "constraint.evaluation.warned", action: $action, violations: $violations}
+        - return: {
+            allowed: true,
+            result: "warn",
+            violations: $violations,
+            total_constraints: length($all_constraints),
+            violated_count: length($violations)
+          }
+
+    - return: {
+        allowed: true,
+        result: "pass",
+        violations: [],
+        total_constraints: length($all_constraints),
+        violated_count: 0
+      }
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONDITION EVALUATION (helper)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Evaluates constraint conditions against action metadata.
+# Supports: field_eq, field_gt, field_lt, all (AND), any (OR)
+
+procedure evaluate_condition:
+  description: "Evaluate a single constraint condition against metadata"
+  trigger: manual
+  input:
+    - condition: object        # {type: "field_eq"|"field_gt"|"field_lt"|"all"|"any", ...}
+    - action: string
+    - metadata: object
+  output: boolean
+
+  steps:
+    # field_eq: metadata[field] == value
+    - when $condition.type == "field_eq":
+        - get_field {obj: $metadata, field: $condition.field} -> $actual
+        - return: $actual == $condition.value
+
+    # field_gt: metadata[field] > threshold
+    - when $condition.type == "field_gt":
+        - get_field {obj: $metadata, field: $condition.field} -> $actual
+        - when $actual == null:
+            - return: false
+        - return: $actual > $condition.threshold
+
+    # field_lt: metadata[field] < threshold
+    - when $condition.type == "field_lt":
+        - get_field {obj: $metadata, field: $condition.field} -> $actual
+        - when $actual == null:
+            - return: false
+        - return: $actual < $condition.threshold
+
+    # all: all sub-conditions must be true (AND)
+    - when $condition.type == "all":
+        - loop over $condition.conditions as sub:
+            - evaluate_condition {condition: $sub, action: $action, metadata: $metadata} -> $sub_result
+            - when not $sub_result:
+                - return: false
+          end
+        - return: true
+
+    # any: at least one sub-condition must be true (OR)
+    - when $condition.type == "any":
+        - loop over $condition.conditions as sub:
+            - evaluate_condition {condition: $sub, action: $action, metadata: $metadata} -> $sub_result
+            - when $sub_result:
+                - return: true
+          end
+        - return: false
+
+    # Unknown condition type — default to not-triggered (safe fallback)
+    - return: false
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONSTRAINT REGISTRATION (ADR-0013 seeds)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Registers the task-decomposition constraints into the praxis store.
+# Equivalent to TaskSizeConstraint::register() in Rust.
+
+procedure register_task_size_constraints:
+  description: "Register C-0009 and C-0010 into the praxis store"
+  trigger: manual
+
+  steps:
+    # C-0009 — task description word count ≤ 200
+    - db_put {
+        key: "constraint:C-0009",
+        value: {
+          id: "C-0009",
+          description: "Sub-agent task descriptions must not exceed 200 words (ADR-0013).",
+          when: {type: "field_gt", field: "task_description_word_count", threshold: 200},
+          require: {type: "field_lt", field: "task_description_word_count", threshold: 200},
+          fix: "Decompose the task into sub-tasks each with ≤ 200-word descriptions. Emit task_decomposition_required with suggested split points.",
+          evidence: ["ADR-0013"],
+          severity: "error"
+        }
+      }
+
+    # C-0010 — expected text output ≤ 2000 chars
+    - db_put {
+        key: "constraint:C-0010",
+        value: {
+          id: "C-0010",
+          description: "Sub-agent tasks expecting text output must not exceed 2000 estimated chars (ADR-0013).",
+          when: {
+            type: "all",
+            conditions: [
+              {type: "field_eq", field: "expected_output_type", value: "text"},
+              {type: "field_gt", field: "expected_output_chars", threshold: 2000}
+            ]
+          },
+          require: {type: "field_lt", field: "expected_output_chars", threshold: 2000},
+          fix: "Decompose the task so each sub-task produces ≤ 2000 chars of text output. Emit task_decomposition_required with suggested split points.",
+          evidence: ["ADR-0013"],
+          severity: "error"
+        }
+      }
+
+    - emit {type: "constraints.registered", ids: ["C-0009", "C-0010"]}
+
+# ═══════════════════════════════════════════════════════════════════════
+# ON_ACTION — combined gate (constraint eval + authorization)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Top-level entry point: runs both the constraint evaluator and the
+# authorization gate in sequence.  First checks registered constraints,
+# then applies the 5-level authorization gate.
+
+procedure on_action:
+  description: "Full action evaluation: constraints + authorization gate"
+  trigger: manual
+  input:
+    - action: string
+    - agent_id: string
+    - session_type: string
+    - metadata: object
+    - completed_recently: boolean
+    - known_failure: boolean
+    - is_destructive: boolean
+    - is_external: boolean
+  output: action_result
+
+  steps:
+    # Step 1: Evaluate registered constraints
+    - evaluate_constraints {
+        action: $action,
+        agent_id: $agent_id,
+        session_type: $session_type,
+        metadata: $metadata
+      } -> $constraint_result
+
+    # Step 2: Determine if blocked by constraint
+    - set $blocked_by_constraint = false
+    - when $constraint_result.result == "block":
+        - set $blocked_by_constraint = true
+
+    # Step 3: Run authorization gate
+    - authorization_gate {
+        action: $action,
+        blocked_by_constraint: $blocked_by_constraint,
+        completed_recently: $completed_recently,
+        known_failure: $known_failure,
+        is_destructive: $is_destructive,
+        is_external: $is_external
+      } -> $gate_result
+
+    # Step 4: Combine results
+    - emit {type: "action.evaluated", action: $action, gate_level: $gate_result.level, gate_result: $gate_result.result, constraint_violations: length($constraint_result.violations)}
+
+    - return: {
+        allowed: $gate_result.result == "allow",
+        gate: $gate_result,
+        constraints: $constraint_result,
+        action: $action,
+        agent_id: $agent_id
+      }
