@@ -1,0 +1,280 @@
+# context-window.px — Context window management procedure
+#
+# Replaces: crates/core/src/cerebellum/context_manager.rs (~428 lines of Rust)
+# This is PURE LOGIC — relevance scoring, eviction, entity extraction, token budgeting.
+#
+# Responsibilities:
+#   - Score context items by relevance (recency, similarity, success, source, entities)
+#   - Evict lowest-relevance items when over token budget
+#   - Extract named entities from messages
+#   - Manage token budget with reservation for new items
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONSTANTS
+# ═══════════════════════════════════════════════════════════════════════
+
+let source_weights = {
+  "memory": 1.0,
+  "entity": 0.8,
+  "tool": 0.6,
+  "system": 0.4
+}
+
+let recency_decay_factor = 0.95
+
+let success_boost_per_count = 0.1
+
+let failure_penalty_factor = 0.2
+
+let query_similarity_weight = 0.4
+
+let entity_overlap_weight = 0.2
+
+let base_weight_factor = 0.4
+
+let new_item_budget_reservation = 0.20
+
+# ═══════════════════════════════════════════════════════════════════════
+# ENTITY EXTRACTION
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure extract_entities:
+  description: "Extract named entities from a message for context enrichment"
+  trigger: manual
+
+  inputs:
+    - message: string          # The message to extract entities from
+
+  steps:
+    - set entities = []
+
+    # Extract @mentions
+    - for match in regex_match_all(message, "@(\\w+)"):
+        - append entities:
+            kind: "mention"
+            value: match[1]
+            context_key: "mention:{match[1]}"
+
+    # Extract #tags (ADO work items: 5-7 digits; generic tags: word chars)
+    - for match in regex_match_all(message, "#(\\d{5,7})"):
+        - append entities:
+            kind: "ado_work_item"
+            value: match[1]
+            context_key: "ado:workitem:{match[1]}"
+
+    - for match in regex_match_all(message, "#([a-zA-Z][\\w-]*)"):
+        - append entities:
+            kind: "tag"
+            value: match[1]
+            context_key: "tag:{match[1]}"
+
+    # Extract URLs
+    - for match in regex_match_all(message, "https?://\\S+"):
+        - append entities:
+            kind: "url"
+            value: match[0]
+            context_key: "url:{match[0]}"
+
+    # Extract file paths (Unix-style and Windows-style)
+    - for match in regex_match_all(message, "(?:^|\\s)([~/][\\w./\\-]+\\.\\w+)"):
+        - append entities:
+            kind: "file_path"
+            value: match[1]
+            context_key: "file:{match[1]}"
+
+    - for match in regex_match_all(message, "(?:^|\\s)([A-Z]:\\\\[\\w\\\\./\\-]+\\.\\w+)"):
+        - append entities:
+            kind: "file_path"
+            value: match[1]
+            context_key: "file:{match[1]}"
+
+    # Extract git SHAs (7-40 hex chars, standalone)
+    - for match in regex_match_all(message, "\\b([0-9a-f]{7,40})\\b"):
+        - append entities:
+            kind: "git_sha"
+            value: match[1]
+            context_key: "git:sha:{match[1]}"
+
+    # Extract GitHub repos (org/name pattern)
+    - for match in regex_match_all(message, "\\b(\\w+/[\\w\\-]+)\\b"):
+        - when:
+            - contains(match[1], "/") and not starts_with(match[1], "/") and not contains(match[1], "."):
+                - append entities:
+                    kind: "github_repo"
+                    value: match[1]
+                    context_key: "repo:{match[1]}"
+
+    # Extract quoted strings
+    - for match in regex_match_all(message, "\"([^\"]{2,})\""):
+        - append entities:
+            kind: "quoted_string"
+            value: match[1]
+            context_key: "quoted:{match[1]}"
+
+    # Extract significant numbers (standalone, 2+ digits)
+    - for match in regex_match_all(message, "\\b(\\d{2,})\\b"):
+        - when:
+            - not already_captured_as(match[1], entities, ["ado_work_item", "git_sha"]):
+                - append entities:
+                    kind: "number"
+                    value: match[1]
+                    context_key: "number:{match[1]}"
+
+  outputs:
+    - entities: list           # [{kind, value, context_key}, ...]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# RELEVANCE SCORING
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure score_item:
+  description: "Calculate relevance score for a single context item"
+  trigger: internal
+
+  inputs:
+    - item: object             # {id, content, tokens, source, age_turns, success_count, failure_count}
+    - query_similarity: number # Cosine similarity of item to current query (0.0-1.0)
+    - entities: list           # Extracted entities from current message
+
+  steps:
+    # 1. Base source weight
+    - set base_weight = lookup(source_weights, item.source, 0.5)
+
+    # 2. Recency decay: 0.95^age_turns
+    - set recency = pow(recency_decay_factor, item.age_turns)
+
+    # 3. Success boost: 1.0 + (success_count * 0.1)
+    - set success_factor = 1.0 + (item.success_count * success_boost_per_count)
+
+    # 4. Failure penalty: 1.0 / (1.0 + failure_count * 0.2)
+    - set failure_factor = 1.0 / (1.0 + item.failure_count * failure_penalty_factor)
+
+    # 5. Entity overlap: check if item content mentions any current entity
+    - set entity_overlap = 0.0
+    - for entity in entities:
+        - when:
+            - contains(item.content, entity.value):
+                - set entity_overlap = 1.0
+                - break
+
+    # 6. Composite score:
+    #    (base_source_weight * recency * success * failure) * 0.4
+    #    + query_similarity * 0.4
+    #    + entity_overlap * 0.2
+    - set weighted_base = base_weight * recency * success_factor * failure_factor
+    - set score = (weighted_base * base_weight_factor) + (query_similarity * query_similarity_weight) + (entity_overlap * entity_overlap_weight)
+
+    # Clamp to [0.0, 1.0]
+    - set score = clamp(score, 0.0, 1.0)
+
+  outputs:
+    - score: number
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# CONTEXT WINDOW MANAGEMENT (MAIN PROCEDURE)
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure context_window:
+  description: "Manages the context window for cerebellum — relevance scoring, eviction, and entity extraction"
+  trigger: manual
+
+  inputs:
+    - items: list              # Current context items [{id, content, tokens, source, age_turns, success_count, failure_count}]
+    - new_items: list          # New items to add this turn
+    - entities: list           # Extracted entities from current message
+    - query_similarities: object  # Map of item_id -> cosine similarity to current query
+    - token_budget: number     # Max tokens allowed
+
+  steps:
+    # ─── Phase 1: Age existing items ───────────────────────────────────
+    - for item in items:
+        - set item.age_turns = item.age_turns + 1
+
+    # ─── Phase 2: Merge new items (dedup by id) ───────────────────────
+    - set existing_ids = map(items, "id")
+    - for new_item in new_items:
+        - when:
+            - not contains(existing_ids, new_item.id):
+                - set new_item.age_turns = 0
+                - append items: new_item
+
+    # ─── Phase 3: Score all items ─────────────────────────────────────
+    - set scored_items = []
+    - for item in items:
+        - set sim = lookup(query_similarities, item.id, 0.0)
+        - call score_item:
+            item: item
+            query_similarity: sim
+            entities: entities
+          into item_score
+        - set item.relevance = item_score
+        - append scored_items: item
+
+    # ─── Phase 4: Sort by relevance (descending) ─────────────────────
+    - sort scored_items by relevance descending
+
+    # ─── Phase 5: Reserve budget for new items ────────────────────────
+    - set reserved_budget = token_budget * new_item_budget_reservation
+    - set available_budget = token_budget - reserved_budget
+
+    # ─── Phase 6: Eviction — fit within budget ────────────────────────
+    # Items from current turn (age_turns == 0) are never evicted.
+    # Process in two passes:
+    #   Pass 1: Include all current-turn items (mandatory)
+    #   Pass 2: Fill remaining budget from older items by score
+
+    - set current_turn_items = filter(scored_items, item.age_turns == 0)
+    - set older_items = filter(scored_items, item.age_turns > 0)
+
+    - set tokens_used = 0
+    - set kept_items = []
+    - set evicted_count = 0
+
+    # Pass 1: Always keep current turn items
+    - for item in current_turn_items:
+        - set tokens_used = tokens_used + item.tokens
+        - append kept_items: item
+
+    # Pass 2: Add older items by relevance until budget exceeded
+    - for item in older_items:
+        - when:
+            - tokens_used + item.tokens <= token_budget:
+                - set tokens_used = tokens_used + item.tokens
+                - append kept_items: item
+            - otherwise:
+                - set evicted_count = evicted_count + 1
+
+    # ─── Phase 7: Return result ───────────────────────────────────────
+
+  outputs:
+    - result: object
+        items: kept_items          # Scored, evicted context items (highest relevance first)
+        tokens_used: tokens_used   # Tokens consumed by kept items
+        token_budget: token_budget # Original budget
+        evicted_count: evicted_count  # Number of items evicted this turn
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OUTCOME RECORDING (for learning)
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure record_outcome:
+  description: "Update success/failure counts on context items after a model response"
+  trigger: manual
+
+  inputs:
+    - items: list              # Context items that were present during the interaction
+    - success: boolean         # Whether the interaction was successful
+
+  steps:
+    - for item in items:
+        - when:
+            - success:
+                - set item.success_count = item.success_count + 1
+            - not success:
+                - set item.failure_count = item.failure_count + 1
+
+  outputs:
+    - items: list              # Updated items with new counts
