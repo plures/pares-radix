@@ -443,6 +443,18 @@ impl Cerebellum {
             return false;
         };
 
+        // Short messages (< 20 chars) are almost always follow-ups ("do that",
+        // "yes", "continue", "no"). Never treat them as topic shifts.
+        if let Event::Message { content, .. } = event {
+            if content.trim().len() < 20 {
+                // Still update the embedding cache for future comparisons
+                if let Ok(mut embeddings) = self.topic_embeddings.lock() {
+                    embeddings.insert(channel_key, current_embedding.to_vec());
+                }
+                return false;
+            }
+        }
+
         let mut embeddings = match self.topic_embeddings.lock() {
             Ok(guard) => guard,
             Err(e) => {
