@@ -1,12 +1,7 @@
-# heartbeat.px — Proactive behavior as a PluresDB procedure
+# heartbeat.px - Periodic health check as a reactive PluresDB procedure
 #
-# Replaces HeartbeatRunner (Rust struct with config, timers, state).
-# A scheduled procedure that fires periodically and emits check events.
-
-fact heartbeat_config:
-  interval_ms: int
-  quiet_start_hour: int
-  quiet_end_hour: int
+# Fires on a cron schedule, checks system load, records in PluresDB.
+# Cross-platform: delegates to OS-appropriate command.
 
 constraint respect_quiet_hours:
   when: event.type == "heartbeat_tick" and heartbeat_config.in_quiet_hours
@@ -16,16 +11,8 @@ constraint respect_quiet_hours:
 
 procedure heartbeat_tick:
   trigger: cron {schedule: "*/5 * * * *"}
-  # Cross-platform load check (delegates to OS-appropriate command)
-  detect_os {} -> $os
-  when os == "linux":
-    run_command {command: "cat /proc/loadavg"} -> $load
-  when os == "macos":
-    run_command {command: "sysctl -n vm.loadavg"} -> $load
-  when os == "windows":
-    run_command {command: "wmic cpu get loadpercentage /value"} -> $load
-  else:
-    set $load = "unknown"
-  end
+  given: "Run a periodic health check and record system load"
+  detect_os {} -> $os_type
+  gather_load {os: $os_type} -> $load
   pluresdb_write {key: "heartbeat:last_check", value: $load}
   emit {type: "heartbeat_complete", load: $load}

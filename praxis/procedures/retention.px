@@ -1,104 +1,33 @@
-procedure evaluate_retention:
-  description: "Evaluates whether memory entries should be retained, decayed, or forgotten"
-  trigger: manual
-  
-  inputs:
-    - entries: list        # [{id, content, category, score, created_at, last_accessed, access_count, tags}]
-    - current_time: number # Unix timestamp ms
-    - config: object       # {staleness_days: 30, decay_rate: 0.95, min_score: 0.1, max_entries: 10000}
-    
-  steps:
-    # Calculate age in days for each entry
-    - set results = []
-    - for entry in entries:
-        - set age_days = (current_time - entry.last_accessed) / 86400000
-        - set base_score = entry.score
-        
-        # Apply exponential decay based on time since last access
-        - set decay_factor = pow(config.decay_rate, age_days / 7)  # decay per week
-        - set decayed_score = base_score * decay_factor
-        
-        # Access frequency boost (logarithmic)
-        - set frequency_boost = log(1 + entry.access_count) * 0.1
-        - set final_score = decayed_score + frequency_boost
-        
-        # Category-based retention floors
-        - set retention_floor = 0.0
-        - when entry.category == "decision":
-            - set retention_floor = 0.3
-        - when entry.category == "preference":
-            - set retention_floor = 0.25
-        - when entry.category == "error-fix":
-            - set retention_floor = 0.2
-        - when entry.category == "code-pattern":
-            - set retention_floor = 0.15
-            
-        - set final_score = max(final_score, retention_floor)
-        
-        # Determine action
-        - set action = "retain"
-        - when final_score < config.min_score:
-            - set action = "forget"
-        - when age_days > config.staleness_days and final_score < 0.3:
-            - set action = "soft_delete"
-        - when final_score < 0.2 and entry.access_count <= 1:
-            - set action = "forget"
-            
-        - append results {
-            id: entry.id,
-            original_score: base_score,
-            final_score: final_score,
-            age_days: age_days,
-            action: action,
-            reason: when(action == "forget", concat("score too low: ", final_score), "")
-          }
-    
-    # Summary stats
-    - set forget_count = length(filter(results, action == "forget"))
-    - set soft_delete_count = length(filter(results, action == "soft_delete"))
-    - set retain_count = length(filter(results, action == "retain"))
-    
-    - return {
-        evaluations: results,
-        summary: {retain: retain_count, soft_delete: soft_delete_count, forget: forget_count},
-        needs_compaction: length(entries) > config.max_entries
-      }
+# retention.px - Memory retention and decay evaluation
+#
+# Evaluates whether memory entries should be retained, decayed, or forgotten.
+# Implements spaced-repetition-inspired scoring for long-term memory management.
 
----
+procedure evaluate_retention:
+  trigger: manual
+  given: "Evaluate whether memory entries should be retained, decayed, or forgotten"
+  db_get_prefix {prefix: "memory:"} -> $all_memories
+  timestamp_now {} -> $now
+  loop over $all_memories as memory:
+    compute_retention_score {memory: $memory, now: $now, decay_rate: 0.05} -> $score
+    when score < 0.1:
+      mark_for_forget {key: $memory} -> $marked
+      pluresdb_write {key: "memory:forget_queue", value: $marked}
+    end
+    when score < 0.4:
+      mark_decayed {key: $memory, score: $score} -> $decayed
+      pluresdb_write {key: $memory, value: $decayed}
+    end
+  end
+  emit {type: "retention.evaluated", count: $all_memories}
 
 procedure consolidate_memories:
-  description: "Identifies duplicate and near-duplicate memories for merging"
   trigger: manual
-  
-  inputs:
-    - entries: list        # [{id, content, embedding, score, category}]
-    - similarity_threshold: number  # typically 0.85
-    
-  steps:
-    # Find clusters of similar entries
-    - set clusters = []
-    - set processed = []
-    
-    - for i in range(0, length(entries)):
-        - when not contains(processed, entries[i].id):
-            - set cluster = [entries[i]]
-            - for j in range(i + 1, length(entries)):
-                - when not contains(processed, entries[j].id):
-                    - set sim = action cosine_similarity(entries[i].embedding, entries[j].embedding)
-                    - when sim >= similarity_threshold:
-                        - append cluster entries[j]
-                        - append processed entries[j].id
-            - when length(cluster) > 1:
-                - append clusters cluster
-                - append processed entries[i].id
-                
-    # For each cluster, pick the best entry and mark others for merge
-    - set merge_actions = []
-    - for cluster in clusters:
-        # Best = highest score * most recent
-        - set best = max_by(cluster, score)
-        - for entry in cluster:
-            - when entry.id != best.id:
-                - append merge_actions {keep: best.id, merge_from: entry.id, similarity: sim}
-                
-    - return {clusters: length(clusters), merge_actions: merge_actions}
+  given: "Merge duplicate or highly similar memories into consolidated entries"
+  db_get_prefix {prefix: "memory:"} -> $all_memories
+  find_duplicates {memories: $all_memories, similarity_threshold: 0.92} -> $duplicates
+  loop over $duplicates as pair:
+    merge_memories {a: $pair, b: $pair} -> $merged
+    pluresdb_write {key: "memory:consolidated", value: $merged}
+  end
+  emit {type: "retention.consolidated", merged_count: $duplicates}

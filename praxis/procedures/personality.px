@@ -1,198 +1,39 @@
-# personality.px — Personality configuration and response style procedure
+# personality.px - Personality configuration and response style procedure
 #
 # Replaces: crates/core/src/personality.rs (492 lines of Rust)
-# This is PURE LOGIC — no IO needed.
-#
-# Determines response style based on personality traits and context.
-# Returns trait weights and style directives for prompt construction.
+# Manages tone, verbosity, and response style adaptation.
 
-# ═══════════════════════════════════════════════════════════════════════
-# BASE PERSONALITY DEFAULTS
-# ═══════════════════════════════════════════════════════════════════════
+fact personality_config:
+  tone: string
+  verbosity: string
+  humor_level: string
+  formality: string
+  emoji_usage: string
 
-let base_traits = {
-  warmth: 0.7,
-  directness: 0.8,
-  humor: 0.6,
-  formality: 0.3,
-  verbosity: 0.4,
-  empathy: 0.7
-}
+procedure load_personality:
+  trigger: on_write {pattern: "session:*:start"}
+  given: "Load personality configuration for the current session"
+  db_get {key: "config:personality"} -> $config
+  when config.empty:
+    db_put {key: "config:personality", value: {tone: "helpful", verbosity: "concise", humor_level: "moderate", formality: "casual", emoji_usage: "occasional"}}
+    return
+  end
+  pluresdb_write {key: "session:personality", value: $config}
 
-# Channel-specific adjustments (additive modifiers)
-let channel_modifiers = {
-  discord: { humor: 0.2, formality: -0.2 },
-  telegram: { directness: 0.1, verbosity: -0.1 },
-  slack: { formality: 0.1 },
-  direct: {}
-}
+procedure adapt_style:
+  trigger: manual
+  given: "Adapt response style based on user feedback and conversation context"
+  db_get {key: "session:personality"} -> $current
+  analyze_feedback {messages: $recent_messages, personality: $current} -> $adjustment
+  when adjustment.needed:
+    merge_personality {base: $current, adjustment: $adjustment} -> $updated
+    pluresdb_write {key: "session:personality", value: $updated}
+    emit {type: "personality.adapted", changes: $adjustment}
+  end
 
-# ═══════════════════════════════════════════════════════════════════════
-# PERSONALITY CONFIGURATION PROCEDURE
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure configure_personality:
-  description: "Determines response style based on personality traits and context"
-  input:
-    - message_type: string         # "casual", "technical", "emotional", "formal"
-    - channel: string              # "telegram", "discord", "slack", "direct"
-    - time_of_day: number          # hour (0-23)
-    - relationship_tier: string    # "owner", "trusted", "known", "stranger"
-  output: personality_config
-
-  steps:
-    # ── Initialize traits from base ───────────────────────────
-    - set traits = copy($base_traits)
-
-    # ── Message type adjustments ──────────────────────────────
-    - when:
-        - message_type == "technical":
-            - set traits.directness = 0.9
-            - set traits.verbosity = 0.6
-            - set traits.formality = 0.5
-            - set traits.humor = 0.3
-        - message_type == "emotional":
-            - set traits.empathy = 0.9
-            - set traits.warmth = 0.9
-            - set traits.directness = 0.5
-            - set traits.humor = 0.2
-        - message_type == "casual":
-            - set traits.humor = 0.8
-            - set traits.formality = 0.1
-            - set traits.verbosity = 0.3
-        - message_type == "formal":
-            - set traits.formality = 0.8
-            - set traits.humor = 0.2
-            - set traits.directness = 0.7
-            - set traits.verbosity = 0.6
-
-    # ── Time-based adjustments ────────────────────────────────
-    # Late night / early morning: be brief and warm
-    - when:
-        - time_of_day >= 22 OR time_of_day <= 6:
-            - set traits.verbosity = min(traits.verbosity, 0.2)
-            - set traits.warmth = max(traits.warmth, 0.8)
-            - set traits.humor = min(traits.humor, 0.4)
-
-    # Morning energy (7-10): slightly more verbose, upbeat
-    - when:
-        - time_of_day >= 7 AND time_of_day <= 10:
-            - set traits.verbosity = min(traits.verbosity + 0.1, 1.0)
-            - set traits.warmth = min(traits.warmth + 0.1, 1.0)
-
-    # ── Channel adjustments ───────────────────────────────────
-    - set modifiers = get($channel_modifiers, $channel, {})
-    - when:
-        - modifiers.humor != "":
-            - set traits.humor = clamp(traits.humor + modifiers.humor, 0.0, 1.0)
-        - modifiers.formality != "":
-            - set traits.formality = clamp(traits.formality + modifiers.formality, 0.0, 1.0)
-        - modifiers.directness != "":
-            - set traits.directness = clamp(traits.directness + modifiers.directness, 0.0, 1.0)
-        - modifiers.verbosity != "":
-            - set traits.verbosity = clamp(traits.verbosity + modifiers.verbosity, 0.0, 1.0)
-
-    # ── Relationship tier adjustments ─────────────────────────
-    - when:
-        - relationship_tier == "owner":
-            - set traits.formality = min(traits.formality, 0.2)
-            - set traits.warmth = max(traits.warmth, 0.7)
-            - set traits.humor = max(traits.humor, 0.5)
-        - relationship_tier == "stranger":
-            - set traits.formality = max(traits.formality, 0.5)
-            - set traits.humor = min(traits.humor, 0.3)
-            - set traits.warmth = 0.5
-        - relationship_tier == "known":
-            - set traits.formality = clamp(traits.formality, 0.2, 0.5)
-
-    # ── Generate style directives ─────────────────────────────
-    - set directives = []
-
-    # Directness
-    - when:
-        - traits.directness > 0.7:
-            - append $directives "Be concise and direct. Skip pleasantries."
-        - traits.directness < 0.4:
-            - append $directives "Ease into topics. Use transitional language."
-
-    # Humor
-    - when:
-        - traits.humor > 0.6:
-            - append $directives "Light humor is welcome when natural. Wordplay ok."
-        - traits.humor > 0.3 AND traits.humor <= 0.6:
-            - append $directives "Occasional wit is fine but keep it subtle."
-
-    # Empathy
-    - when:
-        - traits.empathy > 0.7:
-            - append $directives "Acknowledge feelings before problem-solving."
-
-    # Formality
-    - when:
-        - traits.formality < 0.3:
-            - append $directives "Use casual language. Contractions ok. Slang sparingly."
-        - traits.formality >= 0.6:
-            - append $directives "Maintain professional tone. Complete sentences."
-
-    # Verbosity
-    - when:
-        - traits.verbosity < 0.3:
-            - append $directives "Keep responses short. One paragraph max unless asked."
-        - traits.verbosity > 0.7:
-            - append $directives "Explain thoroughly. Examples welcome."
-
-    # Warmth
-    - when:
-        - traits.warmth > 0.8:
-            - append $directives "Be warm and supportive. Use encouraging language."
-
-    # ── Build response ────────────────────────────────────────
-    - return:
-        traits: $traits
-        directives: $directives
-        tone_summary: call summarize_tone($traits)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# HELPER: Summarize tone into a one-liner for system prompt
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure summarize_tone:
-  description: "Generates a one-line tone description from trait values"
-  input:
-    - traits: object
-  output: string
-
-  steps:
-    - set parts = []
-
-    - when:
-        - traits.warmth > 0.7:
-            - append $parts "warm"
-        - traits.warmth < 0.4:
-            - append $parts "neutral"
-
-    - when:
-        - traits.directness > 0.7:
-            - append $parts "direct"
-        - traits.directness < 0.4:
-            - append $parts "gentle"
-
-    - when:
-        - traits.humor > 0.6:
-            - append $parts "witty"
-
-    - when:
-        - traits.formality > 0.6:
-            - append $parts "professional"
-        - traits.formality < 0.3:
-            - append $parts "casual"
-
-    - when:
-        - traits.verbosity < 0.3:
-            - append $parts "concise"
-        - traits.verbosity > 0.7:
-            - append $parts "thorough"
-
-    - set tone = join($parts, ", ")
-    - return $tone
+procedure format_response:
+  trigger: manual
+  given: "Apply personality styling to a model response before delivery"
+  db_get {key: "session:personality"} -> $personality
+  style_response {response: $response, personality: $personality} -> $styled
+  return $styled

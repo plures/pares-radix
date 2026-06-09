@@ -1,129 +1,27 @@
-# Replaces: cerebellum/mod.rs preprocess() orchestration (~500 lines extractable)
-# This procedure orchestrates the full cerebellum preprocessing pipeline.
+# preprocess.px - Cerebellum preprocessing orchestration
+#
+# Replaces: cerebellum/mod.rs preprocess() orchestration (~500 lines)
+# Orchestrates the full preprocessing pipeline: classify, enrich, route.
 # IO actions (embedding, memory recall, store reads) are Rust-backed;
 # all decision logic is here in .px.
 
 procedure preprocess:
-  description: "Main cerebellum orchestration — autorecall, context management, routing"
   trigger: on_write {pattern: "inbound:*"}
-  
-  inputs:
-    - event: object          # {kind, content, channel, sender, id}
-    - config: object         # CerebellumConfig values
-    
-  steps:
-    # 1. Extract query from event
-    - set query = ""
-    - when event.kind == "message":
-        - when length(trim(event.content)) > 0:
-            - set query = event.content
-    - when event.kind == "state_change":
-        - set query = concat(event.key, ": ", event.new_value)
-        
-    # 2. Skip processing for non-queryable events
-    - when query == "":
-        - return {
-            learned_context: "",
-            clear_history: false,
-            route: "procedural",
-            guidance: []
-          }
-          
-    # 3. Compute embedding and detect topic shift
-    - set query_embedding = action compute_embedding(query)
-    - set clear_history = false
-    
-    # Short message guard: messages < 20 chars are always follow-ups
-    - when event.kind == "message" and length(trim(event.content)) < 20:
-        - set clear_history = false
-    - otherwise:
-        # Compare with previous topic embedding for this channel
-        - set previous_embedding = action read_state(concat("topic:", event.channel))
-        - when previous_embedding != null:
-            - set similarity = action cosine_similarity(query_embedding, previous_embedding)
-            - when similarity < config.topic_similarity_threshold:
-                - set clear_history = true
-    
-    # Update topic embedding for this channel
-    - action write_state(concat("topic:", event.channel), query_embedding)
-    
-    # 4. Autorecall — retrieve relevant memories
-    - set recalled = action recall_memories(query, config.recall_limit)
-    
-    # 5. Convert to context items with relevance scoring
-    - set context_items = []
-    - for i in range(0, length(recalled)):
-        - set sim = 1.0 - (i * 0.05)
-        - when sim < 0.5:
-            - set sim = 0.5
-        - append context_items {
-            id: concat("mem:", i),
-            content: recalled[i].content,
-            tokens: length(recalled[i].content) / 4,
-            relevance: sim,
-            source: "memory",
-            age_turns: 0
-          }
-          
-    # 6. Build learned context string
-    - set learned_context = ""
-    - when length(context_items) > 0:
-        - set learned_context = "## Recalled Context\n"
-        - for item in context_items:
-            - set learned_context = concat(learned_context, "- [rel:", format_float(item.relevance, 2), "] ", item.content, "\n")
-    - otherwise:
-        # Fallback: recent conversation when no memories found
-        - set recent = action read_state(concat("conversation:", event.channel))
-        - when recent != null and length(recent) > 0:
-            - set learned_context = "## Recent Conversation\n"
-            - set last_msgs = slice(recent, -4)
-            - for msg in last_msgs:
-                - set learned_context = concat(learned_context, "- ", msg.role, ": ", truncate(msg.content, 200), "\n")
-                
-    # 7. Authorization gate (simplified — full gate in constraint-eval.px)
-    - set is_destructive = false
-    - set is_external = false
-    - when event.kind == "tool_result":
-        - when starts_with(event.tool_name, "delete_") or starts_with(event.tool_name, "write_"):
-            - set is_destructive = true
-        - when starts_with(event.tool_name, "send_") or starts_with(event.tool_name, "post_"):
-            - set is_external = true
-            
-    # 8. Route the event (delegates to routing.px logic)
-    - set route = "conscious"
-    - when event.kind == "timer":
-        - set route = "procedural"
-    - when event.kind == "state_change":
-        - set route = "procedural"
-    - when event.kind == "model_response":
-        - set route = "drop"
-    - when event.kind == "message":
-        # Check for noise (bare acknowledgements)
-        - set lower = lowercase(event.content)
-        - when lower == "ok" or lower == "k" or lower == "👍" or lower == "thanks":
-            - set route = "drop"
-        # Check for analytical queries that need deep reasoning
-        - set analytical_keywords = ["analyze", "explain", "compare", "design", "architect", "why", "how does", "evaluate", "plan"]
-        - set is_analytical = false
-        - for kw in analytical_keywords:
-            - when contains(lower, kw):
-                - set is_analytical = true
-        - when is_analytical and config.enable_subconscious:
-            # Estimate complexity
-            - set word_count = length(split(event.content, " "))
-            - set complexity = min(word_count / 50.0, 1.0)
-            - when complexity >= config.complexity_threshold:
-                - set route = "deep"
-                - set route_reason = "analytical query exceeds complexity threshold"
-    
-    # 9. Return enriched context
-    - return {
-        learned_context: learned_context,
-        clear_history: clear_history,
-        route: route,
-        route_reason: when(route == "deep", route_reason, ""),
-        guidance: [],
-        is_destructive: is_destructive,
-        is_external: is_external,
-        context_items_count: length(context_items)
-      }
+  given: "Orchestrate full cerebellum preprocessing pipeline for inbound messages"
+  classify_message {message: $event, plugins: $plugins, last_topic: $last_topic} -> $classification
+  pluresdb_write {key: "session:classification", value: $classification}
+  extract_entities {message: $event} -> $entities
+  pluresdb_write {key: "session:entities", value: $entities}
+  recall_context {entities: $entities, classification: $classification} -> $context
+  manage_context {items: $context, new_items: $entities, token_budget: $token_budget} -> $managed
+  pluresdb_write {key: "session:context", value: $managed}
+  inject_guidance {session_type: $session_type, context: $managed} -> $guidance
+  route_event {classification: $classification, context: $managed, guidance: $guidance} -> $route
+  emit {type: "preprocessed", route: $route, classification: $classification}
+
+procedure preprocess_tool_result:
+  trigger: on_write {pattern: "tool_result:*"}
+  given: "Light preprocessing for tool results before feeding back to model"
+  summarize_if_large {content: $event, max_tokens: 4000} -> $summarized
+  pluresdb_append {key: "chat:history", value: $summarized}
+  emit {type: "model_request", source: "tool_result"}

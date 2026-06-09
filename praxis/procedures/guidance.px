@@ -1,148 +1,29 @@
-# guidance.px — Praxis guidance generation procedure
+# guidance.px - Praxis guidance generation procedure
 #
 # Replaces: crates/core/src/praxis/guidance.rs (325 lines of Rust)
-# This is PURE LOGIC — no IO needed.
-#
-# Synthesizes guidance text from active praxis constraints for prompt injection.
-# Called before each agent response to inject relevant constraints as directives.
-
-# ═══════════════════════════════════════════════════════════════════════
-# SEVERITY ORDERING
-# ═══════════════════════════════════════════════════════════════════════
-
-let severity_rank = {
-  error: 1,
-  warning: 2,
-  info: 3
-}
-
-# Maximum constraints to include before truncating (prevent prompt bloat)
-let max_constraints_per_section = 10
-let max_total_guidance_lines = 25
-
-# ═══════════════════════════════════════════════════════════════════════
-# GUIDANCE GENERATION PROCEDURE
-# ═══════════════════════════════════════════════════════════════════════
+# Generates contextual guidance blocks injected into system prompts.
 
 procedure generate_guidance:
-  description: "Synthesizes guidance text from active praxis constraints for prompt injection"
-  input:
-    - event_type: string          # Current event kind (e.g. "message", "tool_call", "response")
-    - tool_names: list            # Tools being considered for this turn
-    - active_constraints: list    # List of {id, severity, condition, message, applies_to, scope}
-  output: guidance_result
+  trigger: manual
+  given: "Generate contextual praxis guidance for the current conversation state"
+  db_get_prefix {prefix: "constraint:"} -> $constraints
+  db_get {key: "session:context"} -> $context
+  filter_relevant {constraints: $constraints, context: $context} -> $relevant
+  format_guidance_block {constraints: $relevant, session_type: $session_type} -> $guidance
+  return $guidance
 
-  steps:
-    # ── Filter constraints relevant to this event ─────────────
-    - set relevant = []
-    - for constraint in $active_constraints:
-        - set dominated = false
+procedure inject_guidance:
+  trigger: on_write {pattern: "model_request:*"}
+  given: "Inject praxis guidance into the system prompt before model invocation"
+  generate_guidance {session_type: $session_type, context: $context} -> $guidance
+  pluresdb_read {key: "config:system_prompt"} -> $base_prompt
+  append_guidance {base: $base_prompt, guidance: $guidance} -> $enhanced
+  pluresdb_write {key: "config:system_prompt_enhanced", value: $enhanced}
 
-        # Always include errors
-        - when:
-            - constraint.severity == "error":
-                - set dominated = false
-
-        # Check event type applicability
-        - when:
-            - constraint.applies_to != "" AND NOT contains($constraint.applies_to, $event_type):
-                - set dominated = true
-
-        # Check tool scope (if constraint is tool-specific)
-        - when:
-            - constraint.scope starts_with "tool:" AND dominated == false:
-                - set scoped_tool = replace($constraint.scope, "tool:", "")
-                - when:
-                    - NOT contains($tool_names, $scoped_tool):
-                        - set dominated = true
-
-        - when:
-            - dominated == false:
-                - append $relevant $constraint
-
-    # ── Sort by severity ──────────────────────────────────────
-    - set errors = []
-    - set warnings = []
-    - set infos = []
-    - for c in $relevant:
-        - when:
-            - c.severity == "error":
-                - append $errors $c
-            - c.severity == "warning":
-                - append $warnings $c
-            - c.severity == "info":
-                - append $infos $c
-
-    # ── Truncate if too many ──────────────────────────────────
-    - set errors = slice($errors, 0, $max_constraints_per_section)
-    - set warnings = slice($warnings, 0, $max_constraints_per_section)
-    - set infos = slice($infos, 0, $max_constraints_per_section)
-
-    # ── Build guidance text ───────────────────────────────────
-    - set guidance_lines = []
-
-    - when:
-        - length($errors) > 0:
-            - append $guidance_lines "⛔ HARD CONSTRAINTS:"
-            - for e in $errors:
-                - append $guidance_lines concat("- ", $e.message)
-            - append $guidance_lines ""
-
-    - when:
-        - length($warnings) > 0:
-            - append $guidance_lines "⚠️ GUIDELINES:"
-            - for w in $warnings:
-                - append $guidance_lines concat("- ", $w.message)
-            - append $guidance_lines ""
-
-    - when:
-        - length($infos) > 0:
-            - append $guidance_lines "ℹ️ NOTES:"
-            - for i in $infos:
-                - append $guidance_lines concat("- ", $i.message)
-
-    # ── Truncate total output ─────────────────────────────────
-    - set guidance_lines = slice($guidance_lines, 0, $max_total_guidance_lines)
-
-    # ── Build result ──────────────────────────────────────────
-    - set text = join($guidance_lines, "\n")
-    - return:
-        text: $text
-        constraint_count: length($relevant)
-        error_count: length($errors)
-        warning_count: length($warnings)
-        was_truncated: length($relevant) > $max_total_guidance_lines
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# TOOL-SPECIFIC GUIDANCE EXTRACTION
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure get_tool_guidance:
-  description: "Extract guidance specifically relevant to a single tool invocation"
-  input:
-    - tool_name: string
-    - active_constraints: list
-  output: tool_guidance
-
-  steps:
-    # Filter constraints scoped to this tool or globally applicable
-    - set applicable = []
-    - for constraint in $active_constraints:
-        - when:
-            - constraint.scope == "" OR constraint.scope == "global":
-                - append $applicable $constraint
-            - constraint.scope == concat("tool:", $tool_name):
-                - append $applicable $constraint
-
-    # Only return errors and warnings for tool-level injection
-    - set lines = []
-    - for c in $applicable:
-        - when:
-            - c.severity == "error" OR c.severity == "warning":
-                - append $lines $c.message
-
-    - return:
-        tool: $tool_name
-        guidance_lines: $lines
-        has_blockers: length(filter($applicable, severity == "error")) > 0
+procedure update_guidance_on_violation:
+  trigger: on_write {pattern: "constraint.evaluation.*"}
+  given: "Update guidance when a constraint violation is detected"
+  db_get {key: "session:violation_history"} -> $history
+  pluresdb_append {key: "session:violation_history", value: $event}
+  regenerate_guidance {violations: $history} -> $updated
+  pluresdb_write {key: "session:active_guidance", value: $updated}

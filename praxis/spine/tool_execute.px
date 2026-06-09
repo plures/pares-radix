@@ -1,27 +1,25 @@
-# tool_execute.px — Tool execution as a PluresDB procedure
+# tool_execute.px - Tool execution loop as a reactive PluresDB procedure
 #
-# Replaces ToolExecutor (670 lines of Rust). The logic is simple:
-# when model responds with tool_calls, execute each one (side-effect actors),
-# then re-emit a model_request with results. PluresDB tracks iteration count.\n
+# When a model response contains tool_calls:
+# 1. Increment iteration counter (hard stop at 25)
+# 2. Record assistant message with tool_calls for API correlation
+# 3. Dispatch each tool call and record results
+# 4. Re-invoke model with updated history
+
 procedure execute_tools:
   trigger: on_write {pattern: "model_response:*"}
+  given: "Dispatch tool calls from model response, record results, and re-invoke"
   when event.has_tool_calls:
-    pluresdb_increment {key: "chat:tool_iterations"}
-    pluresdb_read {key: "chat:tool_iterations"} -> $iteration
+    pluresdb_increment {key: "chat:tool_iterations"} -> $iteration
     when iteration > 25:
-      emit {type: "delivery_request", content: "Tool loop limit reached"}
-      return  # Hard stop: do not execute tools or re-invoke model
+      emit {type: "delivery_request", content: "Tool loop limit reached (25 iterations)"}
+      return
     end
-    # Record assistant message with tool_calls for API correlation
-    pluresdb_append {key: "chat:history", value: {role: "assistant", tool_calls: event.tool_calls}}
-    loop over event.tool_calls as tool_call:
-      tool_dispatch {name: tool_call.function.name, call_id: tool_call.id, arguments: tool_call.function.arguments} -> $result
-      pluresdb_append {key: "chat:history", value: {role: "tool", tool_call_id: tool_call.id, content: $result}}
+    record_assistant_tool_calls {history_key: "chat:history", tool_calls: $event}
+    extract_tool_calls {event: $event} -> $calls
+    loop over $calls as tool_call:
+      tool_dispatch {name: $tool_call, call_id: $tool_call, arguments: $tool_call} -> $result
+      pluresdb_append {key: "chat:history", value: $result}
     end
     emit {type: "model_request", source: "tool_executor"}
   end
-
-# Reset iteration counter when a new user message arrives
-procedure reset_tool_counter:
-  trigger: on_write {pattern: "inbound:*"}
-  pluresdb_write {key: "chat:tool_iterations", value: 0}

@@ -1,214 +1,38 @@
-# routing.px — Event routing procedure
+# routing.px - Event routing procedure
 #
 # Replaces: crates/core/src/cerebellum/router.rs (343 lines of Rust)
-# This is PURE LOGIC — decides where an event goes after preprocessing.
-#
-# Routes:
-#   conscious  — normal model processing path
-#   procedural — handled by .px procedures (timers, state changes)
-#   deep       — high-complexity analytical queries (uses deep model)
-#   delegate   — decompose into sub-tasks
-#   drop       — noise/ack, no response needed
+# Decides where an event goes after preprocessing: model, tool, delivery, or skip.
 
-# ═══════════════════════════════════════════════════════════════════════
-# KEYWORD LISTS
-# ═══════════════════════════════════════════════════════════════════════
-
-let analytical_keywords = ["analyze", "explain", "compare", "design", "architect", "why", "how does", "trade-off", "tradeoff", "evaluate", "reason", "think through", "deep dive", "investigate", "plan"]
-
-let code_keywords = ["code", "implement", "build", "create", "refactor", "fix", "compile", "cargo", "rust", "typescript", "javascript", "python", "module", "crate", "function"]
-
-let research_keywords = ["research", "search", "find", "look up", "documentation", "docs", "source", "citation", "paper", "web"]
-
-let noise_patterns = ["ok", "sure", "thanks", "got it", "k", "cool", "np", "ty", "thx", "okay", "alright"]
-
-let simple_patterns = ["yes", "no", "ok", "sure", "thanks", "got it", "do it", "push", "run", "status", "heartbeat"]
-
-let multi_part_keywords = ["multiple", "components", "modules", "parts", "files", "directories", "across", "integrate", "wire"]
-
-let file_extensions = [".rs", ".ts", ".js", ".py", ".go", ".java", ".toml", ".json", ".yml", ".yaml", ".md"]
-
-let file_path_segments = ["/src/", "crates/", "modules/"]
-
-# ═══════════════════════════════════════════════════════════════════════
-# MAIN ROUTING PROCEDURE
-# ═══════════════════════════════════════════════════════════════════════
+fact route_decision:
+  destination: string
+  model_tier: string
+  skip_reason: string
+  priority: int
 
 procedure route_event:
-  description: "Decide routing for an incoming event"
-  input:
-    - event_type: string       # message | timer | tool_result | model_response | state_change | constraint_violation
-    - content: string          # Message content (empty for non-message events)
-    - learned_context: string  # Autorecall context
-    - enable_subconscious: boolean
-    - complexity_threshold: number  # 0.0 - 1.0
-  output: route
+  trigger: manual
+  given: "Route a preprocessed event to the appropriate handler"
+  db_get {key: "session:classification"} -> $classification
+  when classification.intent == "command":
+    emit {type: "route.command", command: $event}
+    return
+  end
+  when classification.needs_tools:
+    emit {type: "route.tool_first", event: $event}
+    return
+  end
+  select_model_tier {complexity: $classification, context: $context} -> $tier
+  emit {type: "route.model", tier: $tier, event: $event}
 
-  steps:
-    # Non-message events have fixed routes
-    - when:
-        - event_type == "timer":
-            - return: { route: "procedural" }
-        - event_type == "state_change":
-            - return: { route: "procedural" }
-        - event_type == "tool_result":
-            - return: { route: "conscious" }
-        - event_type == "model_response":
-            - return: { route: "drop" }
-        - event_type == "constraint_violation":
-            - return: { route: "drop" }
-
-    # Message routing — analyze signals
-    - set result = call analyze_message($content, $learned_context, $enable_subconscious, $complexity_threshold)
-    - return $result
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# MESSAGE ANALYSIS
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure analyze_message:
-  description: "Analyze a message and decide its route"
-  input:
-    - content: string
-    - learned_context: string
-    - enable_subconscious: boolean
-    - complexity_threshold: number
-  output: route
-
-  steps:
-    - set lower = lowercase($content)
-    - set trimmed = trim($lower)
-    - set words = split($content, " ")
-    - set word_count = length($words)
-
-    # ── Signal Detection ──────────────────────────────────────
-    - set is_noise = exact_match($trimmed, $noise_patterns)
-    - set is_simple = exact_match($trimmed, $simple_patterns) OR (word_count <= 3)
-    - set is_analytical = any_contains($trimmed, $analytical_keywords)
-    - set is_code = any_contains($trimmed, $code_keywords)
-    - set is_research = any_contains($trimmed, $research_keywords)
-
-    # File mention detection
-    - set file_mentions = count_matches($lower, $file_extensions) + count_matches($lower, $file_path_segments)
-
-    # Multi-part detection
-    - set is_multi_part = any_contains($lower, $multi_part_keywords)
-    - set has_multi_verbs = any_contains($lower, ["create", "build", "implement", "wire", "integrate"]) AND (contains($lower, " and ") OR $is_multi_part)
-
-    # Decomposable if: very long, multiple files, multi-verb, or analytical+code
-    - set is_decomposable = (word_count > 200) OR (file_mentions >= 2) OR $has_multi_verbs OR ($is_analytical AND $is_code)
-
-    # ── Routing Decision ──────────────────────────────────────
-
-    # Pure noise gets dropped
-    - when:
-        - is_noise == true AND is_analytical == false:
-            - return: { route: "drop" }
-
-    # Simple commands go to conscious
-    - when:
-        - is_simple == true AND is_analytical == false:
-            - return: { route: "conscious" }
-
-    # Decomposable requests get delegated
-    - when:
-        - is_decomposable == true:
-            - set tasks = call build_subtasks($content, $learned_context, $is_analytical, $is_code, $is_research)
-            - when:
-                - length($tasks) > 0:
-                    - return: { route: "delegate", reason: "multi-part or cross-domain request", tasks: $tasks }
-
-    # Deep reasoning path (if subconscious enabled)
-    - when:
-        - enable_subconscious == true AND is_analytical == true:
-            - set complexity = call estimate_complexity($word_count, $is_analytical, $is_code, $is_research)
-            - when:
-                - complexity >= complexity_threshold:
-                    - return: { route: "deep", reason: "analytical query exceeds complexity threshold" }
-
-    # Default: conscious processing
-    - return: { route: "conscious" }
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# COMPLEXITY ESTIMATION
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure estimate_complexity:
-  description: "Estimate message complexity as 0.0-1.0 score"
-  input:
-    - word_count: number
-    - is_analytical: boolean
-    - is_code: boolean
-    - is_research: boolean
-  output: score
-
-  steps:
-    - set score = 0.0
-
-    # Length contribution
-    - when:
-        - word_count > 50:
-            - set score = $score + 0.3
-        - word_count > 10:
-            - set score = $score + 0.15
-
-    # Analytical intent is a strong signal
-    - when:
-        - is_analytical == true:
-            - set score = $score + 0.6
-
-    # Code suggests implementation complexity
-    - when:
-        - is_code == true:
-            - set score = $score + 0.2
-
-    # Research adds complexity
-    - when:
-        - is_research == true:
-            - set score = $score + 0.15
-
-    # Cap at 1.0
-    - when:
-        - score > 1.0:
-            - set score = 1.0
-
-    - return $score
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# SUB-TASK DECOMPOSITION
-# ═══════════════════════════════════════════════════════════════════════
-
-procedure build_subtasks:
-  description: "Build sub-task list based on signal analysis"
-  input:
-    - content: string
-    - learned_context: string
-    - is_analytical: boolean
-    - is_code: boolean
-    - is_research: boolean
-  output: tasks
-
-  steps:
-    - set tasks = []
-
-    - when:
-        - is_analytical == true:
-            - set tasks = append($tasks, { role: "analyst", prompt: "Analyze and outline the plan for: " + $content, context: $learned_context })
-
-    - when:
-        - is_code == true:
-            - set tasks = append($tasks, { role: "coder", prompt: "Implement or patch: " + $content, context: $learned_context })
-
-    - when:
-        - is_research == true:
-            - set tasks = append($tasks, { role: "researcher", prompt: "Research supporting details for: " + $content, context: $learned_context })
-
-    # Fallback: if decomposable but no specific signals, use analyst
-    - when:
-        - length($tasks) == 0:
-            - set tasks = append($tasks, { role: "analyst", prompt: "Decompose this request into actionable steps: " + $content, context: $learned_context })
-
-    - return $tasks
+procedure select_model_tier:
+  trigger: manual
+  given: "Select model tier based on complexity and context requirements"
+  when complexity > 3:
+    emit {type: "tier.selected", tier: "deep", reason: "high complexity"}
+    return
+  end
+  when complexity > 1:
+    emit {type: "tier.selected", tier: "standard", reason: "moderate complexity"}
+    return
+  end
+  emit {type: "tier.selected", tier: "fast", reason: "simple response"}
