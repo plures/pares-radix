@@ -173,6 +173,8 @@ pub struct Cerebellum {
     context_items: Mutex<Vec<context_manager::ContextItem>>,
     /// Relevance scorer with learned weights.
     relevance_scorer: Mutex<context_manager::RelevanceScorer>,
+    /// Optional conversation store for fallback context when autorecall has no hits.
+    conversation_store: Option<Arc<dyn crate::spine::conversation::ConversationStore>>,
 }
 
 impl Cerebellum {
@@ -185,6 +187,7 @@ impl Cerebellum {
             classifier: None,
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
+            conversation_store: None,
         }
     }
 
@@ -197,7 +200,14 @@ impl Cerebellum {
             classifier: None,
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
+            conversation_store: None,
         }
+    }
+
+    /// Attach a conversation store for fallback context when autorecall returns no hits.
+    pub fn with_conversation_store(mut self, store: Arc<dyn crate::spine::conversation::ConversationStore>) -> Self {
+        self.conversation_store = Some(store);
+        self
     }
 
     /// Attach a message classifier to this cerebellum.
@@ -322,8 +332,32 @@ impl Cerebellum {
         };
 
         // Build the context string from managed items
+        // Fallback: if autorecall returned nothing, pull recent conversation
+        // exchanges so contextual follow-ups ("do that", "yes", "continue") work.
         let learned_context = if managed.items.is_empty() {
-            String::new()
+            // No semantic memory hits — inject recent conversation as fallback
+            if let Some(store) = &self.conversation_store {
+                let chat_id = event.chat_id().unwrap_or_default();
+                if !chat_id.is_empty() {
+                    let history = store.get_history(&chat_id).await;
+                    let recent: Vec<_> = history.iter().rev().take(4).collect();
+                    if !recent.is_empty() {
+                        let mut ctx = String::from("## Recent Conversation\n");
+                        for msg in recent.iter().rev() {
+                            let role = msg.role_str();
+                            let content = msg.content_preview(200);
+                            ctx.push_str(&format!("- {}: {}\n", role, content));
+                        }
+                        ctx
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
         } else {
             let mut ctx = String::from("## Recalled Context\n");
             for item in &managed.items {
