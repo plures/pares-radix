@@ -33,6 +33,7 @@ pub mod px_bridge;
 pub mod router;
 
 use crate::cerebellum::bridge::PluresDbBridge;
+use crate::cerebellum::px_bridge::PxBridge;
 use crate::delegation::broker::SubTask;
 use crate::event::Event;
 use crate::memory::entry::MemoryCategory;
@@ -177,6 +178,9 @@ pub struct Cerebellum {
     relevance_scorer: Mutex<context_manager::RelevanceScorer>,
     /// Optional conversation store for fallback context when autorecall has no hits.
     conversation_store: Option<Arc<dyn crate::spine::conversation::ConversationStore>>,
+    /// Optional .px bridge for calling .px procedures instead of hardcoded Rust logic.
+    /// When loaded, classification and routing go through .px first, falling back to Rust.
+    px_bridge: Option<Arc<PxBridge>>,
 }
 
 impl Cerebellum {
@@ -190,6 +194,7 @@ impl Cerebellum {
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
             conversation_store: None,
+            px_bridge: None,
         }
     }
 
@@ -203,12 +208,22 @@ impl Cerebellum {
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
             conversation_store: None,
+            px_bridge: None,
         }
     }
 
     /// Attach a conversation store for fallback context when autorecall returns no hits.
     pub fn with_conversation_store(mut self, store: Arc<dyn crate::spine::conversation::ConversationStore>) -> Self {
         self.conversation_store = Some(store);
+        self
+    }
+
+    /// Attach a .px bridge for calling .px procedures instead of hardcoded Rust logic.
+    ///
+    /// When set, the cerebellum will try .px procedures for classification and routing
+    /// FIRST, falling back to Rust implementations only when .px returns None or errors.
+    pub fn with_px_bridge(mut self, bridge: Arc<PxBridge>) -> Self {
+        self.px_bridge = Some(bridge);
         self
     }
 
@@ -390,8 +405,40 @@ impl Cerebellum {
             });
         }
 
-        // 3. Route (may be overridden by gate levels 2–4)
-        let mut route = router::decide(event, &learned_context, &self.config);
+        // 3. Route — try .px procedure first, fall back to Rust
+        let mut route = if let Some(ref bridge) = self.px_bridge {
+            if bridge.is_active() {
+                let event_type = event.kind().to_string();
+                let content = extract_query(event).unwrap_or_default();
+                match bridge.route_event(
+                    &event_type,
+                    &content,
+                    &learned_context,
+                    self.config.enable_subconscious,
+                    f64::from(self.config.complexity_threshold),
+                ).await {
+                    Some(Ok(val)) => {
+                        // Parse .px result into Route enum
+                        parse_px_route(&val).unwrap_or_else(|| {
+                            debug!(raw = %val, "px route returned unparseable result, falling back to Rust");
+                            router::decide(event, &learned_context, &self.config)
+                        })
+                    }
+                    Some(Err(e)) => {
+                        warn!(error = %e, "px route_event failed, falling back to Rust");
+                        router::decide(event, &learned_context, &self.config)
+                    }
+                    None => {
+                        // Procedure not loaded — fall through to Rust
+                        router::decide(event, &learned_context, &self.config)
+                    }
+                }
+            } else {
+                router::decide(event, &learned_context, &self.config)
+            }
+        } else {
+            router::decide(event, &learned_context, &self.config)
+        };
         let mut guidance: Vec<String> = vec![];
         let mut approval_required: Option<ApprovalRequest> = None;
 
@@ -695,6 +742,65 @@ fn build_authorization_context(event: &Event) -> RuleContext {
             "is_external":           is_external,
         }),
     )
+}
+
+/// Parse a .px procedure result (JSON Value) into a [`Route`] enum.
+///
+/// Expected .px output format:
+/// ```json
+/// {"route": "conscious"}
+/// {"route": "deep", "reason": "..."}
+/// {"route": "delegate", "reason": "...", "tasks": [...]}
+/// {"route": "procedural"}
+/// {"route": "drop"}
+/// ```
+fn parse_px_route(val: &serde_json::Value) -> Option<Route> {
+    let route_str = val.get("route")?.as_str()?;
+    match route_str {
+        "conscious" => Some(Route::Conscious),
+        "procedural" => Some(Route::Procedural),
+        "drop" => Some(Route::Drop),
+        "deep" => {
+            let reason = val
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("px routing decided deep reasoning needed")
+                .to_string();
+            Some(Route::Deep { reason })
+        }
+        "delegate" => {
+            let reason = val
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("px routing decided delegation needed")
+                .to_string();
+            let tasks = val
+                .get("tasks")
+                .and_then(|t| t.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|task| {
+                            Some(SubTask {
+                                agent_name: task
+                                    .get("agent_name")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("general")
+                                    .to_string(),
+                                input: task.get("input")?.as_str()?.to_string(),
+                                parent_context: task
+                                    .get("parent_context")
+                                    .and_then(|s| s.as_str())
+                                    .map(String::from),
+                                steering_rx: None,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(Route::Delegate { reason, tasks })
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
