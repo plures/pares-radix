@@ -50,6 +50,8 @@ pub struct Pipeline {
     tx: mpsc::Sender<SpineEvent>,
     procedures: tokio::sync::RwLock<Vec<Arc<dyn SpineProcedure>>>,
     delivery_tx: broadcast::Sender<SpineEvent>,
+    /// Optional reactive registry for .px procedure triggers on events.
+    reactive: Option<Arc<super::reactive::ReactiveRegistry>>,
 }
 
 impl Pipeline {
@@ -64,6 +66,25 @@ impl Pipeline {
             tx,
             procedures: tokio::sync::RwLock::new(Vec::new()),
             delivery_tx,
+            reactive: None,
+        });
+
+        (pipeline, rx)
+    }
+
+    /// Create a new pipeline with a reactive registry attached.
+    pub fn with_reactive(
+        capacity: usize,
+        reactive: Arc<super::reactive::ReactiveRegistry>,
+    ) -> (Arc<Self>, mpsc::Receiver<SpineEvent>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let (delivery_tx, _) = broadcast::channel(capacity);
+
+        let pipeline = Arc::new(Self {
+            tx,
+            procedures: tokio::sync::RwLock::new(Vec::new()),
+            delivery_tx,
+            reactive: Some(reactive),
         });
 
         (pipeline, rx)
@@ -120,6 +141,16 @@ impl Pipeline {
                 if should_handle {
                     proc.handle(&event, &emitter).await;
                 }
+            }
+
+            // Notify reactive registry — fire .px procedures on matching writes
+            if let Some(ref reactive) = self.reactive {
+                let key = format!("{}:{}", event.event_type(), event.id());
+                let value = serde_json::json!({
+                    "type": event.event_type(),
+                    "id": event.id(),
+                });
+                reactive.on_write(&key, &value).await;
             }
         }
 
