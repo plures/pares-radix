@@ -66,6 +66,7 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
     "crates/core/src/spine/conversation.rs", // MemoryConversationStore is test utility (PluresConversationStore is production)
     "crates/core/src/agent.rs", // conversation_history is hot cache; persistence via turn_store (PluresDB)
+    "crates/core/src/cerebellum/actions.rs", // state store hot cache (transitional; migrating to PluresDB)
 ];
 
 /// Check that no crate introduces persistent in-memory state outside the allowlist.
