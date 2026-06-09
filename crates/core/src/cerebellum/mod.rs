@@ -339,7 +339,7 @@ impl Cerebellum {
             if let Some(store) = &self.conversation_store {
                 let chat_id = event.chat_id().unwrap_or_default();
                 if !chat_id.is_empty() {
-                    let history = store.get_history(&chat_id).await;
+                    let history = store.get_history(chat_id).await;
                     let recent: Vec<_> = history.iter().rev().take(4).collect();
                     if !recent.is_empty() {
                         let mut ctx = String::from("## Recent Conversation\n");
