@@ -74,6 +74,19 @@ impl CerebellumActionHandler {
         }
     }
 
+    /// Create a minimal handler with no embedder or event channel.
+    ///
+    /// Useful at startup when the full infrastructure isn't available yet.
+    /// Actions that require an embedder will return errors; state operations
+    /// work against an in-memory map; events are silently dropped.
+    pub fn new_minimal() -> Self {
+        Self {
+            embedder: None,
+            state: Arc::new(RwLock::new(HashMap::new())),
+            event_tx: None,
+        }
+    }
+
     /// Create a handler with a pre-populated state map (useful for testing).
     #[cfg(test)]
     pub fn with_state(state: HashMap<String, Value>) -> Self {

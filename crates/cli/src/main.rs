@@ -40,6 +40,7 @@ use pares_agens_channels::telegram::{
 use pares_agens_core::agent::{Agent, Memory};
 use pares_agens_core::auth::copilot::{CopilotAuth, CopilotModelClient};
 use pares_agens_core::cerebellum::{Cerebellum, CerebellumConfig};
+use pares_agens_core::cerebellum::px_bridge::PxBridge;
 use pares_agens_core::delegation::{broker::DelegationBroker, registry::AgentRegistry};
 use pares_agens_core::memory::{
     embed::{EmbeddingProvider, MockEmbedder, OpenAiEmbedder},
@@ -340,6 +341,37 @@ impl RuntimeAgentFactory {
             }
         } else {
             cerebellum
+        };
+
+        // Load .px procedures for cerebellum routing/classification
+        let cerebellum = {
+            // Try ~/.pares-radix/praxis/procedures/ first (production)
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            let px_dir = std::path::PathBuf::from(&home)
+                .join(".pares-radix")
+                .join("praxis")
+                .join("procedures");
+            let bridge = Arc::new(PxBridge::new(Arc::new(
+                pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal(),
+            )));
+            let loaded = bridge.load_from_directory_sync(&px_dir);
+            if loaded > 0 {
+                tracing::info!(count = loaded, dir = %px_dir.display(), "px_bridge: loaded cerebellum procedures");
+                cerebellum.with_px_bridge(bridge)
+            } else {
+                // Also try the repo-local praxis/procedures/ directory
+                let local_dir = std::path::PathBuf::from("praxis/procedures");
+                let loaded_local = bridge.load_from_directory_sync(&local_dir);
+                if loaded_local > 0 {
+                    tracing::info!(count = loaded_local, dir = %local_dir.display(), "px_bridge: loaded cerebellum procedures (local)");
+                    cerebellum.with_px_bridge(bridge)
+                } else {
+                    tracing::debug!("px_bridge: no .px procedures found, using Rust fallback");
+                    cerebellum
+                }
+            }
         };
 
         let system_prompt = self.load_system_prompt()?;
@@ -5277,6 +5309,35 @@ async fn main() {
                 }
             } else {
                 cerebellum
+            };
+
+            // Load .px procedures for cerebellum routing/classification (serve-spine)
+            let cerebellum = {
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_default();
+                let px_dir = std::path::PathBuf::from(&home)
+                    .join(".pares-radix")
+                    .join("praxis")
+                    .join("procedures");
+                let bridge = Arc::new(PxBridge::new(Arc::new(
+                    pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal(),
+                )));
+                let loaded = bridge.load_from_directory_sync(&px_dir);
+                if loaded > 0 {
+                    tracing::info!(count = loaded, dir = %px_dir.display(), "px_bridge: loaded cerebellum procedures (spine)");
+                    cerebellum.with_px_bridge(bridge)
+                } else {
+                    let local_dir = std::path::PathBuf::from("praxis/procedures");
+                    let loaded_local = bridge.load_from_directory_sync(&local_dir);
+                    if loaded_local > 0 {
+                        tracing::info!(count = loaded_local, "px_bridge: loaded cerebellum procedures (local/spine)");
+                        cerebellum.with_px_bridge(bridge)
+                    } else {
+                        tracing::debug!("px_bridge: no .px procedures found (spine), using Rust fallback");
+                        cerebellum
+                    }
+                }
             };
             let system_prompt_text = build_system_prompt(system_prompt).unwrap_or_else(|e| {
                 eprintln!("Warning: {e}");

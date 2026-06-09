@@ -95,6 +95,30 @@ impl PxBridge {
         count
     }
 
+    /// Load .px procedures from a directory synchronously (for non-async contexts).
+    ///
+    /// Uses blocking RwLock access — safe to call from sync code at startup.
+    pub fn load_from_directory_sync(&self, dir: &std::path::Path) -> usize {
+        let adapters = crate::px_adapter::load_px_directory(dir, self.handler.clone());
+        let count = adapters.len();
+
+        // Use blocking write since we're in a sync context
+        let mut procs = self.procedures.blocking_write();
+        for adapter in adapters {
+            let name = adapter.name().to_string();
+            debug!(procedure = %name, "px_bridge: registered procedure from directory (sync)");
+            procs.insert(name, Arc::new(adapter));
+        }
+
+        if count > 0 {
+            self.active
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            info!(count, dir = %dir.display(), "px_bridge: loaded cerebellum procedures from directory (sync)");
+        }
+
+        count
+    }
+
     /// Whether any .px procedures are loaded and ready.
     pub fn is_active(&self) -> bool {
         self.active.load(std::sync::atomic::Ordering::Relaxed)
