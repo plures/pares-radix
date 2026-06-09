@@ -192,7 +192,15 @@ impl ChronosTimeline {
         constraint_results: Vec<String>,
         rationale: Option<String>,
     ) -> ChronosEntry {
-        self.build_entry_with_level(key, actor, action, ChronosLevel::Info, data, constraint_results, rationale)
+        self.build_entry_with_level(
+            key,
+            actor,
+            action,
+            ChronosLevel::Info,
+            data,
+            constraint_results,
+            rationale,
+        )
     }
 
     /// Build an entry with an explicit severity level.
@@ -751,16 +759,37 @@ mod tests {
 
     #[test]
     fn from_str_loose_all_variants() {
-        assert_eq!(ChronosLevel::from_str_loose("debug"), Some(ChronosLevel::Debug));
-        assert_eq!(ChronosLevel::from_str_loose("info"), Some(ChronosLevel::Info));
-        assert_eq!(ChronosLevel::from_str_loose("warn"), Some(ChronosLevel::Warn));
-        assert_eq!(ChronosLevel::from_str_loose("warning"), Some(ChronosLevel::Warn));
-        assert_eq!(ChronosLevel::from_str_loose("error"), Some(ChronosLevel::Error));
+        assert_eq!(
+            ChronosLevel::from_str_loose("debug"),
+            Some(ChronosLevel::Debug)
+        );
+        assert_eq!(
+            ChronosLevel::from_str_loose("info"),
+            Some(ChronosLevel::Info)
+        );
+        assert_eq!(
+            ChronosLevel::from_str_loose("warn"),
+            Some(ChronosLevel::Warn)
+        );
+        assert_eq!(
+            ChronosLevel::from_str_loose("warning"),
+            Some(ChronosLevel::Warn)
+        );
+        assert_eq!(
+            ChronosLevel::from_str_loose("error"),
+            Some(ChronosLevel::Error)
+        );
         assert_eq!(ChronosLevel::from_str_loose("unknown"), None);
         assert_eq!(ChronosLevel::from_str_loose(""), None);
         // Case insensitivity
-        assert_eq!(ChronosLevel::from_str_loose("DEBUG"), Some(ChronosLevel::Debug));
-        assert_eq!(ChronosLevel::from_str_loose("Error"), Some(ChronosLevel::Error));
+        assert_eq!(
+            ChronosLevel::from_str_loose("DEBUG"),
+            Some(ChronosLevel::Debug)
+        );
+        assert_eq!(
+            ChronosLevel::from_str_loose("Error"),
+            Some(ChronosLevel::Error)
+        );
     }
 
     #[test]
@@ -784,12 +813,21 @@ mod tests {
         assert_eq!(ChronosAction::Update.to_string(), "Update");
         assert_eq!(ChronosAction::Delete.to_string(), "Delete");
         assert_eq!(ChronosAction::Move.to_string(), "Move");
-        assert_eq!(ChronosAction::MessageReceived.to_string(), "MessageReceived");
-        assert_eq!(ChronosAction::ResponseGenerated.to_string(), "ResponseGenerated");
+        assert_eq!(
+            ChronosAction::MessageReceived.to_string(),
+            "MessageReceived"
+        );
+        assert_eq!(
+            ChronosAction::ResponseGenerated.to_string(),
+            "ResponseGenerated"
+        );
         assert_eq!(ChronosAction::ToolInvoked.to_string(), "ToolInvoked");
         assert_eq!(ChronosAction::ContextManaged.to_string(), "ContextManaged");
         assert_eq!(ChronosAction::ModelCalled.to_string(), "ModelCalled");
-        assert_eq!(ChronosAction::OutcomeRecorded.to_string(), "OutcomeRecorded");
+        assert_eq!(
+            ChronosAction::OutcomeRecorded.to_string(),
+            "OutcomeRecorded"
+        );
     }
 
     #[test]
@@ -825,7 +863,12 @@ mod tests {
 
     #[test]
     fn level_u8_roundtrip() {
-        for level in [ChronosLevel::Debug, ChronosLevel::Info, ChronosLevel::Warn, ChronosLevel::Error] {
+        for level in [
+            ChronosLevel::Debug,
+            ChronosLevel::Info,
+            ChronosLevel::Warn,
+            ChronosLevel::Error,
+        ] {
             assert_eq!(ChronosLevel::from_u8(level.as_u8()), level);
         }
         // Unknown u8 falls back to Info
@@ -893,7 +936,11 @@ mod tests {
 
         // since == entry.timestamp: entry MUST appear (filter is `< ts`, not `<= ts`)
         let results = timeline.timeline(50, Some(ts), None);
-        assert_eq!(results.len(), 1, "entry at exact since boundary must be included");
+        assert_eq!(
+            results.len(),
+            1,
+            "entry at exact since boundary must be included"
+        );
         assert_eq!(results[0].id, entry.id);
 
         // since == entry.timestamp + 1: entry must NOT appear

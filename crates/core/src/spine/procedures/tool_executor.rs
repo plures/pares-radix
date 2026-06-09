@@ -148,9 +148,10 @@ impl SpineProcedure for ToolExecutor {
         // Always record the assistant message when tool_calls are present,
         // even if content is empty — the model needs to see which calls it made.
         {
-            state
-                .history
-                .push(ChatMessage::assistant_with_tool_calls(content.clone(), tool_calls.clone()));
+            state.history.push(ChatMessage::assistant_with_tool_calls(
+                content.clone(),
+                tool_calls.clone(),
+            ));
         }
 
         // Drop the lock before doing async tool calls
@@ -176,7 +177,10 @@ impl SpineProcedure for ToolExecutor {
                 "tool_executor: calling tool"
             );
 
-            let result = self.dispatcher.call_tool(&tc.name, tc.arguments.clone()).await;
+            let result = self
+                .dispatcher
+                .call_tool(&tc.name, tc.arguments.clone())
+                .await;
 
             // Emit a ToolResult event for observability
             emitter
@@ -209,7 +213,8 @@ impl SpineProcedure for ToolExecutor {
             .iter()
             .enumerate()
             .map(|(i, r)| {
-                let tool_name = tool_calls.get(i)
+                let tool_name = tool_calls
+                    .get(i)
                     .map(|tc| tc.name.as_str())
                     .unwrap_or("unknown");
                 format!("[tool:{}] {}", tool_name, r.content)
@@ -257,7 +262,10 @@ mod tests {
         async fn call_tool(&self, name: &str, arguments: Value) -> String {
             match name {
                 "web_search" => {
-                    format!("Results for: {}", arguments["query"].as_str().unwrap_or("?"))
+                    format!(
+                        "Results for: {}",
+                        arguments["query"].as_str().unwrap_or("?")
+                    )
                 }
                 "read" => "file contents here".into(),
                 _ => format!("unknown tool: {}", name),
@@ -366,8 +374,7 @@ mod tests {
         executor.handle(&event, &emitter).await;
 
         // No events emitted
-        let result =
-            tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await;
+        let result = tokio::time::timeout(std::time::Duration::from_millis(100), rx.recv()).await;
         assert!(result.is_err(), "should timeout — no events emitted");
     }
 
@@ -421,8 +428,7 @@ mod tests {
     async fn max_iterations_guard_aborts_loop() {
         let (emitter, mut rx) = make_emitter();
         // Set max iterations to 3 for easy testing
-        let executor =
-            ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 3);
+        let executor = ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 3);
 
         let chat_id = "chat-loop".to_string();
 
@@ -483,8 +489,7 @@ mod tests {
     #[tokio::test]
     async fn inbound_resets_iteration_counter() {
         let (emitter, mut rx) = make_emitter();
-        let executor =
-            ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 2);
+        let executor = ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 2);
 
         let chat_id = "chat-reset".to_string();
 
@@ -618,8 +623,7 @@ mod tests {
     #[tokio::test]
     async fn different_chats_have_independent_state() {
         let (emitter, mut rx) = make_emitter();
-        let executor =
-            ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 2);
+        let executor = ToolExecutor::with_max_iterations(Arc::new(InfiniteLoopDispatcher), 2);
 
         // Fill up chat-A to max
         for i in 1..=2 {

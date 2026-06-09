@@ -113,6 +113,15 @@ impl Event {
             Event::TaskDecompositionRequired { .. } => "task_decomposition_required",
         }
     }
+
+    /// Extract a chat identifier from the event, if applicable.
+    /// For messages, uses the sender as chat_id (matches ConversationStore key).
+    pub fn chat_id(&self) -> Option<&str> {
+        match self {
+            Event::Message { sender, .. } => Some(sender.as_str()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

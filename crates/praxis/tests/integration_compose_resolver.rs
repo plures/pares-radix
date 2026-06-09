@@ -4,11 +4,11 @@
 //! Validates that multi-file .px projects work end-to-end.
 
 use async_trait::async_trait;
-use pares_radix_praxis::px::compose::{pipe, ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::px::async_executor::{execute_async_with_vars, AsyncActionHandler};
+use pares_radix_praxis::px::compose::{pipe, ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::px::executor::ExecutionError;
-use pares_radix_praxis::px::resolver::{resolve_imports, ResolveError};
 use pares_radix_praxis::px::parse;
+use pares_radix_praxis::px::resolver::{resolve_imports, ResolveError};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
@@ -47,7 +47,10 @@ impl TestHandler {
 #[async_trait]
 impl AsyncActionHandler for TestHandler {
     async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
-        self.calls.lock().unwrap().push((name.to_string(), params.clone()));
+        self.calls
+            .lock()
+            .unwrap()
+            .push((name.to_string(), params.clone()));
         self.results
             .get(name)
             .cloned()
@@ -71,14 +74,39 @@ fn resolver_resolves_single_import() {
     assert!(resolved.document.imports.is_empty());
 
     // Procedures from validation_utils and math_utils should be merged in
-    let proc_names: Vec<&str> = resolved.document.procedures.iter().map(|p| p.name.as_str()).collect();
-    assert!(proc_names.contains(&"validate_input"), "missing validate_input, got: {:?}", proc_names);
-    assert!(proc_names.contains(&"sanitize"), "missing sanitize, got: {:?}", proc_names);
-    assert!(proc_names.contains(&"double"), "missing double, got: {:?}", proc_names);
-    assert!(proc_names.contains(&"process_request"), "missing process_request, got: {:?}", proc_names);
+    let proc_names: Vec<&str> = resolved
+        .document
+        .procedures
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert!(
+        proc_names.contains(&"validate_input"),
+        "missing validate_input, got: {:?}",
+        proc_names
+    );
+    assert!(
+        proc_names.contains(&"sanitize"),
+        "missing sanitize, got: {:?}",
+        proc_names
+    );
+    assert!(
+        proc_names.contains(&"double"),
+        "missing double, got: {:?}",
+        proc_names
+    );
+    assert!(
+        proc_names.contains(&"process_request"),
+        "missing process_request, got: {:?}",
+        proc_names
+    );
 
     // The local constraint should still be there
-    assert!(resolved.document.constraints.iter().any(|c| c.name == "timeout_sane"));
+    assert!(resolved
+        .document
+        .constraints
+        .iter()
+        .any(|c| c.name == "timeout_sane"));
 }
 
 #[test]
@@ -112,10 +140,16 @@ procedure main_proc:
     let resolved = resolve_imports(&doc, &fixtures_dir()).unwrap();
 
     // Count how many times "validate_input" appears — should be exactly 1
-    let count = resolved.document.procedures.iter()
+    let count = resolved
+        .document
+        .procedures
+        .iter()
         .filter(|p| p.name == "validate_input")
         .count();
-    assert_eq!(count, 1, "diamond dedup should prevent duplicate procedures");
+    assert_eq!(
+        count, 1,
+        "diamond dedup should prevent duplicate procedures"
+    );
 }
 
 #[test]
@@ -152,14 +186,25 @@ async fn compose_resolved_procedures_execute() {
     let resolved = resolve_imports(&doc, &fixtures_dir()).unwrap();
 
     // Verify all procedures from imports + local are present
-    let proc_names: Vec<&str> = resolved.document.procedures.iter()
+    let proc_names: Vec<&str> = resolved
+        .document
+        .procedures
+        .iter()
         .map(|p| p.name.as_str())
         .collect();
 
-    assert!(proc_names.contains(&"validate_input"), "got: {:?}", proc_names);
+    assert!(
+        proc_names.contains(&"validate_input"),
+        "got: {:?}",
+        proc_names
+    );
     assert!(proc_names.contains(&"sanitize"), "got: {:?}", proc_names);
     assert!(proc_names.contains(&"double"), "got: {:?}", proc_names);
-    assert!(proc_names.contains(&"process_request"), "got: {:?}", proc_names);
+    assert!(
+        proc_names.contains(&"process_request"),
+        "got: {:?}",
+        proc_names
+    );
 
     // Build a registry — use procedure name as key, full serialized proc as value
     let mut registry = ProcedureRegistry::new();
@@ -238,8 +283,7 @@ async fn compose_nested_procedure_calls_thread_variables() {
     let mut registry = ProcedureRegistry::new();
     registry.register(inner);
 
-    let handler = TestHandler::new()
-        .with_result("leaf_op", json!("leaf_output"));
+    let handler = TestHandler::new().with_result("leaf_op", json!("leaf_output"));
 
     let composable = ComposableHandler::new(registry, handler);
 
@@ -267,11 +311,25 @@ async fn compose_pipe_missing_stage_gives_clear_error() {
 
     let handler = TestHandler::new().with_result("action", json!("ok"));
 
-    let result = pipe(&["exists", "does_not_exist"], &registry, &handler, json!(null)).await;
+    let result = pipe(
+        &["exists", "does_not_exist"],
+        &registry,
+        &handler,
+        json!(null),
+    )
+    .await;
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("does_not_exist"), "error should name the missing procedure: {}", err_msg);
-    assert!(err_msg.contains("not found"), "error should say 'not found': {}", err_msg);
+    assert!(
+        err_msg.contains("does_not_exist"),
+        "error should name the missing procedure: {}",
+        err_msg
+    );
+    assert!(
+        err_msg.contains("not found"),
+        "error should say 'not found': {}",
+        err_msg
+    );
 }
 
 #[tokio::test]
@@ -294,8 +352,11 @@ async fn compose_recursive_depth_limit_integration() {
     let result = execute_async_with_vars(&recursive, &composable, HashMap::new()).await;
     assert!(result.is_err());
     let err_msg = result.unwrap_err().to_string();
-    assert!(err_msg.contains("exceeds maximum") || err_msg.contains("depth"),
-        "error should mention depth limit: {}", err_msg);
+    assert!(
+        err_msg.contains("exceeds maximum") || err_msg.contains("depth"),
+        "error should mention depth limit: {}",
+        err_msg
+    );
 }
 
 #[tokio::test]

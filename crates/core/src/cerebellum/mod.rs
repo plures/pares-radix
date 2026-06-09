@@ -23,14 +23,17 @@
 //!                └────────────────┘  (results flow back)
 //! ```
 
+pub mod actions;
 pub mod bridge;
 pub mod classifier;
 
 pub mod invoke;
 pub mod pipeline;
+pub mod px_bridge;
 pub mod router;
 
 use crate::cerebellum::bridge::PluresDbBridge;
+use crate::cerebellum::px_bridge::PxBridge;
 use crate::delegation::broker::SubTask;
 use crate::event::Event;
 use crate::memory::entry::MemoryCategory;
@@ -173,6 +176,11 @@ pub struct Cerebellum {
     context_items: Mutex<Vec<context_manager::ContextItem>>,
     /// Relevance scorer with learned weights.
     relevance_scorer: Mutex<context_manager::RelevanceScorer>,
+    /// Optional conversation store for fallback context when autorecall has no hits.
+    conversation_store: Option<Arc<dyn crate::spine::conversation::ConversationStore>>,
+    /// Optional .px bridge for calling .px procedures instead of hardcoded Rust logic.
+    /// When loaded, classification and routing go through .px first, falling back to Rust.
+    px_bridge: Option<Arc<PxBridge>>,
 }
 
 impl Cerebellum {
@@ -185,6 +193,8 @@ impl Cerebellum {
             classifier: None,
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
+            conversation_store: None,
+            px_bridge: None,
         }
     }
 
@@ -197,7 +207,27 @@ impl Cerebellum {
             classifier: None,
             context_items: Mutex::new(Vec::new()),
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
+            conversation_store: None,
+            px_bridge: None,
         }
+    }
+
+    /// Attach a conversation store for fallback context when autorecall returns no hits.
+    pub fn with_conversation_store(
+        mut self,
+        store: Arc<dyn crate::spine::conversation::ConversationStore>,
+    ) -> Self {
+        self.conversation_store = Some(store);
+        self
+    }
+
+    /// Attach a .px bridge for calling .px procedures instead of hardcoded Rust logic.
+    ///
+    /// When set, the cerebellum will try .px procedures for classification and routing
+    /// FIRST, falling back to Rust implementations only when .px returns None or errors.
+    pub fn with_px_bridge(mut self, bridge: Arc<PxBridge>) -> Self {
+        self.px_bridge = Some(bridge);
+        self
     }
 
     /// Attach a message classifier to this cerebellum.
@@ -322,8 +352,32 @@ impl Cerebellum {
         };
 
         // Build the context string from managed items
+        // Fallback: if autorecall returned nothing, pull recent conversation
+        // exchanges so contextual follow-ups ("do that", "yes", "continue") work.
         let learned_context = if managed.items.is_empty() {
-            String::new()
+            // No semantic memory hits — inject recent conversation as fallback
+            if let Some(store) = &self.conversation_store {
+                let chat_id = event.chat_id().unwrap_or_default();
+                if !chat_id.is_empty() {
+                    let history = store.get_history(chat_id).await;
+                    let recent: Vec<_> = history.iter().rev().take(4).collect();
+                    if !recent.is_empty() {
+                        let mut ctx = String::from("## Recent Conversation\n");
+                        for msg in recent.iter().rev() {
+                            let role = msg.role_str();
+                            let content = msg.content_preview(200);
+                            ctx.push_str(&format!("- {}: {}\n", role, content));
+                        }
+                        ctx
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
         } else {
             let mut ctx = String::from("## Recalled Context\n");
             for item in &managed.items {
@@ -354,8 +408,43 @@ impl Cerebellum {
             });
         }
 
-        // 3. Route (may be overridden by gate levels 2–4)
-        let mut route = router::decide(event, &learned_context, &self.config);
+        // 3. Route — try .px procedure first, fall back to Rust
+        let mut route = if let Some(ref bridge) = self.px_bridge {
+            if bridge.is_active() {
+                let event_type = event.kind().to_string();
+                let content = extract_query(event).unwrap_or_default();
+                match bridge
+                    .route_event(
+                        &event_type,
+                        &content,
+                        &learned_context,
+                        self.config.enable_subconscious,
+                        f64::from(self.config.complexity_threshold),
+                    )
+                    .await
+                {
+                    Some(Ok(val)) => {
+                        // Parse .px result into Route enum
+                        parse_px_route(&val).unwrap_or_else(|| {
+                            debug!(raw = %val, "px route returned unparseable result, falling back to Rust");
+                            router::decide(event, &learned_context, &self.config)
+                        })
+                    }
+                    Some(Err(e)) => {
+                        warn!(error = %e, "px route_event failed, falling back to Rust");
+                        router::decide(event, &learned_context, &self.config)
+                    }
+                    None => {
+                        // Procedure not loaded — fall through to Rust
+                        router::decide(event, &learned_context, &self.config)
+                    }
+                }
+            } else {
+                router::decide(event, &learned_context, &self.config)
+            }
+        } else {
+            router::decide(event, &learned_context, &self.config)
+        };
         let mut guidance: Vec<String> = vec![];
         let mut approval_required: Option<ApprovalRequest> = None;
 
@@ -408,6 +497,18 @@ impl Cerebellum {
         let Some(channel_key) = event_channel_key(event) else {
             return false;
         };
+
+        // Short messages (< 20 chars) are almost always follow-ups ("do that",
+        // "yes", "continue", "no"). Never treat them as topic shifts.
+        if let Event::Message { content, .. } = event {
+            if content.trim().len() < 20 {
+                // Still update the embedding cache for future comparisons
+                if let Ok(mut embeddings) = self.topic_embeddings.lock() {
+                    embeddings.insert(channel_key, current_embedding.to_vec());
+                }
+                return false;
+            }
+        }
 
         let mut embeddings = match self.topic_embeddings.lock() {
             Ok(guard) => guard,
@@ -647,6 +748,65 @@ fn build_authorization_context(event: &Event) -> RuleContext {
             "is_external":           is_external,
         }),
     )
+}
+
+/// Parse a .px procedure result (JSON Value) into a [`Route`] enum.
+///
+/// Expected .px output format:
+/// ```json
+/// {"route": "conscious"}
+/// {"route": "deep", "reason": "..."}
+/// {"route": "delegate", "reason": "...", "tasks": [...]}
+/// {"route": "procedural"}
+/// {"route": "drop"}
+/// ```
+fn parse_px_route(val: &serde_json::Value) -> Option<Route> {
+    let route_str = val.get("route")?.as_str()?;
+    match route_str {
+        "conscious" => Some(Route::Conscious),
+        "procedural" => Some(Route::Procedural),
+        "drop" => Some(Route::Drop),
+        "deep" => {
+            let reason = val
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("px routing decided deep reasoning needed")
+                .to_string();
+            Some(Route::Deep { reason })
+        }
+        "delegate" => {
+            let reason = val
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("px routing decided delegation needed")
+                .to_string();
+            let tasks = val
+                .get("tasks")
+                .and_then(|t| t.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|task| {
+                            Some(SubTask {
+                                agent_name: task
+                                    .get("agent_name")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("general")
+                                    .to_string(),
+                                input: task.get("input")?.as_str()?.to_string(),
+                                parent_context: task
+                                    .get("parent_context")
+                                    .and_then(|s| s.as_str())
+                                    .map(String::from),
+                                steering_rx: None,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some(Route::Delegate { reason, tasks })
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]

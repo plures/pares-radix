@@ -974,7 +974,11 @@ mod tests {
             .iter()
             .filter(|e| e.action == AuditAction::ScheduledPurgeRan)
             .collect();
-        assert_eq!(scheduled.len(), 1, "expected exactly one ScheduledPurgeRan audit entry");
+        assert_eq!(
+            scheduled.len(),
+            1,
+            "expected exactly one ScheduledPurgeRan audit entry"
+        );
         assert!(scheduled[0].reason.contains("soft_deleted=1"));
     }
 
@@ -1123,7 +1127,10 @@ mod tests {
 
         engine.hard_purge_expired().await;
 
-        let entries = engine.audit_log.entries_by_action(AuditAction::HardPurged).await;
+        let entries = engine
+            .audit_log
+            .entries_by_action(AuditAction::HardPurged)
+            .await;
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].memory_id, "audit_hp");
         assert!(entries[0].reason.contains("recovery window expired"));

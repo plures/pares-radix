@@ -452,7 +452,10 @@ mod tests {
     #[test]
     fn resource_limit_passes_at_exact_limit() {
         let rule = ResourceLimitNotExceeded;
-        let ctx = RuleContext::new("compute", json!({"requested_units": 100, "resource_limit": 100}));
+        let ctx = RuleContext::new(
+            "compute",
+            json!({"requested_units": 100, "resource_limit": 100}),
+        );
         assert_eq!(rule.evaluate(&ctx), RuleResult::Pass);
     }
 
@@ -472,7 +475,10 @@ mod tests {
         let rule = RiskScoreWithinBounds;
         let ctx = RuleContext::new("deploy", json!({"risk_score": 0.9}));
         let result = rule.evaluate(&ctx);
-        assert!(matches!(result, RuleResult::Gate { .. }), "0.9 should gate, not fail: {result:?}");
+        assert!(
+            matches!(result, RuleResult::Gate { .. }),
+            "0.9 should gate, not fail: {result:?}"
+        );
     }
 
     /// Kills: replace > with >= at 0.7 boundary (line 158)
@@ -482,7 +488,10 @@ mod tests {
         let rule = RiskScoreWithinBounds;
         let ctx = RuleContext::new("deploy", json!({"risk_score": 0.7}));
         let result = rule.evaluate(&ctx);
-        assert!(matches!(result, RuleResult::Warning { .. }), "0.7 should warn, not gate: {result:?}");
+        assert!(
+            matches!(result, RuleResult::Warning { .. }),
+            "0.7 should warn, not gate: {result:?}"
+        );
     }
 
     /// Kills: replace > with >= at 0.5 boundary (line 162)
@@ -521,8 +530,18 @@ mod tests {
     #[test]
     fn module_expectations_contain_expected_content() {
         let exps = module().expectations();
-        assert!(exps.len() >= 5, "expected at least 5 expectations, got {}", exps.len());
-        assert!(exps[0].contains("safety evaluation"), "first expectation should mention safety evaluation");
-        assert!(exps.iter().any(|e| e.contains("Privilege")), "should mention privilege levels");
+        assert!(
+            exps.len() >= 5,
+            "expected at least 5 expectations, got {}",
+            exps.len()
+        );
+        assert!(
+            exps[0].contains("safety evaluation"),
+            "first expectation should mention safety evaluation"
+        );
+        assert!(
+            exps.iter().any(|e| e.contains("Privilege")),
+            "should mention privilege levels"
+        );
     }
 }

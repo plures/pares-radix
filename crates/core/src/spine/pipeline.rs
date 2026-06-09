@@ -50,6 +50,8 @@ pub struct Pipeline {
     tx: mpsc::Sender<SpineEvent>,
     procedures: tokio::sync::RwLock<Vec<Arc<dyn SpineProcedure>>>,
     delivery_tx: broadcast::Sender<SpineEvent>,
+    /// Optional reactive registry for .px procedure triggers on events.
+    reactive: Option<Arc<super::reactive::ReactiveRegistry>>,
 }
 
 impl Pipeline {
@@ -64,6 +66,25 @@ impl Pipeline {
             tx,
             procedures: tokio::sync::RwLock::new(Vec::new()),
             delivery_tx,
+            reactive: None,
+        });
+
+        (pipeline, rx)
+    }
+
+    /// Create a new pipeline with a reactive registry attached.
+    pub fn with_reactive(
+        capacity: usize,
+        reactive: Arc<super::reactive::ReactiveRegistry>,
+    ) -> (Arc<Self>, mpsc::Receiver<SpineEvent>) {
+        let (tx, rx) = mpsc::channel(capacity);
+        let (delivery_tx, _) = broadcast::channel(capacity);
+
+        let pipeline = Arc::new(Self {
+            tx,
+            procedures: tokio::sync::RwLock::new(Vec::new()),
+            delivery_tx,
+            reactive: Some(reactive),
         });
 
         (pipeline, rx)
@@ -71,7 +92,10 @@ impl Pipeline {
 
     /// Register a procedure with the pipeline.
     pub async fn register(&self, procedure: Arc<dyn SpineProcedure>) {
-        info!(procedure = procedure.name(), "pipeline: registered procedure");
+        info!(
+            procedure = procedure.name(),
+            "pipeline: registered procedure"
+        );
         self.procedures.write().await.push(procedure);
     }
 
@@ -120,6 +144,16 @@ impl Pipeline {
                 if should_handle {
                     proc.handle(&event, &emitter).await;
                 }
+            }
+
+            // Notify reactive registry — fire .px procedures on matching writes
+            if let Some(ref reactive) = self.reactive {
+                let key = format!("{}:{}", event.event_type(), event.id());
+                let value = serde_json::json!({
+                    "type": event.event_type(),
+                    "id": event.id(),
+                });
+                reactive.on_write(&key, &value).await;
             }
         }
 
@@ -188,13 +222,10 @@ mod tests {
             .await;
 
         // Should receive a delivery request from the echo procedure
-        let delivered = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            delivery_rx.recv(),
-        )
-        .await
-        .expect("timeout")
-        .expect("recv error");
+        let delivered = tokio::time::timeout(std::time::Duration::from_secs(2), delivery_rx.recv())
+            .await
+            .expect("timeout")
+            .expect("recv error");
 
         if let SpineEvent::DeliveryRequest { content, .. } = delivered {
             assert_eq!(content, "echo: hello");
@@ -231,13 +262,11 @@ mod tests {
             .await;
 
         // The delivery_rx should get the event (broadcast), but no new echo event
-        let delivered = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            delivery_rx.recv(),
-        )
-        .await
-        .expect("timeout")
-        .expect("recv error");
+        let delivered =
+            tokio::time::timeout(std::time::Duration::from_millis(500), delivery_rx.recv())
+                .await
+                .expect("timeout")
+                .expect("recv error");
 
         if let SpineEvent::DeliveryRequest { content, .. } = delivered {
             assert_eq!(content, "passthrough"); // Original, not "echo: ..."
@@ -246,11 +275,8 @@ mod tests {
         }
 
         // No second event should arrive
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            delivery_rx.recv(),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(200), delivery_rx.recv()).await;
         assert!(result.is_err(), "should timeout — no extra events");
 
         handle.abort();

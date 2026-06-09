@@ -1,0 +1,15 @@
+# model_invoke.px - Model invocation as a reactive PluresDB procedure
+#
+# When a model_request event arrives:
+# 1. Read conversation history from PluresDB
+# 2. Read system prompt from config
+# 3. Invoke model completion
+# 4. Emit structured response with tool_calls preserved as typed field
+
+procedure invoke_model:
+  trigger: on_write {pattern: "model_request:*"}
+  given: "Invoke model completion with history and system prompt"
+  pluresdb_read {key: "chat:history"} -> $history
+  pluresdb_read {key: "config:system_prompt"} -> $system_prompt
+  model_complete {messages: $history, system_prompt: $system_prompt} -> $response
+  emit_response {source: "invoke_model", response: $response}

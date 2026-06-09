@@ -307,7 +307,7 @@ mod tests {
                         arguments: json!({"q": "test"}),
                     }],
                     logprobs: None,
-                model: None,
+                    model: None,
                 })
             } else {
                 // Second call: final response after tool result
@@ -315,7 +315,7 @@ mod tests {
                     content: Some(self.final_response.clone()),
                     tool_calls: vec![],
                     logprobs: None,
-                model: None,
+                    model: None,
                 })
             }
         }

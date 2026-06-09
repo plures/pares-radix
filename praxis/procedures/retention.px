@@ -1,0 +1,33 @@
+# retention.px - Memory retention and decay evaluation
+#
+# Evaluates whether memory entries should be retained, decayed, or forgotten.
+# Implements spaced-repetition-inspired scoring for long-term memory management.
+
+procedure evaluate_retention:
+  trigger: manual
+  given: "Evaluate whether memory entries should be retained, decayed, or forgotten"
+  db_get_prefix {prefix: "memory:"} -> $all_memories
+  timestamp_now {} -> $now
+  loop over $all_memories as memory:
+    compute_retention_score {memory: $memory, now: $now, decay_rate: 0.05} -> $score
+    when score < 0.1:
+      mark_for_forget {key: $memory} -> $marked
+      pluresdb_write {key: "memory:forget_queue", value: $marked}
+    end
+    when score < 0.4:
+      mark_decayed {key: $memory, score: $score} -> $decayed
+      pluresdb_write {key: $memory, value: $decayed}
+    end
+  end
+  emit {type: "retention.evaluated", count: $all_memories}
+
+procedure consolidate_memories:
+  trigger: manual
+  given: "Merge duplicate or highly similar memories into consolidated entries"
+  db_get_prefix {prefix: "memory:"} -> $all_memories
+  find_duplicates {memories: $all_memories, similarity_threshold: 0.92} -> $duplicates
+  loop over $duplicates as pair:
+    merge_memories {a: $pair, b: $pair} -> $merged
+    pluresdb_write {key: "memory:consolidated", value: $merged}
+  end
+  emit {type: "retention.consolidated", merged_count: $duplicates}

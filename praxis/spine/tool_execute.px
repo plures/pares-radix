@@ -1,0 +1,25 @@
+# tool_execute.px - Tool execution loop as a reactive PluresDB procedure
+#
+# When a model response contains tool_calls:
+# 1. Increment iteration counter (hard stop at 25)
+# 2. Record assistant message with tool_calls for API correlation
+# 3. Dispatch each tool call and record results
+# 4. Re-invoke model with updated history
+
+procedure execute_tools:
+  trigger: on_write {pattern: "model_response:*"}
+  given: "Dispatch tool calls from model response, record results, and re-invoke"
+  when event.has_tool_calls:
+    pluresdb_increment {key: "chat:tool_iterations"} -> $iteration
+    when iteration > 25:
+      emit {type: "delivery_request", content: "Tool loop limit reached (25 iterations)"}
+      return
+    end
+    record_assistant_tool_calls {history_key: "chat:history", tool_calls: $event}
+    extract_tool_calls {event: $event} -> $calls
+    loop over $calls as tool_call:
+      tool_dispatch {name: $tool_call, call_id: $tool_call, arguments: $tool_call} -> $result
+      pluresdb_append {key: "chat:history", value: $result}
+    end
+    emit {type: "model_request", source: "tool_executor"}
+  end

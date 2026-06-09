@@ -40,9 +40,8 @@ impl ActionHandler for PxActionBridge {
         let name_owned = name.to_owned();
         let params_owned = params.clone();
 
-        let result = Handle::current().block_on(async move {
-            handler.call_tool(&name_owned, params_owned).await
-        });
+        let result = Handle::current()
+            .block_on(async move { handler.call_tool(&name_owned, params_owned).await });
 
         if result.is_error {
             Err(ExecutionError::ActionFailed {

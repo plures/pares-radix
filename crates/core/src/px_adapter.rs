@@ -402,35 +402,43 @@ impl crate::spine::pipeline::SpineProcedure for PxProcedureAdapter {
 
         // Convert SpineEvent to core Event for the .px executor
         let core_event = match event {
-            SpineEvent::Inbound { id, source, sender, content, .. } => {
-                Event::Message {
-                    id: id.clone(),
-                    channel: source.clone(),
-                    sender: sender.clone(),
-                    content: content.clone(),
-                }
-            }
-            SpineEvent::Timer { id, name, .. } => {
-                Event::Timer {
-                    id: id.clone(),
-                    name: name.clone(),
-                    recurring: false,
-                }
-            }
-            SpineEvent::ToolResult { tool_call_id, tool_name, content, .. } => {
-                Event::ToolResult {
-                    tool_call_id: tool_call_id.clone(),
-                    tool_name: tool_name.clone(),
-                    content: content.clone(),
-                    is_error: false,
-                }
-            }
+            SpineEvent::Inbound {
+                id,
+                source,
+                sender,
+                content,
+                ..
+            } => Event::Message {
+                id: id.clone(),
+                channel: source.clone(),
+                sender: sender.clone(),
+                content: content.clone(),
+            },
+            SpineEvent::Timer { id, name, .. } => Event::Timer {
+                id: id.clone(),
+                name: name.clone(),
+                recurring: false,
+            },
+            SpineEvent::ToolResult {
+                tool_call_id,
+                tool_name,
+                content,
+                ..
+            } => Event::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.clone(),
+                content: content.clone(),
+                is_error: false,
+            },
             _ => return, // Other spine events not mapped to core events
         };
 
         // Check if this procedure handles this event type
         let event_kind = core_event.kind();
-        if !self.trigger_kind.is_empty() && self.trigger_kind != "*" && self.trigger_kind != event_kind {
+        if !self.trigger_kind.is_empty()
+            && self.trigger_kind != "*"
+            && self.trigger_kind != event_kind
+        {
             return;
         }
 

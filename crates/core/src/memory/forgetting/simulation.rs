@@ -388,7 +388,10 @@ mod tests {
         let log = AuditLog::new();
         let drill = SimulationDrill::total_loss(MemoryCategory::Preference, "cat-check");
         let result = run_drill(&entries, &drill, &log).await.unwrap();
-        assert_eq!(result.simulated_losses[0].category, Some(MemoryCategory::Preference));
+        assert_eq!(
+            result.simulated_losses[0].category,
+            Some(MemoryCategory::Preference)
+        );
     }
 
     #[tokio::test]

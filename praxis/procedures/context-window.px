@@ -1,0 +1,42 @@
+# context-window.px - Context window management procedure
+#
+# Replaces: crates/core/src/cerebellum/context_manager.rs (~428 lines of Rust)
+# Pure logic: relevance scoring, eviction, entity extraction, token budgeting.
+
+fact context_item:
+  id: string
+  content: string
+  tokens: int
+  source: string
+  age_turns: int
+  success_count: int
+  failure_count: int
+  relevance: float
+
+procedure extract_entities:
+  trigger: manual
+  given: "Extract named entities from a message for context enrichment"
+  regex_extract_all {text: $message, patterns: ["@mentions", "#tags", "urls", "file_paths", "git_shas", "github_repos"]} -> $entities
+  return $entities
+
+procedure score_item:
+  trigger: manual
+  given: "Calculate relevance score for a single context item using weighted factors"
+  compute_relevance {item: $item, query_similarity: $similarity, entities: $entities, source_weights: $source_weights, recency_decay: 0.95, success_boost: 0.1, failure_penalty: 0.2} -> $score
+  return $score
+
+procedure manage_context:
+  trigger: manual
+  given: "Score, evict, and manage context items within token budget"
+  age_items {items: $items} -> $aged
+  merge_new_items {existing: $aged, new_items: $new_items} -> $merged
+  score_all_items {items: $merged, query_similarities: $similarities, entities: $entities} -> $scored
+  sort_by_relevance {items: $scored} -> $sorted
+  evict_over_budget {items: $sorted, token_budget: $token_budget, reservation: 0.20} -> $result
+  return $result
+
+procedure record_outcome:
+  trigger: manual
+  given: "Update success/failure counts on context items after a model response"
+  update_counts {items: $items, success: $success} -> $updated
+  return $updated

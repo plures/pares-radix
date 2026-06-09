@@ -109,6 +109,25 @@ impl ChatMessage {
             tool_calls: None,
         }
     }
+
+    /// Get the role as a string slice.
+    pub fn role_str(&self) -> &str {
+        &self.role
+    }
+
+    /// Get a truncated preview of the content, up to `max_chars` characters.
+    pub fn content_preview(&self, max_chars: usize) -> &str {
+        if self.content.len() <= max_chars {
+            &self.content
+        } else {
+            // Find a safe char boundary to truncate at
+            let mut end = max_chars;
+            while end > 0 && !self.content.is_char_boundary(end) {
+                end -= 1;
+            }
+            &self.content[..end]
+        }
+    }
 }
 
 // ── Tool types ───────────────────────────────────────────────────────────────

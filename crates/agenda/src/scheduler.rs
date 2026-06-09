@@ -949,9 +949,8 @@ mod tests {
 
     #[tokio::test]
     async fn with_executor_stores_executor() {
-        let executor: TaskExecutor = Arc::new(|_cmd: String| {
-            tokio::spawn(async { "done".to_string() })
-        });
+        let executor: TaskExecutor =
+            Arc::new(|_cmd: String| tokio::spawn(async { "done".to_string() }));
         let scheduler = Scheduler::new().with_executor(executor);
         assert!(scheduler.executor.is_some());
     }

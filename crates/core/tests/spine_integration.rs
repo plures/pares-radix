@@ -24,9 +24,7 @@ use pares_agens_core::spine::{
     event::SpineEvent,
     pipeline::{Pipeline, PipelineEmitter, SpineProcedure},
     procedures::{
-        inbound_router::InboundRouter,
-        response_router::ResponseRouter,
-        tool_executor::ToolExecutor,
+        inbound_router::InboundRouter, response_router::ResponseRouter, tool_executor::ToolExecutor,
     },
 };
 
@@ -59,7 +57,10 @@ impl SpineProcedure for StatefulModelInvoker {
 
     async fn handle(&self, event: &SpineEvent, emitter: &PipelineEmitter) {
         let SpineEvent::ModelRequest {
-            chat_id, source, content, ..
+            chat_id,
+            source,
+            content,
+            ..
         } = event
         else {
             return;

@@ -209,7 +209,9 @@ impl ModelClient for AppModelClient {
         drop(router_guard);
         let latency_ms = start.elapsed().as_millis();
         info!(latency_ms, model = %model, "model call completed");
-        self.telemetry_service.record_model_call(latency_ms as u64).await;
+        self.telemetry_service
+            .record_model_call(latency_ms as u64)
+            .await;
 
         let choice = response
             .choices
@@ -362,10 +364,8 @@ impl ModelClient for AppModelClient {
                                 if !tc.id.is_empty() {
                                     // New tool call start.
                                     let name = func.name.clone();
-                                    tc_args.insert(
-                                        idx,
-                                        (tc.id.clone(), name.clone(), String::new()),
-                                    );
+                                    tc_args
+                                        .insert(idx, (tc.id.clone(), name.clone(), String::new()));
                                     let _ = tx.send(StreamDelta::ToolCallStart {
                                         index: idx,
                                         id: tc.id.clone(),
@@ -396,15 +396,16 @@ impl ModelClient for AppModelClient {
 
         let latency_ms = start.elapsed().as_millis();
         info!(latency_ms, model = %model, "streaming model call completed");
-        self.telemetry_service.record_model_call(latency_ms as u64).await;
+        self.telemetry_service
+            .record_model_call(latency_ms as u64)
+            .await;
 
         // Assemble tool calls from buffered fragments.
         for (_idx, (id, name, args)) in tc_args {
             tool_calls.push(pares_agens_core::model::ToolCall {
                 id,
                 name,
-                arguments: serde_json::from_str(&args)
-                    .unwrap_or(serde_json::Value::String(args)),
+                arguments: serde_json::from_str(&args).unwrap_or(serde_json::Value::String(args)),
             });
         }
 

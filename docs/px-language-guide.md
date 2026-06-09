@@ -1,345 +1,630 @@
-# The Praxis Intent Language (.px)
+# .px Language Guide
 
-`.px` is a declarative language for expressing logic, constraints, procedures, and configuration. It compiles to PluresDB records that drive reactive behavior.
+> The Praxis Intent Language (`.px`) is a declarative DSL for defining agent behavior, constraints, and automation procedures in pares-radix.
 
-## Philosophy
+## Table of Contents
 
-> Express **what** should happen, not **how** to make it happen.
+- [Overview](#overview)
+- [Imports](#imports)
+- [Facts](#facts)
+- [Rules](#rules)
+- [Constraints](#constraints)
+- [Procedures](#procedures)
+  - [Triggers](#procedure-triggers)
+  - [Steps](#steps)
+  - [Control Flow](#control-flow)
+  - [Parallel Execution](#parallel-execution)
+  - [Error Handling & Retry](#error-handling--retry)
+- [Contracts](#contracts)
+- [Functions](#functions)
+- [Triggers (Event-Driven)](#triggers-event-driven)
+- [Expressions](#expressions)
+- [Types](#types)
 
-`.px` sits between natural language and code. It's readable by humans, executable by machines, and inspectable by AI agents. The compiler produces structured data that the PluresDB procedure engine executes reactively.
+---
 
-## File Structure
+## Overview
 
-A `.px` file contains one or more top-level declarations:
+A `.px` file is a collection of top-level declarations. Each file can contain any combination of:
+
+- `import` — bring in definitions from other modules
+- `fact` — define structured data types
+- `rule` — reactive when/then logic
+- `constraint` — validation rules with severity
+- `procedure` — multi-step automation workflows
+- `contract` — behavioral contracts with examples
+- `function` — named computations (deterministic or probabilistic)
+- `trigger` — event-driven automation hooks
+
+Comments start with `#` and extend to end of line.
 
 ```px
-# Comments start with #
+# This is a comment
+import my_module::helpers as h
 
-config app:
-  setting: "value"
-
-constraint my_rule:
-  when: context.ready == true
-  require: context.tests_passed == true
-  severity: error
-  message: "Tests must pass"
-
-procedure my_workflow:
-  trigger: manual
-  given: "Description of what this does"
-  db_get key: "some:key" -> $data
-  db_put key: "result" value: $data
+fact User:
+  name: string
+  role: enum(admin, member, guest)
 ```
 
-## Declarations
+---
 
-### config — Static Configuration
+## Imports
+
+Import definitions from other `.px` modules:
 
 ```px
-config block_name:
-  key1: "string value"
-  key2: 42
-  key3: true
-  key4: 3.14
+import auth::permissions
+import utils::formatting as fmt
 ```
 
-Config blocks group related settings. Values can be strings, numbers, or booleans.
+Paths use Rust-style `::` separators. Optional `as` alias for local name.
 
-### constraint — Validation Rules
+---
+
+## Facts
+
+Facts define structured data schemas:
 
 ```px
-constraint name:
-  when: <expression>
-  require: <expression>
-  severity: error | warning | info
-  message: "Human-readable explanation"
+fact PullRequest:
+  number: int
+  title: string
+  author: string
+  labels: list[string]
+  draft: bool
+  mergeable: optional[bool]
 ```
 
-Constraints are continuously evaluated. When the `when` condition is true and the `require` condition is false, a violation is raised.
+### Supported Types
 
-**Optional fields:**
-- `scope: <ident>` — limit where this constraint applies
-- `phase: pre-push, pre-release` — when to evaluate
-- `weight: 0.8` — relative importance (0.0–1.0)
+| Type | Description |
+|------|-------------|
+| `string` | UTF-8 text |
+| `int` | Integer |
+| `float` | Floating-point number |
+| `bool` | Boolean |
+| `duration` | Time duration |
+| `list[T]` | List of type T |
+| `optional[T]` | Nullable type T |
+| `enum(a, b, c)` | One of the listed variants |
 
-### procedure — Executable Workflows
+---
+
+## Rules
+
+Rules define reactive logic: when conditions are met, actions fire.
 
 ```px
-procedure name:
-  trigger: manual | on_write | cron
-  given: "What this procedure does"
-  <steps>
-```
-
-Procedures are sequences of steps that execute in order. They can read/write state, call tools, branch conditionally, and loop.
-
-### rule — Event-Driven Logic
-
-```px
-rule name:
+rule auto_label_security:
   priority: 10
   when:
-    - event.type == "deployment"
-    - event.target == "production"
+    - pr.files_changed contains "auth/"
+    - pr.labels NOT contains "security-review"
   then:
-    - action: notify param: "deploying"
+    - action: add_label label: "security-review"
+    - action: notify message: "Security review required"
+  capture:
+    - fact: "Security label auto-applied" category: audit tags: ["security", "automation"]
 ```
 
-Rules fire when their conditions match incoming events.
+### Rule Structure
 
-### fact — Named State Schema
+| Clause | Required | Description |
+|--------|----------|-------------|
+| `priority:` | No | Higher = fires first (default 0) |
+| `when:` | Yes | List of condition expressions |
+| `let` | No | Variable bindings (repeatable) |
+| `then:` | Yes | List of actions to execute |
+| `capture:` | No | Facts to record when rule fires |
+
+### Conditional Actions
+
+Actions can be conditional:
 
 ```px
-fact name:
-  field1: string
-  field2: int
-  field3: bool
+rule smart_assign:
+  when:
+    - issue.assignee == ""
+  then:
+    - if issue.labels contains "bug": action: assign to: "oncall"
+    - if issue.labels contains "feature": action: assign to: "backlog-owner"
+    - action: add_label label: "needs-triage"
 ```
 
-Facts define the shape of state entries stored in PluresDB.
+---
 
-### entity — Domain Objects
+## Constraints
+
+Constraints enforce invariants and are evaluated by the Praxis engine:
 
 ```px
-entity User:
-  prefix: "user:"
-  fields:
-    name: String
-    role: enum(admin, editor, viewer)
-    active: bool
+constraint no_direct_push_to_main:
+  scope: repository
+  phase: pre-push
+  when: branch == "main" && NOT is_pr_merge
+  require: has_approval == true
+  severity: error
+  message: "Direct pushes to main are not allowed"
 ```
 
-Entities define structured objects with typed fields.
+### Constraint Fields
 
-### function — Pure Computations
+| Field | Required | Description |
+|-------|----------|-------------|
+| `scope:` | No | What entity this applies to |
+| `phase:` | No | Comma-separated lifecycle phases |
+| `trait:` | No | Trait/capability this requires |
+| `weight:` | No | Numeric weight for scoring |
+| `prompt:` | No | LLM evaluation prompt |
+| `when:` | No | Guard condition (constraint only evaluates when true) |
+| `require:` | No | The invariant expression that must hold |
+| `severity:` | Yes | `error`, `warning`, or `info` |
+| `message:` | No | Human-readable violation message |
+
+### Phases
+
+Constraints fire at specific lifecycle points:
+
+- `pre-commit` — before code is committed
+- `pre-push` — before pushing to remote
+- `pre-merge` — before merging a PR
+- `on-deploy` — during deployment
+- Custom phases supported via string matching
+
+---
+
+## Procedures
+
+Procedures are the heart of .px automation — multi-step workflows with control flow, parallelism, and error handling.
 
 ```px
-function distance(x1: float, y1: float, x2: float, y2: float) -> float:
-  mode: deterministic
-  """Euclidean distance between two points"""
+procedure deploy_service:
+  trigger: manual
+  given: "Deploy a service to production with health checks"
+  validate_config {} -> $config
+  build_container image: $config.image -> $artifact
+  push_to_registry artifact: $artifact
+  run_health_check endpoint: $config.health_url -> $status
+  when $status.healthy == false:
+    rollback artifact: $artifact
+    notify channel: "ops" message: "Deploy failed, rolled back"
+  end
 ```
 
-Functions declare pure computations. `mode: deterministic` means same inputs always produce same outputs.
-
-### trigger — Reactive Activation
+### Procedure Triggers
 
 ```px
-trigger name:
-  on: after_store | before_search | timer | on_event("custom")
-  schedule: "0 */2 * * *"
-  run: procedure_name
+procedure on_pr_open:
+  trigger: on_write {event: "pr.opened"}
+  # ... steps
+
+procedure nightly_report:
+  trigger: cron {schedule: "0 0 * * *"}
+  # ... steps
+
+procedure before_reply:
+  trigger: before_response
+  # ... steps
+
+procedure after_reply:
+  trigger: after_response
+  # ... steps
+
+procedure manual_task:
+  trigger: manual
+  # ... steps
 ```
 
-Triggers activate procedures in response to events or schedules.
+| Trigger | Description |
+|---------|-------------|
+| `manual` | Invoked explicitly |
+| `on_write {event: "..."}` | Fires when a matching event is written |
+| `before_response` | Runs before agent response generation |
+| `after_response` | Runs after agent response generation |
+| `cron {schedule: "..."}` | Cron expression schedule |
 
-### scenario — Test Cases
+### Steps
+
+Every line in a procedure body that isn't a control-flow keyword is a **step call**:
 
 ```px
-scenario name:
-  given: "Setup context"
-  setup:
-    db_put key: "test:val" value: 42
-  run: my_procedure
-  expect:
-    - db_has key: "test:val" value: 42
+action_name param1: value1 param2: value2
+action_name {key: "value", count: 42}
+action_name {} -> $result
 ```
 
-Scenarios are executable test cases that verify procedure behavior.
+- **Named params**: `key: value` pairs
+- **Map params**: `{key: value}` JSON-like object
+- **Output capture**: `-> $variable_name` stores the step result
 
-### contract — Behavioral Specifications
+Variables are scoped to the procedure and available in subsequent steps via `$name`.
 
-```px
-contract name:
-  given: "Context"
-  when: "Trigger condition"
-  then: "Expected outcome"
-  threshold: 0.95
-  examples:
-    - input: "hello"
-      expect: "greeting"
-```
+### Control Flow
 
-Contracts define expected behavior with examples for testing.
-
-## Procedure Steps
-
-Steps are the building blocks of procedures. They execute sequentially unless branching or looping.
-
-### Action Calls
-
-Call a named action (tool) with parameters:
+#### `when` (conditional)
 
 ```px
-db_get key: "my:key" -> $result
-db_put key: "output" value: $result
-run_command cmd: "ls -la" -> $output
-web_fetch url: "https://example.com" -> $page
-```
-
-The `-> $variable` suffix captures the result.
-
-### Variable Assignment
-
-```px
-$count = 0
-$name = "radix"
-$config = $settings.model
-```
-
-### Conditional (if/else)
-
-```px
-if $count > 10:
-  db_put key: "status" value: "overflow"
-else:
-  db_put key: "status" value: "ok"
+when $user.role == "admin":
+  grant_access level: "full"
+  log_audit action: "admin_access"
 end
 ```
 
-### Loops (for)
+#### `loop` (iteration)
 
 ```px
-for $item in $list:
-  db_put key: $item.id value: $item
+# Loop over a list variable
+loop over $items as item -> $results:
+  process_item data: $item
+end
+
+# Loop N times
+loop times 5:
+  retry_connection {}
 end
 ```
 
-### Pattern Matching (match)
-
-The `match:` step selects an arm based on expression evaluation:
+#### `match` (pattern matching)
 
 ```px
 match:
-  $role == "admin" -> grant_access
-  $role == "viewer" -> read_only
-end
+  $status == "success" -> handle_success
+  $status == "partial" -> handle_partial
+  $status == "failed" -> handle_failure
 ```
 
-### Emit (Events)
-
-Fire an event into the reactive pipeline:
+#### `emit` (fire events)
 
 ```px
-emit event: "task.completed" data: {id: $task_id}
+emit {event: "deploy.complete", service: "api", version: "1.2.3"}
+emit event: "health_check.failed" service: $name
 ```
 
-### Loop (over/times)
+### Parallel Execution
+
+Run multiple branches concurrently with `parallel`:
 
 ```px
-loop over $items as item:
-  process_item input: $item -> $result
-end
-
-loop times 5 as i:
-  retry_operation attempt: $i
-end
-```
-
-### Try/Catch
-
-```px
-try retry 3 delay 1000 ms backoff exponential:
-  risky_operation param: $value -> $result
-catch:
-  db_put key: "error" value: "operation failed"
-end
-```
-
-### Parallel Branches
-
-```px
-parallel -> $results:
-  branch fetch_a:
-    web_fetch url: "https://api-a.com" -> $a
+procedure gather_data:
+  trigger: manual
+  parallel -> $results:
+    branch users:
+      fetch_users {}
+    end
+    branch posts:
+      fetch_posts {}
+    end
+    branch comments:
+      fetch_comments {}
+    end
   end
-  branch fetch_b:
-    web_fetch url: "https://api-b.com" -> $b
-  end
-end
+  merge_results data: $results
 ```
 
-### Return / Abort
+- All branches run concurrently
+- `-> $variable` captures all branch results as a combined value
+- Each branch is named (used as a key in results)
+- Branches can contain multiple steps
+
+### Error Handling & Retry
+
+#### `try/catch` (basic)
 
 ```px
-return $result
-abort "Something went wrong"
+procedure resilient_fetch:
+  trigger: manual
+  try:
+    fetch_external_api url: "https://api.example.com/data" -> $data
+    process_response data: $data
+  catch:
+    log_error message: $error
+    use_cached_data {} -> $data
+  end
 ```
+
+- If any step in `try` fails, execution jumps to `catch`
+- The `$error` variable contains the error message
+- If no `catch` is provided, the error is captured as the step output
+
+#### Per-Branch Retry (parallel blocks)
+
+Parallel branches support automatic retry with configurable backoff:
+
+```px
+procedure resilient_fan_out:
+  trigger: manual
+  parallel -> $results:
+    branch fetch_users retry 3 delay 500 ms backoff exponential max_delay 5000 ms jitter:
+      get_users {}
+    end
+    branch fetch_posts retry 2 delay 100 ms backoff fixed:
+      get_posts {}
+    end
+    branch fetch_static:
+      get_static_content {}
+    end
+  end
+```
+
+##### Retry Options
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `retry N` | Max additional attempts after first failure | `retry 3` (up to 4 total attempts) |
+| `delay N ms` | Base delay between retries | `delay 500 ms` |
+| `backoff fixed` | Same delay every retry | `backoff fixed` |
+| `backoff exponential` | Delay doubles each retry (500, 1000, 2000, ...) | `backoff exponential` |
+| `max_delay N ms` | Cap on delay (prevents exponential blowup) | `max_delay 5000 ms` |
+| `jitter` | Add randomness to delay (prevents thundering herd) | `jitter` |
+
+##### Retry Behavior
+
+1. **First attempt** runs immediately (no delay before attempt 0)
+2. On failure, waits `delay` ms then retries
+3. With `backoff exponential`: delay = `base_delay × 2^(attempt-1)`, capped at `max_delay`
+4. With `jitter`: actual delay is random in `[0, calculated_delay]` (full jitter)
+5. If all retries exhaust, the branch reports failure
+6. The `$retry_count` variable is available inside the branch (0-indexed attempt number)
+
+##### Combining try/catch with parallel retry
+
+```px
+procedure robust_pipeline:
+  trigger: manual
+  try:
+    parallel -> $data:
+      branch api retry 3 delay 1000 ms backoff exponential max_delay 10000 ms jitter:
+        call_flaky_api {}
+      end
+      branch db retry 2 delay 200 ms:
+        query_database {}
+      end
+    end
+    process_results data: $data
+  catch:
+    notify channel: "alerts" message: "Pipeline failed: " + $error
+    use_fallback {}
+  end
+```
+
+#### Try-Level Retry (via compiled JSON)
+
+The async executor also supports retry on `try` blocks when procedures are constructed programmatically (via the builder or direct JSON):
+
+```json
+{
+  "kind": "try",
+  "retry": 3,
+  "retry_delay_ms": 1000,
+  "retry_backoff": "exponential",
+  "retry_max_delay_ms": 10000,
+  "retry_jitter": true,
+  "steps": [...],
+  "catch": [...]
+}
+```
+
+This retries the entire `try` block up to N times before falling through to `catch`.
+
+> **Note:** `.px` syntax for try-level retry (`try retry 3:`) is planned but not yet implemented in the parser. Use parallel branch retry or the programmatic builder for now.
+
+---
+
+## Contracts
+
+Contracts define behavioral expectations with concrete examples:
+
+```px
+contract classify_intent:
+  given: "A user message in a support context"
+  when: "The user sends a message"
+  then: "Classify the intent as one of: question, complaint, praise, request"
+  threshold: 0.9
+  examples:
+    - input: "How do I reset my password?"
+      expect: "question"
+    - input: "This product is terrible!"
+      expect: "complaint"
+    - input: "Thanks for the quick help!"
+      expect: "praise"
+      threshold: 0.85
+```
+
+### Contract Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `given:` | No | Context/precondition |
+| `when:` | No | Triggering condition |
+| `then:` | No | Expected behavior |
+| `threshold:` | No | Global accuracy threshold (0.0–1.0) |
+| `examples:` | Yes | Test cases with input/expect pairs |
+
+Per-example `threshold:` overrides the global threshold for that case.
+
+---
+
+## Functions
+
+Named computations that can be called from expressions:
+
+```px
+function calculate_risk(severity: int, likelihood: float) -> float:
+  mode: deterministic
+  """
+  Calculate risk score as severity × likelihood.
+  Returns a value between 0.0 and 10.0.
+  """
+
+function summarize_thread(messages: list[string]) -> string:
+  mode: probabilistic
+  """
+  Summarize a conversation thread into a single paragraph.
+  Focus on decisions made and action items.
+  """
+```
+
+### Function Modes
+
+| Mode | Description |
+|------|-------------|
+| `deterministic` | Pure computation, same input → same output |
+| `probabilistic` | May involve LLM inference, output varies |
+| `hybrid` | Mix of deterministic logic and probabilistic steps |
+
+---
+
+## Triggers (Event-Driven)
+
+Standalone trigger declarations for hooking into system events:
+
+```px
+trigger consolidate_memories:
+  on: timer
+  schedule: "0 */6 * * *"
+  run: memory_consolidation
+
+trigger index_new_facts:
+  on: after_store
+  run: reindex_embeddings
+
+trigger log_searches:
+  on: before_search
+  run: search_telemetry
+```
+
+### Trigger Events
+
+| Event | Description |
+|-------|-------------|
+| `after_store` | After a fact/memory is stored |
+| `before_search` | Before a semantic search executes |
+| `timer` | On a cron schedule |
+| `on_event("name")` | When a named event fires |
+
+---
 
 ## Expressions
 
-Expressions are used in conditions, assignments, and parameters.
+Expressions are used in `when`, `require`, conditions, and step parameters.
 
 ### Operators
 
-| Operator | Meaning |
-|----------|---------|
+| Operator | Description |
+|----------|-------------|
 | `==`, `!=` | Equality |
 | `>`, `<`, `>=`, `<=` | Comparison |
-| `+`, `-`, `*`, `/` | Arithmetic |
-| `^` | Power |
 | `&&`, `and` | Logical AND |
-| `\|\|`, `or` | Logical OR |
+| `||`, `or` | Logical OR |
 | `NOT` | Logical negation |
+| `contains` | Membership test |
 
-### Values
+### Terms
 
-- Strings: `"hello"` or `'hello'`
-- Numbers: `42`, `3.14`
-- Booleans: `true`, `false`
-- Lists: `[1, 2, 3]`
-- Maps: `{key: "value", count: 5}`
-- Variables: `$name`, `$config.nested.field`
+- **Identifiers**: `name`, `status`
+- **Dotted paths**: `pr.author.name`, `config.timeout`
+- **Bracket access**: `items[0]`, `map["key"]`
+- **Variables**: `$result`, `$error`, `$retry_count`
+- **Function calls**: `len(items)`, `contains(list, item)`
+- **Literals**: `"string"`, `42`, `3.14`, `true`, `[1, 2, 3]`, `{key: "val"}`
+- **Parenthesized**: `(a > 0 && b < 10)`
 
-### Built-in Functions
+---
 
-Available via NativeFunctionRegistry:
+## Complete Example
 
-| Function | Description |
-|----------|-------------|
-| `sqrt(x)` | Square root |
-| `sin(x)`, `cos(x)` | Trigonometry |
-| `abs(x)` | Absolute value |
-| `min(a, b)`, `max(a, b)` | Min/max |
-| `exp(x)` | Exponential |
-| `pi()` | π constant |
-| `random()` | Random 0.0–1.0 |
+```px
+# service-deploy.px — Production deployment procedure with safety checks
 
-## Variable References
+import infra::kubernetes as k8s
+import monitoring::alerts
 
-Variables are prefixed with `$` and can be:
-- Bound by action results: `db_get key: "x" -> $val`
-- Assigned directly: `$count = 0`
-- Dotted for nested access: `$config.model.name`
-- Used in expressions: `$count + 1`
+fact DeployConfig:
+  service: string
+  version: string
+  replicas: int
+  health_endpoint: string
 
-## Best Practices
+constraint min_replicas:
+  scope: deployment
+  phase: pre-deploy
+  require: config.replicas >= 2
+  severity: error
+  message: "Production services must have at least 2 replicas"
 
-1. **Start with .px** — Express intent before implementation
-2. **One concern per file** — Keep files focused (config, constraints, procedures)
-3. **Name things clearly** — Procedure names should read like commands: `route_code`, `validate_architecture`
-4. **Use constraints for invariants** — Things that must ALWAYS be true
-5. **Use procedures for workflows** — Things that happen in response to events
-6. **Test with scenarios** — Every procedure should have a scenario that verifies it
-7. **Keep steps atomic** — Each step should do one thing clearly
+procedure safe_deploy:
+  trigger: manual
+  given: "Deploy a service safely with canary rollout and health checks"
 
-## Tooling
+  validate_config {} -> $config
 
-```bash
-# Parse and check syntax
-pares-radix px check file.px
+  # Run pre-deploy checks in parallel
+  parallel -> $checks:
+    branch lint:
+      run_linter service: $config.service
+    end
+    branch test retry 2 delay 5000 ms backoff exponential:
+      run_integration_tests service: $config.service
+    end
+    branch security:
+      run_security_scan image: $config.service version: $config.version
+    end
+  end
 
-# Compile to PluresDB records
-pares-radix px compile file.px
+  when $checks.security.vulnerabilities > 0:
+    notify channel: "security" message: "Vulnerabilities found, deploy blocked"
+    emit {event: "deploy.blocked", reason: "security"}
+  end
 
-# Lint for common issues
-pares-radix px lint file.px
+  # Canary deploy with retry
+  try:
+    deploy_canary service: $config.service version: $config.version -> $canary
+    wait_for_health endpoint: $config.health_endpoint timeout: 300
+    promote_canary deployment: $canary
+  catch:
+    rollback_canary deployment: $canary
+    notify channel: "ops" message: "Canary failed: " + $error
+  end
 
-# Run a procedure manually
-pares-radix px run --procedure my_workflow
+  emit {event: "deploy.complete", service: $config.service, version: $config.version}
 ```
 
-## Further Reading
+---
 
-- [Configuration Guide](./configuration.md) — using .px for radix config
-- [Procedure Cookbook](./procedure-cookbook.md) — real-world procedure examples
-- [Constraint Patterns](./constraint-patterns.md) — effective constraint design
+## File Organization
+
+Recommended project structure:
+
+```
+praxis/
+├── facts/           # Data schemas
+│   ├── domain.px
+│   └── events.px
+├── rules/           # Reactive rules
+│   ├── automation.px
+│   └── notifications.px
+├── constraints/     # Validation & invariants
+│   ├── security.px
+│   └── quality.px
+├── procedures/      # Multi-step workflows
+│   ├── deploy.px
+│   └── incident.px
+├── contracts/       # Behavioral contracts
+│   └── classification.px
+└── triggers/        # Event hooks
+    └── lifecycle.px
+```
+
+---
+
+## Grammar Reference
+
+The formal PEG grammar is in `crates/praxis/src/px/grammar.pest`. Key parsing rules:
+
+- Indentation is **2 spaces** (not tabs)
+- Blocks end with `end` keyword
+- Comments: `# ...` (line comments only)
+- Strings: double-quoted `"..."` or single-quoted `'...'`
+- Variables: `$name` (alphanumeric + underscore)
+- All keywords are lowercase

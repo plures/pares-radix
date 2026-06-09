@@ -59,10 +59,11 @@ impl ToolDispatcher for NoopDispatcher {
 }
 
 fn make_app() -> (App, mpsc::UnboundedReceiver<AppEvent>) {
-    let agent = Arc::new(
-        Agent::new(Arc::new(NoopMemory))
-            .with_model(Arc::new(NoopModel), Arc::new(NoopDispatcher), "test".to_string()),
-    );
+    let agent = Arc::new(Agent::new(Arc::new(NoopMemory)).with_model(
+        Arc::new(NoopModel),
+        Arc::new(NoopDispatcher),
+        "test".to_string(),
+    ));
     let (tx, rx) = mpsc::unbounded_channel();
     let app = App {
         messages: vec![ChatMessage {
@@ -186,7 +187,10 @@ fn switch_to_index_changes_active_session() {
     assert!(!app.sessions[0].1);
     assert!(app.sessions[1].1);
     assert!(!app.sessions[2].1);
-    assert!(app.messages.iter().any(|m| m.content.contains("Switched to session: work")));
+    assert!(app
+        .messages
+        .iter()
+        .any(|m| m.content.contains("Switched to session: work")));
 }
 
 #[test]
@@ -204,10 +208,7 @@ fn switch_to_index_out_of_bounds_is_noop() {
 #[test]
 fn switch_to_index_same_session_is_noop() {
     let (mut app, _rx) = make_app();
-    app.sessions = vec![
-        ("default".to_string(), true),
-        ("work".to_string(), false),
-    ];
+    app.sessions = vec![("default".to_string(), true), ("work".to_string(), false)];
     app.current_session = "default".to_string();
     let msg_count = app.messages.len();
 

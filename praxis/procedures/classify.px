@@ -1,0 +1,38 @@
+# classify.px - Message classification procedure
+#
+# Replaces: crates/core/src/cerebellum/classifier.rs (431 lines of Rust)
+# Returns classification with intent, complexity, topic, and routing hints.
+# Uses the model for nuanced classification with heuristic fallback.
+
+fact classification:
+  intent: string
+  complexity: int
+  topic: string
+  topic_shift: bool
+  needs_tools: bool
+  needs_deep_model: bool
+  plugin_match: string
+  completion_hint: string
+
+procedure classify_message:
+  trigger: manual
+  given: "Classify an incoming message by intent, complexity, and routing needs"
+  normalize_text {text: $message} -> $lower
+  detect_intent {text: $lower, question_starters: $question_starters, feedback_starters: $feedback_starters, task_keywords: $task_keywords} -> $intent
+  score_complexity {text: $message} -> $complexity
+  detect_tools_needed {text: $lower, tool_keywords: $tool_keywords} -> $needs_tools
+  match_plugin {text: $lower, plugins: $plugins} -> $plugin_match
+  extract_topic {text: $message, stopwords: $stopwords} -> $topic
+  detect_topic_shift {topic: $topic, last_topic: $last_topic} -> $topic_shift
+  determine_model_tier {complexity: $complexity} -> $needs_deep_model
+  return $classification
+
+procedure classify_with_llm:
+  trigger: manual
+  given: "Attempt LLM classification first, fall back to heuristic classify_message"
+  model_classify {prompt: "Classify this message by intent and complexity", message: $message} -> $llm_result
+  when llm_result.valid:
+    return $llm_result
+  end
+  classify_message {message: $message, plugins: $plugins, last_topic: $last_topic} -> $fallback
+  return $fallback

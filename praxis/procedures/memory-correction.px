@@ -1,0 +1,28 @@
+# memory-correction.px - Memory correction and contradiction detection
+#
+# Detects when new information contradicts existing memories
+# and applies corrections (supersede, merge, or flag for review).
+
+procedure evaluate_correction:
+  trigger: manual
+  given: "Determine if a new statement corrects an existing memory"
+  compute_embedding {text: $new_statement} -> $embedding
+  similarity_search {embedding: $embedding, prefix: "memory:", top_k: 5} -> $candidates
+  detect_contradiction {new_statement: $new_statement, candidates: $candidates} -> $contradictions
+  when contradictions.found:
+    apply_correction {old_memory: $contradictions, new_statement: $new_statement} -> $corrected
+    pluresdb_write {key: "memory:corrected", value: $corrected}
+    emit {type: "memory.corrected", old: $contradictions, new: $new_statement}
+    return
+  end
+  emit {type: "memory.no_correction_needed"}
+
+procedure apply_correction:
+  trigger: manual
+  given: "Apply a memory correction by superseding the old entry"
+  db_get {key: $old_key} -> $old_entry
+  mark_superseded {entry: $old_entry, reason: $new_statement} -> $marked
+  pluresdb_write {key: $old_key, value: $marked}
+  compute_embedding {text: $new_statement} -> $embedding
+  db_put {key: "memory:fact", value: $new_statement, embedding: $embedding}
+  emit {type: "memory.superseded", old_key: $old_key}

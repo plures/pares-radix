@@ -4,76 +4,45 @@
 procedure track_commitment:
   trigger: manual
   given: "Record a commitment made by radix during conversation"
-{
-    let id = generate_id({ prefix: "commit" });
-    let now = timestamp_now({});
-    let commitment = {
-        text: $args.text,
-        chat_id: $args.chat_id,
-        created_at: now,
-        status: "active",
-        deadline: $args.deadline,
-        context: $args.context
-    };
-    db_put({ key: id, value: commitment });
-    emit("commitment.created", { id: id, text: $args.text });
-    return id;
-}
+  generate_id {prefix: "commit"} -> $id
+  timestamp_now {} -> $now
+  db_put {key: $id, value: "commitment"}
+  emit {type: "commitment.created", id: $id}
+  return $id
 
 procedure check_commitments:
-  trigger: timer
+  trigger: cron {schedule: "*/5 * * * *"}
   given: "Check all active commitments and flag overdue ones"
-{
-    let now = timestamp_now({});
-    let commitments = db_get_prefix({ prefix: "commit:" });
-
-    for $c in commitments.items {
-        if $c.value.status == "active" {
-            if $c.value.deadline > 0 {
-                if now > $c.value.deadline {
-                    db_put({ key: $c.key, value: { status: "overdue", original: $c.value, overdue_at: now } });
-                    emit("commitment.overdue", { id: $c.key, text: $c.value.text, chat_id: $c.value.chat_id });
-                }
-            }
-        }
-    }
-}
+  timestamp_now {} -> $now
+  db_get_prefix {prefix: "commit:"} -> $commitments
+  loop over $commitments as commitment:
+    check_commitment_deadline {commitment: $commitment, now: $now} -> $status
+    when status.overdue:
+      db_put {key: "commit:overdue", value: $commitment}
+      emit {type: "commitment.overdue", id: $commitment}
+    end
+  end
 
 procedure fulfill_commitment:
   trigger: manual
   given: "Mark a commitment as fulfilled"
-{
-    let now = timestamp_now({});
-    let existing = db_get({ key: $args.commitment_id });
-    db_put({ key: $args.commitment_id, value: { status: "fulfilled", fulfilled_at: now, original: existing } });
-    emit("commitment.fulfilled", { id: $args.commitment_id });
-}
+  timestamp_now {} -> $now
+  db_get {key: "commitment_id"} -> $existing
+  db_put {key: "commitment_id", value: "fulfilled"}
+  emit {type: "commitment.fulfilled", id: "commitment_id"}
 
 procedure get_active_commitments:
   trigger: manual
   given: "Get all active commitments for context injection"
-{
-    let commitments = db_get_prefix({ prefix: "commit:" });
-    let active = [];
-    for $c in commitments.items {
-        if $c.value.status == "active" || $c.value.status == "overdue" {
-            active = active + [$c];
-        }
-    }
-    return active;
-}
+  db_get_prefix {prefix: "commit:"} -> $commitments
+  filter_active {commitments: $commitments} -> $active
+  return $active
 
 procedure inject_commitment_context:
-  trigger: model_request
+  trigger: before_response
   given: "Before model calls, inject active commitments as system context"
-{
-    let active = get_active_commitments({});
-    if active.length > 0 {
-        let context_lines = "Active commitments you made:\n";
-        for $c in active {
-            let status_tag = $c.value.status;
-            context_lines = context_lines + "- [" + status_tag + "] " + $c.value.text + "\n";
-        }
-        emit("context.inject", { role: "system", content: context_lines });
-    }
-}
+  get_active_commitments {} -> $active
+  when active.length > 0:
+    format_commitments {active: $active} -> $context_lines
+    emit {type: "context.inject", role: "system", content: $context_lines}
+  end

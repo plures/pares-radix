@@ -1,7 +1,4 @@
-# pipeline_composed.px — A pipeline that imports and composes other procedures
-#
-# Tests resolver (import resolution) + compose (procedure-to-procedure calls)
-
+# pipeline_composed.px
 import validation_utils
 import math_utils
 
@@ -16,10 +13,6 @@ constraint timeout_sane:
 
 procedure process_request:
   trigger: manual
-{
-    let validation = validate_input({ data: request });
-    if validation.valid == true {
-        let clean = sanitize({ input: request.body });
-        let result = double({ input: clean });
-    }
-}
+  validate_input {data: "request"} -> $validation
+  sanitize {input: "body"} -> $clean
+  double {input: $clean} -> $result

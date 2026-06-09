@@ -15,8 +15,8 @@
 //! | `radix.model.calls` | Counter | 1 | model, provider |
 //! | `radix.session.active` | UpDownCounter | 1 | — |
 
-use opentelemetry::{global, KeyValue};
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use opentelemetry::{global, KeyValue};
 
 /// Application metrics bundle — create once, clone cheaply.
 #[derive(Clone)]
@@ -85,7 +85,8 @@ impl AppMetrics {
         self.tool_duration.record(latency_ms, &attrs);
         self.tool_calls.add(1, &attrs);
         if !success {
-            self.tool_errors.add(1, &[KeyValue::new("tool", tool_name.to_string())]);
+            self.tool_errors
+                .add(1, &[KeyValue::new("tool", tool_name.to_string())]);
         }
     }
 

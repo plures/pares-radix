@@ -1,0 +1,38 @@
+# routing.px - Event routing procedure
+#
+# Replaces: crates/core/src/cerebellum/router.rs (343 lines of Rust)
+# Decides where an event goes after preprocessing: model, tool, delivery, or skip.
+
+fact route_decision:
+  destination: string
+  model_tier: string
+  skip_reason: string
+  priority: int
+
+procedure route_event:
+  trigger: manual
+  given: "Route a preprocessed event to the appropriate handler"
+  db_get {key: "session:classification"} -> $classification
+  when classification.intent == "command":
+    emit {type: "route.command", command: $event}
+    return
+  end
+  when classification.needs_tools:
+    emit {type: "route.tool_first", event: $event}
+    return
+  end
+  select_model_tier {complexity: $classification, context: $context} -> $tier
+  emit {type: "route.model", tier: $tier, event: $event}
+
+procedure select_model_tier:
+  trigger: manual
+  given: "Select model tier based on complexity and context requirements"
+  when complexity > 3:
+    emit {type: "tier.selected", tier: "deep", reason: "high complexity"}
+    return
+  end
+  when complexity > 1:
+    emit {type: "tier.selected", tier: "standard", reason: "moderate complexity"}
+    return
+  end
+  emit {type: "tier.selected", tier: "fast", reason: "simple response"}

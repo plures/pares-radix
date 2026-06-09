@@ -1,0 +1,30 @@
+# heartbeat-logic.px - Heartbeat scheduling and quiet-hours procedure
+#
+# Replaces: ~200 lines scattered across heartbeat handling in Rust
+# Determines when heartbeats fire and what gets checked.
+
+procedure schedule_heartbeat:
+  trigger: manual
+  given: "Determine if heartbeat should fire based on quiet hours and last check time"
+  timestamp_now {} -> $now
+  db_get {key: "config:quiet_hours"} -> $quiet_config
+  check_quiet_hours {now: $now, config: $quiet_config} -> $in_quiet
+  when in_quiet:
+    emit {type: "heartbeat.suppressed", reason: "quiet hours"}
+    return
+  end
+  db_get {key: "heartbeat:last_check"} -> $last
+  compute_interval {now: $now, last: $last, min_interval_ms: 300000} -> $should_fire
+  when should_fire:
+    emit {type: "heartbeat_tick"}
+  end
+
+procedure heartbeat_check_items:
+  trigger: on_write {pattern: "heartbeat_tick:*"}
+  given: "Run the heartbeat checklist items in sequence"
+  db_get {key: "heartbeat:checklist"} -> $items
+  loop over $items as item:
+    execute_check {item: $item} -> $result
+    pluresdb_write {key: "heartbeat:results", value: $result}
+  end
+  emit {type: "heartbeat_complete"}

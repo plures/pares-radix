@@ -169,9 +169,9 @@ async fn fanout_100_concurrent_procedures() {
     for _ in 0..100 {
         let h = handler.clone();
         let p = procedure.clone();
-        handles.push(tokio::spawn(async move {
-            execute_async(&p, h.as_ref()).await
-        }));
+        handles.push(tokio::spawn(
+            async move { execute_async(&p, h.as_ref()).await },
+        ));
     }
 
     let results: Vec<_> = futures::future::join_all(handles).await;
@@ -211,9 +211,9 @@ async fn fanout_with_limited_concurrency_respects_backpressure() {
     for _ in 0..50 {
         let h = handler.clone();
         let p = procedure.clone();
-        handles.push(tokio::spawn(async move {
-            execute_async(&p, h.as_ref()).await
-        }));
+        handles.push(tokio::spawn(
+            async move { execute_async(&p, h.as_ref()).await },
+        ));
     }
 
     let results: Vec<_> = futures::future::join_all(handles).await;
@@ -435,7 +435,10 @@ async fn timeout_cancels_without_leaking_tasks() {
 
     let result = execute_async(&procedure, &handler).await;
     assert!(result.is_err());
-    assert!(started.load(Ordering::SeqCst), "handler should have started");
+    assert!(
+        started.load(Ordering::SeqCst),
+        "handler should have started"
+    );
 
     // Give a little time for any leaked task to complete (it shouldn't)
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -470,21 +473,11 @@ async fn sequential_procedures_maintain_strict_order() {
     // Verify monotonically increasing call numbers
     let vals: Vec<u64> = ["a", "b", "c", "d", "e", "f"]
         .iter()
-        .map(|k| {
-            result.variables[*k]
-                .get("call")
-                .unwrap()
-                .as_u64()
-                .unwrap()
-        })
+        .map(|k| result.variables[*k].get("call").unwrap().as_u64().unwrap())
         .collect();
 
     for i in 1..vals.len() {
-        assert!(
-            vals[i] > vals[i - 1],
-            "step order violated: {:?}",
-            vals
-        );
+        assert!(vals[i] > vals[i - 1], "step order violated: {:?}", vals);
     }
 }
 
@@ -531,9 +524,9 @@ async fn concurrent_procedures_with_contended_state() {
     for _ in 0..20 {
         let h = handler.clone();
         let p = procedure.clone();
-        handles.push(tokio::spawn(async move {
-            execute_async(&p, h.as_ref()).await
-        }));
+        handles.push(tokio::spawn(
+            async move { execute_async(&p, h.as_ref()).await },
+        ));
     }
 
     let results: Vec<_> = futures::future::join_all(handles).await;

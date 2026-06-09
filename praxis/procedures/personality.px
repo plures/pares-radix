@@ -1,0 +1,39 @@
+# personality.px - Personality configuration and response style procedure
+#
+# Replaces: crates/core/src/personality.rs (492 lines of Rust)
+# Manages tone, verbosity, and response style adaptation.
+
+fact personality_config:
+  tone: string
+  verbosity: string
+  humor_level: string
+  formality: string
+  emoji_usage: string
+
+procedure load_personality:
+  trigger: on_write {pattern: "session:*:start"}
+  given: "Load personality configuration for the current session"
+  db_get {key: "config:personality"} -> $config
+  when config.empty:
+    db_put {key: "config:personality", value: {tone: "helpful", verbosity: "concise", humor_level: "moderate", formality: "casual", emoji_usage: "occasional"}}
+    return
+  end
+  pluresdb_write {key: "session:personality", value: $config}
+
+procedure adapt_style:
+  trigger: manual
+  given: "Adapt response style based on user feedback and conversation context"
+  db_get {key: "session:personality"} -> $current
+  analyze_feedback {messages: $recent_messages, personality: $current} -> $adjustment
+  when adjustment.needed:
+    merge_personality {base: $current, adjustment: $adjustment} -> $updated
+    pluresdb_write {key: "session:personality", value: $updated}
+    emit {type: "personality.adapted", changes: $adjustment}
+  end
+
+procedure format_response:
+  trigger: manual
+  given: "Apply personality styling to a model response before delivery"
+  db_get {key: "session:personality"} -> $personality
+  style_response {response: $response, personality: $personality} -> $styled
+  return $styled

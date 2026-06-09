@@ -331,6 +331,9 @@ mod tests {
             blocked_patterns: vec!["dangerous_pattern".into()],
         });
         let output = gov.format_policies();
-        assert!(output.contains("Blocked: dangerous_pattern"), "blocked patterns must appear in formatted output");
+        assert!(
+            output.contains("Blocked: dangerous_pattern"),
+            "blocked patterns must appear in formatted output"
+        );
     }
 }

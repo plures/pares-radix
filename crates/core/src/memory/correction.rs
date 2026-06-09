@@ -539,18 +539,12 @@ mod tests {
         // Exactly 80 chars should NOT be truncated
         let msg_80 = "a".repeat(80);
         let s = derive_rule_summary(&msg_80);
-        assert!(
-            !s.contains('…'),
-            "80-char message should not be truncated"
-        );
+        assert!(!s.contains('…'), "80-char message should not be truncated");
 
         // 81 chars SHOULD be truncated
         let msg_81 = "a".repeat(81);
         let s = derive_rule_summary(&msg_81);
-        assert!(
-            s.contains('…'),
-            "81-char message should be truncated"
-        );
+        assert!(s.contains('…'), "81-char message should be truncated");
 
         // Verify exact truncation boundary: content portion is exactly 77 bytes for ASCII
         // Full format: "follow user correction: {content}…"
@@ -585,7 +579,11 @@ mod tests {
         // So content should be 78 bytes (the 76 a's + first é)
         let prefix_len = "follow user correction: ".len();
         let content_part = &s[prefix_len..s.len() - '…'.len_utf8()];
-        assert_eq!(content_part.len(), 78, "should include the multi-byte char at boundary");
+        assert_eq!(
+            content_part.len(),
+            78,
+            "should include the multi-byte char at boundary"
+        );
         assert!(content_part.ends_with('é'));
     }
 

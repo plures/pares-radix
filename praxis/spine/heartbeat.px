@@ -1,0 +1,18 @@
+# heartbeat.px - Periodic health check as a reactive PluresDB procedure
+#
+# Fires on a cron schedule, checks system load, records in PluresDB.
+# Cross-platform: delegates to OS-appropriate command.
+
+constraint respect_quiet_hours:
+  when: event.type == "heartbeat_tick" and heartbeat_config.in_quiet_hours
+  require: false
+  severity: warning
+  message: "Heartbeat suppressed during quiet hours"
+
+procedure heartbeat_tick:
+  trigger: cron {schedule: "*/5 * * * *"}
+  given: "Run a periodic health check and record system load"
+  detect_os {} -> $os_type
+  gather_load {os: $os_type} -> $load
+  pluresdb_write {key: "heartbeat:last_check", value: $load}
+  emit {type: "heartbeat_complete", load: $load}

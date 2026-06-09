@@ -1,0 +1,34 @@
+# conversation.px — Conversation memory as reactive PluresDB procedures
+#
+# When a message arrives, store it. When the model needs context, read it.
+# No ConversationStore trait. No HistoryRecorder struct. Just PluresDB writes
+# triggered by events, and PluresDB reads when building model context.
+
+fact conversation:
+  chat_id: string
+  messages: list[string]
+  max_history: int
+
+fact message:
+  role: string
+  content: string
+  timestamp: int
+
+# Record every inbound user message
+procedure record_user_message:
+  trigger: on_write {pattern: "inbound:*"}
+  pluresdb_append {key: "chat:history", value: "user_message"}
+
+# Record final assistant responses (no tool_calls = final)
+procedure record_assistant_response:
+  trigger: on_write {pattern: "model_response:*"}
+  when event.tool_calls_empty:
+    pluresdb_append {key: "chat:history", value: "assistant_response"}
+  end
+
+# Build conversation context for model invocation
+procedure build_context:
+  trigger: before_response
+  pluresdb_read {key: "chat:history"} -> $history
+  slice {list: $history, last: 50} -> $recent
+  enrich_event {field: "conversation_history", value: $recent}

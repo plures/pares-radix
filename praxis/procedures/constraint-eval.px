@@ -1,0 +1,83 @@
+# constraint-eval.px - Constraint evaluation engine + authorization gate
+#
+# Replaces: crates/core/src/praxis/constraints.rs (~776 lines of Rust)
+# ADR-0012: 5-level brain-first authorization gate
+# ADR-0013: Task-decomposition size constraints (C-0009, C-0010)
+
+constraint task_description_size:
+  when: task.description_word_count > 200
+  require: false
+  severity: error
+  message: "Sub-agent task descriptions must not exceed 200 words (ADR-0013, C-0009)."
+
+constraint task_output_size:
+  when: task.output_type == "text" and task.estimated_output_chars > 2000
+  require: false
+  severity: error
+  message: "Sub-agent text output must not exceed 2000 chars (ADR-0013, C-0010)."
+
+procedure authorization_gate:
+  trigger: manual
+  given: "5-level brain-first authorization gate per ADR-0012"
+  check_blocked {action: $action, constraints: $constraints} -> $blocked
+  when blocked:
+    emit {type: "authorization.blocked", action: $action, level: 1, reason: "blocked by hard constraint"}
+    return
+  end
+  check_recently_completed {action: $action} -> $recent
+  when recent:
+    emit {type: "authorization.skipped", action: $action, level: 2, reason: "duplicate suppressed"}
+    return
+  end
+  check_known_failure {action: $action} -> $known_fail
+  when known_fail:
+    emit {type: "authorization.warned", action: $action, level: 3, reason: "known failure"}
+    return
+  end
+  check_destructive_or_external {action: $action} -> $needs_approval
+  when needs_approval:
+    emit {type: "authorization.gated", action: $action, level: 4, reason: "requires human approval"}
+    return
+  end
+  emit {type: "authorization.approved", action: $action, level: 5, reason: "auto-approved"}
+
+procedure check_task_size:
+  trigger: manual
+  given: "Enforce task size limits per ADR-0013 (C-0009 and C-0010)"
+  word_count {text: $description} -> $wc
+  when wc > 200:
+    compute_splits {word_count: $wc, max: 200} -> $splits
+    emit {type: "task.decomposition.required", word_count: $wc, suggested_splits: $splits, constraint: "C-0009"}
+    return
+  end
+  when output_type == "text":
+    when estimated_output_chars > 2000:
+      compute_splits {chars: $estimated_output_chars, max: 2000} -> $splits
+      emit {type: "task.decomposition.required", output_chars: $estimated_output_chars, suggested_splits: $splits}
+      return
+    end
+  end
+  emit {type: "task.size.passed", word_count: $wc}
+
+procedure evaluate_constraints:
+  trigger: manual
+  given: "Evaluate all registered praxis constraints against a proposed action"
+  db_get_prefix {prefix: "constraint:"} -> $all_constraints
+  evaluate_all {constraints: $all_constraints, action: $action, metadata: $metadata} -> $result
+  when result.has_errors:
+    emit {type: "constraint.evaluation.blocked", action: $action, violations: $result}
+    return
+  end
+  when result.has_warnings:
+    emit {type: "constraint.evaluation.warned", action: $action, violations: $result}
+    return
+  end
+  emit {type: "constraint.evaluation.passed", action: $action}
+
+procedure on_action:
+  trigger: manual
+  given: "Full action evaluation: constraints + authorization gate"
+  evaluate_constraints {action: $action, metadata: $metadata} -> $constraint_result
+  authorization_gate {action: $action, constraints: $constraint_result} -> $gate_result
+  emit {type: "action.evaluated", action: $action, gate_level: $gate_result, constraints: $constraint_result}
+  return $gate_result

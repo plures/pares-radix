@@ -11,52 +11,41 @@
 # === PX-L002: Non-exhaustive match (no wildcard _) ===
 procedure no_wildcard:
   trigger: manual
-{
-    // TODO: verify match syntax
-    match status {
-        "ok" => { handle_ok(); }
-        "error" => { handle_error(); }
-    }
-}
+  match:
+    "ok" -> handle_ok
+    "error" -> handle_error
+  end
 
 # === PX-L003: Unreachable arms after wildcard ===
 procedure unreachable_arm:
   trigger: manual
-{
-    match status {
-        "ok" => { handle_ok(); }
-        _ => { handle_default(); }
-        "error" => { handle_error(); }
-    }
-}
+  match:
+    "ok" -> handle_ok
+    _ -> handle_default
+    "error" -> handle_error
+  end
 
 # === PX-L004: Duplicate arm conditions ===
 procedure dup_arms:
   trigger: manual
-{
-    match level {
-        "high" => { alert(); }
-        "low" => { ignore(); }
-        "high" => { alert_again(); }
-    }
-}
+  match:
+    "high" -> alert
+    "low" -> ignore
+    "high" -> alert_again
+  end
 
 # === PX-L005: Unused output variable ===
 procedure unused_output:
   trigger: manual
-{
-    let result = fetch_data({});
-    do_something({});
-}
+  fetch_data {} -> $result
+  do_something {}
 
 # === PX-L006: Unused loop item variable ===
 procedure unused_loop_var:
   trigger: manual
-{
-    for item in items {
-        process_batch({});
-    }
-}
+  loop over $items as item:
+    process_batch {}
+  end
 
 # === PX-L007: Empty catch block ===
 # NOTE: L007 cannot be triggered from parsed .px because the grammar requires
@@ -65,51 +54,32 @@ procedure unused_loop_var:
 # === PX-L008: Shadowed output variable ===
 procedure shadowed_var:
   trigger: manual
-{
-    let data = first_call({});
-    let data = second_call({});
-    use_data({ input: data });
-}
+  first_call {} -> $data
+  second_call {} -> $data
+  use_data {input: $data}
 
 # === PX-L009: Unreachable steps after return ===
 procedure dead_code:
   trigger: manual
-{
-    do_work({});
-    return;
-    never_reached({});
-}
+  do_work {}
+  return
+  never_reached {}
 
 # === PX-L010: Unused procedure parameter ===
 procedure unused_param:
-  trigger: on_write
-    pattern: "some:pattern"
-  params: [channel, message]
-{
-    send_notification({ text: channel });
-}
+  trigger: on_write {channel: "string", message: "string"}
+  send_notification {text: $channel}
 
 # === PX-L011: Undefined procedure call (cross-procedure) ===
-# Note: All call names that don't match a defined procedure name trigger L011.
-# To test this cleanly, we reference a name that doesn't exist.
 procedure calls_undefined:
   trigger: manual
-{
-    nonexistent_procedure({});
-}
+  nonexistent_procedure {}
 
 # === PX-L012: Arity mismatch ===
-# callee declares params via trigger, caller passes extras
 procedure callee:
-  trigger: on_write
-    pattern: "some:pattern"
-  params: [name, age]
-{
-    greet({ who: name });
-}
+  trigger: on_write {name: "string", age: "string"}
+  greet {who: $name}
 
 procedure caller:
   trigger: manual
-{
-    callee({ name: "Alice", extra_param: "oops" });
-}
+  callee {name: "Alice", extra_param: "oops"}

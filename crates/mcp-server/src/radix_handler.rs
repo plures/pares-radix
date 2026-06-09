@@ -810,8 +810,8 @@ impl RadixToolHandler {
 
     async fn web_fetch(&self, args: &Value) -> ToolResult {
         let url = match args.get("url").and_then(|v| v.as_str()) {
-            Some(u) => u,
-            None => return ToolResult::error("missing required parameter: url"),
+            Some(u) if !u.is_empty() => u,
+            _ => return ToolResult::error("missing required parameter: url"),
         };
 
         let max_chars = args
@@ -1166,10 +1166,7 @@ impl RadixToolHandler {
             None => return ToolResult::error("state store not configured"),
         };
 
-        let prefix = args
-            .get("prefix")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let prefix = args.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
 
         let keys = store.keys_with_prefix(prefix).await;
         // Filter out null-valued keys (soft-deleted remnants)
@@ -1199,9 +1196,7 @@ impl RadixToolHandler {
                 }
             }
         }
-        ToolResult::ok(
-            serde_json::to_string_pretty(&Value::Object(entries)).unwrap_or_default(),
-        )
+        ToolResult::ok(serde_json::to_string_pretty(&Value::Object(entries)).unwrap_or_default())
     }
 
     // ── Task Action tools ────────────────────────────────────────────────────────
@@ -1215,10 +1210,7 @@ impl RadixToolHandler {
     }
 
     async fn generate_id(&self, args: &Value) -> ToolResult {
-        let prefix = args
-            .get("prefix")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let prefix = args.get("prefix").and_then(|v| v.as_str()).unwrap_or("");
 
         let uuid_simple = Uuid::new_v4().simple().to_string();
         let id = if prefix.is_empty() {
@@ -2784,33 +2776,42 @@ impl RadixToolHandler {
         let doc = match px::parse(&source) {
             Ok(doc) => doc,
             Err(e) => {
-                return ToolResult::ok(json!({
-                    "status": "parse_error",
-                    "error": format!("{e}"),
-                    "diagnostics": []
-                }).to_string());
+                return ToolResult::ok(
+                    json!({
+                        "status": "parse_error",
+                        "error": format!("{e}"),
+                        "diagnostics": []
+                    })
+                    .to_string(),
+                );
             }
         };
 
         let diagnostics = px::lint::lint(&doc);
-        let diag_json: Vec<Value> = diagnostics.iter().map(|d| {
-            json!({
-                "code": d.code,
-                "message": d.message,
-                "severity": match d.severity {
-                    px::lint::LintSeverity::Warning => "warning",
-                    px::lint::LintSeverity::Error => "error",
-                },
-                "procedure": d.procedure,
-                "step_index": d.step_index,
+        let diag_json: Vec<Value> = diagnostics
+            .iter()
+            .map(|d| {
+                json!({
+                    "code": d.code,
+                    "message": d.message,
+                    "severity": match d.severity {
+                        px::lint::LintSeverity::Warning => "warning",
+                        px::lint::LintSeverity::Error => "error",
+                    },
+                    "procedure": d.procedure,
+                    "step_index": d.step_index,
+                })
             })
-        }).collect();
+            .collect();
 
-        ToolResult::ok(json!({
-            "status": if diagnostics.is_empty() { "clean" } else { "issues_found" },
-            "diagnostics_count": diagnostics.len(),
-            "diagnostics": diag_json
-        }).to_string())
+        ToolResult::ok(
+            json!({
+                "status": if diagnostics.is_empty() { "clean" } else { "issues_found" },
+                "diagnostics_count": diagnostics.len(),
+                "diagnostics": diag_json
+            })
+            .to_string(),
+        )
     }
 
     // ── Compose tool ──────────────────────────────────────────────────────────
@@ -2830,7 +2831,9 @@ impl RadixToolHandler {
                     let resolved = self.resolve_path(file_path);
                     match tokio::fs::read_to_string(&resolved).await {
                         Ok(content) => content,
-                        Err(e) => return ToolResult::error(format!("failed to read .px file: {e}")),
+                        Err(e) => {
+                            return ToolResult::error(format!("failed to read .px file: {e}"))
+                        }
                     }
                 } else {
                     return ToolResult::error(
@@ -2885,10 +2888,13 @@ impl RadixToolHandler {
                 }
 
                 info!(count = registered.len(), names = ?registered, "px_compose: registered procedures");
-                ToolResult::ok(json!({
-                    "registered": registered,
-                    "total": procedures_guard.len(),
-                }).to_string())
+                ToolResult::ok(
+                    json!({
+                        "registered": registered,
+                        "total": procedures_guard.len(),
+                    })
+                    .to_string(),
+                )
             }
 
             "unregister" => {
@@ -2900,10 +2906,13 @@ impl RadixToolHandler {
                 let mut procedures_guard = self.loaded_procedures.write().await;
                 if procedures_guard.remove(name).is_some() {
                     info!(name, "px_compose: unregistered procedure");
-                    ToolResult::ok(json!({
-                        "unregistered": name,
-                        "total": procedures_guard.len(),
-                    }).to_string())
+                    ToolResult::ok(
+                        json!({
+                            "unregistered": name,
+                            "total": procedures_guard.len(),
+                        })
+                        .to_string(),
+                    )
                 } else {
                     let available: Vec<_> = procedures_guard.keys().cloned().collect();
                     ToolResult::error(format!(
@@ -2924,18 +2933,18 @@ impl RadixToolHandler {
                         })
                     })
                     .collect();
-                ToolResult::ok(json!({
-                    "procedures": list,
-                    "count": list.len(),
-                }).to_string())
+                ToolResult::ok(
+                    json!({
+                        "procedures": list,
+                        "count": list.len(),
+                    })
+                    .to_string(),
+                )
             }
 
             "pipe" => {
                 let pipeline = match args.get("pipeline").and_then(|v| v.as_array()) {
-                    Some(arr) => arr
-                        .iter()
-                        .filter_map(|v| v.as_str())
-                        .collect::<Vec<_>>(),
+                    Some(arr) => arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>(),
                     None => {
                         return ToolResult::error(
                             "'pipeline' (array of procedure names) required for action=pipe",
@@ -2969,18 +2978,19 @@ impl RadixToolHandler {
                 let shell_handler = ShellBackedProcedureHandler {
                     shell: Arc::clone(&self.shell),
                     workdir: self.workdir.clone(),
-                    children: Arc::new(tokio::sync::Mutex::new(
-                        std::collections::HashMap::new(),
-                    )),
+                    children: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
                 };
 
                 use pares_radix_praxis::px::compose::pipe;
                 match pipe(&pipeline, &registry, &shell_handler, initial_input).await {
-                    Ok(result) => ToolResult::ok(json!({
-                        "pipeline": pipeline,
-                        "result": result,
-                        "success": true,
-                    }).to_string()),
+                    Ok(result) => ToolResult::ok(
+                        json!({
+                            "pipeline": pipeline,
+                            "result": result,
+                            "success": true,
+                        })
+                        .to_string(),
+                    ),
                     Err(e) => ToolResult::error(format!("pipe execution failed: {e}")),
                 }
             }
@@ -3139,7 +3149,15 @@ impl RadixToolHandler {
         let level_str = args.get("level").and_then(|v| v.as_str()).unwrap_or("info");
         let level = ChronosLevel::from_str_loose(level_str).unwrap_or(ChronosLevel::Info);
 
-        let entry = chronos.build_entry_with_level(key, actor, action, level, &data, constraints, rationale);
+        let entry = chronos.build_entry_with_level(
+            key,
+            actor,
+            action,
+            level,
+            &data,
+            constraints,
+            rationale,
+        );
         let recorded = chronos.record(&entry);
 
         ToolResult::ok(
@@ -3163,11 +3181,19 @@ impl RadixToolHandler {
         };
         let level_str = match args.get("level").and_then(|v| v.as_str()) {
             Some(l) => l,
-            None => return ToolResult::error("missing required parameter: level (debug|info|warn|error)"),
+            None => {
+                return ToolResult::error(
+                    "missing required parameter: level (debug|info|warn|error)",
+                )
+            }
         };
         let level = match ChronosLevel::from_str_loose(level_str) {
             Some(l) => l,
-            None => return ToolResult::error(format!("invalid level: {level_str}. Valid: debug, info, warn, error")),
+            None => {
+                return ToolResult::error(format!(
+                    "invalid level: {level_str}. Valid: debug, info, warn, error"
+                ))
+            }
         };
         chronos.set_level(level);
         ToolResult::ok(json!({ "level": level.to_string() }).to_string())
@@ -3222,10 +3248,7 @@ impl RadixToolHandler {
                 vars.insert("action".to_string(), Value::String(action_str.clone()));
                 vars.insert("actor".to_string(), Value::String(entry.actor.clone()));
                 vars.insert("key".to_string(), Value::String(entry.key.clone()));
-                vars.insert(
-                    "level".to_string(),
-                    Value::String(entry.level.to_string()),
-                );
+                vars.insert("level".to_string(), Value::String(entry.level.to_string()));
 
                 for key in constraint_keys {
                     if let Some(record) = store.get(&key).await {
@@ -3237,10 +3260,7 @@ impl RadixToolHandler {
                             .get("severity")
                             .and_then(|v| v.as_str())
                             .unwrap_or("error");
-                        let message = record
-                            .get("message")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
+                        let message = record.get("message").and_then(|v| v.as_str()).unwrap_or("");
                         let when_expr = record
                             .get("when")
                             .and_then(|v| v.as_str())
@@ -3419,7 +3439,8 @@ impl RadixToolHandler {
         };
         match runtime.get(name).await {
             Some(_) => ToolResult::ok(
-                json!({"name": name, "status": "active", "message": "Plugin is already active"}).to_string(),
+                json!({"name": name, "status": "active", "message": "Plugin is already active"})
+                    .to_string(),
             ),
             None => ToolResult::error(format!("Plugin '{}' not found", name)),
         }
@@ -3437,9 +3458,7 @@ impl RadixToolHandler {
         match runtime.uninstall(name, false).await {
             Ok(()) => {
                 self.notify_tools_changed();
-                ToolResult::ok(
-                    json!({"name": name, "status": "deactivated"}).to_string(),
-                )
+                ToolResult::ok(json!({"name": name, "status": "deactivated"}).to_string())
             }
             Err(e) => ToolResult::error(format!("Failed to deactivate plugin: {}", e)),
         }
@@ -3569,14 +3588,13 @@ impl RadixToolHandler {
         // Handle model override if requested
         if let Some(model_override) = args.get("model").and_then(|v| v.as_str()) {
             if let Some(store) = &self.state_store {
-                let key = format!(
-                    "session:model_override:{}",
-                    session_id.unwrap_or("main")
-                );
+                let key = format!("session:model_override:{}", session_id.unwrap_or("main"));
                 if model_override == "default" {
                     store.delete(&key).await;
                 } else {
-                    store.set(&key, Value::String(model_override.to_string())).await;
+                    store
+                        .set(&key, Value::String(model_override.to_string()))
+                        .await;
                 }
             }
         }
@@ -3596,11 +3614,11 @@ impl RadixToolHandler {
 
         // Get model override if set
         let model_override = if let Some(store) = &self.state_store {
-            let key = format!(
-                "session:model_override:{}",
-                session_id.unwrap_or("main")
-            );
-            store.get(&key).await.and_then(|v| v.as_str().map(|s| s.to_string()))
+            let key = format!("session:model_override:{}", session_id.unwrap_or("main"));
+            store
+                .get(&key)
+                .await
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
         } else {
             None
         };
@@ -3880,7 +3898,10 @@ impl RadixToolHandler {
         match self.metrics.lock() {
             Ok(mut metrics) => {
                 metrics.reset();
-                ToolResult::ok(json!({"reset": true, "message": "All telemetry counters cleared."}).to_string())
+                ToolResult::ok(
+                    json!({"reset": true, "message": "All telemetry counters cleared."})
+                        .to_string(),
+                )
             }
             Err(_) => ToolResult::error("metrics lock poisoned".to_string()),
         }
@@ -3898,7 +3919,10 @@ impl RadixToolHandler {
             Some(t) => t.to_string(),
             None => return ToolResult::error("missing required parameter: title"),
         };
-        let description = args.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let description = args
+            .get("description")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let id = uuid::Uuid::new_v4().to_string();
         let canvas = json!({
@@ -3925,7 +3949,9 @@ impl RadixToolHandler {
 
         match store.get("canvas:active").await {
             Some(Value::Null) | None => ToolResult::ok("null"),
-            Some(canvas) => ToolResult::ok(serde_json::to_string_pretty(&canvas).unwrap_or_default()),
+            Some(canvas) => {
+                ToolResult::ok(serde_json::to_string_pretty(&canvas).unwrap_or_default())
+            }
         }
     }
 
@@ -4021,9 +4047,7 @@ impl RadixToolHandler {
         fn remove_from_tree(tree: &mut Value, node_id: &str) -> bool {
             if let Some(children) = tree.get_mut("children").and_then(|c| c.as_array_mut()) {
                 let len_before = children.len();
-                children.retain(|child| {
-                    child.get("id").and_then(|v| v.as_str()) != Some(node_id)
-                });
+                children.retain(|child| child.get("id").and_then(|v| v.as_str()) != Some(node_id));
                 if children.len() < len_before {
                     return true;
                 }
@@ -4106,7 +4130,9 @@ impl RadixToolHandler {
         };
 
         match store.get("canvas:active").await {
-            Some(c) if !c.is_null() => ToolResult::ok(serde_json::to_string_pretty(&c).unwrap_or_default()),
+            Some(c) if !c.is_null() => {
+                ToolResult::ok(serde_json::to_string_pretty(&c).unwrap_or_default())
+            }
             _ => ToolResult::error("no active canvas — create one first"),
         }
     }
@@ -4133,8 +4159,13 @@ impl RadixToolHandler {
         }
 
         store.set("canvas:active", canvas.clone()).await;
-        ToolResult::ok(format!("canvas '{}' imported and set as active",
-            canvas.get("title").and_then(|v| v.as_str()).unwrap_or("untitled")))
+        ToolResult::ok(format!(
+            "canvas '{}' imported and set as active",
+            canvas
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("untitled")
+        ))
     }
 
     async fn canvas_list(&self) -> ToolResult {
@@ -4305,17 +4336,20 @@ impl RadixToolHandler {
         };
 
         // Accept either `jsonl` (string of newline-delimited JSON) or `instructions` (array)
-        let instructions: Vec<Value> = if let Some(jsonl_str) = args.get("jsonl").and_then(|v| v.as_str()) {
-            jsonl_str
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect()
-        } else if let Some(arr) = args.get("instructions").and_then(|v| v.as_array()) {
-            arr.clone()
-        } else {
-            return ToolResult::error("missing required parameter: jsonl (string) or instructions (array)");
-        };
+        let instructions: Vec<Value> =
+            if let Some(jsonl_str) = args.get("jsonl").and_then(|v| v.as_str()) {
+                jsonl_str
+                    .lines()
+                    .filter(|l| !l.trim().is_empty())
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect()
+            } else if let Some(arr) = args.get("instructions").and_then(|v| v.as_array()) {
+                arr.clone()
+            } else {
+                return ToolResult::error(
+                    "missing required parameter: jsonl (string) or instructions (array)",
+                );
+            };
 
         if instructions.is_empty() {
             return ToolResult::error("no valid instructions provided");
@@ -4354,7 +4388,10 @@ impl RadixToolHandler {
             None => return ToolResult::error("state store not configured"),
         };
 
-        let target = args.get("target").and_then(|v| v.as_str()).unwrap_or("global");
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("global");
         let queue_key = if target == "global" {
             "canvas:a2ui:queue".to_string()
         } else {
@@ -5493,9 +5530,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "chronos_get_level".into(),
-            description: Some(
-                "Get the current minimum recording level for Chronos.".into(),
-            ),
+            description: Some("Get the current minimum recording level for Chronos.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5537,9 +5572,7 @@ impl ToolHandler for RadixToolHandler {
         // ── Plugin management tools ────────────────────────────────────────────────────────
         tools.push(Tool {
             name: "plugin_list".into(),
-            description: Some(
-                "List all registered plugins and their status.".into(),
-            ),
+            description: Some("List all registered plugins and their status.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5548,9 +5581,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "plugin_info".into(),
-            description: Some(
-                "Get detailed info about a specific plugin.".into(),
-            ),
+            description: Some("Get detailed info about a specific plugin.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5577,9 +5608,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "plugin_activate".into(),
-            description: Some(
-                "Activate a registered plugin.".into(),
-            ),
+            description: Some("Activate a registered plugin.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5590,9 +5619,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "plugin_deactivate".into(),
-            description: Some(
-                "Deactivate a plugin (uninstalls it).".into(),
-            ),
+            description: Some("Deactivate a plugin (uninstalls it).".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5779,7 +5806,8 @@ impl ToolHandler for RadixToolHandler {
         tools.push(Tool {
             name: "canvas_get".into(),
             description: Some(
-                "Get the current active canvas document. Returns null if no canvas is active.".into(),
+                "Get the current active canvas document. Returns null if no canvas is active."
+                    .into(),
             ),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
@@ -5816,9 +5844,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_remove_node".into(),
-            description: Some(
-                "Remove a node from the canvas tree by ID.".into(),
-            ),
+            description: Some("Remove a node from the canvas tree by ID.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5829,9 +5855,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_validate".into(),
-            description: Some(
-                "Validate the active canvas and return any issues found.".into(),
-            ),
+            description: Some("Validate the active canvas and return any issues found.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5840,9 +5864,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_export".into(),
-            description: Some(
-                "Export the active canvas as a .canvas JSON string.".into(),
-            ),
+            description: Some("Export the active canvas as a .canvas JSON string.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5864,9 +5886,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_list".into(),
-            description: Some(
-                "List all saved canvases (id, title, description).".into(),
-            ),
+            description: Some("List all saved canvases (id, title, description).".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5875,9 +5895,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_load".into(),
-            description: Some(
-                "Load a saved canvas by ID, making it the active canvas.".into(),
-            ),
+            description: Some("Load a saved canvas by ID, making it the active canvas.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5888,9 +5906,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_save".into(),
-            description: Some(
-                "Save the active canvas to the saved canvases list.".into(),
-            ),
+            description: Some("Save the active canvas to the saved canvases list.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: None,
@@ -5900,7 +5916,8 @@ impl ToolHandler for RadixToolHandler {
         tools.push(Tool {
             name: "canvas_set_data".into(),
             description: Some(
-                "Set data values in the active canvas (seeds PluresDB with canvas-scoped data).".into(),
+                "Set data values in the active canvas (seeds PluresDB with canvas-scoped data)."
+                    .into(),
             ),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
@@ -5925,9 +5942,7 @@ impl ToolHandler for RadixToolHandler {
         });
         tools.push(Tool {
             name: "canvas_add_rule".into(),
-            description: Some(
-                "Add a Praxis validation rule to the active canvas.".into(),
-            ),
+            description: Some("Add a Praxis validation rule to the active canvas.".into()),
             input_schema: ToolInputSchema {
                 schema_type: "object".into(),
                 properties: Some(json!({
@@ -5991,7 +6006,8 @@ impl ToolHandler for RadixToolHandler {
                 metrics.record(name, latency_ms, success);
             }
             // Emit to OTLP exporter (no-op without configured provider)
-            self.otel_metrics.record_tool_call(name, latency_ms as f64, success);
+            self.otel_metrics
+                .record_tool_call(name, latency_ms as f64, success);
         }
         result
     }
@@ -6268,7 +6284,10 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     .headers()
                     .iter()
                     .map(|(k, v)| {
-                        (k.to_string(), Value::String(v.to_str().unwrap_or("").to_string()))
+                        (
+                            k.to_string(),
+                            Value::String(v.to_str().unwrap_or("").to_string()),
+                        )
                     })
                     .collect();
                 let body = resp.text().await.unwrap_or_default();
@@ -6320,7 +6339,10 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     .headers()
                     .iter()
                     .map(|(k, v)| {
-                        (k.to_string(), Value::String(v.to_str().unwrap_or("").to_string()))
+                        (
+                            k.to_string(),
+                            Value::String(v.to_str().unwrap_or("").to_string()),
+                        )
                     })
                     .collect();
                 let body = resp.text().await.unwrap_or_default();
@@ -6344,10 +6366,7 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                 } else {
                     Err(ExecutionError::ActionFailed {
                         action: name.to_string(),
-                        message: format!(
-                            "{message}: expected {:?}, got {:?}",
-                            expected, actual
-                        ),
+                        message: format!("{message}: expected {:?}, got {:?}", expected, actual),
                     })
                 }
             }
@@ -6358,18 +6377,19 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     .get("message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("assertion failed");
-                let contains = params.get("contains").ok_or_else(|| {
-                    ExecutionError::ActionFailed {
-                        action: name.to_string(),
-                        message: "missing 'contains' parameter".into(),
-                    }
-                })?;
-                let value = params.get("value").ok_or_else(|| {
-                    ExecutionError::ActionFailed {
+                let contains =
+                    params
+                        .get("contains")
+                        .ok_or_else(|| ExecutionError::ActionFailed {
+                            action: name.to_string(),
+                            message: "missing 'contains' parameter".into(),
+                        })?;
+                let value = params
+                    .get("value")
+                    .ok_or_else(|| ExecutionError::ActionFailed {
                         action: name.to_string(),
                         message: "missing 'value' parameter".into(),
-                    }
-                })?;
+                    })?;
                 let found = if let Some(s) = value.as_str() {
                     if let Some(needle) = contains.as_str() {
                         s.contains(needle)
@@ -6378,6 +6398,25 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     }
                 } else if let Some(arr) = value.as_array() {
                     arr.contains(contains)
+                } else if value.is_object() {
+                    // For objects (e.g. shell results), check stdout/output fields first,
+                    // then fall back to stringified representation
+                    if let Some(needle) = contains.as_str() {
+                        // Check common output fields
+                        let stdout_match = value
+                            .get("stdout")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.contains(needle))
+                            .unwrap_or(false);
+                        let output_match = value
+                            .get("output")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.contains(needle))
+                            .unwrap_or(false);
+                        stdout_match || output_match || value.to_string().contains(needle)
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 };
@@ -6386,10 +6425,7 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                 } else {
                     Err(ExecutionError::ActionFailed {
                         action: name.to_string(),
-                        message: format!(
-                            "{message}: {:?} does not contain {:?}",
-                            value, contains
-                        ),
+                        message: format!("{message}: {:?} does not contain {:?}", value, contains),
                     })
                 }
             }
@@ -6536,9 +6572,7 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
                     if tokio::time::Instant::now() >= deadline {
                         return Err(ExecutionError::ActionFailed {
                             action: name.to_string(),
-                            message: format!(
-                                "timeout after {timeout_secs}s waiting for {url}"
-                            ),
+                            message: format!("timeout after {timeout_secs}s waiting for {url}"),
                         });
                     }
                     tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
@@ -6547,33 +6581,91 @@ impl AsyncActionHandler for ShellBackedProcedureHandler {
 
             // Built-in: sleep/wait
             "sleep" | "wait" => {
-                let ms = params.get("ms").and_then(|v| v.as_u64()).unwrap_or_else(|| {
-                    params
-                        .get("secs")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0)
-                        * 1000
-                });
+                let ms = params
+                    .get("ms")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or_else(|| {
+                        params.get("secs").and_then(|v| v.as_u64()).unwrap_or(0) * 1000
+                    });
                 tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
                 Ok(json!({"status": "ok", "slept_ms": ms}))
             }
 
             // Built-in: parse JSON string into Value
             "json_parse" | "parse_json" => {
-                let text = params
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ExecutionError::ActionFailed {
-                        action: name.to_string(),
-                        message: "missing 'text' parameter".into(),
-                    })?;
-                let parsed: Value = serde_json::from_str(text).map_err(|e| {
+                let text = params.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
                     ExecutionError::ActionFailed {
                         action: name.to_string(),
-                        message: format!("parse failed: {e}"),
+                        message: "missing 'text' parameter".into(),
                     }
                 })?;
+                let parsed: Value =
+                    serde_json::from_str(text).map_err(|e| ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("parse failed: {e}"),
+                    })?;
                 Ok(parsed)
+            }
+
+            // Built-in: detect OS type
+            "detect_os" => {
+                let os = if cfg!(target_os = "linux") {
+                    "linux"
+                } else if cfg!(target_os = "macos") {
+                    "macos"
+                } else if cfg!(target_os = "windows") {
+                    "windows"
+                } else {
+                    "unknown"
+                };
+                Ok(Value::String(os.to_string()))
+            }
+
+            // Built-in: get platform temp directory
+            "get_temp_dir" | "temp_dir" => Ok(Value::String(
+                std::env::temp_dir().to_string_lossy().to_string(),
+            )),
+
+            // Built-in: join path components
+            "join_path" | "path_join" => {
+                let base = params.get("base").and_then(|v| v.as_str()).unwrap_or("");
+                let name = params.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'name' parameter".into(),
+                    }
+                })?;
+                let joined = PathBuf::from(base).join(name);
+                Ok(Value::String(joined.to_string_lossy().to_string()))
+            }
+
+            // Built-in: delete a file
+            "delete_file" | "remove_file" | "rm" => {
+                let path = params.get("path").and_then(|v| v.as_str()).ok_or_else(|| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: "missing 'path' parameter".into(),
+                    }
+                })?;
+                let full_path = if std::path::Path::new(path).is_absolute() {
+                    PathBuf::from(path)
+                } else {
+                    self.workdir.join(path)
+                };
+                tokio::fs::remove_file(&full_path).await.map_err(|e| {
+                    ExecutionError::ActionFailed {
+                        action: name.to_string(),
+                        message: format!("delete failed: {e}"),
+                    }
+                })?;
+                Ok(json!({"status": "ok", "deleted": full_path.display().to_string()}))
+            }
+
+            // Built-in: emit event (log/noop in procedure context)
+            "emit" => {
+                // In procedure context, emit is a structured event log.
+                // We just return the params as acknowledgment.
+                Ok(params.clone())
             }
 
             // Default: treat the step name as a shell command with params as JSON env
@@ -6943,9 +7035,7 @@ mod tests {
         handler
             .call_tool("db_put", json!({"key": "gone", "value": 2}))
             .await;
-        handler
-            .call_tool("db_delete", json!({"key": "gone"}))
-            .await;
+        handler.call_tool("db_delete", json!({"key": "gone"})).await;
 
         let result = handler.call_tool("db_dump", json!({})).await;
         assert!(!result.is_error);
@@ -8021,8 +8111,7 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let store = Arc::new(CrdtStore::default());
         let chronos = Arc::new(ChronosTimeline::new(store));
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(chronos);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(chronos);
 
         let result = handler
             .call_tool("chronos_replay", json!({"fromId": "nonexistent-id-abc"}))
@@ -8039,8 +8128,7 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let store = Arc::new(CrdtStore::default());
         let chronos = Arc::new(ChronosTimeline::new(store));
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_chronos(chronos);
+        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_chronos(chronos);
 
         let result = handler
             .call_tool("chronos_replay", json!({"toId": "fake-id-xyz"}))
@@ -8185,7 +8273,10 @@ mod tests {
         let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"));
 
         let result = handler
-            .call_tool("subagent_steer", json!({"session_id": "abc", "message": "change direction"}))
+            .call_tool(
+                "subagent_steer",
+                json!({"session_id": "abc", "message": "change direction"}),
+            )
             .await;
         assert!(result.is_error);
         assert!(result.content.contains("not configured"));
@@ -8725,7 +8816,9 @@ mod tests {
     async fn test_px_assert_eq_pass() {
         use pares_radix_praxis::px::async_executor::AsyncActionHandler;
         let h = make_shell_handler();
-        let result = h.call("assert_eq", &json!({"actual": 42, "expected": 42})).await;
+        let result = h
+            .call("assert_eq", &json!({"actual": 42, "expected": 42}))
+            .await;
         assert!(result.is_ok());
     }
 
@@ -8733,7 +8826,9 @@ mod tests {
     async fn test_px_assert_eq_fail() {
         use pares_radix_praxis::px::async_executor::AsyncActionHandler;
         let h = make_shell_handler();
-        let result = h.call("assert_eq", &json!({"actual": 1, "expected": 2})).await;
+        let result = h
+            .call("assert_eq", &json!({"actual": 1, "expected": 2}))
+            .await;
         assert!(result.is_err());
     }
 
@@ -8742,7 +8837,10 @@ mod tests {
         use pares_radix_praxis::px::async_executor::AsyncActionHandler;
         let h = make_shell_handler();
         let result = h
-            .call("assert_contains", &json!({"value": "hello world", "contains": "world"}))
+            .call(
+                "assert_contains",
+                &json!({"value": "hello world", "contains": "world"}),
+            )
             .await;
         assert!(result.is_ok());
     }
@@ -8752,7 +8850,10 @@ mod tests {
         use pares_radix_praxis::px::async_executor::AsyncActionHandler;
         let h = make_shell_handler();
         let result = h
-            .call("assert_contains", &json!({"value": "hello", "contains": "xyz"}))
+            .call(
+                "assert_contains",
+                &json!({"value": "hello", "contains": "xyz"}),
+            )
             .await;
         assert!(result.is_err());
     }
@@ -8835,7 +8936,10 @@ mod tests {
         // Wait a moment for it to start
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         let result = h
-            .call("http_get", &json!({"url": "http://127.0.0.1:18321/", "timeout_secs": 5}))
+            .call(
+                "http_get",
+                &json!({"url": "http://127.0.0.1:18321/", "timeout_secs": 5}),
+            )
             .await;
         // Clean up
         let _ = h.call("stop_process", &json!({"pid": pid})).await;
@@ -8858,8 +8962,8 @@ mod tests {
     async fn plugin_list_with_runtime() {
         let shell = Arc::new(ShellExecutor::new());
         let runtime = Arc::new(PluginRuntime::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_plugin_runtime(runtime);
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_plugin_runtime(runtime);
         let result = handler.call_tool("plugin_list", json!({})).await;
         assert!(!result.is_error);
         assert!(result.content.contains("[]"));
@@ -8869,8 +8973,8 @@ mod tests {
     async fn plugin_register_and_info() {
         let shell = Arc::new(ShellExecutor::new());
         let runtime = Arc::new(PluginRuntime::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_plugin_runtime(runtime);
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_plugin_runtime(runtime);
 
         // Register
         let result = handler
@@ -8895,8 +8999,8 @@ mod tests {
     async fn plugin_activate_not_found() {
         let shell = Arc::new(ShellExecutor::new());
         let runtime = Arc::new(PluginRuntime::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_plugin_runtime(runtime);
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_plugin_runtime(runtime);
         let result = handler
             .call_tool("plugin_activate", json!({"name": "nonexistent"}))
             .await;
@@ -8907,8 +9011,8 @@ mod tests {
     async fn plugin_deactivate_removes_plugin() {
         let shell = Arc::new(ShellExecutor::new());
         let runtime = Arc::new(PluginRuntime::new());
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_plugin_runtime(runtime);
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_plugin_runtime(runtime);
 
         // Register first
         handler
@@ -9005,7 +9109,9 @@ mod tests {
             .call_tool("session_send", json!({"message": "hello"}))
             .await;
         assert!(result.is_error);
-        assert!(result.content.contains("missing required parameter: session_id"));
+        assert!(result
+            .content
+            .contains("missing required parameter: session_id"));
     }
 
     #[tokio::test]
@@ -9015,7 +9121,9 @@ mod tests {
             .call_tool("session_send", json!({"session_id": "test"}))
             .await;
         assert!(result.is_error);
-        assert!(result.content.contains("missing required parameter: message"));
+        assert!(result
+            .content
+            .contains("missing required parameter: message"));
     }
 
     #[tokio::test]
@@ -9085,10 +9193,7 @@ mod tests {
     async fn session_yield_with_state_store() {
         let handler = make_handler_with_state();
         let result = handler
-            .call_tool(
-                "session_yield",
-                json!({"message": "spawned 3 workers"}),
-            )
+            .call_tool("session_yield", json!({"message": "spawned 3 workers"}))
             .await;
         assert!(!result.is_error);
         // Verify yield state was stored
@@ -9126,7 +9231,9 @@ mod tests {
         assert!(!result.is_error);
 
         // Should have received a tools/list_changed notification
-        let notif = rx.try_recv().expect("expected tools_list_changed notification");
+        let notif = rx
+            .try_recv()
+            .expect("expected tools_list_changed notification");
         assert_eq!(notif.method, "notifications/tools/list_changed");
         assert!(notif.params.is_none());
     }
@@ -9157,7 +9264,9 @@ mod tests {
         assert!(!result.is_error);
 
         // Should have received another tools/list_changed notification
-        let notif = rx.try_recv().expect("expected tools_list_changed notification on deactivate");
+        let notif = rx
+            .try_recv()
+            .expect("expected tools_list_changed notification on deactivate");
         assert_eq!(notif.method, "notifications/tools/list_changed");
     }
 
@@ -9166,8 +9275,8 @@ mod tests {
         let shell = Arc::new(ShellExecutor::new());
         let runtime = Arc::new(PluginRuntime::new());
         // No notification_tx attached
-        let handler = RadixToolHandler::new(shell, PathBuf::from("/tmp"))
-            .with_plugin_runtime(runtime);
+        let handler =
+            RadixToolHandler::new(shell, PathBuf::from("/tmp")).with_plugin_runtime(runtime);
 
         // Should not panic
         let result = handler
@@ -9207,7 +9316,9 @@ mod tests {
 
         // Top tools should include db_get
         let top_tools = data["top_tools"].as_array().unwrap();
-        assert!(top_tools.iter().any(|t| t["name"] == "db_get" && t["calls"] == 2));
+        assert!(top_tools
+            .iter()
+            .any(|t| t["name"] == "db_get" && t["calls"] == 2));
     }
 
     #[tokio::test]
@@ -9445,7 +9556,12 @@ mod tests {
     #[tokio::test]
     async fn canvas_create_returns_document() {
         let handler = make_handler_with_state();
-        let result = handler.call_tool("canvas_create", json!({"title": "Test App", "description": "A test"})).await;
+        let result = handler
+            .call_tool(
+                "canvas_create",
+                json!({"title": "Test App", "description": "A test"}),
+            )
+            .await;
         assert!(!result.is_error);
         let doc: Value = serde_json::from_str(&result.content).unwrap();
         assert_eq!(doc["title"], "Test App");
@@ -9462,7 +9578,9 @@ mod tests {
         assert_eq!(result.content, "null");
 
         // Create one
-        handler.call_tool("canvas_create", json!({"title": "My Canvas"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "My Canvas"}))
+            .await;
         let result = handler.call_tool("canvas_get", json!({})).await;
         assert!(!result.is_error);
         let doc: Value = serde_json::from_str(&result.content).unwrap();
@@ -9472,10 +9590,15 @@ mod tests {
     #[tokio::test]
     async fn canvas_set_tree_replaces_tree() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Tree Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Tree Test"}))
+            .await;
 
-        let new_tree = json!({"id": "root", "type": "Root", "children": [{"id": "box1", "type": "Box"}]});
-        let result = handler.call_tool("canvas_set_tree", json!({"tree": new_tree})).await;
+        let new_tree =
+            json!({"id": "root", "type": "Root", "children": [{"id": "box1", "type": "Box"}]});
+        let result = handler
+            .call_tool("canvas_set_tree", json!({"tree": new_tree}))
+            .await;
         assert!(!result.is_error);
 
         let get = handler.call_tool("canvas_get", json!({})).await;
@@ -9486,11 +9609,15 @@ mod tests {
     #[tokio::test]
     async fn canvas_add_and_remove_node() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Node Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Node Test"}))
+            .await;
 
         // Add a node under root
         let node = json!({"id": "child1", "type": "Text", "props": {"text": "Hello"}});
-        let result = handler.call_tool("canvas_add_node", json!({"parentId": "root", "node": node})).await;
+        let result = handler
+            .call_tool("canvas_add_node", json!({"parentId": "root", "node": node}))
+            .await;
         assert!(!result.is_error);
 
         // Verify it's there
@@ -9499,7 +9626,9 @@ mod tests {
         assert_eq!(doc["tree"]["children"][0]["id"], "child1");
 
         // Remove it
-        let result = handler.call_tool("canvas_remove_node", json!({"nodeId": "child1"})).await;
+        let result = handler
+            .call_tool("canvas_remove_node", json!({"nodeId": "child1"}))
+            .await;
         assert!(!result.is_error);
 
         // Verify it's gone
@@ -9511,14 +9640,18 @@ mod tests {
     #[tokio::test]
     async fn canvas_validate_catches_duplicate_ids() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Validate Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Validate Test"}))
+            .await;
 
         // Set tree with duplicate IDs
         let tree = json!({"id": "root", "type": "Root", "children": [
             {"id": "dup", "type": "Box"},
             {"id": "dup", "type": "Text"}
         ]});
-        handler.call_tool("canvas_set_tree", json!({"tree": tree})).await;
+        handler
+            .call_tool("canvas_set_tree", json!({"tree": tree}))
+            .await;
 
         let result = handler.call_tool("canvas_validate", json!({})).await;
         let validation: Value = serde_json::from_str(&result.content).unwrap();
@@ -9529,7 +9662,9 @@ mod tests {
     #[tokio::test]
     async fn canvas_save_and_load() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Save Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Save Test"}))
+            .await;
 
         // Get the ID
         let get = handler.call_tool("canvas_get", json!({})).await;
@@ -9541,7 +9676,9 @@ mod tests {
         assert!(!result.is_error);
 
         // Create a new canvas (overwrites active)
-        handler.call_tool("canvas_create", json!({"title": "Other"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Other"}))
+            .await;
 
         // Load the saved one
         let result = handler.call_tool("canvas_load", json!({"id": id})).await;
@@ -9553,7 +9690,9 @@ mod tests {
     #[tokio::test]
     async fn canvas_list_shows_saved() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Listed"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Listed"}))
+            .await;
         handler.call_tool("canvas_save", json!({})).await;
 
         let result = handler.call_tool("canvas_list", json!({})).await;
@@ -9566,16 +9705,22 @@ mod tests {
     #[tokio::test]
     async fn canvas_export_and_import() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Export Me"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Export Me"}))
+            .await;
 
         let exported = handler.call_tool("canvas_export", json!({})).await;
         assert!(!exported.is_error);
 
         // Create a different canvas
-        handler.call_tool("canvas_create", json!({"title": "Different"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Different"}))
+            .await;
 
         // Import the exported one
-        let result = handler.call_tool("canvas_import", json!({"json": exported.content})).await;
+        let result = handler
+            .call_tool("canvas_import", json!({"json": exported.content}))
+            .await;
         assert!(!result.is_error);
 
         // Verify active is the imported one
@@ -9587,10 +9732,22 @@ mod tests {
     #[tokio::test]
     async fn canvas_set_data_merges() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Data Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Data Test"}))
+            .await;
 
-        handler.call_tool("canvas_set_data", json!({"data": {"count": 1, "name": "test"}})).await;
-        handler.call_tool("canvas_set_data", json!({"data": {"count": 2, "extra": true}})).await;
+        handler
+            .call_tool(
+                "canvas_set_data",
+                json!({"data": {"count": 1, "name": "test"}}),
+            )
+            .await;
+        handler
+            .call_tool(
+                "canvas_set_data",
+                json!({"data": {"count": 2, "extra": true}}),
+            )
+            .await;
 
         let get = handler.call_tool("canvas_get", json!({})).await;
         let doc: Value = serde_json::from_str(&get.content).unwrap();
@@ -9602,14 +9759,20 @@ mod tests {
     #[tokio::test]
     async fn canvas_add_procedure_and_rule() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Proc Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Proc Test"}))
+            .await;
 
         let proc = json!({"name": "onClick", "steps": [{"action": "navigate", "url": "/next"}]});
-        let result = handler.call_tool("canvas_add_procedure", json!({"procedure": proc})).await;
+        let result = handler
+            .call_tool("canvas_add_procedure", json!({"procedure": proc}))
+            .await;
         assert!(!result.is_error);
 
         let rule = json!({"name": "no-empty-text", "check": "node.props.text != ''"});
-        let result = handler.call_tool("canvas_add_rule", json!({"rule": rule})).await;
+        let result = handler
+            .call_tool("canvas_add_rule", json!({"rule": rule}))
+            .await;
         assert!(!result.is_error);
 
         let get = handler.call_tool("canvas_get", json!({})).await;
@@ -9649,10 +9812,14 @@ mod tests {
         assert!(!result.is_error);
         let parsed: Value = serde_json::from_str(&result.content).unwrap();
         let components = parsed["components"].as_array().unwrap();
-        assert!(components.len() >= 15, "catalog should have at least 15 components");
+        assert!(
+            components.len() >= 15,
+            "catalog should have at least 15 components"
+        );
 
         // Verify key component types are present
-        let types: Vec<&str> = components.iter()
+        let types: Vec<&str> = components
+            .iter()
             .filter_map(|c| c["type"].as_str())
             .collect();
         assert!(types.contains(&"Root"));
@@ -9682,12 +9849,16 @@ mod tests {
     async fn canvas_a2ui_push_with_jsonl() {
         let handler = make_handler_with_state();
         // Create a canvas first
-        handler.call_tool("canvas_create", json!({"title": "A2UI Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "A2UI Test"}))
+            .await;
 
         let jsonl = r#"{"op":"set","path":"/title","value":"Hello"}
 {"op":"append","path":"/items","value":{"text":"Item 1"}}"#;
 
-        let result = handler.call_tool("canvas_a2ui_push", json!({"jsonl": jsonl})).await;
+        let result = handler
+            .call_tool("canvas_a2ui_push", json!({"jsonl": jsonl}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("2 instruction(s) pushed"));
 
@@ -9700,14 +9871,18 @@ mod tests {
     #[tokio::test]
     async fn canvas_a2ui_push_with_instructions_array() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "A2UI Array Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "A2UI Array Test"}))
+            .await;
 
         let instructions = json!([
             {"op": "set", "path": "/header", "value": "Dashboard"},
             {"op": "clear", "path": "/notifications"}
         ]);
 
-        let result = handler.call_tool("canvas_a2ui_push", json!({"instructions": instructions})).await;
+        let result = handler
+            .call_tool("canvas_a2ui_push", json!({"instructions": instructions}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("2 instruction(s) pushed"));
     }
@@ -9715,10 +9890,14 @@ mod tests {
     #[tokio::test]
     async fn canvas_a2ui_push_rejects_empty() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Empty Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Empty Test"}))
+            .await;
 
         // Empty JSONL
-        let result = handler.call_tool("canvas_a2ui_push", json!({"jsonl": ""})).await;
+        let result = handler
+            .call_tool("canvas_a2ui_push", json!({"jsonl": ""}))
+            .await;
         assert!(result.is_error);
 
         // No params
@@ -9729,11 +9908,15 @@ mod tests {
     #[tokio::test]
     async fn canvas_a2ui_reset_clears_queue() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Reset Test"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Reset Test"}))
+            .await;
 
         // Push some instructions
         let jsonl = r#"{"op":"set","path":"/x","value":1}"#;
-        handler.call_tool("canvas_a2ui_push", json!({"jsonl": jsonl})).await;
+        handler
+            .call_tool("canvas_a2ui_push", json!({"jsonl": jsonl}))
+            .await;
 
         // Reset
         let result = handler.call_tool("canvas_a2ui_reset", json!({})).await;
@@ -9749,9 +9932,13 @@ mod tests {
     #[tokio::test]
     async fn canvas_a2ui_reset_with_target() {
         let handler = make_handler_with_state();
-        handler.call_tool("canvas_create", json!({"title": "Target Reset"})).await;
+        handler
+            .call_tool("canvas_create", json!({"title": "Target Reset"}))
+            .await;
 
-        let result = handler.call_tool("canvas_a2ui_reset", json!({"target": "node-1"})).await;
+        let result = handler
+            .call_tool("canvas_a2ui_reset", json!({"target": "node-1"}))
+            .await;
         assert!(!result.is_error);
         assert!(result.content.contains("node-1"));
     }

@@ -139,7 +139,7 @@ impl ModelClient for BitnetModelClient {
             content: Some(result),
             tool_calls: vec![],
             logprobs: None,
-                model: None,
+            model: None,
         })
     }
 }

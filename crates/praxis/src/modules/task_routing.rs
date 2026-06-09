@@ -435,7 +435,10 @@ mod tests {
         let exp = module().expectations();
         assert!(!exp.is_empty(), "expectations must not be empty");
         assert!(exp.len() >= 4);
-        assert!(exp.iter().all(|e| !e.is_empty()), "no empty expectation strings");
+        assert!(
+            exp.iter().all(|e| !e.is_empty()),
+            "no empty expectation strings"
+        );
         assert!(exp.iter().any(|e| e.contains("Priority")));
     }
 

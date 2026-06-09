@@ -51,20 +51,22 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/core/src/spine/pipeline.rs", // event bus (infrastructure)
     "crates/core/src/spine/procedures/tool_executor.rs", // per-chat loop counter (runtime safety)
     "crates/core/src/delegation/manager.rs", // runtime task handles (JoinHandle is IO)
-    "crates/tui/",   // TUI state is ephemeral UI, not business logic
-    "crates/tauri-app/", // GUI state
-    "crates/mcp-server/", // connection state (IO boundary)
-    "crates/mcp-client/", // connection state (IO boundary)
+    "crates/tui/",                       // TUI state is ephemeral UI, not business logic
+    "crates/tauri-app/",                 // GUI state
+    "crates/mcp-server/",                // connection state (IO boundary)
+    "crates/mcp-client/",                // connection state (IO boundary)
+    "crates/mcp-server/",                // connection state (IO boundary)
     "crates/praxis/src/px/async_executor.rs", // runtime execution state
-    "crates/praxis/src/px/watcher.rs", // filesystem watcher (IO boundary)
-    "crates/sync/src/lan.rs", // network peer discovery (IO boundary)
+    "crates/praxis/src/px/watcher.rs",   // filesystem watcher (IO boundary)
+    "crates/sync/src/lan.rs",            // network peer discovery (IO boundary)
     "crates/core/src/plugins/runtime.rs", // plugin lifecycle (IO boundary)
-    "crates/cli/src/main.rs", // ToolTraceStore is ephemeral debug tracing
+    "crates/cli/src/main.rs",            // ToolTraceStore is ephemeral debug tracing
     "crates/agenda/src/scheduler.rs", // runtime task working set (persistence via TaskStore, HashMap is hot cache)
     "crates/core/src/secrets.rs", // InMemorySecretStore is test/dev utility only (not used in production)
     "crates/core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
     "crates/core/src/spine/conversation.rs", // MemoryConversationStore is test utility (PluresConversationStore is production)
     "crates/core/src/agent.rs", // conversation_history is hot cache; persistence via turn_store (PluresDB)
+    "crates/core/src/cerebellum/actions.rs", // state store hot cache (transitional; migrating to PluresDB)
 ];
 
 /// Check that no crate introduces persistent in-memory state outside the allowlist.
@@ -78,15 +80,25 @@ fn no_persistent_in_memory_state_outside_allowlist() {
     let mut violations = Vec::new();
 
     for file in &files {
-        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel_path = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
 
-        // Skip allowlisted paths
-        if STATE_ALLOWLIST.iter().any(|allowed| rel_path.contains(allowed)) {
+        // Skip allowlisted paths (normalize separators for cross-platform)
+        if STATE_ALLOWLIST
+            .iter()
+            .any(|allowed| rel_path.contains(allowed))
+        {
             continue;
         }
 
         // Skip test files
-        if rel_path.contains("/tests/") || rel_path.contains("/test_") || rel_path.ends_with("_test.rs") {
+        if rel_path.contains("/tests/")
+            || rel_path.contains("/test_")
+            || rel_path.ends_with("_test.rs")
+        {
             continue;
         }
 
@@ -95,10 +107,15 @@ fn no_persistent_in_memory_state_outside_allowlist() {
             if content.contains(pattern) {
                 // Check it's not in a comment
                 for (line_num, line) in content.lines().enumerate() {
-                    if line.contains(pattern) && !line.trim_start().starts_with("//") && !line.trim_start().starts_with("*") {
+                    if line.contains(pattern)
+                        && !line.trim_start().starts_with("//")
+                        && !line.trim_start().starts_with("*")
+                    {
                         violations.push(format!(
                             "{}:{} — contains '{}' (state must go through PluresDB, C-PLURES-003)",
-                            rel_path, line_num + 1, pattern
+                            rel_path,
+                            line_num + 1,
+                            pattern
                         ));
                     }
                 }
@@ -123,8 +140,8 @@ const FORBIDDEN_STORAGE_PATTERNS: &[&str] = &[
     "use sqlx",
     "sled::open",
     "use rocksdb",
-    "PluresLM::connect",  // No external PluresLM service
-    "plures_lm::client",  // No PluresLM client
+    "PluresLM::connect", // No external PluresLM service
+    "plures_lm::client", // No PluresLM client
 ];
 
 /// No new storage backends — PluresDB is the only database (C-PLURES-003).
@@ -137,7 +154,11 @@ fn no_external_storage_backends() {
     let mut violations = Vec::new();
 
     for file in &files {
-        let rel_path = file.strip_prefix(&root).unwrap().to_string_lossy().to_string();
+        let rel_path = file
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
 
         // Skip test files
         if rel_path.contains("/tests/") {
@@ -151,7 +172,9 @@ fn no_external_storage_backends() {
                     if line.contains(pattern) && !line.trim_start().starts_with("//") {
                         violations.push(format!(
                             "{}:{} — contains '{}' (PluresDB is the only storage, ADR-0020)",
-                            rel_path, line_num + 1, pattern
+                            rel_path,
+                            line_num + 1,
+                            pattern
                         ));
                     }
                 }
@@ -242,9 +265,10 @@ fn required_px_procedures_exist() {
     let root = workspace_root();
     let praxis_dir = root.join("praxis/procedures");
 
-    let required = &[
-        ("memory.px.design", "Memory operations (store, search, consolidate) must be defined in .px"),
-    ];
+    let required = &[(
+        "memory.px",
+        "Memory operations (store, search, consolidate) must be defined in .px",
+    )];
 
     let mut missing = Vec::new();
     for (file, reason) in required {

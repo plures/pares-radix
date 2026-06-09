@@ -1,19 +1,15 @@
 procedure dashboard_refresh:
-  trigger: periodic
-    interval: "5m"
-{
-    // TODO: verify parallel syntax
-    let data = parallel {
-        metrics: {
-            let m = fetch_metrics({});
-            transform_metrics({ raw: m });
-        }
-        alerts: {
-            fetch_alerts({});
-        }
-        status: {
-            check_health({});
-        }
-    };
-    emit("dashboard_updated", { data: data });
-}
+  trigger: manual
+  parallel -> $data:
+    branch metrics:
+      fetch_metrics {} -> $m
+      transform_metrics {raw: $m}
+    end
+    branch alerts:
+      fetch_alerts {}
+    end
+    branch status:
+      check_health {}
+    end
+  end
+  emit {type: "dashboard_updated", data: $data}
