@@ -26,6 +26,7 @@
 pub mod actions;
 pub mod bridge;
 pub mod classifier;
+pub mod dataflow_bridge;
 
 pub mod invoke;
 pub mod pipeline;

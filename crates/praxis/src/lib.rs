@@ -58,6 +58,13 @@ pub mod modules;
 pub mod px;
 pub mod rule;
 
+/// Re-export dataflow types from pluresdb-px for use by downstream crates.
+pub mod dataflow {
+    pub use pluresdb_px::px::dataflow::*;
+    pub use pluresdb_px::px::async_executor::AsyncActionHandler;
+    pub use pluresdb_px::px::async_executor::execute_async_with_vars;
+}
+
 pub use audit::CompletenessAudit;
 pub use factory::RulesFactory;
 pub use module::{CompletenessReport, PraxisModule};
