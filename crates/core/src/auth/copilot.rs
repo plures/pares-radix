@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::Mutex;
@@ -605,6 +605,301 @@ impl ModelClient for CopilotModelClient {
             logprobs,
             model: None,
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Model Discovery
+// ---------------------------------------------------------------------------
+
+/// Information about a model available through the Copilot API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AvailableModel {
+    /// Model identifier (e.g. "claude-sonnet-4.5", "gpt-4o").
+    pub id: String,
+    /// Human-readable name.
+    #[serde(default)]
+    pub name: String,
+    /// Maximum input tokens.
+    #[serde(default)]
+    pub max_input_tokens: Option<u64>,
+    /// Maximum output tokens.
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
+    /// Supported capabilities (e.g. ["chat", "tools"]).
+    #[serde(default)]
+    pub capabilities: Vec<String>,
+}
+
+/// Model tier classification for smart selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ModelTier {
+    /// Fast, cheap models for simple tasks.
+    Fast,
+    /// Balanced models for most work.
+    Standard,
+    /// High-capability models for complex reasoning.
+    Premium,
+}
+
+/// Result of model discovery — recommended selections.
+#[derive(Debug, Clone)]
+pub struct ModelSelection {
+    /// Primary model for standard inference.
+    pub primary: String,
+    /// Deep/escalation model for complex reasoning.
+    pub deep: String,
+    /// All available models.
+    pub available: Vec<AvailableModel>,
+}
+
+impl CopilotAuth {
+    /// List models available through the Copilot API.
+    ///
+    /// Tries `/models` on the Copilot API base URL first, falls back to the
+    /// GitHub Models catalog at `https://models.github.ai/catalog/models`.
+    pub async fn list_models(&mut self) -> Result<Vec<AvailableModel>, CopilotAuthError> {
+        let token = self.ensure_fresh_token().await?.to_string();
+        let api_base = self.api_base_url().to_string();
+        let client = reqwest::Client::new();
+
+        // Try Copilot API /models endpoint
+        let url = format!("{}/models", api_base.trim_end_matches('/'));
+        tracing::info!(url = %url, "listing available models");
+
+        let response = client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .header("Editor-Version", EDITOR_VERSION)
+            .header("User-Agent", USER_AGENT)
+            .header("X-Github-Api-Version", API_VERSION)
+            .header(ACCEPT, "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let body: Value = response.json().await?;
+            if let Some(models) = parse_models_response(&body) {
+                tracing::info!(count = models.len(), "discovered models from Copilot API");
+                return Ok(models);
+            }
+        } else {
+            tracing::debug!(
+                status = %response.status(),
+                "Copilot /models endpoint unavailable, trying catalog"
+            );
+        }
+
+        // Fallback: GitHub Models catalog
+        let catalog_url = "https://models.github.ai/catalog/models";
+        let response = client
+            .get(catalog_url)
+            .header(AUTHORIZATION, format!("Bearer {token}"))
+            .header(ACCEPT, "application/json")
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let body: Value = response.json().await?;
+            if let Some(models) = parse_models_response(&body) {
+                tracing::info!(count = models.len(), source = "catalog", "discovered models from GitHub catalog");
+                return Ok(models);
+            }
+        }
+
+        tracing::warn!("no model listing available from any endpoint");
+        Ok(vec![])
+    }
+}
+
+/// Parse a models response — handles both array-of-objects and {data: [...]} formats.
+fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
+    let arr = if let Some(arr) = body.as_array() {
+        arr.clone()
+    } else if let Some(arr) = body.get("data").and_then(|d| d.as_array()) {
+        arr.clone()
+    } else if let Some(arr) = body.get("models").and_then(|d| d.as_array()) {
+        arr.clone()
+    } else {
+        return None;
+    };
+
+    let models: Vec<AvailableModel> = arr
+        .iter()
+        .filter_map(|v| {
+            let id = v.get("id").and_then(|i| i.as_str())?.to_string();
+            let name = v
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or(&id)
+                .to_string();
+            let max_input_tokens = v
+                .get("limits")
+                .and_then(|l| l.get("max_input_tokens"))
+                .and_then(|t| t.as_u64())
+                .or_else(|| v.get("max_input_tokens").and_then(|t| t.as_u64()));
+            let max_output_tokens = v
+                .get("limits")
+                .and_then(|l| l.get("max_output_tokens"))
+                .and_then(|t| t.as_u64())
+                .or_else(|| v.get("max_output_tokens").and_then(|t| t.as_u64()));
+            let capabilities = v
+                .get("capabilities")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|c| c.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            Some(AvailableModel {
+                id,
+                name,
+                max_input_tokens,
+                max_output_tokens,
+                capabilities,
+            })
+        })
+        .collect();
+
+    if models.is_empty() {
+        None
+    } else {
+        Some(models)
+    }
+}
+
+/// Classify a model into a tier based on its identifier.
+fn classify_model_tier(model_id: &str) -> ModelTier {
+    let id = model_id.to_lowercase();
+
+    // Premium tier — large reasoning models
+    if id.contains("opus")
+        || id.contains("o1")
+        || id.contains("o3")
+        || id.contains("gpt-5")
+        || id.contains("deep-research")
+    {
+        return ModelTier::Premium;
+    }
+
+    // Standard tier — balanced capability models
+    if id.contains("sonnet")
+        || id.contains("gpt-4o")
+        || id.contains("gpt-4.1")
+        || id.contains("gemini-2")
+        || id.contains("claude-4")
+    {
+        return ModelTier::Standard;
+    }
+
+    // Fast tier — smaller/cheaper models
+    if id.contains("haiku")
+        || id.contains("mini")
+        || id.contains("flash")
+        || id.contains("nano")
+        || id.contains("gpt-3")
+    {
+        return ModelTier::Fast;
+    }
+
+    // Default to standard for unknown models
+    ModelTier::Standard
+}
+
+/// Score a model within its tier for selection preference.
+/// Higher = better. Based on recency and capability.
+fn model_preference_score(model_id: &str) -> u32 {
+    let id = model_id.to_lowercase();
+
+    // Claude models — prefer newer versions
+    if id.contains("claude-opus-4") { return 100; }
+    if id.contains("claude-sonnet-4") { return 95; }
+    if id.contains("claude-4") { return 90; }
+    if id.contains("claude-opus") { return 85; }
+    if id.contains("claude-sonnet") { return 80; }
+
+    // GPT models
+    if id.contains("gpt-5") { return 98; }
+    if id.contains("gpt-4o") { return 75; }
+    if id.contains("gpt-4.1") { return 70; }
+    if id.contains("o3") { return 92; }
+    if id.contains("o1") { return 88; }
+
+    // Gemini
+    if id.contains("gemini-2.5") { return 72; }
+    if id.contains("gemini-2") { return 68; }
+
+    50 // Unknown
+}
+
+/// Select the best primary and deep models from a list of available models.
+pub fn select_models(available: &[AvailableModel]) -> ModelSelection {
+    if available.is_empty() {
+        tracing::warn!("no models discovered, using hardcoded defaults");
+        return ModelSelection {
+            primary: "claude-sonnet-4.5".to_string(),
+            deep: "claude-opus-4.6".to_string(),
+            available: vec![],
+        };
+    }
+
+    // Separate into tiers
+    let mut premium: Vec<&AvailableModel> = vec![];
+    let mut standard: Vec<&AvailableModel> = vec![];
+    let mut fast: Vec<&AvailableModel> = vec![];
+
+    for m in available {
+        match classify_model_tier(&m.id) {
+            ModelTier::Premium => premium.push(m),
+            ModelTier::Standard => standard.push(m),
+            ModelTier::Fast => fast.push(m),
+        }
+    }
+
+    // Primary: best Standard-tier model (balanced speed/quality)
+    let primary = standard
+        .iter()
+        .max_by_key(|m| model_preference_score(&m.id))
+        .map(|m| m.id.clone())
+        .or_else(|| {
+            // Fallback to best Fast model if no Standard available
+            fast.iter()
+                .max_by_key(|m| model_preference_score(&m.id))
+                .map(|m| m.id.clone())
+        })
+        .unwrap_or_else(|| available[0].id.clone());
+
+    // Deep: best Premium-tier model (max reasoning for escalation)
+    let deep = premium
+        .iter()
+        .max_by_key(|m| model_preference_score(&m.id))
+        .map(|m| m.id.clone())
+        .or_else(|| {
+            // Fallback to best Standard model that's different from primary
+            standard
+                .iter()
+                .filter(|m| m.id != primary)
+                .max_by_key(|m| model_preference_score(&m.id))
+                .map(|m| m.id.clone())
+        })
+        .unwrap_or_else(|| primary.clone());
+
+    tracing::info!(
+        primary = %primary,
+        deep = %deep,
+        total_available = available.len(),
+        premium_count = premium.len(),
+        standard_count = standard.len(),
+        fast_count = fast.len(),
+        "model selection complete"
+    );
+
+    ModelSelection {
+        primary,
+        deep,
+        available: available.to_vec(),
     }
 }
 

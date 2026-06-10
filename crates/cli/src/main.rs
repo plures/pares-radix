@@ -3037,8 +3037,9 @@ enum Commands {
         )]
         model_url: String,
 
-        /// Model name to use.
-        #[arg(long, env = "PARES_MODEL", default_value = "claude-sonnet-4.5")]
+        /// Model name to use. Set to "auto" or leave as default with --auto-models
+        /// to let pares-radix discover and select the best available model.
+        #[arg(long, env = "PARES_MODEL", default_value = "auto")]
         model: String,
 
         /// Use GitHub Copilot device flow authentication.
@@ -3046,7 +3047,8 @@ enum Commands {
         copilot: bool,
 
         /// Deep model name used for low-confidence escalation.
-        #[arg(long, env = "PARES_DEEP_MODEL", default_value = "claude-opus-4.6")]
+        /// Set to "auto" or leave as default with --auto-models to auto-select.
+        #[arg(long, env = "PARES_DEEP_MODEL", default_value = "auto")]
         deep_model: String,
 
         /// Deep model API URL (defaults to --model-url).
@@ -4135,17 +4137,31 @@ async fn main() {
             let mut deep_escalation_enabled = default_deep_escalation_enabled();
             let mut runtime_log_level = "info".to_string();
 
-            // Apply config file defaults when CLI wasn't explicitly set
-            if model == "claude-sonnet-4.5" {
+            // Apply config file overrides — only override CLI "auto" when config
+            // specifies a concrete model (not "auto" or empty)
+            if model == "auto" && radix_config.model.primary != "auto" && !radix_config.model.primary.is_empty() {
                 model = radix_config.model.primary.clone();
             }
-            if deep_model == "claude-opus-4.6" {
+            if deep_model == "auto" && radix_config.model.deep != "auto" && !radix_config.model.deep.is_empty() {
                 deep_model = radix_config.model.deep.clone();
             }
-            if model_url == "https://models.inference.ai.azure.com" {
+            if model_url == "https://models.inference.ai.azure.com" && !radix_config.model.endpoint.is_empty() {
                 model_url = radix_config.model.endpoint.clone();
             }
             let copilot = copilot || radix_config.model.copilot;
+
+            // For non-copilot mode, "auto" falls back to sensible defaults since
+            // we can't discover models from arbitrary OpenAI-compatible endpoints.
+            if !copilot {
+                if model == "auto" {
+                    model = "gpt-4o".to_string();
+                    tracing::info!("non-copilot mode: defaulting primary model to gpt-4o");
+                }
+                if deep_model == "auto" {
+                    deep_model = "gpt-4o".to_string();
+                    tracing::info!("non-copilot mode: defaulting deep model to gpt-4o");
+                }
+            }
 
             if copilot {
                 tracing::info!("Copilot auth enabled");
@@ -4295,8 +4311,56 @@ async fn main() {
                         oauth_token
                     };
 
-                    let auth = CopilotAuth::new(oauth_token.clone());
+                    let mut auth = CopilotAuth::new(oauth_token.clone());
                     let deep_auth = CopilotAuth::new(oauth_token);
+
+                    // Smart model discovery: if model or deep_model is "auto",
+                    // probe the Copilot API for available models and select the best.
+                    if model == "auto" || deep_model == "auto" {
+                        tracing::info!("auto-detecting available models...");
+                        match auth.list_models().await {
+                            Ok(available) if !available.is_empty() => {
+                                let selection = pares_agens_core::auth::copilot::select_models(&available);
+                                if model == "auto" {
+                                    tracing::info!(selected = %selection.primary, "auto-selected primary model");
+                                    model = selection.primary;
+                                    *model_name.write().await = model.clone();
+                                }
+                                if deep_model == "auto" {
+                                    tracing::info!(selected = %selection.deep, "auto-selected deep model");
+                                    deep_model = selection.deep;
+                                    *deep_model_name.write().await = deep_model.clone();
+                                }
+                                tracing::info!(
+                                    available_count = available.len(),
+                                    models = %available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>().join(", "),
+                                    "model discovery complete"
+                                );
+                            }
+                            Ok(_) => {
+                                tracing::warn!("model discovery returned empty list, using defaults");
+                                if model == "auto" {
+                                    model = "claude-sonnet-4.5".to_string();
+                                    *model_name.write().await = model.clone();
+                                }
+                                if deep_model == "auto" {
+                                    deep_model = "claude-opus-4.6".to_string();
+                                    *deep_model_name.write().await = deep_model.clone();
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "model discovery failed, using defaults");
+                                if model == "auto" {
+                                    model = "claude-sonnet-4.5".to_string();
+                                    *model_name.write().await = model.clone();
+                                }
+                                if deep_model == "auto" {
+                                    deep_model = "claude-opus-4.6".to_string();
+                                    *deep_model_name.write().await = deep_model.clone();
+                                }
+                            }
+                        }
+                    }
 
                     // Default fallback chain for Copilot: if the primary model
                     // is unavailable (enterprise-only, rate-limited, etc.), try
