@@ -346,6 +346,162 @@ impl Agent {
         self
     }
 
+    /// Select the appropriate model client for a request based on context size and complexity.
+    ///
+    /// Algorithm:
+    /// 1. Context size is the GATE — if a tier's model can't fit the context, skip it
+    /// 2. Complexity is the SELECTOR — pick the cheapest tier that handles the task
+    /// 3. Failover is handled at the client level (fallback chains per tier)
+    ///
+    /// Context size gate: estimate total tokens, reject models where
+    /// context_window < total_tokens * 1.3 (30% headroom for response generation).
+    fn select_model_for_request(&self, content: &str) -> Option<&Arc<dyn ModelClient>> {
+        let word_count = content.split_whitespace().count();
+        let complexity = Self::estimate_complexity(content, word_count);
+
+        // Rough token estimate: ~1.3 tokens per word for English text.
+        // This doesn't include system prompt or history — those are managed
+        // separately by the context window manager. This is just the MESSAGE
+        // itself as a quick filter.
+        let estimated_message_tokens = (word_count as u64).saturating_mul(13) / 10;
+
+        tracing::info!(
+            words = word_count,
+            complexity = complexity,
+            est_tokens = estimated_message_tokens,
+            has_fast = self.fast_model_client.is_some(),
+            has_deep = self.deep_model_client.is_some(),
+            "model selection: context-size-gated complexity routing"
+        );
+
+        // Context-size gate check for a model client.
+        // Returns true if the model's window can accommodate this message
+        // (with headroom). Note: full context (history + system prompt) is
+        // managed elsewhere — this prevents obviously-too-large messages
+        // from being sent to small-context models.
+        let fits_context = |client: &Arc<dyn ModelClient>| -> bool {
+            match client.context_window() {
+                Some(window) => {
+                    // 30% headroom for system prompt, history, and response
+                    let required = estimated_message_tokens.saturating_mul(13) / 10;
+                    window >= required
+                }
+                None => true, // Unknown window = don't gate
+            }
+        };
+
+        // Tier selection based on complexity score:
+        // 0-1: Fast tier (simple follow-ups, acknowledgments, short factual)
+        // 2-3: Standard tier (moderate questions, tool use, summaries)
+        // 4+:  Premium tier (complex reasoning, multi-step, design, comparison)
+        //
+        // If the preferred tier can't fit the context, cascade UP (larger models
+        // have larger windows). Never cascade DOWN for context overflow.
+        match complexity {
+            0..=1 => {
+                // Try fast first (if it fits), fall back to standard, then deep
+                if let Some(ref fast) = self.fast_model_client {
+                    if fits_context(fast) {
+                        tracing::info!("routing to Fast tier (complexity={})", complexity);
+                        return Some(fast);
+                    }
+                    tracing::info!("fast model context too small, escalating to standard");
+                }
+                // Standard as fallback
+                if let Some(ref standard) = self.model_client {
+                    if fits_context(standard) {
+                        return Some(standard);
+                    }
+                }
+                // Deep as last resort (largest context)
+                self.deep_model_client.as_ref()
+            }
+            2..=3 => {
+                // Standard tier, escalate to deep if context overflows
+                if let Some(ref standard) = self.model_client {
+                    if fits_context(standard) {
+                        tracing::info!("routing to Standard tier (complexity={})", complexity);
+                        return Some(standard);
+                    }
+                    tracing::info!("standard model context too small, escalating to premium");
+                }
+                // Deep as fallback for large context
+                self.deep_model_client.as_ref().or(self.model_client.as_ref())
+            }
+            _ => {
+                // Premium tier directly — these have the largest context windows
+                if let Some(ref deep) = self.deep_model_client {
+                    tracing::info!("routing to Premium tier (complexity={})", complexity);
+                    Some(deep)
+                } else {
+                    self.model_client.as_ref()
+                }
+            }
+        }
+    }
+
+    /// Estimate request complexity from content signals.
+    /// Returns a score 0-6 where higher = more complex.
+    ///
+    /// This is intentionally heuristic — no embedding or model call needed.
+    /// The goal is: short contextual follow-ups → 0-1, moderate questions → 2-3,
+    /// complex analytical/design/comparison tasks → 4+.
+    fn estimate_complexity(content: &str, word_count: usize) -> u8 {
+        let mut score: u8 = 0;
+        let lower = content.to_lowercase();
+
+        // Length signal: very short messages are almost always simple
+        if word_count <= 3 {
+            return 0; // "yes", "do it", "thanks", "ok cool"
+        }
+        if word_count <= 8 {
+            score += 1; // Short but might have substance
+        } else if word_count <= 30 {
+            score += 2; // Medium — could be anything
+        } else {
+            score += 2; // Long context doesn't mean complex (could be pasting a log)
+        }
+
+        // Reasoning indicators: questions that require synthesis/analysis
+        let reasoning_words = ["why", "how", "compare", "design", "explain",
+            "analyze", "evaluate", "trade-off", "tradeoff", "architect",
+            "what are the implications", "pros and cons", "difference between"];
+        for word in &reasoning_words {
+            if lower.contains(word) {
+                score += 1;
+                break; // Only count once
+            }
+        }
+
+        // Multi-step indicators
+        let multi_step_markers = ["first", "then", "after that", "finally",
+            "step 1", "step 2", "also", "additionally"];
+        let multi_step_count = multi_step_markers.iter()
+            .filter(|m| lower.contains(*m))
+            .count();
+        if multi_step_count >= 2 {
+            score += 1;
+        }
+
+        // Code/technical complexity
+        if content.contains('`') || content.contains("fn ") || content.contains("def ")
+            || content.contains("impl ") || content.contains("class ")
+            || content.contains("struct ") {
+            score += 1;
+        }
+
+        // Multi-clause structure (compound questions)
+        let clause_separators = content.matches(';').count()
+            + content.matches(" and ").count()
+            + content.matches(" but ").count()
+            + content.matches(" or ").count();
+        if clause_separators >= 3 {
+            score += 1;
+        }
+
+        score.min(6) // Cap at 6
+    }
+
     /// Attach a delegation broker for decomposed tasks.
     pub fn with_delegation(mut self, broker: DelegationBroker) -> Self {
         self.delegation_broker = Some(broker);
@@ -665,26 +821,20 @@ impl Agent {
         let session_channel = self.resolve_branch_channel(channel);
         let session_id = Self::branch_label(&session_channel);
 
-        // Dynamic model selection: use fast client for short/simple messages
-        let word_count = content.split_whitespace().count();
-        let use_fast = word_count <= 5 && self.fast_model_client.is_some();
-        let effective_client = if use_fast {
-            tracing::info!(words = word_count, "using fast model for short message");
-            self.fast_model_client.as_ref().unwrap()
-        } else {
-            match &self.model_client {
-                Some(client) => client,
-                None => {
-                    warn!("agent: model client not configured");
-                    return Some(Event::ModelResponse {
-                        request_id: id.to_string(),
-                        model: "unconfigured".into(),
-                        content: "⚠️ Model client not configured.".into(),
-                    });
-                }
+        // Dynamic model selection based on context size + complexity.
+        // Context size is the GATE (hard constraint), complexity is the SELECTOR.
+        let effective_client = self.select_model_for_request(content);
+        let model_client = match effective_client {
+            Some(client) => client,
+            None => {
+                warn!("agent: no model client available for request");
+                return Some(Event::ModelResponse {
+                    request_id: id.to_string(),
+                    model: "unconfigured".into(),
+                    content: "⚠️ Model client not configured.".into(),
+                });
             }
         };
-        let model_client = effective_client;
         let tool_dispatcher = match &self.tool_dispatcher {
             Some(dispatcher) => dispatcher,
             None => {

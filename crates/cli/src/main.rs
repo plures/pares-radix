@@ -770,6 +770,14 @@ impl ModelClient for ToggleableModelClient {
         }
         self.inner.complete(messages, tools, options).await
     }
+
+    fn context_window(&self) -> Option<u64> {
+        self.inner.context_window()
+    }
+
+    fn model_id(&self) -> Option<String> {
+        self.inner.model_id()
+    }
 }
 
 // SpineToolDispatcher removed — ServeSpine now uses SpineProcedureDispatcher

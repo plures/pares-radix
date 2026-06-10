@@ -221,6 +221,18 @@ pub trait ModelClient: Send + Sync {
         let _ = tx.send(StreamDelta::Done);
         Ok(result)
     }
+
+    /// Returns the model's maximum context window in tokens, if known.
+    /// Used for context-aware model routing: requests exceeding this window
+    /// should be routed to a model with a larger context.
+    fn context_window(&self) -> Option<u64> {
+        None
+    }
+
+    /// Returns the model identifier this client is currently using.
+    fn model_id(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Abstraction over the MCP tool dispatcher.

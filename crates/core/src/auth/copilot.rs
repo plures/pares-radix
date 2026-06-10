@@ -606,6 +606,17 @@ impl ModelClient for CopilotModelClient {
             model: None,
         })
     }
+
+    fn context_window(&self) -> Option<u64> {
+        // Estimate context window from model name.
+        // Use try_read to avoid blocking in async contexts.
+        let model = self.model.try_read().ok()?;
+        Some(estimate_context_window(&model))
+    }
+
+    fn model_id(&self) -> Option<String> {
+        self.model.try_read().ok().map(|m| m.clone())
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -786,6 +797,48 @@ fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
     } else {
         Some(models)
     }
+}
+
+/// Estimate a model's context window from its name.
+/// Returns conservative estimates; discovery-based `max_input_tokens` overrides these.
+fn estimate_context_window(model_id: &str) -> u64 {
+    let id = model_id.to_lowercase();
+
+    // Premium models — typically largest context windows
+    if id.contains("opus") || id.contains("o1") || id.contains("o3") {
+        return 200_000;
+    }
+    if id.contains("gpt-5") {
+        return 256_000;
+    }
+    // Standard models
+    if id.contains("sonnet") || id.contains("claude") {
+        return 200_000;
+    }
+    if id.contains("gpt-4o") && !id.contains("mini") {
+        return 128_000;
+    }
+    if id.contains("gpt-4.1") || id.contains("gpt-4.5") {
+        return 128_000;
+    }
+    if id.contains("gemini") {
+        return 1_000_000; // Gemini has massive context
+    }
+    // Fast models — usually smaller context
+    if id.contains("haiku") {
+        return 200_000;
+    }
+    if id.contains("mini") {
+        return 128_000;
+    }
+    if id.contains("flash") {
+        return 1_000_000; // Gemini Flash still has large context
+    }
+    if id.contains("nano") {
+        return 32_000;
+    }
+    // Conservative default
+    128_000
 }
 
 /// Classify a model into a tier based on its identifier.
