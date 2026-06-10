@@ -437,6 +437,246 @@ impl CerebellumActionHandler {
         }))
     }
 
+    // ── Unified Router & Task Steering actions ────────────────────────────────
+
+    /// Classify whether a message is a continuation of an existing task.
+    /// Mirrors task-steering.px logic as a Rust fallback until PxBridge wires fully.
+    async fn classify_continuation_action(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let message = params.get("message").and_then(|v| v.as_str()).unwrap_or_default();
+        let lower = message.to_lowercase();
+
+        // Read promises from state
+        let promises = self.read_state(&json!({"key": "agent_promises"})).await
+            .ok().and_then(|v| v.get("value").cloned())
+            .filter(|v| !v.is_null());
+
+        let tasks = self.read_state(&json!({"key": "active_tasks"})).await
+            .ok().and_then(|v| v.get("value").cloned())
+            .filter(|v| !v.is_null());
+
+        // No promises or tasks → always new request
+        if promises.is_none() && tasks.is_none() {
+            return Ok(json!({
+                "is_continuation": false,
+                "confidence": 1.0,
+                "target_task_id": null,
+                "intent": "new_request"
+            }));
+        }
+
+        // Confirmation patterns
+        let confirm_patterns = [
+            "do it", "yes", "go ahead", "proceed", "fix it", "do that",
+            "go for it", "make it happen", "execute", "run it", "ship it",
+            "start", "begin", "let's go", "yep", "yeah", "confirmed",
+            "approved", "do both", "do all", "continue", "keep going",
+        ];
+        if confirm_patterns.iter().any(|p| lower.contains(p)) {
+            return Ok(json!({
+                "is_continuation": true,
+                "confidence": 0.95,
+                "target_task_id": null,
+                "intent": "confirm"
+            }));
+        }
+
+        // Cancel patterns
+        let cancel_patterns = ["never mind", "cancel", "stop", "don't", "abort", "forget it", "scratch that"];
+        if cancel_patterns.iter().any(|p| lower.contains(p)) {
+            return Ok(json!({
+                "is_continuation": true,
+                "confidence": 0.9,
+                "target_task_id": null,
+                "intent": "cancel"
+            }));
+        }
+
+        // Redirect patterns
+        let redirect_patterns = ["actually", "instead", "focus on", "prioritize", "switch to"];
+        if redirect_patterns.iter().any(|p| lower.contains(p)) && message.len() > 15 {
+            return Ok(json!({
+                "is_continuation": true,
+                "confidence": 0.8,
+                "target_task_id": null,
+                "intent": "redirect"
+            }));
+        }
+
+        // Short messages after promises = likely continuation
+        if message.split_whitespace().count() <= 5 && promises.is_some() {
+            return Ok(json!({
+                "is_continuation": true,
+                "confidence": 0.7,
+                "target_task_id": null,
+                "intent": "confirm"
+            }));
+        }
+
+        Ok(json!({
+            "is_continuation": false,
+            "confidence": 0.6,
+            "target_task_id": null,
+            "intent": "new_request"
+        }))
+    }
+
+    /// Word count.
+    fn word_count_action(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or_default();
+        Ok(json!(text.split_whitespace().count()))
+    }
+
+    /// Match text against a list of patterns (returns true if any match).
+    fn match_patterns_action(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or_default().to_lowercase();
+        let patterns = params.get("patterns").and_then(|v| v.as_array());
+        if let Some(pats) = patterns {
+            let matched = pats.iter().any(|p| {
+                p.as_str().map_or(false, |s| text.contains(s))
+            });
+            Ok(json!(matched))
+        } else {
+            Ok(json!(false))
+        }
+    }
+
+    /// Recall memories via embedding search (delegates to PluresLM).
+    /// For now returns empty since PluresLM isn't wired into the action handler.
+    async fn recall_memories_action(&self, params: &Value) -> Result<Value, ExecutionError> {
+        // TODO: Wire to PluresLM.recall() when available in action handler context
+        let _embedding = params.get("embedding");
+        let _limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10);
+        Ok(json!({"memories": []}))
+    }
+
+    /// Extract entities from text (lightweight NER).
+    fn extract_entities_action(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params.get("text").and_then(|v| v.as_str()).unwrap_or_default();
+        let mut entities = vec![];
+        // Simple pattern extraction (file paths, URLs, @mentions, #tags)
+        for word in text.split_whitespace() {
+            if word.starts_with('/') || word.starts_with("C:\\") || word.starts_with("~/") {
+                entities.push(json!({"kind": "path", "value": word}));
+            } else if word.starts_with("http") {
+                entities.push(json!({"kind": "url", "value": word}));
+            } else if word.starts_with('@') {
+                entities.push(json!({"kind": "mention", "value": word}));
+            } else if word.starts_with('#') {
+                entities.push(json!({"kind": "tag", "value": word}));
+            }
+        }
+        Ok(json!({"entities": entities}))
+    }
+
+    /// Manage context window: trim to token budget.
+    fn manage_context_action(params: &Value) -> Result<Value, ExecutionError> {
+        let memories = params.get("memories").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let token_budget = params.get("token_budget").and_then(|v| v.as_u64()).unwrap_or(4096) as usize;
+        // Simple: take memories up to ~token budget (estimate 4 chars per token)
+        let mut context_str = String::new();
+        let mut tokens_used = 0;
+        for mem in &memories {
+            let content = mem.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+            let est_tokens = content.len() / 4;
+            if tokens_used + est_tokens > token_budget {
+                break;
+            }
+            context_str.push_str(content);
+            context_str.push('\n');
+            tokens_used += est_tokens;
+        }
+        Ok(json!({"context": context_str, "tokens_used": tokens_used}))
+    }
+
+    /// Build message array for model invocation.
+    fn build_messages_action(params: &Value) -> Result<Value, ExecutionError> {
+        let mut messages = vec![];
+        if let Some(system) = params.get("system").and_then(|v| v.as_str()) {
+            if !system.is_empty() {
+                messages.push(json!({"role": "system", "content": system}));
+            }
+        }
+        if let Some(context) = params.get("context").and_then(|v| v.as_str()) {
+            if !context.is_empty() {
+                messages.push(json!({"role": "system", "content": format!("## Context\n{}", context)}));
+            }
+        }
+        if let Some(history) = params.get("history").and_then(|v| v.as_array()) {
+            for msg in history {
+                messages.push(msg.clone());
+            }
+        }
+        if let Some(user_msg) = params.get("user_message").and_then(|v| v.as_str()) {
+            messages.push(json!({"role": "user", "content": user_msg}));
+        }
+        Ok(json!(messages))
+    }
+
+    /// Append to conversation tail (ring buffer of last N messages).
+    fn append_tail_action(params: &Value) -> Result<Value, ExecutionError> {
+        let mut tail = params.get("tail").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let role = params.get("role").and_then(|v| v.as_str()).unwrap_or("user");
+        let content = params.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        let max = params.get("max").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+
+        tail.push(json!({"role": role, "content": content}));
+        if tail.len() > max {
+            tail = tail[tail.len() - max..].to_vec();
+        }
+        Ok(json!(tail))
+    }
+
+    /// Build tool followup request.
+    fn build_tool_followup_action(params: &Value) -> Result<Value, ExecutionError> {
+        let tool_results = params.get("tool_results").cloned().unwrap_or(json!([]));
+        Ok(json!({
+            "messages": [{"role": "tool", "content": tool_results.to_string()}],
+            "model_tier": "standard",
+            "streaming": true,
+            "source": "tool_followup",
+            "task_id": null
+        }))
+    }
+
+    /// Format a template string with variable substitution.
+    fn format_string_action(params: &Value) -> Result<Value, ExecutionError> {
+        let template = params.get("template").and_then(|v| v.as_str()).unwrap_or_default();
+        let vars = params.get("vars").and_then(|v| v.as_object());
+        let mut result = template.to_string();
+        if let Some(vars) = vars {
+            for (key, val) in vars {
+                let replacement = val.as_str().map(|s| s.to_string())
+                    .unwrap_or_else(|| val.to_string());
+                result = result.replace(&format!("{{{}}}", key), &replacement);
+            }
+        }
+        Ok(json!(result))
+    }
+
+    /// Find most recent task/promise ID.
+    fn find_most_recent_action(params: &Value) -> Result<Value, ExecutionError> {
+        let tasks = params.get("tasks").and_then(|v| v.as_array());
+        let promises = params.get("promises").and_then(|v| v.as_array());
+
+        // Try tasks first (sorted by created_at desc)
+        if let Some(tasks) = tasks {
+            if let Some(last) = tasks.last() {
+                if let Some(id) = last.get("id").or(last.get("task_id")).and_then(|v| v.as_str()) {
+                    return Ok(json!(id));
+                }
+            }
+        }
+        // Fall back to promises
+        if let Some(promises) = promises {
+            if let Some(last) = promises.last() {
+                if let Some(id) = last.get("task_id").and_then(|v| v.as_str()) {
+                    return Ok(json!(id));
+                }
+            }
+        }
+        Ok(json!(null))
+    }
+
     /// Call the model client with messages and return the completion.
     async fn model_complete_action(&self, params: &Value) -> Result<Value, ExecutionError> {
         let client = self.model_client.read().unwrap().clone().ok_or_else(|| {
@@ -524,6 +764,26 @@ impl AsyncActionHandler for CerebellumActionHandler {
             "determine_model_tier" => Self::determine_model_tier(params),
             "classify" => Self::classify_action(params),
             "model_complete" => self.model_complete_action(params).await,
+            // Unified router actions (unified-router.px, task-steering.px)
+            "classify_continuation" => self.classify_continuation_action(params).await,
+            "classify_intent" => Self::detect_intent(params),
+            "word_count" => Self::word_count_action(params),
+            "match_patterns" => Self::match_patterns_action(params),
+            "embed_text" => self.compute_embedding(params).await,
+            "recall_memories" => self.recall_memories_action(params).await,
+            "extract_entities" => Self::extract_entities_action(params),
+            "manage_context" => Self::manage_context_action(params),
+            "build_messages" => Self::build_messages_action(params),
+            "append_history" => self.write_state(params).await, // Uses state store for now
+            "append_tail" => Self::append_tail_action(params),
+            "channel_send" => Ok(json!({"sent": true})), // Handled by graph output, not inline
+            "dispatch_tools" => Ok(json!({"results": []})), // TODO: wire to tool registry
+            "build_tool_followup" => Self::build_tool_followup_action(params),
+            "push_queue" => Ok(json!({"pushed": true})), // Graph handles queue routing
+            "timestamp_now" => Self::get_current_time(),
+            "format_string" => Self::format_string_action(params),
+            "find_most_recent" => Self::find_most_recent_action(params),
+            "generate_id" => Ok(json!(uuid::Uuid::new_v4().to_string())),
             _ => Err(ExecutionError::UnknownAction(name.to_string())),
         }
     }

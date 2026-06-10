@@ -534,6 +534,46 @@ impl Cerebellum {
         })
     }
 
+    /// Full dataflow pipeline: write to inbound → graph runs → delivery returned.
+    ///
+    /// This is the target architecture (unified-router.px). When the dataflow bridge
+    /// is active and has procedures loaded, this runs the COMPLETE pipeline without
+    /// the imperative preprocess/route/invoke cycle.
+    ///
+    /// Returns `Some(DeliveryResult)` if the graph produced a response, `None` to
+    /// fall through to the legacy cerebellum path.
+    pub async fn try_full_dataflow(
+        &self,
+        chat_id: i64,
+        sender: &str,
+        content: &str,
+        message_id: Option<&str>,
+    ) -> Option<dataflow_bridge::DeliveryResult> {
+        let df_bridge = self.dataflow_bridge.as_ref()?;
+        if !df_bridge.is_active() {
+            return None;
+        }
+
+        match df_bridge.process_message(chat_id, sender, content, message_id).await {
+            Ok(Some(delivery)) => {
+                info!(
+                    chat_id,
+                    content_len = delivery.content.len(),
+                    "full dataflow pipeline produced delivery"
+                );
+                Some(delivery)
+            }
+            Ok(None) => {
+                debug!(chat_id, "dataflow pipeline quiesced without delivery — falling through");
+                None
+            }
+            Err(e) => {
+                warn!(error = %e, chat_id, "dataflow pipeline error — falling through to legacy");
+                None
+            }
+        }
+    }
+
     /// Try routing via the px_bridge (trigger-based .px procedures).
     /// Falls back to Rust-native router if px_bridge is inactive, missing, or errors.
     async fn try_px_bridge_route(&self, event: &Event, learned_context: &str) -> Route {

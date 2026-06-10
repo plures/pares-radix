@@ -567,7 +567,34 @@ impl Agent {
             }
         }
 
-        // ── Cerebellum: autorecall + routing ─────────────────────────────
+        // ── Full Dataflow Pipeline (preferred path) ─────────────────────────
+        // If the dataflow bridge is active, run the entire pipeline through .px
+        // procedures. This handles routing, context, model invocation, tool loops,
+        // and delivery all within the PluresDB dataflow graph.
+        if let Some(cerebellum) = &self.cerebellum {
+            if let Event::Message { ref id, ref sender, ref content, .. } = event {
+                // Parse chat_id from message id (format: "chat_id:msg_id" or just numeric)
+                let chat_id = id.split(':').next()
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(0);
+                if let Some(delivery) = cerebellum.try_full_dataflow(
+                    chat_id,
+                    sender,
+                    content,
+                    Some(id.as_str()),
+                ).await {
+                    // Full pipeline handled — package as ModelResponse
+                    return Some(Event::ModelResponse {
+                        request_id: request_id.to_string(),
+                        content: delivery.content,
+                        model: "dataflow".to_string(),
+                    });
+                }
+            }
+        }
+
+        // ── Legacy Cerebellum: autorecall + routing ──────────────────────────
+        // Falls through here when dataflow bridge isn't active or didn't produce output.
         let (route, learned_context, clear_history) = if let (Some(cerebellum), Some(plures_lm)) =
             (&self.cerebellum, &self.plures_lm)
         {
