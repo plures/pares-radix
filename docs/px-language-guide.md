@@ -15,6 +15,7 @@
   - [Control Flow](#control-flow)
   - [Parallel Execution](#parallel-execution)
   - [Error Handling & Retry](#error-handling--retry)
+- [Dataflow Procedures (v2)](#dataflow-procedures-v2)
 - [Contracts](#contracts)
 - [Functions](#functions)
 - [Triggers (Event-Driven)](#triggers-event-driven)
@@ -408,6 +409,128 @@ The async executor also supports retry on `try` blocks when procedures are const
 This retries the entire `try` block up to N times before falling through to `catch`.
 
 > **Note:** `.px` syntax for try-level retry (`try retry 3:`) is planned but not yet implemented in the parser. Use parallel branch retry or the programmatic builder for now.
+
+---
+
+## Dataflow Procedures (v2)
+
+> **New in pluresdb-px 0.14+**: Dataflow procedures replace trigger-based procedures with pure functions connected by queues.
+
+Dataflow procedures are pure functions with typed inputs and outputs. Unlike trigger-based procedures (which fire on events), dataflow procedures fire when **all input queues have data**.
+
+### Why Dataflow?
+
+| Trigger-based (v1) | Dataflow (v2) |
+|---|---|
+| Fires on event pattern | Fires when inputs ready |
+| Dependencies invisible | Dependencies in signature |
+| Sequential by priority | Concurrent by default |
+| Reads shared state | Pure function (args → return) |
+| Manual ordering | Automatic via queue topology |
+
+### Basic Syntax
+
+```px
+# Pure function: takes message, returns classification
+procedure classify_message(message: string) -> classification:
+  given: "Classify an incoming message"
+  detect_intent {text: $message} -> $intent
+  score_complexity {text: $message} -> $complexity
+  return $classification
+```
+
+### Queue Bindings
+
+Use `from "queue_name"` to specify which queue feeds a parameter, and `into "queue_name"` for the output destination:
+
+```px
+# Reads from "inbound" queue, writes to "classification" queue
+procedure classify_message(message: string from "inbound") -> classification into "classification":
+  given: "Classify an incoming message"
+  detect_intent {text: $message} -> $intent
+  return $intent
+```
+
+Default bindings (when `from`/`into` are omitted):
+- Input: queue name = parameter name
+- Output: queue name = procedure name
+
+### Multi-Input Procedures
+
+Procedures with multiple inputs fire only when **ALL** queues have data:
+
+```px
+# Fires when BOTH classification AND context are available
+procedure route_message(classification: classification from "classification", context: string from "context") -> route into "route":
+  given: "Determine model tier"
+  when classification.needs_deep_model:
+    return {tier: "premium", reason: "high complexity"}
+  end
+  return {tier: "fast", reason: "simple message"}
+```
+
+### Pipeline Composition
+
+Chain procedures by connecting output queues to input queues:
+
+```
+inbound → [classify_message] → classification → [route_message] → route → [invoke_model] → response
+```
+
+No orchestrator needed — data flows through queues automatically.
+
+### Termination
+
+- A procedure that returns `null`/nothing → nothing pushed downstream → propagation stops
+- An empty queue means a stopped system (natural quiescence)
+- Depth guard: queue rejects writes when lineage depth exceeds limit (default 25)
+
+### Available Types
+
+Parameter and return types support:
+- Built-in: `string`, `int`, `float`, `bool`, `duration`
+- Lists: `list[string]`, `list[int]`
+- Optional: `string?`, `int?`
+- Enums: `enum(fast, standard, premium)`
+- User-defined: any identifier (e.g., `classification`, `route`, `response`)
+
+### Effect Boundary
+
+Procedures are pure. Side effects (model calls, tool dispatch, network IO) happen through **actions** called within steps. Actions are implemented in Rust and registered in the `CerebellumActionHandler`.
+
+Available actions for dataflow procedures:
+
+| Action | Purpose |
+|---|---|
+| `normalize_text` | Lowercase + trim |
+| `detect_intent` | Classify as question/command/statement/greeting/farewell |
+| `score_complexity` | Structural complexity score 0-6 |
+| `detect_tools_needed` | Pattern-match for tool-requiring messages |
+| `match_plugin` | Match against known plugin categories |
+| `extract_topic` | Extract significant words as topic |
+| `detect_topic_shift` | Compare current vs previous topic |
+| `determine_model_tier` | Complexity → model tier decision |
+| `model_complete` | Call LLM API |
+| `compute_embedding` | Generate embedding vector |
+| `read_state` / `write_state` | Persistent state access |
+
+### Migration from Trigger-Based
+
+```px
+# OLD (trigger-based)
+procedure classify:
+  trigger: on_write {pattern: "inbound:*"}
+  pluresdb_read {key: "inbound:latest"} -> $msg
+  detect_intent {text: $msg.content} -> $intent
+  pluresdb_write {key: "classification", value: $intent}
+
+# NEW (dataflow)
+procedure classify_message(message: string from "inbound") -> classification into "classification":
+  detect_intent {text: $message} -> $intent
+  return $intent
+```
+
+Both styles coexist — files can contain trigger-based and dataflow procedures side by side.
 
 ---
 
