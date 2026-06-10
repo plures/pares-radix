@@ -1,38 +1,32 @@
-# routing.px - Event routing procedure
+# routing.px - Message routing procedure
 #
-# Replaces: crates/core/src/cerebellum/router.rs (343 lines of Rust)
-# Decides where an event goes after preprocessing: model, tool, delivery, or skip.
+# Replaces: cerebellum/router.rs (~300 lines of Rust)
+# Pure function: determines how to route a message based on classification.
 
-fact route_decision:
-  destination: string
-  model_tier: string
-  skip_reason: string
-  priority: int
-
-procedure route_event:
-  trigger: manual
-  given: "Route a preprocessed event to the appropriate handler"
-  db_get {key: "session:classification"} -> $classification
-  when classification.intent == "command":
-    emit {type: "route.command", command: $event}
-    return
+procedure route_message(classification: classification from "classification", context: string from "context") -> route into "route":
+  given: "Determine which model tier and response strategy handles this message"
+  when classification.needs_deep_model:
+    return {tier: "premium", reason: "high complexity", streaming: true}
   end
   when classification.needs_tools:
-    emit {type: "route.tool_first", event: $event}
-    return
+    return {tier: "standard", reason: "tool use required", streaming: false}
   end
-  select_model_tier {complexity: $classification, context: $context} -> $tier
-  emit {type: "route.model", tier: $tier, event: $event}
+  when classification.complexity > 3:
+    return {tier: "standard", reason: "moderate complexity", streaming: true}
+  end
+  when classification.intent == "greeting":
+    return {tier: "fast", reason: "greeting", streaming: false}
+  end
+  when classification.intent == "farewell":
+    return {tier: "fast", reason: "farewell", streaming: false}
+  end
+  return {tier: "fast", reason: "simple message", streaming: true}
 
-procedure select_model_tier:
-  trigger: manual
-  given: "Select model tier based on complexity and context requirements"
-  when complexity > 3:
-    emit {type: "tier.selected", tier: "deep", reason: "high complexity"}
-    return
+procedure route_with_context_gate(classification: classification, context_size: int) -> route:
+  given: "Apply context-size gating: if context exceeds model window, cascade UP"
+  determine_model_tier {complexity: $classification.complexity} -> $base_tier
+  estimate_context_window {tier: $base_tier} -> $window
+  when context_size > $window:
+    return {tier: "premium", reason: "context overflow", streaming: true}
   end
-  when complexity > 1:
-    emit {type: "tier.selected", tier: "standard", reason: "moderate complexity"}
-    return
-  end
-  emit {type: "tier.selected", tier: "fast", reason: "simple response"}
+  return {tier: $base_tier, reason: "within window", streaming: true}

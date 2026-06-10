@@ -1,51 +1,31 @@
-# Memory Procedures — .px Reactive Memory System
+# memory.px - Memory management procedures
 #
-# These procedures implement pares-radix's reactive memory layer.
-# They fire on PluresDB writes and maintain indexed memory nodes
-# for search, consolidation, and context loading.
+# Handles memory extraction, storage, and retrieval.
+# Conversation memories are stored on response, session context on start.
 
-procedure on_conversation_complete:
-  trigger: on_write {pattern: "conversation:*:response:*"}
-  given: "Extract facts, decisions, entities from a completed turn and index them"
-  db_get {key: "trigger.node_path"} -> $turn
-  extract_entities {content: $turn} -> $entities
-  loop over $entities as entity:
-    db_put {key: "entity", value: $entity}
-  end
-  classify_turn {turn: $turn} -> $classification
-  when classification.is_decision:
-    compute_embedding {text: $classification} -> $embedding
-    db_put {key: "memory:decision", value: $embedding}
-  end
-  when classification.is_learning:
-    compute_embedding {text: $classification} -> $embedding
-    db_put {key: "memory:learning", value: $embedding}
-  end
+procedure extract_memories(response: string from "conversation_response") -> memories into "memory_store":
+  given: "Extract memorable facts from a conversation response"
+  identify_facts {text: $response} -> $facts
+  compute_embedding {text: $response} -> $embedding
+  format_memory_entry {facts: $facts, embedding: $embedding} -> $entry
+  return $entry
 
-procedure on_session_start:
-  trigger: on_write {pattern: "session:*:start"}
-  given: "Load relevant context from memory nodes into session context"
-  db_query {prefix: "memory:*", limit: 20} -> $recent_memories
-  db_put {key: "session:context", value: $recent_memories}
+procedure init_session_memory(session_start: string from "session_start") -> session_context into "session_context":
+  given: "Load relevant memories for a new session"
+  db_get_prefix {prefix: "memory:long_term:"} -> $memories
+  compute_embedding {text: $session_start} -> $session_embedding
+  rank_by_relevance {memories: $memories, embedding: $session_embedding, top_k: 10} -> $relevant
+  return $relevant
 
-procedure periodic_consolidate:
-  trigger: cron {schedule: "0 */6 * * *"}
-  given: "Merge duplicate memories and decay old ones"
-  db_query {prefix: "memory:*"} -> $all_memories
-  find_duplicates {memories: $all_memories, threshold: 92} -> $duplicate_groups
-  loop over $duplicate_groups as group:
-    merge_memories {group: $group} -> $merged
-    db_put {key: "memory:merged", value: $merged}
-  end
-  db_query {prefix: "memory:*", older_than: "7d"} -> $aging
-  loop over $aging as mem:
-    decay_memory {memory: $mem, factor: 95}
-  end
+procedure periodic_memory_maintenance(all_memories: list) -> maintenance_results:
+  given: "Run periodic memory maintenance: decay, consolidation, cleanup"
+  evaluate_retention {all_memories: $all_memories} -> $retention
+  consolidate_memories {all_memories: $all_memories} -> $consolidation
+  return {retention: $retention, consolidation: $consolidation}
 
-procedure memory_search:
-  trigger: manual
-  given: "Search indexed memory nodes by semantic similarity"
-  compute_embedding {text: "query"} -> $query_embedding
-  db_query {prefix: "memory:*"} -> $candidates
-  cosine_rank {query: $query_embedding, candidates: $candidates, limit: 10} -> $results
-  return $results
+procedure correct_memory(correction: string, memory_key: string) -> corrected_memory:
+  given: "Apply a user correction to an existing memory entry"
+  db_get {key: $memory_key} -> $existing
+  apply_correction {memory: $existing, correction: $correction} -> $corrected
+  pluresdb_write {key: $memory_key, value: $corrected}
+  return $corrected

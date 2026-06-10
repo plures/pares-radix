@@ -28,6 +28,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, RwLock};
+use std::sync::RwLock as StdRwLock;
 
 use crate::memory::embed::EmbeddingProvider;
 use crate::px_adapter::AsyncActionHandler;
@@ -50,7 +51,8 @@ pub struct CerebellumActionHandler {
     /// Channel for emitting spine events into the pipeline.
     event_tx: Option<mpsc::Sender<SpineEvent>>,
     /// Model client for `model_complete` action.
-    model_client: Option<Arc<dyn crate::model::ModelClient>>,
+    /// Wrapped in RwLock so it can be set after construction (late binding).
+    model_client: Arc<StdRwLock<Option<Arc<dyn crate::model::ModelClient>>>>,
 }
 
 impl CerebellumActionHandler {
@@ -63,7 +65,7 @@ impl CerebellumActionHandler {
             embedder,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
-            model_client: None,
+            model_client: Arc::new(StdRwLock::new(None)),
         }
     }
 
@@ -74,7 +76,7 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
-            model_client: None,
+            model_client: Arc::new(StdRwLock::new(None)),
         }
     }
 
@@ -88,14 +90,21 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
-            model_client: None,
+            model_client: Arc::new(StdRwLock::new(None)),
         }
     }
 
     /// Attach a model client to enable `model_complete` action.
-    pub fn with_model_client(mut self, client: Arc<dyn crate::model::ModelClient>) -> Self {
-        self.model_client = Some(client);
+    /// Can be called after construction (late binding pattern).
+    pub fn with_model_client(self, client: Arc<dyn crate::model::ModelClient>) -> Self {
+        *self.model_client.write().unwrap() = Some(client);
         self
+    }
+
+    /// Set the model client after construction (for late binding when
+    /// the model client isn't available at cerebellum init time).
+    pub fn set_model_client(&self, client: Arc<dyn crate::model::ModelClient>) {
+        *self.model_client.write().unwrap() = Some(client);
     }
 
     /// Create a handler with a pre-populated state map (useful for testing).
@@ -105,7 +114,7 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(state)),
             event_tx: None,
-            model_client: None,
+            model_client: Arc::new(StdRwLock::new(None)),
         }
     }
 
@@ -430,10 +439,10 @@ impl CerebellumActionHandler {
 
     /// Call the model client with messages and return the completion.
     async fn model_complete_action(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let client = self.model_client.as_ref().ok_or_else(|| {
+        let client = self.model_client.read().unwrap().clone().ok_or_else(|| {
             ExecutionError::ActionFailed {
                 action: "model_complete".to_string(),
-                message: "no model client attached".to_string(),
+                message: "no model client attached (call set_model_client first)".to_string(),
             }
         })?;
 

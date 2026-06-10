@@ -1,19 +1,22 @@
-feat: dataflow bridge — connect cerebellum to queue-driven procedures
+refactor: migrate ALL procedures to dataflow syntax (no more triggers)
 
-Wires the new pluresdb-px dataflow module into pares-radix:
+Complete migration of all 17 procedure files from trigger-based to
+dataflow syntax. Zero trigger: keywords remain in praxis/procedures/.
 
-- DataflowBridge struct: replaces px_bridge.route_event() for new-style
-  procedures. Pushes event data into graph input queues, runs to
-  quiescence, reads results from output queues.
+Changes:
+- All procedures now use typed signatures with explicit params
+- Event-triggered procedures use from-queue bindings
+- Output procedures use into-queue bindings
+- Manual/cron procedures use explicit params (no queue bindings)
+- Deleted *_dataflow.px files (superseded by main files)
+- model_client field now uses StdRwLock for late binding
+- set_model_client() enables post-construction model attachment
 
-- Re-exports from pares-radix-praxis: DataflowGraph types,
-  AsyncActionHandler, execute_async_with_vars — downstream crates
-  access the full dataflow API through praxis.
+Stats: -287 net lines (639 deleted, 352 added)
+  Trigger boilerplate eliminated across all procedure files.
 
-- Updated pluresdb-px pin to 483af63 (includes dataflow module + grammar).
+The full .px procedure corpus is now dataflow-native:
+  inbound -> preprocess -> classify -> route -> invoke -> deliver
 
-- Registered dataflow_bridge module in cerebellum.
-
-Integration path: the cerebellum will gradually migrate procedures
-from trigger-based (px_bridge) to queue-driven (dataflow_bridge).
-Both paths coexist during migration.
+All procedures are pure functions. No triggers. No priority ordering.
+Data flows through queues. The system stops when queues are empty.

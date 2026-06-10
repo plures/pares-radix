@@ -1,83 +1,42 @@
-# constraint-eval.px - Constraint evaluation engine + authorization gate
+# constraint-eval.px - Constraint evaluation procedures
 #
-# Replaces: crates/core/src/praxis/constraints.rs (~776 lines of Rust)
-# ADR-0012: 5-level brain-first authorization gate
-# ADR-0013: Task-decomposition size constraints (C-0009, C-0010)
+# Evaluates praxis constraints against current state and produces
+# violations or validations.
 
-constraint task_description_size:
-  when: task.description_word_count > 200
-  require: false
-  severity: error
-  message: "Sub-agent task descriptions must not exceed 200 words (ADR-0013, C-0009)."
+procedure evaluate_constraint(constraint_name: string, state: string) -> evaluation:
+  given: "Evaluate a single praxis constraint against current state"
+  db_get {key: "constraint:" } -> $constraint
+  check_condition {constraint: $constraint, state: $state} -> $result
+  when result.violated:
+    return {status: "violated", constraint: $constraint_name, details: $result}
+  end
+  return {status: "satisfied", constraint: $constraint_name}
 
-constraint task_output_size:
-  when: task.output_type == "text" and task.estimated_output_chars > 2000
-  require: false
-  severity: error
-  message: "Sub-agent text output must not exceed 2000 chars (ADR-0013, C-0010)."
+procedure evaluate_all_constraints(state: string) -> evaluations:
+  given: "Evaluate all active constraints against current state"
+  db_get_prefix {prefix: "constraint:"} -> $constraints
+  loop over $constraints as constraint:
+    evaluate_constraint {constraint_name: $constraint, state: $state} -> $result
+  end
+  return {results: $constraints}
 
-procedure authorization_gate:
-  trigger: manual
-  given: "5-level brain-first authorization gate per ADR-0012"
-  check_blocked {action: $action, constraints: $constraints} -> $blocked
-  when blocked:
-    emit {type: "authorization.blocked", action: $action, level: 1, reason: "blocked by hard constraint"}
-    return
+procedure enforce_violation(violation: string from "constraint_violation") -> enforcement into "enforcement_action":
+  given: "Take enforcement action on a constraint violation"
+  determine_severity {violation: $violation} -> $severity
+  when severity.level == "error":
+    return {action: "block", reason: $violation}
   end
-  check_recently_completed {action: $action} -> $recent
-  when recent:
-    emit {type: "authorization.skipped", action: $action, level: 2, reason: "duplicate suppressed"}
-    return
+  when severity.level == "warning":
+    return {action: "warn", reason: $violation}
   end
-  check_known_failure {action: $action} -> $known_fail
-  when known_fail:
-    emit {type: "authorization.warned", action: $action, level: 3, reason: "known failure"}
-    return
-  end
-  check_destructive_or_external {action: $action} -> $needs_approval
-  when needs_approval:
-    emit {type: "authorization.gated", action: $action, level: 4, reason: "requires human approval"}
-    return
-  end
-  emit {type: "authorization.approved", action: $action, level: 5, reason: "auto-approved"}
+  return {action: "log", reason: $violation}
 
-procedure check_task_size:
-  trigger: manual
-  given: "Enforce task size limits per ADR-0013 (C-0009 and C-0010)"
-  word_count {text: $description} -> $wc
-  when wc > 200:
-    compute_splits {word_count: $wc, max: 200} -> $splits
-    emit {type: "task.decomposition.required", word_count: $wc, suggested_splits: $splits, constraint: "C-0009"}
-    return
+procedure update_constraint(constraint_name: string, new_definition: string) -> updated:
+  given: "Update an existing constraint definition"
+  db_get {key: "constraint:" } -> $existing
+  validate_constraint {definition: $new_definition} -> $valid
+  when valid.errors:
+    return {status: "invalid", errors: $valid}
   end
-  when output_type == "text":
-    when estimated_output_chars > 2000:
-      compute_splits {chars: $estimated_output_chars, max: 2000} -> $splits
-      emit {type: "task.decomposition.required", output_chars: $estimated_output_chars, suggested_splits: $splits}
-      return
-    end
-  end
-  emit {type: "task.size.passed", word_count: $wc}
-
-procedure evaluate_constraints:
-  trigger: manual
-  given: "Evaluate all registered praxis constraints against a proposed action"
-  db_get_prefix {prefix: "constraint:"} -> $all_constraints
-  evaluate_all {constraints: $all_constraints, action: $action, metadata: $metadata} -> $result
-  when result.has_errors:
-    emit {type: "constraint.evaluation.blocked", action: $action, violations: $result}
-    return
-  end
-  when result.has_warnings:
-    emit {type: "constraint.evaluation.warned", action: $action, violations: $result}
-    return
-  end
-  emit {type: "constraint.evaluation.passed", action: $action}
-
-procedure on_action:
-  trigger: manual
-  given: "Full action evaluation: constraints + authorization gate"
-  evaluate_constraints {action: $action, metadata: $metadata} -> $constraint_result
-  authorization_gate {action: $action, constraints: $constraint_result} -> $gate_result
-  emit {type: "action.evaluated", action: $action, gate_level: $gate_result, constraints: $constraint_result}
-  return $gate_result
+  pluresdb_write {key: "constraint:" , value: $new_definition}
+  return {status: "updated", constraint: $constraint_name}

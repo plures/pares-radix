@@ -1,42 +1,34 @@
-# context-window.px - Context window management procedure
+# context-window.px - Context window management procedures
 #
-# Replaces: crates/core/src/cerebellum/context_manager.rs (~428 lines of Rust)
-# Pure logic: relevance scoring, eviction, entity extraction, token budgeting.
+# Manages token budgets, context truncation, and window optimization.
 
-fact context_item:
-  id: string
-  content: string
-  tokens: int
-  source: string
-  age_turns: int
-  success_count: int
-  failure_count: int
-  relevance: float
+procedure estimate_tokens(text: string) -> token_count:
+  given: "Estimate token count for a text string"
+  count_tokens {text: $text} -> $count
+  return $count
 
-procedure extract_entities:
-  trigger: manual
-  given: "Extract named entities from a message for context enrichment"
-  regex_extract_all {text: $message, patterns: ["@mentions", "#tags", "urls", "file_paths", "git_shas", "github_repos"]} -> $entities
-  return $entities
+procedure truncate_to_window(messages: list, max_tokens: int) -> truncated:
+  given: "Truncate message history to fit within a token window"
+  estimate_total_tokens {messages: $messages} -> $total
+  when total <= $max_tokens:
+    return $messages
+  end
+  prioritize_messages {messages: $messages, budget: $max_tokens} -> $prioritized
+  return $prioritized
 
-procedure score_item:
-  trigger: manual
-  given: "Calculate relevance score for a single context item using weighted factors"
-  compute_relevance {item: $item, query_similarity: $similarity, entities: $entities, source_weights: $source_weights, recency_decay: 0.95, success_boost: 0.1, failure_penalty: 0.2} -> $score
-  return $score
+procedure select_context_window(model_tier: string, context_size: int) -> window_config:
+  given: "Determine context window configuration based on model tier and content size"
+  estimate_context_window {tier: $model_tier} -> $max_window
+  when context_size > $max_window:
+    return {overflow: true, max_window: $max_window, actual: $context_size, action: "cascade_up"}
+  end
+  return {overflow: false, max_window: $max_window, actual: $context_size, action: "proceed"}
 
-procedure manage_context:
-  trigger: manual
-  given: "Score, evict, and manage context items within token budget"
-  age_items {items: $items} -> $aged
-  merge_new_items {existing: $aged, new_items: $new_items} -> $merged
-  score_all_items {items: $merged, query_similarities: $similarities, entities: $entities} -> $scored
-  sort_by_relevance {items: $scored} -> $sorted
-  evict_over_budget {items: $sorted, token_budget: $token_budget, reservation: 0.20} -> $result
-  return $result
-
-procedure record_outcome:
-  trigger: manual
-  given: "Update success/failure counts on context items after a model response"
-  update_counts {items: $items, success: $success} -> $updated
-  return $updated
+procedure optimize_context(messages: list, tools: list, system_prompt: string) -> optimized:
+  given: "Optimize context allocation across messages, tools, and system prompt"
+  estimate_tokens {text: $system_prompt} -> $prompt_tokens
+  estimate_total_tokens {messages: $messages} -> $message_tokens
+  estimate_total_tokens {messages: $tools} -> $tool_tokens
+  allocate_budget {prompt: $prompt_tokens, messages: $message_tokens, tools: $tool_tokens} -> $budget
+  truncate_to_window {messages: $messages, max_tokens: $budget} -> $truncated
+  return {messages: $truncated, budget_used: $budget}

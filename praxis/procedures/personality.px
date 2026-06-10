@@ -10,30 +10,26 @@ fact personality_config:
   formality: string
   emoji_usage: string
 
-procedure load_personality:
-  trigger: on_write {pattern: "session:*:start"}
+procedure load_personality(session_start: string from "session_start") -> personality into "personality":
   given: "Load personality configuration for the current session"
   db_get {key: "config:personality"} -> $config
   when config.empty:
     db_put {key: "config:personality", value: {tone: "helpful", verbosity: "concise", humor_level: "moderate", formality: "casual", emoji_usage: "occasional"}}
-    return
+    return {tone: "helpful", verbosity: "concise", humor_level: "moderate", formality: "casual", emoji_usage: "occasional"}
   end
-  pluresdb_write {key: "session:personality", value: $config}
+  return $config
 
-procedure adapt_style:
-  trigger: manual
+procedure adapt_style(recent_messages: list, personality: personality_config) -> adaptation:
   given: "Adapt response style based on user feedback and conversation context"
-  db_get {key: "session:personality"} -> $current
-  analyze_feedback {messages: $recent_messages, personality: $current} -> $adjustment
+  analyze_feedback {messages: $recent_messages, personality: $personality} -> $adjustment
   when adjustment.needed:
-    merge_personality {base: $current, adjustment: $adjustment} -> $updated
+    merge_personality {base: $personality, adjustment: $adjustment} -> $updated
     pluresdb_write {key: "session:personality", value: $updated}
-    emit {type: "personality.adapted", changes: $adjustment}
+    return $updated
   end
+  return $personality
 
-procedure format_response:
-  trigger: manual
+procedure format_response(response: string, personality: personality_config) -> styled_response:
   given: "Apply personality styling to a model response before delivery"
-  db_get {key: "session:personality"} -> $personality
   style_response {response: $response, personality: $personality} -> $styled
   return $styled

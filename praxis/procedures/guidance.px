@@ -3,27 +3,25 @@
 # Replaces: crates/core/src/praxis/guidance.rs (325 lines of Rust)
 # Generates contextual guidance blocks injected into system prompts.
 
-procedure generate_guidance:
-  trigger: manual
+procedure generate_guidance(session_type: string, context: string) -> guidance:
   given: "Generate contextual praxis guidance for the current conversation state"
   db_get_prefix {prefix: "constraint:"} -> $constraints
-  db_get {key: "session:context"} -> $context
-  filter_relevant {constraints: $constraints, context: $context} -> $relevant
+  db_get {key: "session:context"} -> $session_context
+  filter_relevant {constraints: $constraints, context: $session_context} -> $relevant
   format_guidance_block {constraints: $relevant, session_type: $session_type} -> $guidance
   return $guidance
 
-procedure inject_guidance:
-  trigger: on_write {pattern: "model_request:*"}
+procedure inject_guidance(model_request: string from "model_request") -> enhanced_prompt into "enhanced_prompt":
   given: "Inject praxis guidance into the system prompt before model invocation"
   generate_guidance {session_type: $session_type, context: $context} -> $guidance
   pluresdb_read {key: "config:system_prompt"} -> $base_prompt
   append_guidance {base: $base_prompt, guidance: $guidance} -> $enhanced
   pluresdb_write {key: "config:system_prompt_enhanced", value: $enhanced}
+  return $enhanced
 
-procedure update_guidance_on_violation:
-  trigger: on_write {pattern: "constraint.evaluation.*"}
+procedure update_guidance_on_violation(event: string from "constraint_violation") -> updated_guidance into "active_guidance":
   given: "Update guidance when a constraint violation is detected"
   db_get {key: "session:violation_history"} -> $history
   pluresdb_append {key: "session:violation_history", value: $event}
   regenerate_guidance {violations: $history} -> $updated
-  pluresdb_write {key: "session:active_guidance", value: $updated}
+  return $updated

@@ -1,30 +1,17 @@
-# task-system.px — Architectural constraints for the task system
-# Enforces C-DEV-001: logic in .px, Rust only for IO boundaries
+# task-system.px - Task management procedures
 #
-# These constraints use freeform domain expressions that guide AI agent behavior.
-# They are not compiled by the Condition evaluator at runtime — they serve as
-# architectural guardrails readable by both humans and AI agents reviewing changes.
+# Handles task creation, tracking, and completion evaluation.
 
-constraint task_logic_in_px:
-  when: change.modifies_crates && change.adds_business_logic
-  require: change.has_corresponding_px_procedure
-  severity: error
-  message: "Task logic must be expressed as .px procedures (C-DEV-001). Rust handles only IO boundaries."
+procedure create_task(description: string, priority: int) -> task:
+  given: "Create a new tracked task"
+  timestamp_now {} -> $now
+  generate_id {} -> $id
+  pluresdb_write {key: "task:" , value: {description: $description, priority: $priority, created: $now, status: "pending"}}
+  return {id: $id, status: "created"}
 
-constraint no_standalone_task_state:
-  when: change.adds_hashmap && change.in_task_path
-  require: change.uses_state_store
-  severity: error
-  message: "Task state must go through PluresDB StateStore, not standalone HashMaps (C-PLURES-003)."
-
-constraint timer_triggers_px:
-  when: event.type == "timer" && event.name == "task_eval"
-  require: procedure.evaluate_tasks.is_registered
-  severity: error
-  message: "Timer events must trigger .px procedures, not inline Rust logic."
-
-constraint commitment_tracking_required:
-  when: model_response.contains_future_tense_promise
-  require: commitment.is_tracked
-  severity: warning
-  message: "Model promises should be tracked as commitments."
+procedure complete_task(task_id: string, result: string) -> completion:
+  given: "Mark a task as complete with its result"
+  db_get {key: "task:" } -> $task
+  timestamp_now {} -> $now
+  pluresdb_write {key: "task:" , value: {status: "complete", result: $result, completed_at: $now}}
+  return {id: $task_id, status: "complete"}

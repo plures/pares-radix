@@ -5,8 +5,7 @@
 # IO actions (embedding, memory recall, store reads) are Rust-backed;
 # all decision logic is here in .px.
 
-procedure preprocess:
-  trigger: on_write {pattern: "inbound:*"}
+procedure preprocess(event: string from "inbound") -> preprocessed into "preprocessed":
   given: "Orchestrate full cerebellum preprocessing pipeline for inbound messages"
   classify_message {message: $event, plugins: $plugins, last_topic: $last_topic} -> $classification
   pluresdb_write {key: "session:classification", value: $classification}
@@ -17,11 +16,10 @@ procedure preprocess:
   pluresdb_write {key: "session:context", value: $managed}
   inject_guidance {session_type: $session_type, context: $managed} -> $guidance
   route_event {classification: $classification, context: $managed, guidance: $guidance} -> $route
-  emit {type: "preprocessed", route: $route, classification: $classification}
+  return {route: $route, classification: $classification}
 
-procedure preprocess_tool_result:
-  trigger: on_write {pattern: "tool_result:*"}
+procedure preprocess_tool_result(event: string from "tool_result") -> model_request into "model_request":
   given: "Light preprocessing for tool results before feeding back to model"
   summarize_if_large {content: $event, max_tokens: 4000} -> $summarized
   pluresdb_append {key: "chat:history", value: $summarized}
-  emit {type: "model_request", source: "tool_result"}
+  return {source: "tool_result"}

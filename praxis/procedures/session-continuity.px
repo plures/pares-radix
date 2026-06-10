@@ -1,48 +1,41 @@
-# session-continuity.px — Track commitments radix makes and inject as context
-# Ensures "I'll do X" results in X actually happening
+# session-continuity.px - Session continuity and state management
+#
+# Handles session persistence, context recovery, and state checkpointing.
 
-procedure track_commitment:
-  trigger: manual
-  given: "Record a commitment made by radix during conversation"
-  generate_id {prefix: "commit"} -> $id
+procedure save_session_state(session_id: string, state: string) -> save_result:
+  given: "Checkpoint current session state for recovery"
   timestamp_now {} -> $now
-  db_put {key: $id, value: "commitment"}
-  emit {type: "commitment.created", id: $id}
-  return $id
+  pluresdb_write {key: "session:checkpoint:" , value: {state: $state, timestamp: $now}}
+  return {saved: true, timestamp: $now}
 
-procedure check_commitments:
-  trigger: cron {schedule: "*/5 * * * *"}
-  given: "Check all active commitments and flag overdue ones"
+procedure periodic_checkpoint(session_id: string from "checkpoint_tick") -> checkpoint_result into "checkpoint_done":
+  given: "Periodically checkpoint session state"
+  db_get {key: "session:state"} -> $current_state
+  save_session_state {session_id: $session_id, state: $current_state} -> $result
+  return $result
+
+procedure recover_session(session_id: string) -> recovered_state:
+  given: "Recover session state from the last checkpoint"
+  db_get {key: "session:checkpoint:" } -> $checkpoint
+  when checkpoint.empty:
+    return {recovered: false, reason: "no checkpoint found"}
+  end
+  return {recovered: true, state: $checkpoint}
+
+procedure cleanup_old_sessions(max_age_hours: int) -> cleanup_result:
+  given: "Remove session checkpoints older than max_age_hours"
+  db_get_prefix {prefix: "session:checkpoint:"} -> $checkpoints
   timestamp_now {} -> $now
-  db_get_prefix {prefix: "commit:"} -> $commitments
-  loop over $commitments as commitment:
-    check_commitment_deadline {commitment: $commitment, now: $now} -> $status
-    when status.overdue:
-      db_put {key: "commit:overdue", value: $commitment}
-      emit {type: "commitment.overdue", id: $commitment}
+  loop over $checkpoints as cp:
+    compute_age_hours {checkpoint: $cp, now: $now} -> $age
+    when age > $max_age_hours:
+      pluresdb_delete {key: $cp}
     end
   end
+  return {cleaned: true}
 
-procedure fulfill_commitment:
-  trigger: manual
-  given: "Mark a commitment as fulfilled"
-  timestamp_now {} -> $now
-  db_get {key: "commitment_id"} -> $existing
-  db_put {key: "commitment_id", value: "fulfilled"}
-  emit {type: "commitment.fulfilled", id: "commitment_id"}
-
-procedure get_active_commitments:
-  trigger: manual
-  given: "Get all active commitments for context injection"
-  db_get_prefix {prefix: "commit:"} -> $commitments
-  filter_active {commitments: $commitments} -> $active
-  return $active
-
-procedure inject_commitment_context:
-  trigger: before_response
-  given: "Before model calls, inject active commitments as system context"
-  get_active_commitments {} -> $active
-  when active.length > 0:
-    format_commitments {active: $active} -> $context_lines
-    emit {type: "context.inject", role: "system", content: $context_lines}
-  end
+procedure prepare_response_context(session_id: string, messages: list) -> context:
+  given: "Prepare full context for response generation including session state"
+  recover_session {session_id: $session_id} -> $state
+  db_get {key: "session:personality"} -> $personality
+  return {state: $state, personality: $personality, messages: $messages}

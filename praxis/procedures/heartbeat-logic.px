@@ -1,30 +1,23 @@
-# heartbeat-logic.px - Heartbeat scheduling and quiet-hours procedure
+# heartbeat-logic.px - Heartbeat evaluation procedure
 #
-# Replaces: ~200 lines scattered across heartbeat handling in Rust
-# Determines when heartbeats fire and what gets checked.
+# Determines what to do on each heartbeat tick: check services,
+# evaluate proactive actions, decide whether to speak or stay quiet.
 
-procedure schedule_heartbeat:
-  trigger: manual
-  given: "Determine if heartbeat should fire based on quiet hours and last check time"
+procedure evaluate_heartbeat(tick: string from "heartbeat_tick") -> heartbeat_action into "heartbeat_action":
+  given: "Evaluate what actions to take on a heartbeat tick"
+  db_get {key: "heartbeat:last_checks"} -> $last_checks
   timestamp_now {} -> $now
-  db_get {key: "config:quiet_hours"} -> $quiet_config
-  check_quiet_hours {now: $now, config: $quiet_config} -> $in_quiet
-  when in_quiet:
-    emit {type: "heartbeat.suppressed", reason: "quiet hours"}
-    return
+  determine_checks_due {last_checks: $last_checks, now: $now} -> $due
+  when due.empty:
+    return {action: "silent"}
   end
-  db_get {key: "heartbeat:last_check"} -> $last
-  compute_interval {now: $now, last: $last, min_interval_ms: 300000} -> $should_fire
-  when should_fire:
-    emit {type: "heartbeat_tick"}
-  end
+  return {action: "check", targets: $due}
 
-procedure heartbeat_check_items:
-  trigger: on_write {pattern: "heartbeat_tick:*"}
-  given: "Run the heartbeat checklist items in sequence"
-  db_get {key: "heartbeat:checklist"} -> $items
-  loop over $items as item:
-    execute_check {item: $item} -> $result
-    pluresdb_write {key: "heartbeat:results", value: $result}
+procedure process_heartbeat_check(check_type: string, config: string) -> heartbeat_result:
+  given: "Execute a specific heartbeat check and determine if notification is needed"
+  run_check {type: $check_type, config: $config} -> $result
+  evaluate_urgency {result: $result} -> $urgency
+  when urgency.level > 2:
+    return {notify: true, message: $result, urgency: $urgency}
   end
-  emit {type: "heartbeat_complete"}
+  return {notify: false, result: $result}

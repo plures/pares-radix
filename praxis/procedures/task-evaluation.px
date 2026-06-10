@@ -1,58 +1,43 @@
-# task-evaluation.px — Periodic task evaluation and execution
-# Triggered by cron every 60s
-# Evaluates pending tasks, executes ready ones, reports results
+# task-evaluation.px - Task evaluation and prioritization procedures
+#
+# Evaluates task progress, priorities, and scheduling.
 
-procedure evaluate_tasks:
-  trigger: cron {schedule: "* * * * *"}
-  given: "Evaluate all pending tasks and execute those that are ready"
+procedure evaluate_task_progress(task_id: string) -> evaluation:
+  given: "Evaluate progress on a specific task"
+  db_get {key: "task:" } -> $task
   timestamp_now {} -> $now
-  db_get_prefix {prefix: "task:"} -> $tasks
+  compute_age_hours {checkpoint: $task, now: $now} -> $age
+  return {task: $task, age_hours: $age, status: $task}
+
+procedure prioritize_tasks(tasks: list) -> prioritized:
+  given: "Sort and prioritize pending tasks"
   loop over $tasks as task:
-    check_task_ready {task: $task, now: $now} -> $ready
-    when ready.is_ready:
-      db_put {key: "task:running", value: $task}
-      dispatch_task {task: $task} -> $result
-      db_put {key: "task:completed", value: $result}
-      emit {type: "task.completed", task_id: $task}
-    end
+    compute_priority_score {task: $task} -> $score
   end
+  return {sorted: $tasks}
 
-procedure execute_shell_task:
-  trigger: manual
-  given: "Execute a shell-type task"
-  exec {command: "task_command"} -> $result
-  timestamp_now {} -> $now
-  db_put {key: "task:completed", value: $result}
-  emit {type: "task.completed", task_type: "shell"}
+procedure suggest_next_task(tasks: list, context: string) -> suggestion:
+  given: "Suggest the next task to work on based on context and priorities"
+  prioritize_tasks {tasks: $tasks} -> $sorted
+  match_context {tasks: $sorted, context: $context} -> $best
+  return $best
 
-procedure execute_procedure_task:
-  trigger: manual
-  given: "Execute a procedure-type task by running another .px procedure"
-  praxis_run {procedure: "target"} -> $result
-  timestamp_now {} -> $now
-  db_put {key: "task:completed", value: $result}
-  emit {type: "task.completed", task_type: "procedure"}
+procedure evaluate_task_completion(task_id: string, deliverables: list) -> verdict:
+  given: "Evaluate whether a task's deliverables meet its acceptance criteria"
+  db_get {key: "task:" } -> $task
+  check_acceptance_criteria {task: $task, deliverables: $deliverables} -> $result
+  return $result
 
-procedure execute_message_task:
-  trigger: manual
-  given: "Execute a message-type task by sending a message"
-  send_message {chat_id: "target", text: "message"}
-  timestamp_now {} -> $now
-  db_put {key: "task:completed", value: "sent"}
-  emit {type: "task.completed", task_type: "message"}
+procedure schedule_recurring_task(template: string, schedule: string) -> scheduled:
+  given: "Schedule a recurring task from a template"
+  validate_schedule {schedule: $schedule} -> $valid
+  pluresdb_write {key: "task:recurring:" , value: {template: $template, schedule: $schedule}}
+  return {status: "scheduled", schedule: $schedule}
 
-procedure create_task:
-  trigger: manual
-  given: "Create a new task for deferred execution"
-  generate_id {} -> $id
+procedure check_overdue_tasks(tasks: list) -> overdue_list:
+  given: "Identify tasks that are overdue"
   timestamp_now {} -> $now
-  db_put {key: $id, value: "new_task"}
-  emit {type: "task.created", task_id: $id}
-  return $id
-
-procedure park_task:
-  trigger: manual
-  given: "Park a task that is blocked on external input"
-  timestamp_now {} -> $now
-  db_put {key: "task:parked", value: "parked"}
-  emit {type: "task.parked", reason: "blocked"}
+  loop over $tasks as task:
+    compute_age_hours {checkpoint: $task, now: $now} -> $age
+  end
+  return {overdue: $tasks}

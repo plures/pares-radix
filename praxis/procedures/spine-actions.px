@@ -1,69 +1,18 @@
-# spine-actions.px — Action contracts for the Rust IO boundary
-# These are behavioral contracts, not executable procedures.
-# They document what RadixToolHandler MUST implement for .px procedures to work.
+# spine-actions.px - Core spine action procedures
+#
+# Actions that the spine can invoke: model calls, tool dispatch, response delivery.
 
-contract timestamp_now:
-  given: "Returns current Unix epoch seconds"
-  when: "Any procedure needs current time"
-  then: "Returns integer seconds since epoch"
-  examples:
-    - input: {}
-      expect: "integer > 1700000000"
+procedure invoke_model(route: route from "route", history: list from "chat_history", prompt: string from "system_prompt") -> response into "model_response":
+  given: "Call the model with appropriate tier based on routing decision"
+  model_complete {messages: $history, system_prompt: $prompt, tier: $route.tier} -> $response
+  return $response
 
-contract generate_id:
-  given: "Generates a unique ID with optional prefix"
-  when: "Any procedure needs a unique identifier"
-  then: "Returns string in format prefix_uuid or bare uuid"
-  examples:
-    - input: { prefix: "task" }
-      expect: "task_<uuid>"
-    - input: {}
-      expect: "<uuid>"
+procedure dispatch_tool(tool_request: string from "tool_request") -> tool_result into "tool_result":
+  given: "Dispatch a tool call and return the result"
+  execute_tool {request: $tool_request} -> $result
+  return $result
 
-contract db_get_prefix:
-  given: "Prefix scan of PluresDB state store"
-  when: "A procedure needs to enumerate keys by prefix"
-  then: "Returns {items: [{key, value}...], count: N}"
-  examples:
-    - input: { prefix: "task:" }
-      expect: "{items: [...], count: N}"
-
-contract send_message:
-  given: "Send a message to a chat channel via spine delivery"
-  when: "A procedure needs to proactively message a user"
-  then: "Emits SpineEvent::DeliveryRequest, returns confirmation"
-  examples:
-    - input: { chat_id: "12345", text: "Task complete" }
-      expect: "delivery_request_emitted"
-
-contract db_get:
-  given: "Get a single key from PluresDB state store"
-  when: "A procedure needs to read state"
-  then: "Returns the stored value or null"
-  examples:
-    - input: { key: "task:abc123" }
-      expect: "stored value or null"
-
-contract db_put:
-  given: "Write a key-value pair to PluresDB state store"
-  when: "A procedure needs to persist state"
-  then: "Writes value, returns confirmation"
-  examples:
-    - input: { key: "task:abc123", value: { status: "done" } }
-      expect: "ok"
-
-contract exec:
-  given: "Execute a shell command"
-  when: "A procedure needs to run a system command"
-  then: "Returns {stdout, stderr, exit_code}"
-  examples:
-    - input: { command: "echo hello" }
-      expect: "{stdout: 'hello\\n', stderr: '', exit_code: 0}"
-
-contract model_call:
-  given: "Invoke the LLM for reasoning or generation"
-  when: "A procedure needs AI-generated content or decisions"
-  then: "Returns model response text"
-  examples:
-    - input: { prompt: "Summarize this", context: "..." }
-      expect: "model-generated text"
+procedure deliver_response(response: string from "model_response", personality: personality_config from "personality") -> delivery into "delivery":
+  given: "Format and deliver a model response to the user"
+  format_response {response: $response, personality: $personality} -> $styled
+  return $styled

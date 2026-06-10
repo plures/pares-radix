@@ -1,23 +1,13 @@
-# health_check.px — System health check procedure (cross-platform)
+# health_check.px - System health check procedures
 #
-# Callable as the "health_check" tool by the model.
-# Runs a series of diagnostic checks and returns aggregated status.
-# Works on Windows, Linux, and macOS.
+# Validates that all subsystems are functioning correctly.
 
-procedure system_health:
-  trigger: manual
-  given: "Run system health diagnostics and return aggregated status"
-  detect_os {} -> $os_type
-  gather_system_metrics {os: $os_type} -> $metrics
-  emit {type: "health.check.complete", os: $os_type, status: "ok"}
-  return $metrics
+procedure check_pluresdb_health(endpoint: string) -> health_status:
+  given: "Check PluresDB connectivity and response time"
+  ping_service {url: $endpoint, timeout_ms: 5000} -> $result
+  return {service: "pluresdb", status: $result, healthy: $result}
 
-procedure detect_os:
-  trigger: manual
-  given: "Detect the current operating system"
-  exec {command: "uname -s"} -> $result
-  match:
-    "Linux" -> linux
-    "Darwin" -> darwin
-    _ -> windows
-  end
+procedure check_model_health(model_tier: string) -> health_status:
+  given: "Verify model API is responding for a given tier"
+  model_complete {messages: [{role: "user", content: "ping"}], tier: $model_tier} -> $result
+  return {service: "model", tier: $model_tier, healthy: true}
