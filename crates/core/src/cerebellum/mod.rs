@@ -265,6 +265,8 @@ impl Cerebellum {
         memory: &PluresLm,
         _registry: &ProcedureRegistry,
     ) -> Result<CerebellumContext, CerebellumError> {
+        let preprocess_start = std::time::Instant::now();
+
         // 0. Extract entities from the message (fast, no model)
         let query = extract_query(event);
         let entities = query
@@ -276,18 +278,34 @@ impl Cerebellum {
         let mut clear_history = false;
         let mut query_similarities = std::collections::HashMap::new();
 
-        let recalled_items = if let Some(q) = &query {
+        // Fast path: skip expensive embedding + recall for very short
+        // contextual messages (≤3 words). These are almost always follow-ups
+        // that rely on conversation history, not semantic memory.
+        let skip_recall = query.as_deref().is_none_or(|q| {
+            let word_count = q.split_whitespace().count();
+            word_count <= 3 && word_count > 0
+        });
+
+        let recalled_items = if !skip_recall {
+            if let Some(q) = &query {
+            let embed_start = std::time::Instant::now();
             let query_embedding = memory
                 .embed_text(q)
                 .await
                 .map_err(|e| CerebellumError::Memory(e.to_string()))?;
+            let embed_elapsed = embed_start.elapsed();
+            tracing::info!(embed_ms = embed_elapsed.as_millis(), "embedding computed");
+
             clear_history = self.detect_topic_shift(event, &query_embedding);
 
+            let recall_start = std::time::Instant::now();
             let exclude_categories = parse_excluded_categories(&self.config.exclude_categories);
             let memories = memory
                 .recall(q, self.config.recall_limit, &exclude_categories)
                 .await
                 .map_err(|e| CerebellumError::Memory(e.to_string()))?;
+            let recall_elapsed = recall_start.elapsed();
+            tracing::info!(recall_ms = recall_elapsed.as_millis(), memories_found = memories.len(), "memory recall complete");
 
             // Convert recalled memories to ContextItems
             memories
@@ -310,7 +328,14 @@ impl Cerebellum {
                     }
                 })
                 .collect::<Vec<_>>()
+            } else {
+                vec![]
+            }
         } else {
+            // Fast path: skip embedding/recall for short contextual messages
+            if let Some(q) = &query {
+                tracing::info!(query = %q, "skipping recall for short message (fast path)");
+            }
             vec![]
         };
 
@@ -481,6 +506,13 @@ impl Cerebellum {
         }
 
         debug!(?route, "routing decision");
+
+        let preprocess_elapsed = preprocess_start.elapsed();
+        tracing::info!(
+            preprocess_ms = preprocess_elapsed.as_millis(),
+            route = ?route,
+            "cerebellum preprocess complete"
+        );
 
         // 4. Package
         Ok(CerebellumContext {

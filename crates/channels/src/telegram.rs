@@ -2185,7 +2185,16 @@ impl ChannelAdapter for TelegramAdapter {
                                 Self::acknowledge_message(&bot, &msg).await;
                                 return respond(());
                             }
-                            _ => {} // fall through to agent
+                            _ => {
+                                // Unknown slash command — respond immediately
+                                // instead of falling through to model
+                                let reply = format!(
+                                    "Unknown command: /{cmd}\nType /help for available commands."
+                                );
+                                Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                Self::acknowledge_message(&bot, &msg).await;
+                                return respond(());
+                            }
                         }
                     }
                 }

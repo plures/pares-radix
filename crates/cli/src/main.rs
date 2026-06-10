@@ -2693,6 +2693,7 @@ fn self_update_task_from_env() -> pares_agens_agenda::scheduler::Task {
     build_self_update_task(&flake_dir, &host, interval)
 }
 
+#[allow(dead_code)] // Used on Linux only (/proc/self/status)
 fn parse_vm_rss_kib(contents: &str) -> Option<u64> {
     contents.lines().find_map(|line| {
         let line = line.trim();
@@ -2821,9 +2822,26 @@ async fn run_adapter_with_recovery(
 
                     let agent = agent.read().await.clone();
                     let mut response = if let Some(request_id) = trace_request_id.clone() {
-                        ACTIVE_TELEGRAM_REQUEST_ID
-                            .scope(request_id, async { agent.handle_event(event).await })
-                            .await
+                        // Use streaming path for real-time token delivery
+                        let (stream_tx, mut stream_rx) = tokio::sync::mpsc::unbounded_channel();
+                        let agent_for_stream = agent.clone();
+                        let event_for_stream = event.clone();
+                        let handle = tokio::spawn(async move {
+                            ACTIVE_TELEGRAM_REQUEST_ID
+                                .scope(request_id.clone(), async {
+                                    agent_for_stream.handle_event_streaming(event_for_stream, stream_tx).await
+                                })
+                                .await
+                        });
+
+                        // Drain stream — we don't use it here yet (Telegram edits
+                        // are handled in the adapter's progressive delivery), but
+                        // consuming it prevents unbounded channel backpressure.
+                        tokio::spawn(async move {
+                            while stream_rx.recv().await.is_some() {}
+                        });
+
+                        handle.await.unwrap_or(None)
                     } else {
                         agent.handle_event(event).await
                     };
