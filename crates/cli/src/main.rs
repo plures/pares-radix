@@ -389,7 +389,11 @@ impl RuntimeAgentFactory {
                 .join("procedures");
             let local_dir = std::path::PathBuf::from("praxis/procedures");
 
-            let mut df_bridge = DataflowBridge::new();
+            let mut df_bridge = DataflowBridge::new(Arc::new(
+                pares_agens_core::cerebellum::dataflow_bridge::DataflowActionAdapter::new(
+                    Arc::new(pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal()),
+                ),
+            ));
             let mut df_count = 0usize;
 
             for dir in [&px_dir, &local_dir] {
@@ -5626,7 +5630,11 @@ async fn main() {
                     .join("procedures");
                 let local_dir = std::path::PathBuf::from("praxis/procedures");
 
-                let mut df_bridge = DataflowBridge::new();
+                let mut df_bridge = DataflowBridge::new(Arc::new(
+                pares_agens_core::cerebellum::dataflow_bridge::DataflowActionAdapter::new(
+                    Arc::new(pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal()),
+                ),
+            ));
                 let mut df_count = 0usize;
 
                 for dir in [&px_dir, &local_dir] {

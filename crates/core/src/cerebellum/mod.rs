@@ -455,7 +455,7 @@ impl Cerebellum {
                 let event_type = event.kind().to_string();
                 let content = extract_query(event).unwrap_or_default();
                 match df_bridge
-                    .process_event(&event_type, &content, &learned_context, self.action_handler())
+                    .process_event(&event_type, &content, &learned_context)
                     .await
                 {
                     Ok(Some(val)) => {
@@ -569,12 +569,6 @@ impl Cerebellum {
         } else {
             router::decide(event, learned_context, &self.config)
         }
-    }
-
-    /// Get an action handler for the dataflow bridge.
-    /// Returns an Arc wrapping a handler that maps action names to real implementations.
-    fn action_handler(&self) -> Arc<dyn pares_radix_praxis::dataflow::AsyncActionHandler> {
-        Arc::new(dataflow_bridge::CerebellumActionHandler)
     }
 
     fn detect_topic_shift(&self, event: &Event, current_embedding: &[f32]) -> bool {
