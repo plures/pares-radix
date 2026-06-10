@@ -1,0 +1,32 @@
+# classify.px - Message classification (dataflow version)
+#
+# Pure function: takes an inbound message, returns classification.
+# No trigger keyword — PluresDB fires this when "inbound" queue has data.
+#
+# Input: inbound message (string)
+# Output: classification record (into "classification" queue)
+#
+# Downstream procedures (invoke_model, inject_guidance) consume from
+# the "classification" queue — they fire automatically when this produces output.
+
+fact classification:
+  intent: string
+  complexity: int
+  topic: string
+  topic_shift: bool
+  needs_tools: bool
+  needs_deep_model: bool
+  plugin_match: string
+  completion_hint: string
+
+procedure classify_message(message: string from "inbound") -> classification into "classification":
+  given: "Classify an incoming message by intent, complexity, and routing needs"
+  normalize_text {text: $message} -> $lower
+  detect_intent {text: $lower} -> $intent
+  score_complexity {text: $message} -> $complexity
+  detect_tools_needed {text: $lower} -> $needs_tools
+  match_plugin {text: $lower} -> $plugin_match
+  extract_topic {text: $message} -> $topic
+  detect_topic_shift {topic: $topic} -> $topic_shift
+  determine_model_tier {complexity: $complexity} -> $needs_deep_model
+  return $classification
