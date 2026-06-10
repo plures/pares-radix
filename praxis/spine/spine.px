@@ -1,104 +1,124 @@
-# spine.px — The complete agent spine as v3 dataflow
+# spine.px — Event Spine topology (v3 dataflow)
 #
-# This file IS the spine. Not 1,700 lines of Rust. Not 5 procedure structs.
-# Not pipeline wiring. Just pure functions connected by queue topology.
+# This file defines the COMPLETE queue topology for pares-radix.
+# It is the single source of truth for how data flows through the system.
 #
-# Side-effect actors (the only Rust):
-#   - telegram_adapter: network bytes → writes to "inbound" queue
-#   - model_client: HTTP request to LLM API (via model_complete action)
-#   - shell_executor: spawn process, return output
-#   - file_system: read/write bytes to disk
-#   - tool_dispatch: route tool_call.name to the correct actor
+# ═══════════════════════════════════════════════════════════════════════════════
+# ARCHITECTURE PRINCIPLE
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-# Everything else is here.
-
-import spine::conversation
-import spine::routing
-import spine::model_invoke
-import spine::tool_execute
-import spine::heartbeat
-
-# ═══════════════════════════════════════════════════════════════════
-# Queue Topology — The Full Dataflow Graph
-# ═══════════════════════════════════════════════════════════════════
+# PluresDB IS the router. Writing to a queue IS routing.
+# The graph runs to quiescence. No scheduler. No dispatcher.
+# Rust exists ONLY at IO boundaries (model API, tool exec, channel send).
 #
-#   ┌─────────────────────────────────────────────────────────────────────┐
-#   │                     AGENT SPINE DATAFLOW                            │
-#   └─────────────────────────────────────────────────────────────────────┘
+# Entry: channel adapter writes InboundMessage to "inbound" queue
+# Exit: deliver_response writes to channel (Rust IO)
+# Everything between is pure dataflow in .px
 #
-#   INBOUND (from telegram_adapter)
-#   ════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUEUE REGISTRY (all named queues in the system)
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-#   "inbound" ─┬─→ [record_user_message] ─→ "history_write"
-#              │
-#              └─→ [route_inbound] ─→ "model_request"
+# Queue Name          | Producers                       | Consumers
+# ────────────────────|─────────────────────────────────|──────────────────────
+# inbound             | channel adapters (Rust IO)      | classify_and_route, track_inbound
+# route_decision      | classify_and_route              | assemble_context, dispatch_steered_task
+# model_request       | assemble_context,               | invoke_model
+#                     | dispatch_steered_task,           |
+#                     | route_model_response (tool loop) |
+# model_response      | invoke_model                    | route_model_response, detect_commitments
+# delivery            | route_model_response            | deliver_response
+# delivered           | deliver_response                | (terminal — observability only)
+# commitment_events   | detect_and_store_commitments    | (terminal — task creation done inline)
+# inbound_tracked     | track_inbound                   | (terminal — history write done inline)
+# heartbeat_tick      | heartbeat timer (Rust IO)       | evaluate_dispatch
+# dispatch_decision   | evaluate_dispatch               | (Rust IO: TaskDispatcher)
+# task_dispatch       | steer_active_task               | build_steered_prompt
+# task_prompt         | build_steered_prompt            | (Rust IO: TaskDispatcher)
 #
+# ═══════════════════════════════════════════════════════════════════════════════
+# IO BOUNDARIES (the ONLY Rust code that isn't pure dataflow)
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-#   MODEL REQUEST → CONTEXT → INVOKE
-#   ═════════════════════════════════
+# 1. Channel Adapters (telegram.rs, discord.rs, etc.)
+#    - Reads: external messages
+#    - Writes: InboundMessage → "inbound" queue
+#    - Reads: DeliveryRequest from "delivery" queue
+#    - Sends: message to external channel
 #
-#   "model_request" ─→ [build_context] ─→ "enriched_request"
-#                                               │
-#                                               ▼
-#                                      [invoke_model] ─→ "model_response"
+# 2. Model Client (router.rs → RouterModelClient)
+#    - Reads: ModelRequest from "model_request" queue
+#    - Calls: model API (HTTP)
+#    - Writes: ModelResponse → "model_response" queue
 #
+# 3. Tool Executor (executor.rs)
+#    - Reads: tool_calls from route_model_response
+#    - Executes: shell, file, network operations
+#    - Writes: tool results back into model_request (tool loop)
 #
-#   MODEL RESPONSE FAN-OUT
-#   ══════════════════════
+# 4. Heartbeat Timer (heartbeat.rs)
+#    - Fires: periodically
+#    - Writes: tick → "heartbeat_tick" queue
 #
-#   "model_response" ─┬─→ [record_assistant_response] ─→ "history_write"
-#                     │
-#                     ├─→ [route_response] ─→ "delivery_request"
-#                     │       (only when NO tool_calls)
-#                     │
-#                     └─→ [execute_tools] ─→ "model_request"  (loop back)
-#                             (only when HAS tool_calls)
+# 5. TaskDispatcher (task_executor.rs)
+#    - Reads: DispatchDecision from "dispatch_decision" or "task_prompt"
+#    - Calls: EventSpine::emit_inbound_message (injects into "inbound")
 #
+# ═══════════════════════════════════════════════════════════════════════════════
+# PROCEDURE FILES (implementations)
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-#   OUTBOUND (to telegram_adapter)
-#   ══════════════════════════════
+# unified-router.px      → classify_and_route, assemble_context, dispatch_steered_task,
+#                           invoke_model, route_model_response, deliver_response,
+#                           detect_and_store_commitments, track_inbound
+# task-steering.px       → classify_continuation, steer_active_task
+# commitment-detection.px → detect_commitments, create_tasks_from_commitments
+# autonomous-dispatch.px → evaluate_dispatch, build_steered_prompt
+# heartbeat-logic.px     → process_heartbeat_check
 #
-#   "delivery_request" ─→ telegram_adapter (IO boundary)
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIFECYCLE
+# ═══════════════════════════════════════════════════════════════════════════════
 #
+# Startup:
+#   1. PluresDB loads all .px files → registers procedures in DataflowGraph
+#   2. Queues are created for every `from "X"` and `into "Y"` binding
+#   3. Channel adapters start listening (Telegram, Discord, etc.)
+#   4. Heartbeat timer starts firing ticks
 #
-#   HEARTBEAT (independent)
-#   ═══════════════════════
+# Steady state:
+#   Message arrives → channel adapter writes to "inbound" → graph runs to quiescence
+#   All queues empty = idle
+#   Next message = next run
 #
-#   heartbeat_clock ─→ [heartbeat_tick] ─→ "heartbeat_result"
+# Shutdown:
+#   Channel adapters stop → no new writes to "inbound" → graph quiesces naturally
+#   In-flight model calls complete or timeout
+#   State is in PluresDB (persistent)
 #
+# ═══════════════════════════════════════════════════════════════════════════════
+# WHAT THE CEREBELLUM BECOMES
+# ═══════════════════════════════════════════════════════════════════════════════
 #
-#   TOOL EXECUTION LOOP
-#   ═══════════════════
+# The 1100-line cerebellum/mod.rs is replaced by:
+#   - classify_and_route (entry point — 60 lines of .px)
+#   - assemble_context (context assembly — 50 lines of .px)
+#   - Rust IO: embed_text, recall_memories (thin wrappers around PluresLM)
 #
-#   "model_response" ─→ [execute_tools] ─→ "model_request"
-#       │                                       │
-#       │   tool_dispatch results appended      │
-#       │   to "chat:history" via PluresDB      │
-#       │                                       ▼
-#       │                              [build_context] (re-enriched)
-#       │                                       │
-#       │                                       ▼
-#       │                              [invoke_model] (re-invoked)
-#       │                                       │
-#       └───────────────────────────────────────┘  (loops until no tool_calls)
+# What survives in Rust:
+#   - CerebellumActionHandler: dispatches actions from .px to actual IO
+#     - model_complete → ModelClient.chat()
+#     - embed_text → PluresLM.embed()
+#     - recall_memories → PluresLM.recall()
+#     - channel_send → Telegram/Discord API
+#     - dispatch_tools → ToolRegistry.execute()
+#   - DataflowBridge: pushes initial datum, runs graph, reads output
+#   - AuthorizationGate: stays as Rust (security boundary — never .px)
 #
-#   DEPTH GUARD: queue rejects writes when lineage depth > 25
-#
-#
-#   ┌─────────────────────────────────────────────────────────────────────┐
-#   │  QUEUES (named data channels):                                      │
-#   │                                                                     │
-#   │    inbound            - raw user messages from adapter              │
-#   │    model_request      - requests to build context & invoke model    │
-#   │    enriched_request   - context-enriched model invocation payload   │
-#   │    model_response     - raw model responses (may have tool_calls)   │
-#   │    delivery_request   - final responses for channel delivery        │
-#   │    history_write      - conversation history append operations       │
-#   │    heartbeat_clock    - periodic timer ticks                        │
-#   │    heartbeat_result   - health check outputs                        │
-#   │                                                                     │
-#   └─────────────────────────────────────────────────────────────────────┘
-#
-# Total Rust: ~200 lines of thin IO actors
-# Total .px: this file + 5 imports
-# Replaced: 1,700+ lines of pipeline/procedure Rust
+# What dies:
+#   - router.rs (Rust heuristic routing) → replaced by classify_and_route
+#   - classifier.rs (Rust intent classification) → replaced by classify_intent action
+#   - context_manager.rs (Rust context window) → replaced by manage_context action
+#   - pipeline.rs → the graph IS the pipeline
+#   - invoke.rs → replaced by invoke_model procedure
+#   - Most of mod.rs → the dataflow graph replaces imperative orchestration

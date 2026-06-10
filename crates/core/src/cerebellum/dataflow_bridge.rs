@@ -1,27 +1,36 @@
-//! Dataflow bridge: connects the cerebellum to the queue-driven procedure graph.
+//! Dataflow bridge: the COMPLETE message pipeline as a PluresDB dataflow graph.
 //!
-//! Instead of trigger-matching (old model), the cerebellum pushes event data
-//! into the graph's input queues and reads results from output queues.
+//! This replaces the imperative cerebellum orchestration. The flow is:
+//!   1. Channel adapter writes InboundMessage to "inbound" queue
+//!   2. Graph runs to quiescence (all procedures fire via data availability)
+//!   3. "delivery" queue contains the response to send
+//!   4. Channel adapter reads from "delivery" and sends
 //!
-//! The graph is built at startup from .px files with typed signatures.
-//! At runtime, data flows through queues — no scheduling decisions needed.
+//! The graph IS the router, the context assembler, the model invoker, and
+//! the tool loop. Rust only exists at IO boundaries (model API, tool exec,
+//! channel send) — implemented as actions in CerebellumActionHandler.
+//!
+//! See: praxis/procedures/unified-router.px for the complete topology.
+//! See: praxis/spine/spine.px for the queue registry and architecture.
 
 use pares_radix_praxis::dataflow::{
-    AsyncDataflowGraph, DataflowConfig, Datum, ProcedureNode, AsyncActionHandler,
+    AsyncActionHandler, AsyncDataflowGraph, DataflowConfig, Datum, ProcedureNode,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{debug, info};
 
-/// The dataflow-driven replacement for PxBridge.
+/// The dataflow-driven message pipeline.
 ///
-/// Procedures are pre-wired at startup. Events push data into input queues;
-/// results materialize in output queues.
+/// Replaces: cerebellum/mod.rs orchestration, router.rs, classifier.rs,
+/// context_manager.rs, invoke.rs, pipeline.rs.
+///
+/// Keeps: CerebellumActionHandler (IO boundary dispatch).
 pub struct DataflowBridge {
     graph: AsyncDataflowGraph,
     /// Whether the graph has any procedures loaded.
     active: bool,
-    /// Action handler for side-effect dispatch.
+    /// Action handler for side-effect dispatch (model calls, tool exec, channel send).
     handler: Arc<dyn AsyncActionHandler>,
 }
 
@@ -59,53 +68,142 @@ impl DataflowBridge {
         self.active
     }
 
-    /// Push an inbound event into the graph and run to quiescence.
-    /// Returns the final output value from the designated result queue.
+    /// Run the FULL pipeline for an inbound message.
     ///
-    /// Output queue priority: "route" > "classification" > "model_response"
-    /// (whichever has data first wins)
+    /// This is the top-level entry point. Channel adapters call this.
+    /// The graph handles everything: routing, context, model invocation,
+    /// tool loops, commitment detection, and delivery.
+    ///
+    /// Returns the delivery payload (content to send to user), or None
+    /// if the graph produced no deliverable output (e.g., message was dropped).
+    pub async fn process_message(
+        &self,
+        chat_id: i64,
+        sender: &str,
+        content: &str,
+        message_id: Option<&str>,
+    ) -> Result<Option<DeliveryResult>, String> {
+        if !self.active {
+            return Ok(None);
+        }
+
+        let event_datum = Datum::root(json!({
+            "content": content,
+            "chat_id": chat_id.to_string(),
+            "sender": sender,
+            "timestamp": chrono::Utc::now().timestamp_millis(),
+            "message_id": message_id,
+        }));
+
+        // Push to inbound — graph fires from here
+        self.graph
+            .push("inbound", event_datum)
+            .await
+            .map_err(|e| format!("push to inbound failed: {e}"))?;
+
+        // Run to quiescence — everything happens here
+        let fired = self
+            .graph
+            .run_to_completion(self.handler.clone())
+            .await
+            .map_err(|e| format!("graph execution failed: {e}"))?;
+
+        info!(procedures_fired = fired, chat_id, "dataflow pipeline quiescent");
+
+        if fired == 0 {
+            debug!("no procedures fired — graph may not have matching consumers");
+            return Ok(None);
+        }
+
+        // Read delivery output
+        if let Some(datum) = self.graph.pop("delivery").await {
+            let content = datum.value.get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let streaming = datum.value.get("streaming")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+
+            if content.is_empty() {
+                return Ok(None);
+            }
+
+            return Ok(Some(DeliveryResult {
+                content,
+                chat_id: chat_id.to_string(),
+                streaming,
+                reply_to: datum.value.get("reply_to")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            }));
+        }
+
+        // Check if delivery happened inline (side-effect in deliver_response procedure)
+        if let Some(datum) = self.graph.pop("delivered").await {
+            debug!(delivered = ?datum.value, "delivery completed inline by procedure");
+            return Ok(None); // Already sent — nothing for caller to do
+        }
+
+        // Procedures fired but no delivery output — might be a dropped message
+        // or a procedural response that was handled internally
+        debug!(fired, "procedures fired but no delivery output");
+        Ok(None)
+    }
+
+    /// Legacy compatibility: process_event for the cerebellum's current routing path.
+    /// TODO: Remove once cerebellum is fully replaced by process_message.
     pub async fn process_event(
         &self,
         event_type: &str,
         content: &str,
         context: &str,
     ) -> Result<Option<Value>, String> {
-        // Package event data as a datum
         let event_datum = Datum::root(json!({
             "type": event_type,
             "content": content,
             "context": context,
         }));
 
-        // Push to the inbound queue
         self.graph
             .push("inbound", event_datum)
             .await
             .map_err(|e| format!("push failed: {e}"))?;
 
-        // Run the graph to quiescence — all ready procedures fire concurrently
         let fired = self
             .graph
             .run_to_completion(self.handler.clone())
             .await
             .map_err(|e| format!("execution failed: {e}"))?;
 
-        info!(procedures_fired = fired, "dataflow graph quiescent");
+        info!(procedures_fired = fired, "dataflow graph quiescent (legacy path)");
 
         if fired == 0 {
             return Ok(None);
         }
 
-        // Read from output queues in priority order
-        for queue_name in &["route", "classification", "model_response"] {
+        // Read from output queues in priority order (legacy compatibility)
+        for queue_name in &["route", "route_decision", "classification", "model_response", "delivery"] {
             if let Some(datum) = self.graph.pop(queue_name).await {
                 return Ok(Some(datum.value));
             }
         }
 
-        // Procedures fired but no output in known queues
         Ok(None)
     }
+}
+
+/// Result of a successful pipeline execution — ready for channel delivery.
+#[derive(Debug, Clone)]
+pub struct DeliveryResult {
+    /// The response content to send to the user.
+    pub content: String,
+    /// Target chat ID.
+    pub chat_id: String,
+    /// Whether to stream the response (progressive editing).
+    pub streaming: bool,
+    /// Message to reply to (quote), if any.
+    pub reply_to: Option<String>,
 }
 
 /// Re-exports the existing CerebellumActionHandler so the dataflow bridge
@@ -126,14 +224,12 @@ impl DataflowActionAdapter {
 }
 
 #[async_trait::async_trait]
-impl pares_radix_praxis::dataflow::AsyncActionHandler for DataflowActionAdapter {
+impl AsyncActionHandler for DataflowActionAdapter {
     async fn call(
         &self,
         name: &str,
         params: &Value,
     ) -> Result<Value, pares_radix_praxis::dataflow::ExecutionError> {
-        // Both traits use the same ExecutionError type (pluresdb_px::px::executor::ExecutionError)
-        // re-exported through different paths. Direct pass-through works.
         self.inner.call(name, params).await
     }
 }
