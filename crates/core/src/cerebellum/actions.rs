@@ -49,6 +49,8 @@ pub struct CerebellumActionHandler {
     state: Arc<RwLock<HashMap<String, Value>>>,
     /// Channel for emitting spine events into the pipeline.
     event_tx: Option<mpsc::Sender<SpineEvent>>,
+    /// Model client for `model_complete` action.
+    model_client: Option<Arc<dyn crate::model::ModelClient>>,
 }
 
 impl CerebellumActionHandler {
@@ -61,6 +63,7 @@ impl CerebellumActionHandler {
             embedder,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
+            model_client: None,
         }
     }
 
@@ -71,6 +74,7 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
+            model_client: None,
         }
     }
 
@@ -84,7 +88,14 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
+            model_client: None,
         }
+    }
+
+    /// Attach a model client to enable `model_complete` action.
+    pub fn with_model_client(mut self, client: Arc<dyn crate::model::ModelClient>) -> Self {
+        self.model_client = Some(client);
+        self
     }
 
     /// Create a handler with a pre-populated state map (useful for testing).
@@ -94,6 +105,7 @@ impl CerebellumActionHandler {
             embedder: None,
             state: Arc::new(RwLock::new(state)),
             event_tx: None,
+            model_client: None,
         }
     }
 
@@ -416,15 +428,69 @@ impl CerebellumActionHandler {
         }))
     }
 
-    /// Stub for model_complete — returns placeholder.
-    /// Real implementation will call the model client.
-    fn model_complete_stub(params: &Value) -> Result<Value, ExecutionError> {
-        let tier = params["tier"].as_str().unwrap_or("standard");
-        Ok(json!({
-            "tier": tier,
-            "status": "stub",
-            "message": "model_complete not yet wired to real model client"
-        }))
+    /// Call the model client with messages and return the completion.
+    async fn model_complete_action(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let client = self.model_client.as_ref().ok_or_else(|| {
+            ExecutionError::ActionFailed {
+                action: "model_complete".to_string(),
+                message: "no model client attached".to_string(),
+            }
+        })?;
+
+        // Extract messages from params
+        let messages_raw = params.get("messages").cloned().unwrap_or(json!([]));
+        let system_prompt = params.get("system_prompt")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let tier = params.get("tier")
+            .and_then(|v| v.as_str())
+            .unwrap_or("standard");
+
+        // Build ChatMessage list
+        use crate::model::{ChatMessage, ChatOptions};
+        let mut chat_messages: Vec<ChatMessage> = vec![];
+
+        if !system_prompt.is_empty() {
+            chat_messages.push(ChatMessage::system(system_prompt));
+        }
+
+        // Parse raw messages array
+        if let Some(arr) = messages_raw.as_array() {
+            for msg in arr {
+                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                let content = msg.get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                match role {
+                    "system" => chat_messages.push(ChatMessage::system(content)),
+                    "assistant" => chat_messages.push(ChatMessage::assistant(content)),
+                    _ => chat_messages.push(ChatMessage::user(content)),
+                }
+            }
+        }
+
+        let options = ChatOptions {
+            temperature: match tier {
+                "premium" => Some(0.7),
+                "fast" => Some(0.3),
+                _ => Some(0.5),
+            },
+            ..Default::default()
+        };
+
+        match client.complete(&chat_messages, &[], &options).await {
+            Ok(completion) => Ok(json!({
+                "content": completion.content,
+                "model": completion.model,
+                "tier": tier,
+            })),
+            Err(e) => Err(ExecutionError::ActionFailed {
+                action: "model_complete".to_string(),
+                message: e,
+            }),
+        }
     }
 }
 
@@ -448,7 +514,7 @@ impl AsyncActionHandler for CerebellumActionHandler {
             "detect_topic_shift" => Self::detect_topic_shift_action(params),
             "determine_model_tier" => Self::determine_model_tier(params),
             "classify" => Self::classify_action(params),
-            "model_complete" => Self::model_complete_stub(params),
+            "model_complete" => self.model_complete_action(params).await,
             _ => Err(ExecutionError::UnknownAction(name.to_string())),
         }
     }
