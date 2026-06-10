@@ -184,6 +184,9 @@ pub struct Cerebellum {
     /// Optional .px bridge for calling .px procedures instead of hardcoded Rust logic.
     /// When loaded, classification and routing go through .px first, falling back to Rust.
     px_bridge: Option<Arc<PxBridge>>,
+    /// Optional dataflow bridge for queue-driven procedures.
+    /// When loaded, takes precedence over px_bridge (trigger-based).
+    dataflow_bridge: Option<Arc<dataflow_bridge::DataflowBridge>>,
 }
 
 impl Cerebellum {
@@ -198,6 +201,7 @@ impl Cerebellum {
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
             conversation_store: None,
             px_bridge: None,
+            dataflow_bridge: None,
         }
     }
 
@@ -212,6 +216,7 @@ impl Cerebellum {
             relevance_scorer: Mutex::new(context_manager::RelevanceScorer::default()),
             conversation_store: None,
             px_bridge: None,
+            dataflow_bridge: None,
         }
     }
 
@@ -230,6 +235,13 @@ impl Cerebellum {
     /// FIRST, falling back to Rust implementations only when .px returns None or errors.
     pub fn with_px_bridge(mut self, bridge: Arc<PxBridge>) -> Self {
         self.px_bridge = Some(bridge);
+        self
+    }
+
+    /// Attach a dataflow bridge for queue-driven procedure execution.
+    /// When set, takes precedence over px_bridge (trigger-based).
+    pub fn with_dataflow_bridge(mut self, bridge: Arc<dataflow_bridge::DataflowBridge>) -> Self {
+        self.dataflow_bridge = Some(bridge);
         self
     }
 
@@ -436,42 +448,36 @@ impl Cerebellum {
             });
         }
 
-        // 3. Route — try .px procedure first, fall back to Rust
-        let mut route = if let Some(ref bridge) = self.px_bridge {
-            if bridge.is_active() {
+        // 3. Route — try dataflow first, then .px trigger-based, fall back to Rust
+        //    Precedence: dataflow_bridge → px_bridge → router::decide()
+        let mut route = if let Some(ref df_bridge) = self.dataflow_bridge {
+            if df_bridge.is_active() {
                 let event_type = event.kind().to_string();
                 let content = extract_query(event).unwrap_or_default();
-                match bridge
-                    .route_event(
-                        &event_type,
-                        &content,
-                        &learned_context,
-                        self.config.enable_subconscious,
-                        f64::from(self.config.complexity_threshold),
-                    )
+                match df_bridge
+                    .process_event(&event_type, &content, &learned_context, self.action_handler())
                     .await
                 {
-                    Some(Ok(val)) => {
-                        // Parse .px result into Route enum
+                    Ok(Some(val)) => {
                         parse_px_route(&val).unwrap_or_else(|| {
-                            debug!(raw = %val, "px route returned unparseable result, falling back to Rust");
-                            router::decide(event, &learned_context, &self.config)
+                            debug!(raw = %val, "dataflow route returned unparseable result, trying px_bridge");
+                            Route::Conscious // signal to try next tier
                         })
                     }
-                    Some(Err(e)) => {
-                        warn!(error = %e, "px route_event failed, falling back to Rust");
-                        router::decide(event, &learned_context, &self.config)
+                    Ok(None) => {
+                        // Dataflow didn't produce a route — fall through to px_bridge
+                        self.try_px_bridge_route(event, &learned_context).await
                     }
-                    None => {
-                        // Procedure not loaded — fall through to Rust
-                        router::decide(event, &learned_context, &self.config)
+                    Err(e) => {
+                        warn!(error = %e, "dataflow bridge failed, falling back to px_bridge");
+                        self.try_px_bridge_route(event, &learned_context).await
                     }
                 }
             } else {
-                router::decide(event, &learned_context, &self.config)
+                self.try_px_bridge_route(event, &learned_context).await
             }
         } else {
-            router::decide(event, &learned_context, &self.config)
+            self.try_px_bridge_route(event, &learned_context).await
         };
         let mut guidance: Vec<String> = vec![];
         let mut approval_required: Option<ApprovalRequest> = None;
@@ -526,6 +532,49 @@ impl Cerebellum {
             clear_history,
             approval_required,
         })
+    }
+
+    /// Try routing via the px_bridge (trigger-based .px procedures).
+    /// Falls back to Rust-native router if px_bridge is inactive, missing, or errors.
+    async fn try_px_bridge_route(&self, event: &Event, learned_context: &str) -> Route {
+        if let Some(ref bridge) = self.px_bridge {
+            if bridge.is_active() {
+                let event_type = event.kind().to_string();
+                let content = extract_query(event).unwrap_or_default();
+                match bridge
+                    .route_event(
+                        &event_type,
+                        &content,
+                        learned_context,
+                        self.config.enable_subconscious,
+                        f64::from(self.config.complexity_threshold),
+                    )
+                    .await
+                {
+                    Some(Ok(val)) => {
+                        parse_px_route(&val).unwrap_or_else(|| {
+                            debug!(raw = %val, "px route returned unparseable result, falling back to Rust");
+                            router::decide(event, learned_context, &self.config)
+                        })
+                    }
+                    Some(Err(e)) => {
+                        warn!(error = %e, "px route_event failed, falling back to Rust");
+                        router::decide(event, learned_context, &self.config)
+                    }
+                    None => router::decide(event, learned_context, &self.config),
+                }
+            } else {
+                router::decide(event, learned_context, &self.config)
+            }
+        } else {
+            router::decide(event, learned_context, &self.config)
+        }
+    }
+
+    /// Get an action handler for the dataflow bridge.
+    /// Returns an Arc wrapping a handler that maps action names to real implementations.
+    fn action_handler(&self) -> Arc<dyn pares_radix_praxis::dataflow::AsyncActionHandler> {
+        Arc::new(dataflow_bridge::CerebellumActionHandler)
     }
 
     fn detect_topic_shift(&self, event: &Event, current_embedding: &[f32]) -> bool {

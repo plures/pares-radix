@@ -102,3 +102,30 @@ impl Default for DataflowBridge {
         Self::new()
     }
 }
+
+/// Action handler for the cerebellum's dataflow graph.
+///
+/// Maps action names (from .px steps) to real implementations.
+/// This is the effect boundary: pure procedures call actions like
+/// `classify`, `model_complete`, `detect_intent` etc.
+///
+/// For now, this is a stub that passes through inputs as outputs.
+/// The real implementations will delegate to the model client, tools, etc.
+pub struct CerebellumActionHandler;
+
+#[async_trait::async_trait]
+impl pares_radix_praxis::dataflow::AsyncActionHandler for CerebellumActionHandler {
+    async fn call(
+        &self,
+        name: &str,
+        params: &Value,
+    ) -> Result<Value, pares_radix_praxis::dataflow::ExecutionError> {
+        // Stub: echo the action and args back as output.
+        // Real implementation will route to model/tools/memory.
+        Ok(json!({
+            "action": name,
+            "result": params,
+            "status": "stub"
+        }))
+    }
+}
