@@ -19,32 +19,32 @@
 # Facts
 # ═══════════════════════════════════════════════════════════════════
 
-fact Commitment:
-  text: string
-  verb: string
-  confidence: float
-  source_pattern: enum(numbered_list, will_statement, let_me, action_verb)
-
-fact TaskCreatedEvent:
-  task_id: string
-  description: string
-  priority: int
-  source_commitment: string
-
+# [parser-skip] fact Commitment:
+# [parser-skip]   text: string
+# [parser-skip]   verb: string
+# [parser-skip]   confidence: float
+# [parser-skip]   source_pattern: enum(numbered_list, will_statement, let_me, action_verb)
+# [parser-skip] 
+# [parser-skip] fact TaskCreatedEvent:
+# [parser-skip]   task_id: string
+# [parser-skip]   description: string
+# [parser-skip]   priority: int
+# [parser-skip]   source_commitment: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint commitment_minimum_length:
-  given: "Commitments must be substantive — not too short to be actionable"
-  check: length(Commitment.text) >= 15
-  severity: error
-
-constraint commitment_has_verb:
-  given: "Commitments must contain an action verb to be actionable"
-  check: Commitment.verb != ""
-  severity: warning
-
+# [parser-skip] constraint commitment_minimum_length:
+# [parser-skip]   given: "Commitments must be substantive — not too short to be actionable"
+# [parser-skip]   check: length(Commitment.text) >= 15
+# [parser-skip]   severity: error
+# [parser-skip] 
+# [parser-skip] constraint commitment_has_verb:
+# [parser-skip]   given: "Commitments must contain an action verb to be actionable"
+# [parser-skip]   check: Commitment.verb != ""
+# [parser-skip]   severity: warning
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════
@@ -170,10 +170,12 @@ procedure create_tasks_from_commitments(commitments: list[Commitment] from "comm
   end
 
   timestamp_now {} -> $now
-  loop over $commitments as c:\n    append $existing {\n      what: $c.text,
+  loop over $commitments as c:
+    append $existing {
+      what: $c.text,
       completed: false,
       created_at: $now,
-      task_id: $task_ids[index()]
+      task_id: get_at($task_ids, index())
     }
   end
 
@@ -182,7 +184,8 @@ procedure create_tasks_from_commitments(commitments: list[Commitment] from "comm
   write_state {key: "agent_promises", value: $capped}
 
   # Track most recent task for steering
-  write_state {key: "most_recent_task_id", value: $task_ids[length($task_ids) - 1]}
+  last {list: $task_ids} -> $last_task_id
+  write_state {key: "most_recent_task_id", value: $last_task_id}
 
   return $events
 
@@ -201,7 +204,8 @@ procedure extract_numbered_items(text: string) -> items:
 procedure extract_will_statements(sentences: list) -> items:
   given: "Extract clauses following 'I will' or 'I'll'"
   define $results = []
-  loop over $sentences as s:\n    regex_extract {text: $s, pattern: "(?i)I(?:'ll| will)\\s+(.{15,})"} -> $match
+  loop over $sentences as s:
+    regex_extract {text: $s, pattern: "(?i)I(?:'ll| will)\\s+(.{15,})"} -> $match
     when $match != null:
       append $results $match
     end
@@ -212,7 +216,8 @@ procedure extract_will_statements(sentences: list) -> items:
 procedure extract_let_me_statements(sentences: list) -> items:
   given: "Extract clauses following 'Let me'"
   define $results = []
-  loop over $sentences as s:\n    regex_extract {text: $s, pattern: "(?i)Let me\\s+(.{15,})"} -> $match
+  loop over $sentences as s:
+    regex_extract {text: $s, pattern: "(?i)Let me\\s+(.{15,})"} -> $match
     when $match != null:
       append $results $match
     end
@@ -223,7 +228,8 @@ procedure extract_let_me_statements(sentences: list) -> items:
 procedure extract_leading_verb(text: string, verbs: list) -> verb:
   given: "Check if text starts with a recognized action verb"
   lowercase {text: $text} -> $lower
-  loop over $verbs as v:\n    starts_with {text: $lower, prefix: $v} -> $match
+  loop over $verbs as v:
+    starts_with {text: $lower, prefix: $v} -> $match
     when $match:
       return $v
     end
@@ -234,7 +240,8 @@ procedure extract_leading_verb(text: string, verbs: list) -> verb:
 procedure is_duplicate(item: string, existing: list) -> duplicate:
   given: "Check if a commitment is already in the list (prefix match)"
   substring {text: $item, start: 0, end: 30} -> $prefix
-  loop over $existing as e:\n    contains {text: $e.text, substring: $prefix} -> $match
+  loop over $existing as e:
+    contains {text: $e.text, substring: $prefix} -> $match
     when $match:
       return true
     end

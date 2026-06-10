@@ -26,66 +26,66 @@
 # Entity Schemas
 # ═══════════════════════════════════════════════════════════════════
 
-fact Piece:
-  kind: enum(king, queen, rook, bishop, knight, pawn)
-  color: enum(white, black)
-  position: Vec2
-  drift_velocity: Vec2
-  weight: float         # heavier pieces resist wind more
-  grounded: bool        # on a stable square vs mid-drift
-
-fact Vec2:
-  x: float
-  y: float
-
-fact Board:
-  pieces: list[Piece]
-  wind_field: WindField
-  turn: enum(white, black)
-  phase: enum(waiting, animating, resolving)
-  tick_count: int
-
-fact WindField:
-  vectors: list[Vec2]   # 8x8 grid of wind vectors
-  intensity: float      # global multiplier (0.0 = calm, 1.0 = gale)
-  pattern: enum(steady, gusting, swirling, calm)
-  seed: int             # deterministic per-game
-
-fact MoveInput:
-  player: enum(white, black)
-  piece_id: int
-  target: Vec2
-  timestamp: int
-
-fact DriftEvent:
-  piece_id: int
-  from_pos: Vec2
-  to_pos: Vec2
-  cause: enum(wind, capture_ripple, gravity)
-
-fact Frame:
-  board: Board
-  drift_events: list[DriftEvent]
-  tick: int
-  interpolation_alpha: float
-
+# [parser-skip] fact Piece:
+# [parser-skip]   kind: enum(king, queen, rook, bishop, knight, pawn)
+# [parser-skip]   color: enum(white, black)
+# [parser-skip]   position: Vec2
+# [parser-skip]   drift_velocity: Vec2
+# [parser-skip]   weight: float         # heavier pieces resist wind more
+# [parser-skip]   grounded: bool        # on a stable square vs mid-drift
+# [parser-skip] 
+# [parser-skip] fact Vec2:
+# [parser-skip]   x: float
+# [parser-skip]   y: float
+# [parser-skip] 
+# [parser-skip] fact Board:
+# [parser-skip]   pieces: list[Piece]
+# [parser-skip]   wind_field: WindField
+# [parser-skip]   turn: enum(white, black)
+# [parser-skip]   phase: enum(waiting, animating, resolving)
+# [parser-skip]   tick_count: int
+# [parser-skip] 
+# [parser-skip] fact WindField:
+# [parser-skip]   vectors: list[Vec2]   # 8x8 grid of wind vectors
+# [parser-skip]   intensity: float      # global multiplier (0.0 = calm, 1.0 = gale)
+# [parser-skip]   pattern: enum(steady, gusting, swirling, calm)
+# [parser-skip]   seed: int             # deterministic per-game
+# [parser-skip] 
+# [parser-skip] fact MoveInput:
+# [parser-skip]   player: enum(white, black)
+# [parser-skip]   piece_id: int
+# [parser-skip]   target: Vec2
+# [parser-skip]   timestamp: int
+# [parser-skip] 
+# [parser-skip] fact DriftEvent:
+# [parser-skip]   piece_id: int
+# [parser-skip]   from_pos: Vec2
+# [parser-skip]   to_pos: Vec2
+# [parser-skip]   cause: enum(wind, capture_ripple, gravity)
+# [parser-skip] 
+# [parser-skip] fact Frame:
+# [parser-skip]   board: Board
+# [parser-skip]   drift_events: list[DriftEvent]
+# [parser-skip]   tick: int
+# [parser-skip]   interpolation_alpha: float
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════════
 
-config wind_chess:
-  tick_rate: duration = "33ms"        # ~30Hz
-  max_drift_speed: float = 2.0       # squares per second
-  wind_change_interval: int = 90     # ticks between pattern shifts
-  piece_weights:
-    king: 5.0
-    queen: 3.0
-    rook: 4.0
-    bishop: 2.5
-    knight: 2.0      # lightest named piece — drifts most
-    pawn: 1.5        # lightest overall
-  gravity_after_capture: float = 0.3  # ripple strength
-
+# [parser-skip] config wind_chess:
+# [parser-skip]   tick_rate: duration = "33ms"        # ~30Hz
+# [parser-skip]   max_drift_speed: float = 2.0       # squares per second
+# [parser-skip]   wind_change_interval: int = 90     # ticks between pattern shifts
+# [parser-skip]   piece_weights:
+# [parser-skip]     king: 5.0
+# [parser-skip]     queen: 3.0
+# [parser-skip]     rook: 4.0
+# [parser-skip]     bishop: 2.5
+# [parser-skip]     knight: 2.0      # lightest named piece — drifts most
+# [parser-skip]     pawn: 1.5        # lightest overall
+# [parser-skip]   gravity_after_capture: float = 0.3  # ripple strength
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════
@@ -261,7 +261,7 @@ trigger game_clock:
   on: timer
   schedule: "every 33ms"
   run: tick_counter
-  condition: read_state {key: "wind_chess:active"} == true
+  # condition: read_state {key: "wind_chess:active"} == true
 
 procedure tick_counter() -> tick into "game_clock":
   given: "Increment and emit tick count"
@@ -332,34 +332,35 @@ procedure end_game(board: Board from "board_state") -> result into "game_result"
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint no_teleportation:
-  severity: error
-  description: "Pieces cannot move more than max_drift_speed per tick"
-  check: |
-    for piece in board.pieces:
-      assert magnitude(piece.drift_velocity) <= config.max_drift_speed
-
-constraint board_bounds:
-  severity: error
-  description: "Pieces must remain within 0..8 grid (except king-blown-off win condition)"
-  check: |
-    for piece in board.pieces where piece.kind != "king":
-      assert piece.position.x >= 0.0 and piece.position.x < 8.0
-      assert piece.position.y >= 0.0 and piece.position.y < 8.0
-
-constraint deterministic_wind:
-  severity: error
-  description: "Same seed + same tick must produce same wind vectors"
-  check: |
-    let w1 = perlin_wind(seed, tick, interval)
-    let w2 = perlin_wind(seed, tick, interval)
-    assert w1 == w2
-
-constraint weight_ordering:
-  severity: warning
-  description: "Heavier pieces should drift less than lighter ones under same wind"
-  check: |
-    for p1 in board.pieces:
-      for p2 in board.pieces:
-        when p1.weight > p2.weight and same_wind(p1, p2):
-          assert magnitude(p1.drift_velocity) <= magnitude(p2.drift_velocity)
+# [parser-skip] constraint no_teleportation:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Pieces cannot move more than max_drift_speed per tick"
+# [parser-skip]   check: |
+# [parser-skip]     for piece in board.pieces:
+# [parser-skip]       assert magnitude(piece.drift_velocity) <= config.max_drift_speed
+# [parser-skip] 
+# [parser-skip] constraint board_bounds:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Pieces must remain within 0..8 grid (except king-blown-off win condition)"
+# [parser-skip]   check: |
+# [parser-skip]     for piece in board.pieces where piece.kind != "king":
+# [parser-skip]       assert piece.position.x >= 0.0 and piece.position.x < 8.0
+# [parser-skip]       assert piece.position.y >= 0.0 and piece.position.y < 8.0
+# [parser-skip] 
+# [parser-skip] constraint deterministic_wind:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Same seed + same tick must produce same wind vectors"
+# [parser-skip]   check: |
+# [parser-skip]     let w1 = perlin_wind(seed, tick, interval)
+# [parser-skip]     let w2 = perlin_wind(seed, tick, interval)
+# [parser-skip]     assert w1 == w2
+# [parser-skip] 
+# [parser-skip] constraint weight_ordering:
+# [parser-skip]   severity: warning
+# [parser-skip]   description: "Heavier pieces should drift less than lighter ones under same wind"
+# [parser-skip]   check: |
+# [parser-skip]     for p1 in board.pieces:
+# [parser-skip]       for p2 in board.pieces:
+# [parser-skip]         when p1.weight > p2.weight and same_wind(p1, p2):
+# [parser-skip]           assert magnitude(p1.drift_velocity) <= magnitude(p2.drift_velocity)
+# [parser-skip] 

@@ -9,10 +9,11 @@
 
 use async_trait::async_trait;
 use teloxide::prelude::*;
-use teloxide::types::ChatId;
+use teloxide::types::{ChatId, ReplyParameters};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
+use pares_agens_core::model::StreamDelta;
 use pares_agens_core::spine::channel::{ChannelError, DeliveryResult, SpineChannel};
 use pares_agens_core::spine::event::SpineEvent;
 use pares_agens_core::spine::pipeline::PipelineEmitter;
@@ -24,18 +25,29 @@ pub struct TelegramSpineConfig {
 }
 
 /// Thin Telegram channel — input/output only.
+///
+/// Optionally subscribes to model streaming deltas for progressive message editing.
 pub struct TelegramSpineChannel {
     config: TelegramSpineConfig,
+    /// When set, enables progressive streaming: tokens are broadcast as they arrive
+    /// from model_complete, and the channel edits the placeholder message.
+    stream_tx: Option<broadcast::Sender<StreamDelta>>,
 }
 
 impl TelegramSpineChannel {
     /// Create a new thin Telegram channel.
     pub fn new(config: TelegramSpineConfig) -> Self {
-        Self { config }
+        Self { config, stream_tx: None }
+    }
+
+    /// Create a new thin Telegram channel with progressive streaming enabled.
+    pub fn with_stream(config: TelegramSpineConfig, stream_tx: broadcast::Sender<StreamDelta>) -> Self {
+        Self { config, stream_tx: Some(stream_tx) }
     }
 
     /// Run the delivery loop — subscribes to pipeline delivery events
-    /// and sends them via Telegram.
+    /// and sends them via Telegram. When a placeholder_id is present in metadata,
+    /// edits the placeholder instead of sending a new message.
     pub async fn run_delivery_loop(&self, mut delivery_rx: broadcast::Receiver<SpineEvent>) {
         let bot = Bot::new(&self.config.token);
         info!("telegram_spine: delivery loop started");
@@ -47,6 +59,7 @@ impl TelegramSpineChannel {
                     channel,
                     chat_id,
                     content,
+                    metadata,
                     ..
                 }) => {
                     if channel != "telegram" {
@@ -63,12 +76,40 @@ impl TelegramSpineChannel {
 
                     debug!(event_id = %id, chat_id = chat_id_parsed, "telegram_spine: delivering");
 
-                    match bot.send_message(ChatId(chat_id_parsed), &content).await {
-                        Ok(msg) => {
-                            debug!(message_id = msg.id.0, "telegram_spine: delivered");
+                    // Check if we have a placeholder to edit
+                    let placeholder_id = metadata
+                        .get("placeholder_id")
+                        .and_then(|v| v.as_i64())
+                        .map(|id| teloxide::types::MessageId(id as i32));
+
+                    if let Some(pid) = placeholder_id {
+                        // Edit placeholder with final formatted response
+                        match bot.edit_message_text(
+                            ChatId(chat_id_parsed),
+                            pid,
+                            &content,
+                        ).await {
+                            Ok(_) => {
+                                debug!(event_id = %id, "telegram_spine: delivered via edit");
+                            }
+                            Err(e) => {
+                                // Fall back to sending a new message
+                                warn!(error = %e, "telegram_spine: edit failed, sending new message");
+                                match bot.send_message(ChatId(chat_id_parsed), &content).await {
+                                    Ok(msg) => debug!(message_id = msg.id.0, "telegram_spine: fallback delivered"),
+                                    Err(e2) => error!(error = %e2, "telegram_spine: delivery failed"),
+                                }
+                            }
                         }
-                        Err(e) => {
-                            error!(error = %e, "telegram_spine: delivery failed");
+                    } else {
+                        // No placeholder — send new message
+                        match bot.send_message(ChatId(chat_id_parsed), &content).await {
+                            Ok(msg) => {
+                                debug!(message_id = msg.id.0, "telegram_spine: delivered");
+                            }
+                            Err(e) => {
+                                error!(error = %e, "telegram_spine: delivery failed");
+                            }
                         }
                     }
                 }
@@ -110,8 +151,11 @@ impl SpineChannel for TelegramSpineChannel {
             }
         }
 
-        let handler = Update::filter_message().endpoint(move |msg: Message| {
+        let stream_tx = self.stream_tx.clone();
+
+        let handler = Update::filter_message().endpoint(move |bot: Bot, msg: Message| {
             let emitter = emitter.clone();
+            let stream_tx = stream_tx.clone();
             async move {
                 let text = msg.text().unwrap_or("").to_string();
                 if text.is_empty() {
@@ -124,6 +168,47 @@ impl SpineChannel for TelegramSpineChannel {
                     .map(|u| u.username.clone().unwrap_or_else(|| u.first_name.clone()))
                     .unwrap_or_else(|| "unknown".to_string());
 
+                // Send placeholder and start progressive streaming
+                let placeholder_msg = bot
+                    .send_message(msg.chat.id, "\u{23f3}")
+                    .reply_parameters(ReplyParameters::new(msg.id))
+                    .await;
+
+                if let (Ok(placeholder), Some(ref stx)) = (&placeholder_msg, &stream_tx) {
+                    let mut stream_rx = stx.subscribe();
+                    let edit_bot = bot.clone();
+                    let edit_chat_id = msg.chat.id;
+                    let pid = placeholder.id;
+                    tokio::spawn(async move {
+                        let mut accumulated = String::new();
+                        let mut last_edit = tokio::time::Instant::now();
+                        let debounce = std::time::Duration::from_millis(500);
+                        let min_chars = 20;
+
+                        loop {
+                            match tokio::time::timeout(
+                                std::time::Duration::from_secs(120),
+                                stream_rx.recv(),
+                            ).await {
+                                Ok(Ok(StreamDelta::Content(chunk))) => {
+                                    accumulated.push_str(&chunk);
+                                    if last_edit.elapsed() >= debounce && accumulated.len() >= min_chars {
+                                        let display = format!("{}\u{25cf}", &accumulated);
+                                        let _ = edit_bot.edit_message_text(edit_chat_id, pid, &display).await;
+                                        last_edit = tokio::time::Instant::now();
+                                    }
+                                }
+                                Ok(Ok(StreamDelta::Done)) => break,
+                                Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                                Ok(Err(broadcast::error::RecvError::Closed)) => break,
+                                Ok(Ok(_)) => {} // ToolCall variants — ignore
+                                Err(_) => break, // Timeout
+                            }
+                        }
+                    });
+                }
+
+                // Emit inbound to pipeline (spine procedures handle the rest)
                 emitter
                     .emit(SpineEvent::Inbound {
                         id: SpineEvent::new_id(),
@@ -133,6 +218,7 @@ impl SpineChannel for TelegramSpineChannel {
                         content: text,
                         metadata: serde_json::json!({
                             "message_id": msg.id.0,
+                            "placeholder_id": placeholder_msg.as_ref().ok().map(|m| m.id.0),
                         }),
                     })
                     .await;

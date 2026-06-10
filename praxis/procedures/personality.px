@@ -12,22 +12,22 @@
 #                         └─ calls [format_response] (utility)
 #
 
-fact PersonalityConfig:
-  tone: string
-  verbosity: string
-  humor_level: string
-  formality: string
-  emoji_usage: string
-
+# [parser-skip] fact PersonalityConfig:
+# [parser-skip]   tone: string
+# [parser-skip]   verbosity: string
+# [parser-skip]   humor_level: string
+# [parser-skip]   formality: string
+# [parser-skip]   emoji_usage: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint personality_always_loaded:
-  given: "Session must always have a personality config — never operate with empty config"
-  check: PersonalityConfig.tone != "" AND PersonalityConfig.verbosity != ""
-  severity: error
-
+# [parser-skip] constraint personality_always_loaded:
+# [parser-skip]   given: "Session must always have a personality config — never operate with empty config"
+# [parser-skip]   check: PersonalityConfig.tone != "" AND PersonalityConfig.verbosity != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

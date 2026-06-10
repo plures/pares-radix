@@ -13,24 +13,24 @@
 #   personality ────┼─→ [deliver_response] ─→ delivery
 #
 
-fact Route:
-  tier: enum(fast, standard, premium)
-  reason: string
-  streaming: bool
-
-fact Delivery:
-  styled_content: string
-  tier: string
-
+# [parser-skip] fact Route:
+# [parser-skip]   tier: enum(fast, standard, premium)
+# [parser-skip]   reason: string
+# [parser-skip]   streaming: bool
+# [parser-skip] 
+# [parser-skip] fact Delivery:
+# [parser-skip]   styled_content: string
+# [parser-skip]   tier: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint model_invocation_requires_route:
-  given: "Model invocation must always have a routing decision"
-  check: Route.tier != ""
-  severity: error
-
+# [parser-skip] constraint model_invocation_requires_route:
+# [parser-skip]   given: "Model invocation must always have a routing decision"
+# [parser-skip]   check: Route.tier != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

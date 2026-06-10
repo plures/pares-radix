@@ -10,16 +10,16 @@
 #   model_request ─→ [build_context] ─→ enriched_request
 #
 
-fact Message:
-  role: enum(user, assistant, system, tool)
-  content: string
-  timestamp: int
-  tool_calls: optional[list[string]]
-
-fact ConversationContext:
-  history: list[Message]
-  max_history: int
-
+# [parser-skip] fact Message:
+# [parser-skip]   role: enum(user, assistant, system, tool)
+# [parser-skip]   content: string
+# [parser-skip]   timestamp: int
+# [parser-skip]   tool_calls: optional[list[string]]
+# [parser-skip] 
+# [parser-skip] fact ConversationContext:
+# [parser-skip]   history: list[Message]
+# [parser-skip]   max_history: int
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

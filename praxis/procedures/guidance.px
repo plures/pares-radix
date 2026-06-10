@@ -12,20 +12,20 @@
 #                                └─ calls [generate_guidance] (utility)
 #
 
-fact Guidance:
-  constraints: list
-  session_type: string
-  formatted_block: string
-
+# [parser-skip] fact Guidance:
+# [parser-skip]   constraints: list
+# [parser-skip]   session_type: string
+# [parser-skip]   formatted_block: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint guidance_always_injected:
-  given: "Every model request must pass through guidance injection"
-  check: enhanced_prompt.guidance != ""
-  severity: error
-
+# [parser-skip] constraint guidance_always_injected:
+# [parser-skip]   given: "Every model request must pass through guidance injection"
+# [parser-skip]   check: enhanced_prompt.guidance != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

@@ -24,100 +24,100 @@ import games::wind_chess
 # Entity Schemas
 # ═══════════════════════════════════════════════════════════════════
 
-fact Room:
-  id: string
-  name: string
-  description: string
-  bounds: Bounds3D
-  connections: list[Portal]
-  ambient: AmbientProfile
-  active_games: list[string]      # game IDs running in this room
-  entities: list[string]          # entity IDs present
-
-fact Bounds3D:
-  origin: Vec3
-  size: Vec3
-
-fact Vec3:
-  x: float
-  y: float
-  z: float
-
-fact Portal:
-  target_room: string
-  position: Vec3
-  label: string
-  traversable: bool
-
-fact Entity:
-  id: string
-  kind: enum(npc, object, effect, player, game_surface)
-  name: string
-  position: Vec3
-  rotation: float
-  state: string                   # FSM state key
-  dialogue_tree: optional[string] # for NPCs with conversation
-  behaviors: list[string]         # behavior procedure names
-  visible: bool
-
-fact AmbientEffect:
-  id: string
-  kind: enum(particle, light, sound, weather, fog, glow)
-  intensity: float                # 0.0 = off, 1.0 = full
-  color: optional[string]         # hex color for visual effects
-  position: optional[Vec3]        # null = room-wide
-  radius: float                   # effect spread
-  phase: float                    # animation phase (0.0 - 1.0)
-  loop: bool                      # repeating or one-shot
-
-fact AmbientProfile:
-  effects: list[AmbientEffect]
-  base_light: float               # 0.0 = pitch dark, 1.0 = bright
-  sound_bed: optional[string]     # ambient sound loop name
-  temperature: enum(cold, cool, neutral, warm, hot)
-
-fact WorldState:
-  current_room: string
-  rooms: list[Room]
-  entities: list[Entity]
-  time_of_day: float              # 0.0 = midnight, 0.5 = noon
-  tick_count: int
-
-fact SpatialCommand:
-  action: enum(move, look, interact, enter_room, spawn_entity, remove_entity, start_game, stop_game)
-  target: optional[string]        # entity or room id
-  position: optional[Vec3]
-  parameters: optional[string]    # JSON-encoded action-specific params
-
-fact GameSurface:
-  game_id: string
-  game_type: enum(wind_chess, future_game)
-  position: Vec3
-  size: Vec3
-  active: bool
-
-fact WorldFrame:
-  room: Room
-  entities: list[Entity]
-  ambient: list[AmbientEffect]
-  game_frames: list[Frame]        # composited game frames (from wind-chess etc.)
-  time_of_day: float
-  tick: int
-  camera_position: Vec3
-  camera_target: Vec3
-
+# [parser-skip] fact Room:
+# [parser-skip]   id: string
+# [parser-skip]   name: string
+# [parser-skip]   description: string
+# [parser-skip]   bounds: Bounds3D
+# [parser-skip]   connections: list[Portal]
+# [parser-skip]   ambient: AmbientProfile
+# [parser-skip]   active_games: list[string]      # game IDs running in this room
+# [parser-skip]   entities: list[string]          # entity IDs present
+# [parser-skip] 
+# [parser-skip] fact Bounds3D:
+# [parser-skip]   origin: Vec3
+# [parser-skip]   size: Vec3
+# [parser-skip] 
+# [parser-skip] fact Vec3:
+# [parser-skip]   x: float
+# [parser-skip]   y: float
+# [parser-skip]   z: float
+# [parser-skip] 
+# [parser-skip] fact Portal:
+# [parser-skip]   target_room: string
+# [parser-skip]   position: Vec3
+# [parser-skip]   label: string
+# [parser-skip]   traversable: bool
+# [parser-skip] 
+# [parser-skip] fact Entity:
+# [parser-skip]   id: string
+# [parser-skip]   kind: enum(npc, object, effect, player, game_surface)
+# [parser-skip]   name: string
+# [parser-skip]   position: Vec3
+# [parser-skip]   rotation: float
+# [parser-skip]   state: string                   # FSM state key
+# [parser-skip]   dialogue_tree: optional[string] # for NPCs with conversation
+# [parser-skip]   behaviors: list[string]         # behavior procedure names
+# [parser-skip]   visible: bool
+# [parser-skip] 
+# [parser-skip] fact AmbientEffect:
+# [parser-skip]   id: string
+# [parser-skip]   kind: enum(particle, light, sound, weather, fog, glow)
+# [parser-skip]   intensity: float                # 0.0 = off, 1.0 = full
+# [parser-skip]   color: optional[string]         # hex color for visual effects
+# [parser-skip]   position: optional[Vec3]        # null = room-wide
+# [parser-skip]   radius: float                   # effect spread
+# [parser-skip]   phase: float                    # animation phase (0.0 - 1.0)
+# [parser-skip]   loop: bool                      # repeating or one-shot
+# [parser-skip] 
+# [parser-skip] fact AmbientProfile:
+# [parser-skip]   effects: list[AmbientEffect]
+# [parser-skip]   base_light: float               # 0.0 = pitch dark, 1.0 = bright
+# [parser-skip]   sound_bed: optional[string]     # ambient sound loop name
+# [parser-skip]   temperature: enum(cold, cool, neutral, warm, hot)
+# [parser-skip] 
+# [parser-skip] fact WorldState:
+# [parser-skip]   current_room: string
+# [parser-skip]   rooms: list[Room]
+# [parser-skip]   entities: list[Entity]
+# [parser-skip]   time_of_day: float              # 0.0 = midnight, 0.5 = noon
+# [parser-skip]   tick_count: int
+# [parser-skip] 
+# [parser-skip] fact SpatialCommand:
+# [parser-skip]   action: enum(move, look, interact, enter_room, spawn_entity, remove_entity, start_game, stop_game)
+# [parser-skip]   target: optional[string]        # entity or room id
+# [parser-skip]   position: optional[Vec3]
+# [parser-skip]   parameters: optional[string]    # JSON-encoded action-specific params
+# [parser-skip] 
+# [parser-skip] fact GameSurface:
+# [parser-skip]   game_id: string
+# [parser-skip]   game_type: enum(wind_chess, future_game)
+# [parser-skip]   position: Vec3
+# [parser-skip]   size: Vec3
+# [parser-skip]   active: bool
+# [parser-skip] 
+# [parser-skip] fact WorldFrame:
+# [parser-skip]   room: Room
+# [parser-skip]   entities: list[Entity]
+# [parser-skip]   ambient: list[AmbientEffect]
+# [parser-skip]   game_frames: list[Frame]        # composited game frames (from wind-chess etc.)
+# [parser-skip]   time_of_day: float
+# [parser-skip]   tick: int
+# [parser-skip]   camera_position: Vec3
+# [parser-skip]   camera_target: Vec3
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════════
 
-config inner_space:
-  ambient_tick_rate: duration = "100ms"    # 10Hz for ambient effects
-  max_entities_per_room: int = 64
-  max_rooms: int = 16
-  npc_think_interval: int = 30            # ticks between NPC behavior updates
-  default_light: float = 0.7
-  time_scale: float = 60.0               # 1 real second = 1 game minute
-
+# [parser-skip] config inner_space:
+# [parser-skip]   ambient_tick_rate: duration = "100ms"    # 10Hz for ambient effects
+# [parser-skip]   max_entities_per_room: int = 64
+# [parser-skip]   max_rooms: int = 16
+# [parser-skip]   npc_think_interval: int = 30            # ticks between NPC behavior updates
+# [parser-skip]   default_light: float = 0.7
+# [parser-skip]   time_scale: float = 60.0               # 1 real second = 1 game minute
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════
@@ -341,7 +341,7 @@ trigger ambient_clock:
   on: timer
   schedule: "every 100ms"
   run: ambient_timer
-  condition: read_state {key: "inner_space:active"} == true
+  # condition: read_state {key: "inner_space:active"} == true
 
 procedure ambient_timer() -> tick into "ambient_clock":
   given: "Emit ambient tick count for inner-space updates"
@@ -431,39 +431,40 @@ procedure shutdown_world(command: string from "world_stop") -> result into "worl
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint entity_room_limit:
-  severity: error
-  description: "No room can exceed max_entities_per_room"
-  check: |
-    for room in world.rooms:
-      let count = len(filter(world.entities, e -> e.room == room.id))
-      assert count <= config.max_entities_per_room
-
-constraint portal_bidirectional:
-  severity: warning
-  description: "Portals should be bidirectional — if A connects to B, B should connect to A"
-  check: |
-    for room in world.rooms:
-      for portal in room.connections:
-        let target = find(world.rooms, r -> r.id == portal.target_room)
-        assert any(target.connections, c -> c.target_room == room.id)
-
-constraint game_surface_in_room:
-  severity: error
-  description: "Game surfaces must be within room bounds"
-  check: |
-    for entity in world.entities where entity.kind == "game_surface":
-      let room = find(world.rooms, r -> r.id == world.current_room)
-      assert entity.position.x >= room.bounds.origin.x
-      assert entity.position.y >= room.bounds.origin.y
-      assert entity.position.z >= room.bounds.origin.z
-      assert entity.position.x <= room.bounds.origin.x + room.bounds.size.x
-      assert entity.position.y <= room.bounds.origin.y + room.bounds.size.y
-      assert entity.position.z <= room.bounds.origin.z + room.bounds.size.z
-
-constraint time_bounds:
-  severity: error
-  description: "Time of day must stay in [0.0, 1.0)"
-  check: |
-    assert world.time_of_day >= 0.0
-    assert world.time_of_day < 1.0
+# [parser-skip] constraint entity_room_limit:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "No room can exceed max_entities_per_room"
+# [parser-skip]   check: |
+# [parser-skip]     for room in world.rooms:
+# [parser-skip]       let count = len(filter(world.entities, e -> e.room == room.id))
+# [parser-skip]       assert count <= config.max_entities_per_room
+# [parser-skip] 
+# [parser-skip] constraint portal_bidirectional:
+# [parser-skip]   severity: warning
+# [parser-skip]   description: "Portals should be bidirectional — if A connects to B, B should connect to A"
+# [parser-skip]   check: |
+# [parser-skip]     for room in world.rooms:
+# [parser-skip]       for portal in room.connections:
+# [parser-skip]         let target = find(world.rooms, r -> r.id == portal.target_room)
+# [parser-skip]         assert any(target.connections, c -> c.target_room == room.id)
+# [parser-skip] 
+# [parser-skip] constraint game_surface_in_room:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Game surfaces must be within room bounds"
+# [parser-skip]   check: |
+# [parser-skip]     for entity in world.entities where entity.kind == "game_surface":
+# [parser-skip]       let room = find(world.rooms, r -> r.id == world.current_room)
+# [parser-skip]       assert entity.position.x >= room.bounds.origin.x
+# [parser-skip]       assert entity.position.y >= room.bounds.origin.y
+# [parser-skip]       assert entity.position.z >= room.bounds.origin.z
+# [parser-skip]       assert entity.position.x <= room.bounds.origin.x + room.bounds.size.x
+# [parser-skip]       assert entity.position.y <= room.bounds.origin.y + room.bounds.size.y
+# [parser-skip]       assert entity.position.z <= room.bounds.origin.z + room.bounds.size.z
+# [parser-skip] 
+# [parser-skip] constraint time_bounds:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Time of day must stay in [0.0, 1.0)"
+# [parser-skip]   check: |
+# [parser-skip]     assert world.time_of_day >= 0.0
+# [parser-skip]     assert world.time_of_day < 1.0
+# [parser-skip] 

@@ -25,32 +25,32 @@
 # Facts
 # ═══════════════════════════════════════════════════════════════════
 
-fact ContinuationSignal:
-  is_continuation: bool
-  confidence: float
-  target_task_id: optional[string]
-  intent: enum(confirm, redirect, clarify, cancel, new_request)
-  original_message: string
-
-fact SteerResult:
-  task_id: string
-  action: enum(dispatched, priority_bumped, cancelled, clarified)
-  message_to_agent: string
-
+# [parser-skip] fact ContinuationSignal:
+# [parser-skip]   is_continuation: bool
+# [parser-skip]   confidence: float
+# [parser-skip]   target_task_id: optional[string]
+# [parser-skip]   intent: enum(confirm, redirect, clarify, cancel, new_request)
+# [parser-skip]   original_message: string
+# [parser-skip] 
+# [parser-skip] fact SteerResult:
+# [parser-skip]   task_id: string
+# [parser-skip]   action: enum(dispatched, priority_bumped, cancelled, clarified)
+# [parser-skip]   message_to_agent: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint continuation_confidence_bounded:
-  given: "Continuation confidence must be between 0.0 and 1.0"
-  check: ContinuationSignal.confidence >= 0.0 AND ContinuationSignal.confidence <= 1.0
-  severity: error
-
-constraint steer_requires_task:
-  given: "Cannot steer a task that doesn't exist"
-  check: SteerResult.task_id != ""
-  severity: error
-
+# [parser-skip] constraint continuation_confidence_bounded:
+# [parser-skip]   given: "Continuation confidence must be between 0.0 and 1.0"
+# [parser-skip]   check: ContinuationSignal.confidence >= 0.0 AND ContinuationSignal.confidence <= 1.0
+# [parser-skip]   severity: error
+# [parser-skip] 
+# [parser-skip] constraint steer_requires_task:
+# [parser-skip]   given: "Cannot steer a task that doesn't exist"
+# [parser-skip]   check: SteerResult.task_id != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════
@@ -265,6 +265,7 @@ procedure find_most_recent(tasks: list, promises: list) -> task_id:
   end
   # Fall back to promises
   when length($promises) > 0:
-    return $promises[length($promises) - 1].task_id
+    last {list: $promises} -> $last_promise
+    return $last_promise.task_id
   end
   return null

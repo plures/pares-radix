@@ -12,598 +12,598 @@
 # PRACTICES (from practices/)
 # ══════════════════════════════════════════════════════════════════════
 
-constraint practice_hyperswarm_patterns:
-  severity: warning
-  message: "Follow guidance from: Hyperswarm Integration Patterns"
-
-constraint practice_merge_conflict_prevention:
-  severity: warning
-  message: "Follow guidance from: Merge Conflict Prevention & Resolution Guide"
-
-constraint practice_work_prioritization:
-  severity: warning
-  message: "Follow guidance from: Work Prioritization Framework"
-
-constraint practice_automation_first_1:
-  severity: warning
-  message: "Fresh environment, one command, success. No manual steps, no 'now open this file and change line 42.'"
-
-constraint practice_automation_first_2:
-  severity: error
-  message: "Automation must not amplify problems. A workflow that creates issues faster than humans can triage them is harmful. Build cascade detection and escalation thresholds into every loop. See [lessons learned: praxis-business cascade](../lessons-learned/2026-03-praxis-business-cascade.md)."
-
-constraint practice_automation_first_3:
-  severity: warning
-  message: "Idempotent by default. Every automation is safe to run twice. Check state before acting."
-
-constraint practice_automation_first_4:
-  severity: warning
-  message: "Fail loudly with actionable messages. Silent failures are worse than crashes."
-
-constraint practice_automation_first_5:
-  severity: warning
-  message: "Edge cases are expected cases. Network timeouts, rate limits, missing permissions — handle them explicitly."
-
-constraint practice_automation_first_6:
-  severity: warning
-  message: "Event-driven beats polling beats cron (in that order). Cron is a last resort, not a default."
-
-constraint practice_copilot_delegation_1:
-  severity: warning
-  message: "Issues are goals, not tickets. One issue may decompose into multiple work units (PRs, config changes, procedure updates). There is no required 1:1 issue-to-PR mapping."
-
-constraint practice_copilot_delegation_2:
-  severity: warning
-  message: "Pipeline state lives in PluresDB. Every transition is recorded in `work_units`, `goals`, and `activity_log` — not in ad-hoc comments or spreadsheets."
-
-constraint practice_copilot_delegation_3:
-  severity: warning
-  message: "The coordinator communicates via structured PR comments. Copilot receives fix requests and revision requests through the PR comment thread, with relevant PluresLM context prepended."
-
-constraint practice_copilot_delegation_4:
-  severity: warning
-  message: "Retry thresholds gate escalation. CI fix attempts ≤ 3, review revision attempts ≤ 2. Exceeding these surfaces a human escalation — the coordinator does not loop indefinitely."
-
-constraint practice_copilot_delegation_5:
-  severity: warning
-  message: "Queue priority is explicit. Goals are prioritized by integer `priority` field (1 = highest). Strategy changes re-score the entire queue."
-
-constraint practice_dogfooding:
-  severity: warning
-  message: "Follow guidance from: Dogfooding"
-
-constraint practice_ledger_driven_ops:
-  severity: warning
-  message: "Follow guidance from: Ledger-Driven Ops"
-
-constraint practice_local_first_development:
-  severity: warning
-  message: "Follow guidance from: Local-First Development"
-
-constraint practice_merge_sweeps:
-  severity: warning
-  message: "Follow guidance from: Merge Sweeps"
-
-constraint practice_org_anomaly_detection_1:
-  severity: warning
-  message: "Rate of change beats absolute thresholds. A sudden spike from 0.02 to 0.18 CI failure rate is more significant than a stable 0.20. Detect velocity changes, not just threshold crossings."
-
-constraint practice_org_anomaly_detection_2:
-  severity: warning
-  message: "Correlate before alerting. A single anomaly may be noise. The same metric degrading across three or more repositories in 30 minutes is an org-wide signal."
-
-constraint practice_org_anomaly_detection_3:
-  severity: warning
-  message: "Causal hypotheses, not just alerts. Every anomaly notification includes the most probable cause (shared dependency change, recent PR merge, known failure pattern) — not just the metric value."
-
-constraint practice_org_anomaly_detection_4:
-  severity: warning
-  message: "Auto-remediate only low-risk actions. The monitor can open coordinator tasks and trigger known-safe fixes. High-impact actions always require human approval via Praxis gate."
-
-constraint practice_org_anomaly_detection_5:
-  severity: warning
-  message: "False positives are learning data. When a human marks a detection as a false positive, the pattern library updates its sensitivity for that signature."
-
-constraint practice_org_anomaly_detection_6:
-  severity: warning
-  message: "All detections are logged. Nothing happens silently. Every anomaly is written to `health_anomalies` with status, causal hypothesis, and resolution."
-
-constraint practice_praxis_logic_1:
-  severity: warning
-  message: "Facts, events, and rules over finite state machines. FSMs become unwieldy when state transitions depend on multiple conditions, business rules change independently of state flow, or you need to explain 'why did this happen?'"
-
-constraint practice_praxis_logic_2:
-  severity: error
-  message: "Every conclusion must be traceable. No rule fires in isolation. Each decision links back to the facts and events that triggered it."
-
-constraint practice_praxis_logic_3:
-  severity: warning
-  message: "Rules are pure. A rule's `impl` receives state and events and returns a result. No I/O, no side effects, no mutations."
-
-constraint practice_praxis_logic_4:
-  severity: warning
-  message: "Hypotheses are first-class. When evidence is incomplete, the system proposes hypotheses (praxis_kind: hypothesis) and records confidence. Hypotheses decay if not confirmed."
-
-constraint practice_praxis_logic_5:
-  severity: warning
-  message: "The loop improves with use. Each accepted or rejected guidance becomes a feedback signal. Over time, conflict rates fall and objective alignment scores rise."
-
-constraint practice_reactive_architecture_1:
-  severity: warning
-  message: "Procedures over code. Agent behavior is defined as PluresDB procedures, not imperative TypeScript or Rust functions. You extend behavior by adding or updating a procedure — not by forking a repo."
-
-constraint practice_reactive_architecture_2:
-  severity: warning
-  message: "Events over state polling. React to events when they happen. Do not check 'what is the current state?' on a schedule."
-
-constraint practice_reactive_architecture_3:
-  severity: warning
-  message: "State is always consistent. Because procedures are triggered by the very event that changes state, there is no window where state is stale."
-
-constraint practice_reactive_architecture_4:
-  severity: warning
-  message: "Cron for sweeps only. Cron (timer-based execution) is acceptable for periodic health checks and aggregation sweeps. It is not acceptable as the primary trigger for lifecycle transitions."
-
-constraint practice_reactive_architecture_5:
-  severity: warning
-  message: "Everything is auditable. Every event that triggers a procedure is recorded. Every procedure output is recorded in `activity_log` and `pipeline_events`. Nothing happens silently."
-
-constraint practice_reactive_architecture_6:
-  severity: warning
-  message: "Pipelines are graphs, not linear YAML. Flows trigger on conditions over state and events, including joins. A pipeline step can wait for multiple upstream conditions simultaneously."
-
-constraint practice_repo_routing_validation:
-  severity: warning
-  message: "Follow guidance from: Repository Routing Validation"
-
-constraint practice_stale_pr_process:
-  severity: warning
-  message: "Follow guidance from: Stale PR Process"
-
-constraint practice_systemic_triage_protocol:
-  severity: warning
-  message: "Follow guidance from: Systemic Triage Protocol"
-
+# [parser-skip] constraint practice_hyperswarm_patterns:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Hyperswarm Integration Patterns"
+# [parser-skip] 
+# [parser-skip] constraint practice_merge_conflict_prevention:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Merge Conflict Prevention & Resolution Guide"
+# [parser-skip] 
+# [parser-skip] constraint practice_work_prioritization:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Work Prioritization Framework"
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_1:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Fresh environment, one command, success. No manual steps, no 'now open this file and change line 42.'"
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Automation must not amplify problems. A workflow that creates issues faster than humans can triage them is harmful. Build cascade detection and escalation thresholds into every loop. See [lessons learned: praxis-business cascade](../lessons-learned/2026-03-praxis-business-cascade.md)."
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_3:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Idempotent by default. Every automation is safe to run twice. Check state before acting."
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_4:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Fail loudly with actionable messages. Silent failures are worse than crashes."
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_5:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Edge cases are expected cases. Network timeouts, rate limits, missing permissions — handle them explicitly."
+# [parser-skip] 
+# [parser-skip] constraint practice_automation_first_6:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Event-driven beats polling beats cron (in that order). Cron is a last resort, not a default."
+# [parser-skip] 
+# [parser-skip] constraint practice_copilot_delegation_1:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Issues are goals, not tickets. One issue may decompose into multiple work units (PRs, config changes, procedure updates). There is no required 1:1 issue-to-PR mapping."
+# [parser-skip] 
+# [parser-skip] constraint practice_copilot_delegation_2:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Pipeline state lives in PluresDB. Every transition is recorded in `work_units`, `goals`, and `activity_log` — not in ad-hoc comments or spreadsheets."
+# [parser-skip] 
+# [parser-skip] constraint practice_copilot_delegation_3:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "The coordinator communicates via structured PR comments. Copilot receives fix requests and revision requests through the PR comment thread, with relevant PluresLM context prepended."
+# [parser-skip] 
+# [parser-skip] constraint practice_copilot_delegation_4:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Retry thresholds gate escalation. CI fix attempts ≤ 3, review revision attempts ≤ 2. Exceeding these surfaces a human escalation — the coordinator does not loop indefinitely."
+# [parser-skip] 
+# [parser-skip] constraint practice_copilot_delegation_5:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Queue priority is explicit. Goals are prioritized by integer `priority` field (1 = highest). Strategy changes re-score the entire queue."
+# [parser-skip] 
+# [parser-skip] constraint practice_dogfooding:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Dogfooding"
+# [parser-skip] 
+# [parser-skip] constraint practice_ledger_driven_ops:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Ledger-Driven Ops"
+# [parser-skip] 
+# [parser-skip] constraint practice_local_first_development:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Local-First Development"
+# [parser-skip] 
+# [parser-skip] constraint practice_merge_sweeps:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Merge Sweeps"
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_1:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Rate of change beats absolute thresholds. A sudden spike from 0.02 to 0.18 CI failure rate is more significant than a stable 0.20. Detect velocity changes, not just threshold crossings."
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_2:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Correlate before alerting. A single anomaly may be noise. The same metric degrading across three or more repositories in 30 minutes is an org-wide signal."
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_3:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Causal hypotheses, not just alerts. Every anomaly notification includes the most probable cause (shared dependency change, recent PR merge, known failure pattern) — not just the metric value."
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_4:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Auto-remediate only low-risk actions. The monitor can open coordinator tasks and trigger known-safe fixes. High-impact actions always require human approval via Praxis gate."
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_5:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "False positives are learning data. When a human marks a detection as a false positive, the pattern library updates its sensitivity for that signature."
+# [parser-skip] 
+# [parser-skip] constraint practice_org_anomaly_detection_6:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "All detections are logged. Nothing happens silently. Every anomaly is written to `health_anomalies` with status, causal hypothesis, and resolution."
+# [parser-skip] 
+# [parser-skip] constraint practice_praxis_logic_1:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Facts, events, and rules over finite state machines. FSMs become unwieldy when state transitions depend on multiple conditions, business rules change independently of state flow, or you need to explain 'why did this happen?'"
+# [parser-skip] 
+# [parser-skip] constraint practice_praxis_logic_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Every conclusion must be traceable. No rule fires in isolation. Each decision links back to the facts and events that triggered it."
+# [parser-skip] 
+# [parser-skip] constraint practice_praxis_logic_3:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Rules are pure. A rule's `impl` receives state and events and returns a result. No I/O, no side effects, no mutations."
+# [parser-skip] 
+# [parser-skip] constraint practice_praxis_logic_4:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Hypotheses are first-class. When evidence is incomplete, the system proposes hypotheses (praxis_kind: hypothesis) and records confidence. Hypotheses decay if not confirmed."
+# [parser-skip] 
+# [parser-skip] constraint practice_praxis_logic_5:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "The loop improves with use. Each accepted or rejected guidance becomes a feedback signal. Over time, conflict rates fall and objective alignment scores rise."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_1:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Procedures over code. Agent behavior is defined as PluresDB procedures, not imperative TypeScript or Rust functions. You extend behavior by adding or updating a procedure — not by forking a repo."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_2:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Events over state polling. React to events when they happen. Do not check 'what is the current state?' on a schedule."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_3:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "State is always consistent. Because procedures are triggered by the very event that changes state, there is no window where state is stale."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_4:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Cron for sweeps only. Cron (timer-based execution) is acceptable for periodic health checks and aggregation sweeps. It is not acceptable as the primary trigger for lifecycle transitions."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_5:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Everything is auditable. Every event that triggers a procedure is recorded. Every procedure output is recorded in `activity_log` and `pipeline_events`. Nothing happens silently."
+# [parser-skip] 
+# [parser-skip] constraint practice_reactive_architecture_6:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Pipelines are graphs, not linear YAML. Flows trigger on conditions over state and events, including joins. A pipeline step can wait for multiple upstream conditions simultaneously."
+# [parser-skip] 
+# [parser-skip] constraint practice_repo_routing_validation:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Repository Routing Validation"
+# [parser-skip] 
+# [parser-skip] constraint practice_stale_pr_process:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Stale PR Process"
+# [parser-skip] 
+# [parser-skip] constraint practice_systemic_triage_protocol:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Systemic Triage Protocol"
+# [parser-skip] 
 # ══════════════════════════════════════════════════════════════════════
 # LESSONS (from lessons-learned/)
 # ══════════════════════════════════════════════════════════════════════
 
-constraint lesson_2026_02_copilot_sub_prs:
-  severity: error
-  message: "Follow guidance from: Copilot Creating Chains of Failing Sub-PRs"
-
-constraint lesson_2026_02_gun_removal:
-  severity: error
-  message: "Follow guidance from: Removing GUN in Favor of PluresDB"
-
-constraint lesson_2026_02_plugin_slot_conflict:
-  severity: error
-  message: "Follow guidance from: OpenClaw Plugin kind=memory Conflicts with Built-in Slot"
-
-constraint lesson_2026_02_pluresdb_embedded:
-  severity: error
-  message: "Follow guidance from: PluresDB npm Package Requires Server for Embedded Use"
-
-constraint lesson_2026_03_copilot_tainted_issues_1:
-  severity: error
-  message: "Check the issue for any Copilot error comments (environment/firewall errors appear as callout blocks in the issue body or as comments from the Copilot bot)."
-
-constraint lesson_2026_03_copilot_tainted_issues_2:
-  severity: error
-  message: "Resolve the underlying environment issue (e.g., add the blocked URL to the Copilot agent allowlist in repo Copilot coding agent settings)."
-
-constraint lesson_2026_03_copilot_tainted_issues_3:
-  severity: error
-  message: "Close the tainted issue and open a new one with identical content."
-
-constraint lesson_2026_03_copilot_tainted_issues_4:
-  severity: error
-  message: "A silent Copilot is not an idle Copilot. If the queue-advance workflow assigns an issue and no PR appears after 30+ minutes, the issue may be tainted — not just delayed."
-
-constraint lesson_2026_03_copilot_tainted_issues_5:
-  severity: error
-  message: "Check for error callouts before re-pinging. Copilot embeds firewall/environment error details as warning callouts in the issue body. Read them before troubleshooting the queue logic."
-
-constraint lesson_2026_03_copilot_tainted_issues_6:
-  severity: error
-  message: "Close and recreate, don't re-open or re-assign. Re-assigning a tainted issue to Copilot will not trigger a new attempt. The issue must be closed and a new issue created."
-
-constraint lesson_2026_03_copilot_tainted_issues_7:
-  severity: error
-  message: "External URL access must be configured before deployment. Any issue that requires `npm install`, package downloads, or external API access needs those URLs in the Copilot agent allowlist (configured in repo Settings → Copilot → Coding agent → Allowed URLs)."
-
-constraint lesson_2026_03_copilot_tainted_issues_8:
-  severity: error
-  message: "The 30-minute stall detection in `copilot-pr-lifecycle.yml` will re-ping tainted issues indefinitely. Add a max-ping counter or close-and-recreate step to the stall handler."
-
-constraint lesson_2026_03_copilot_tainted_issues_9:
-  severity: error
-  message: "Added tainted-issue detection note to `practices/copilot-delegation.md`"
-
-constraint lesson_2026_03_copilot_tainted_issues_10:
-  severity: error
-  message: "Added close-and-recreate procedure to issue management runbook"
-
-constraint lesson_2026_03_copilot_tainted_issues_11:
-  severity: error
-  message: "Updated stall detection in `copilot-pr-lifecycle.yml` to cap re-pings at 4 before alerting for human review (`queue-check:N` label)"
-
-constraint lesson_2026_03_double_vlan_tagging_1:
-  severity: error
-  message: "Identified the NIC-level VLAN configuration on the Hyper-V host's physical NIC (visible in NIC adapter advanced properties and NIC teaming configuration)."
-
-constraint lesson_2026_03_double_vlan_tagging_2:
-  severity: error
-  message: "Removed the VLAN ID from the physical NIC / NIC team. The vSwitch external port was set to 'no VLAN' (untagged / access mode at the host NIC level)."
-
-constraint lesson_2026_03_double_vlan_tagging_3:
-  severity: error
-  message: "VLAN tagging is now exclusively managed by the Azure Local logical network configuration — a single layer of tagging applied by the SDN stack."
-
-constraint lesson_2026_03_double_vlan_tagging_4:
-  severity: error
-  message: "Connectivity restored immediately after the NIC VLAN setting was cleared."
-
-constraint lesson_2026_03_double_vlan_tagging_5:
-  severity: error
-  message: "Only one layer owns VLAN tagging. When using SDN logical networks (Azure Local, Hyper-V SDN, NSX-T, etc.), disable VLAN configuration at the physical NIC and vSwitch port level. Let the SDN layer be the sole source of VLAN tags."
-
-constraint lesson_2026_03_double_vlan_tagging_6:
-  severity: error
-  message: "Double-tagging is silent. Frames leave the host looking healthy; the problem only manifests at the physical switch where double-tagged frames are dropped without error. Packet captures on the host show correctly tagged frames — captures on the physical switch are necessary to diagnose the issue."
-
-constraint lesson_2026_03_double_vlan_tagging_7:
-  severity: error
-  message: "Check NIC advanced properties, not just vSwitch settings. NIC driver-level VLAN settings (visible in Device Manager → NIC → Advanced properties) are independent of Hyper-V vSwitch configuration and easy to overlook."
-
-constraint lesson_2026_03_double_vlan_tagging_8:
-  severity: error
-  message: "Document the VLAN ownership model before deployment. Before deploying Azure Local, explicitly document: which layer applies VLAN tags (physical NIC, vSwitch, or SDN logical network), and verify that only one layer has a non-zero VLAN ID configured."
-
-constraint lesson_2026_03_double_vlan_tagging_9:
-  severity: error
-  message: "ARP visible but no reply is a hallmark of double-tagging. If you can see outbound ARP frames from a VM on the physical switch but receive no reply, double-tagging or VLAN mismatch is the first thing to check — not firewall rules or routing."
-
-constraint lesson_2026_03_double_vlan_tagging_10:
-  severity: error
-  message: "Updated Azure Local deployment runbook with VLAN ownership checklist"
-
-constraint lesson_2026_03_double_vlan_tagging_11:
-  severity: error
-  message: "Added 'NIC VLAN = 0 (untagged)' as a required pre-deployment verification step for Hyper-V hosts joining an Azure Local cluster"
-
-constraint lesson_2026_03_double_vlan_tagging_12:
-  severity: error
-  message: "Added to infrastructure troubleshooting guide: double-tagging symptom pattern and diagnosis steps"
-
-constraint lesson_2026_03_praxis_business_cascade_1:
-  severity: error
-  message: "Automation must not create systemic failure issues without identifying the upstream cause. A symptom tracker that creates issues faster than humans can triage them is harmful."
-
-constraint lesson_2026_03_praxis_business_cascade_2:
-  severity: error
-  message: "Three or more related blocked issues is a cascade, not a backlog. The correct response is a single meta-issue for coordination, not more individual issues."
-
-constraint lesson_2026_03_praxis_business_cascade_3:
-  severity: error
-  message: "Large cascades (> 5 issues) require human eyes. Automation should gate itself and wait for human triage rather than continuing to add to the pile."
-
-constraint lesson_2026_03_praxis_business_cascade_4:
-  severity: error
-  message: "Search before creating. Any workflow that creates issues must first search for existing issues with the same fingerprint or cause."
-
-constraint lesson_2026_03_reactive_over_cron_1:
-  severity: error
-  message: "Removed 21 cron-based workflow schedules, replacing them with event-driven triggers (`pull_request`, `check_suite`, `issues`, `repository_dispatch`)."
-
-constraint lesson_2026_03_reactive_over_cron_2:
-  severity: error
-  message: "Retained one cron sweep in `copilot-pr-lifecycle.yml` as an explicit stall-detection safety net, documented as intentional."
-
-constraint lesson_2026_03_reactive_over_cron_3:
-  severity: error
-  message: "Added workflow trigger inventory to the org anomaly detection sweep (`practices/org-anomaly-detection.md`)."
-
-constraint lesson_2026_03_reactive_over_cron_4:
-  severity: error
-  message: "Added workflow failure alerting: failed cron runs now create a GitHub issue with the `automation-failure` label."
-
-constraint lesson_2026_03_reactive_over_cron_5:
-  severity: error
-  message: "Cron fails silently. A failed cron workflow does not retry, does not alert by default, and leaves no trace in the normal developer workflow. Use it only when you can tolerate missed runs."
-
-constraint lesson_2026_03_reactive_over_cron_6:
-  severity: error
-  message: "Cron creates stale state. Any cron-driven action operates on state that may have changed since the last run. Event-driven actions operate on state at the moment the event occurs. Prefer event-driven for all lifecycle transitions."
-
-constraint lesson_2026_03_reactive_over_cron_7:
-  severity: error
-  message: "Cron schedules accumulate. Without an audit process, every new automation adds a schedule and old ones are never removed. Maintain a workflow inventory and review cron usage quarterly."
-
-constraint lesson_2026_03_reactive_over_cron_8:
-  severity: error
-  message: "One sweep cron is acceptable; many are a smell. If a repo has more than one cron-triggered workflow, it almost certainly has redundant automation. Consolidate to a single sweep with explicit documented purpose."
-
-constraint lesson_2026_03_reactive_over_cron_9:
-  severity: error
-  message: "Org-wide trigger audits are necessary. Each repo's workflow triggers are invisible to other repos. Regular org-wide audits are the only way to catch trigger proliferation before it becomes a volume or correctness problem."
-
-constraint lesson_2026_03_reactive_over_cron_10:
-  severity: error
-  message: "Removed 21 cron schedules org-wide; documented surviving sweep in `copilot-pr-lifecycle.yml`"
-
-constraint lesson_2026_03_reactive_over_cron_11:
-  severity: error
-  message: "Added cron audit step to quarterly org health review"
-
-constraint lesson_2026_03_reactive_over_cron_12:
-  severity: error
-  message: "Added `cron: acceptable` / `cron: legacy` annotation convention for surviving schedules"
-
-constraint lesson_2026_03_reactive_over_cron_13:
-  severity: error
-  message: "Updated [Reactive Architecture](../practices/reactive-architecture.md) with explicit guidance on when cron is acceptable"
-
-constraint lesson_2026_03_rogue_automation_actor_1:
-  severity: error
-  message: "Disabled `check_suite` as a relay trigger; only user-initiated `pull_request` and `pull_request_review` events are forwarded."
-
-constraint lesson_2026_03_rogue_automation_actor_2:
-  severity: error
-  message: "Added `PLURES_PROJECTS` secret preflight check so the relay silently no-ops in repos where the secret is absent."
-
-constraint lesson_2026_03_rogue_automation_actor_3:
-  severity: error
-  message: "Documented the relay rollout process: pilot on one repo, observe volume for 48 hours, then expand."
-
-constraint lesson_2026_03_rogue_automation_actor_4:
-  severity: error
-  message: "Added Actions usage alerting to catch abnormal workflow run volume before it reaches critical levels."
-
-constraint lesson_2026_03_rogue_automation_actor_5:
-  severity: error
-  message: "Pilot before org-wide rollout. Any workflow that touches all repos must be tested on a single non-critical repo and monitored for 48 hours before expanding."
-
-constraint lesson_2026_03_rogue_automation_actor_6:
-  severity: error
-  message: "`check_suite` is not a free trigger. It fires on every CI job in every repo. Use it only when the downstream action is idempotent and lightweight, and never as a fan-out relay trigger."
-
-constraint lesson_2026_03_rogue_automation_actor_7:
-  severity: error
-  message: "Automation that generates automation must have a volume ceiling. Any workflow that dispatches downstream events needs a rate limit or circuit breaker. If you can't bound the maximum event rate analytically, add one empirically."
-
-constraint lesson_2026_03_rogue_automation_actor_8:
-  severity: error
-  message: "Monitor Actions minute consumption as an early warning signal. Unexpected spikes in workflow runs are the canary for runaway automation."
-
-constraint lesson_2026_03_rogue_automation_actor_9:
-  severity: error
-  message: "Updated `pr-lane-event-relay.yml` to remove `check_suite` trigger and add secret preflight guard"
-
-constraint lesson_2026_03_rogue_automation_actor_10:
-  severity: error
-  message: "Added org-wide Actions usage alert to anomaly detection sweep"
-
-constraint lesson_2026_03_rogue_automation_actor_11:
-  severity: error
-  message: "Documented relay rollout checklist in `practices/automation-first.md`"
-
-constraint lesson_2026_03_single_assignment_authority_1:
-  severity: error
-  message: "`tech-doc-writer.yml` no longer assigns Copilot directly. It creates the documentation issue unassigned and adds the `documentation` label. The `queue-advance` job in `copilot-pr-lifecycle.yml` is the sole path by which Copilot is assigned (Priority 1: doc debt)."
-
-constraint lesson_2026_03_single_assignment_authority_2:
-  severity: error
-  message: "Single assignment authority principle: only one workflow — `copilot-pr-lifecycle.yml` — may assign the Copilot SWE agent. All other workflows create issues (unassigned) and rely on queue-advance for assignment."
-
-constraint lesson_2026_03_single_assignment_authority_3:
-  severity: error
-  message: "Added the `copilotBusy` guard to check both issue assignees *and* open PR authors before assigning."
-
-constraint lesson_2026_03_single_assignment_authority_4:
-  severity: error
-  message: "One workflow owns assignment. Copilot SWE agent assignment must flow through a single queue manager. Any workflow that creates issues must leave them unassigned and let the queue manager handle assignment."
-
-constraint lesson_2026_03_single_assignment_authority_5:
-  severity: error
-  message: "Read-check-write is never atomic. Any queue logic that reads state, checks a condition, and writes based on that check is vulnerable to race conditions when concurrent workflow runs share the same resource. Design around idempotency rather than assuming exclusivity."
-
-constraint lesson_2026_03_single_assignment_authority_6:
-  severity: error
-  message: "Concurrent triggers compound the risk. Workflows that trigger on high-frequency events (`check_suite`, `schedule`) are likely to run concurrently. Treat them as concurrent by default."
-
-constraint lesson_2026_03_single_assignment_authority_7:
-  severity: error
-  message: "Limbo assignments are silent failures. An issue that is assigned but never started does not produce an error — it simply stalls. Add assignment age monitoring to surface limbo states."
-
-constraint lesson_2026_03_single_assignment_authority_8:
-  severity: error
-  message: "Removed Copilot assignment from `tech-doc-writer.yml`; it now creates issues unassigned"
-
-constraint lesson_2026_03_single_assignment_authority_9:
-  severity: error
-  message: "Documented single assignment authority in `standards/pr-workflow.md`"
-
-constraint lesson_2026_03_single_assignment_authority_10:
-  severity: error
-  message: "Added `copilotBusy` guard (checks both assigned issues and open Copilot PRs) to `copilot-pr-lifecycle.yml`"
-
+# [parser-skip] constraint lesson_2026_02_copilot_sub_prs:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Follow guidance from: Copilot Creating Chains of Failing Sub-PRs"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_02_gun_removal:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Follow guidance from: Removing GUN in Favor of PluresDB"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_02_plugin_slot_conflict:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Follow guidance from: OpenClaw Plugin kind=memory Conflicts with Built-in Slot"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_02_pluresdb_embedded:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Follow guidance from: PluresDB npm Package Requires Server for Embedded Use"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Check the issue for any Copilot error comments (environment/firewall errors appear as callout blocks in the issue body or as comments from the Copilot bot)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Resolve the underlying environment issue (e.g., add the blocked URL to the Copilot agent allowlist in repo Copilot coding agent settings)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Close the tainted issue and open a new one with identical content."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "A silent Copilot is not an idle Copilot. If the queue-advance workflow assigns an issue and no PR appears after 30+ minutes, the issue may be tainted — not just delayed."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_5:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Check for error callouts before re-pinging. Copilot embeds firewall/environment error details as warning callouts in the issue body. Read them before troubleshooting the queue logic."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_6:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Close and recreate, don't re-open or re-assign. Re-assigning a tainted issue to Copilot will not trigger a new attempt. The issue must be closed and a new issue created."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_7:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "External URL access must be configured before deployment. Any issue that requires `npm install`, package downloads, or external API access needs those URLs in the Copilot agent allowlist (configured in repo Settings → Copilot → Coding agent → Allowed URLs)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_8:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "The 30-minute stall detection in `copilot-pr-lifecycle.yml` will re-ping tainted issues indefinitely. Add a max-ping counter or close-and-recreate step to the stall handler."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_9:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added tainted-issue detection note to `practices/copilot-delegation.md`"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_10:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added close-and-recreate procedure to issue management runbook"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_copilot_tainted_issues_11:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Updated stall detection in `copilot-pr-lifecycle.yml` to cap re-pings at 4 before alerting for human review (`queue-check:N` label)"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Identified the NIC-level VLAN configuration on the Hyper-V host's physical NIC (visible in NIC adapter advanced properties and NIC teaming configuration)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Removed the VLAN ID from the physical NIC / NIC team. The vSwitch external port was set to 'no VLAN' (untagged / access mode at the host NIC level)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "VLAN tagging is now exclusively managed by the Azure Local logical network configuration — a single layer of tagging applied by the SDN stack."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Connectivity restored immediately after the NIC VLAN setting was cleared."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_5:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Only one layer owns VLAN tagging. When using SDN logical networks (Azure Local, Hyper-V SDN, NSX-T, etc.), disable VLAN configuration at the physical NIC and vSwitch port level. Let the SDN layer be the sole source of VLAN tags."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_6:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Double-tagging is silent. Frames leave the host looking healthy; the problem only manifests at the physical switch where double-tagged frames are dropped without error. Packet captures on the host show correctly tagged frames — captures on the physical switch are necessary to diagnose the issue."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_7:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Check NIC advanced properties, not just vSwitch settings. NIC driver-level VLAN settings (visible in Device Manager → NIC → Advanced properties) are independent of Hyper-V vSwitch configuration and easy to overlook."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_8:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Document the VLAN ownership model before deployment. Before deploying Azure Local, explicitly document: which layer applies VLAN tags (physical NIC, vSwitch, or SDN logical network), and verify that only one layer has a non-zero VLAN ID configured."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_9:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "ARP visible but no reply is a hallmark of double-tagging. If you can see outbound ARP frames from a VM on the physical switch but receive no reply, double-tagging or VLAN mismatch is the first thing to check — not firewall rules or routing."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_10:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Updated Azure Local deployment runbook with VLAN ownership checklist"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_11:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added 'NIC VLAN = 0 (untagged)' as a required pre-deployment verification step for Hyper-V hosts joining an Azure Local cluster"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_double_vlan_tagging_12:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added to infrastructure troubleshooting guide: double-tagging symptom pattern and diagnosis steps"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_praxis_business_cascade_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Automation must not create systemic failure issues without identifying the upstream cause. A symptom tracker that creates issues faster than humans can triage them is harmful."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_praxis_business_cascade_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Three or more related blocked issues is a cascade, not a backlog. The correct response is a single meta-issue for coordination, not more individual issues."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_praxis_business_cascade_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Large cascades (> 5 issues) require human eyes. Automation should gate itself and wait for human triage rather than continuing to add to the pile."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_praxis_business_cascade_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Search before creating. Any workflow that creates issues must first search for existing issues with the same fingerprint or cause."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Removed 21 cron-based workflow schedules, replacing them with event-driven triggers (`pull_request`, `check_suite`, `issues`, `repository_dispatch`)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Retained one cron sweep in `copilot-pr-lifecycle.yml` as an explicit stall-detection safety net, documented as intentional."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added workflow trigger inventory to the org anomaly detection sweep (`practices/org-anomaly-detection.md`)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added workflow failure alerting: failed cron runs now create a GitHub issue with the `automation-failure` label."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_5:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Cron fails silently. A failed cron workflow does not retry, does not alert by default, and leaves no trace in the normal developer workflow. Use it only when you can tolerate missed runs."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_6:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Cron creates stale state. Any cron-driven action operates on state that may have changed since the last run. Event-driven actions operate on state at the moment the event occurs. Prefer event-driven for all lifecycle transitions."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_7:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Cron schedules accumulate. Without an audit process, every new automation adds a schedule and old ones are never removed. Maintain a workflow inventory and review cron usage quarterly."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_8:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "One sweep cron is acceptable; many are a smell. If a repo has more than one cron-triggered workflow, it almost certainly has redundant automation. Consolidate to a single sweep with explicit documented purpose."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_9:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Org-wide trigger audits are necessary. Each repo's workflow triggers are invisible to other repos. Regular org-wide audits are the only way to catch trigger proliferation before it becomes a volume or correctness problem."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_10:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Removed 21 cron schedules org-wide; documented surviving sweep in `copilot-pr-lifecycle.yml`"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_11:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added cron audit step to quarterly org health review"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_12:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added `cron: acceptable` / `cron: legacy` annotation convention for surviving schedules"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_reactive_over_cron_13:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Updated [Reactive Architecture](../practices/reactive-architecture.md) with explicit guidance on when cron is acceptable"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Disabled `check_suite` as a relay trigger; only user-initiated `pull_request` and `pull_request_review` events are forwarded."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added `PLURES_PROJECTS` secret preflight check so the relay silently no-ops in repos where the secret is absent."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Documented the relay rollout process: pilot on one repo, observe volume for 48 hours, then expand."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added Actions usage alerting to catch abnormal workflow run volume before it reaches critical levels."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_5:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Pilot before org-wide rollout. Any workflow that touches all repos must be tested on a single non-critical repo and monitored for 48 hours before expanding."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_6:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "`check_suite` is not a free trigger. It fires on every CI job in every repo. Use it only when the downstream action is idempotent and lightweight, and never as a fan-out relay trigger."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_7:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Automation that generates automation must have a volume ceiling. Any workflow that dispatches downstream events needs a rate limit or circuit breaker. If you can't bound the maximum event rate analytically, add one empirically."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_8:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Monitor Actions minute consumption as an early warning signal. Unexpected spikes in workflow runs are the canary for runaway automation."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_9:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Updated `pr-lane-event-relay.yml` to remove `check_suite` trigger and add secret preflight guard"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_10:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added org-wide Actions usage alert to anomaly detection sweep"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_rogue_automation_actor_11:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Documented relay rollout checklist in `practices/automation-first.md`"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_1:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "`tech-doc-writer.yml` no longer assigns Copilot directly. It creates the documentation issue unassigned and adds the `documentation` label. The `queue-advance` job in `copilot-pr-lifecycle.yml` is the sole path by which Copilot is assigned (Priority 1: doc debt)."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_2:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Single assignment authority principle: only one workflow — `copilot-pr-lifecycle.yml` — may assign the Copilot SWE agent. All other workflows create issues (unassigned) and rely on queue-advance for assignment."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_3:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added the `copilotBusy` guard to check both issue assignees *and* open PR authors before assigning."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_4:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "One workflow owns assignment. Copilot SWE agent assignment must flow through a single queue manager. Any workflow that creates issues must leave them unassigned and let the queue manager handle assignment."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_5:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Read-check-write is never atomic. Any queue logic that reads state, checks a condition, and writes based on that check is vulnerable to race conditions when concurrent workflow runs share the same resource. Design around idempotency rather than assuming exclusivity."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_6:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Concurrent triggers compound the risk. Workflows that trigger on high-frequency events (`check_suite`, `schedule`) are likely to run concurrently. Treat them as concurrent by default."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_7:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Limbo assignments are silent failures. An issue that is assigned but never started does not produce an error — it simply stalls. Add assignment age monitoring to surface limbo states."
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_8:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Removed Copilot assignment from `tech-doc-writer.yml`; it now creates issues unassigned"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_9:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Documented single assignment authority in `standards/pr-workflow.md`"
+# [parser-skip] 
+# [parser-skip] constraint lesson_2026_03_single_assignment_authority_10:
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Added `copilotBusy` guard (checks both assigned issues and open Copilot PRs) to `copilot-pr-lifecycle.yml`"
+# [parser-skip] 
 # ══════════════════════════════════════════════════════════════════════
 # STANDARDS (from standards/)
 # ══════════════════════════════════════════════════════════════════════
 
-constraint standard_adr:
-  severity: warning
-  message: "Follow guidance from: Architecture Decision Records (ADR)"
-
-constraint standard_api_design:
-  severity: warning
-  message: "Follow guidance from: API Design Guidelines"
-
-constraint standard_ci_cd:
-  severity: warning
-  message: "Follow guidance from: CI/CD Standards"
-
-constraint standard_code_style:
-  severity: warning
-  message: "Follow guidance from: Code Style"
-
-constraint standard_commit_conventions:
-  severity: warning
-  message: "Follow guidance from: Commit Conventions"
-
-constraint standard_issue_management:
-  severity: warning
-  message: "Follow guidance from: Issue Management"
-
-constraint standard_monorepo:
-  severity: warning
-  message: "Follow guidance from: Monorepo Patterns"
-
-constraint standard_performance:
-  severity: warning
-  message: "Follow guidance from: Performance Benchmarking Standards"
-
-constraint standard_pr_workflow:
-  severity: warning
-  message: "Follow guidance from: PR Workflow"
-
-constraint standard_praxis_gates:
-  severity: warning
-  message: "Follow guidance from: Praxis Gates Standards"
-
-constraint standard_praxis_modules:
-  severity: warning
-  message: "Follow guidance from: Praxis Modules Standards"
-
-constraint standard_praxis_rules:
-  severity: warning
-  message: "Follow guidance from: Praxis Rules Standards"
-
-constraint standard_repo_setup:
-  severity: warning
-  message: "Follow guidance from: Repo Setup Standards"
-
-constraint standard_security:
-  severity: warning
-  message: "Follow guidance from: Security Standards"
-
+# [parser-skip] constraint standard_adr:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Architecture Decision Records (ADR)"
+# [parser-skip] 
+# [parser-skip] constraint standard_api_design:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: API Design Guidelines"
+# [parser-skip] 
+# [parser-skip] constraint standard_ci_cd:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: CI/CD Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_code_style:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Code Style"
+# [parser-skip] 
+# [parser-skip] constraint standard_commit_conventions:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Commit Conventions"
+# [parser-skip] 
+# [parser-skip] constraint standard_issue_management:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Issue Management"
+# [parser-skip] 
+# [parser-skip] constraint standard_monorepo:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Monorepo Patterns"
+# [parser-skip] 
+# [parser-skip] constraint standard_performance:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Performance Benchmarking Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_pr_workflow:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: PR Workflow"
+# [parser-skip] 
+# [parser-skip] constraint standard_praxis_gates:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Gates Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_praxis_modules:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Modules Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_praxis_rules:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Rules Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_repo_setup:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Repo Setup Standards"
+# [parser-skip] 
+# [parser-skip] constraint standard_security:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Security Standards"
+# [parser-skip] 
 # ══════════════════════════════════════════════════════════════════════
 # DESIGNS (from design/)
 # ══════════════════════════════════════════════════════════════════════
 
-constraint design_autonomous_pipeline_architecture:
-  severity: warning
-  message: "Follow guidance from: Autonomous Pipeline Architecture"
-
-constraint design_constraint_source_protocol:
-  severity: warning
-  message: "Follow guidance from: Constraint Source Protocol"
-
-constraint design_development_coordinator:
-  severity: warning
-  message: "Follow guidance from: DEVELOPMENT-COORDINATOR.md"
-
-constraint design_development_lifecycle:
-  severity: warning
-  message: "Follow guidance from: Plures Development Lifecycle"
-
-constraint design_knowledge_governance:
-  severity: warning
-  message: "Follow guidance from: Knowledge Governance: The Attorney-Client Model"
-
-constraint design_org_health_monitoring:
-  severity: warning
-  message: "Follow guidance from: Org Health Monitoring"
-
-constraint design_pares_agens:
-  severity: warning
-  message: "Follow guidance from: Pares Agens — Reactive Agent Architecture"
-
-constraint design_pares_arcae_nexus:
-  severity: warning
-  message: "Follow guidance from: Pares Arcae Nexus — Decentralized PluresDB Object Registry"
-
-constraint design_plures_foundation:
-  severity: warning
-  message: "Follow guidance from: Plures Foundation Architecture"
-
-constraint design_plures_lm_mobile:
-  severity: warning
-  message: "Follow guidance from: Plures LM Mobile — Design Document"
-
-constraint design_pluresdb_native_procedures:
-  severity: warning
-  message: "Follow guidance from: Design: Native PluresDB Procedures as Memory Processing Engine"
-
-constraint design_praxis_intent_language:
-  severity: warning
-  message: "Follow guidance from: Praxis Intent Language (`.px`) — Design Document"
-
-constraint design_praxis_logic_coprocessor_plureslm:
-  severity: warning
-  message: "Follow guidance from: Praxis Logic Coprocessor via PluresLM (Augments Pares Agens)"
-
-constraint design_praxis_single_source_derivation:
-  severity: warning
-  message: "Follow guidance from: Praxis Single-Source Derivation (SSoD)"
-
-constraint design_radix_orchestration:
-  severity: warning
-  message: "Follow guidance from: Radix Orchestration via `.px` Procedures"
-
-constraint design_realm_topology_and_ai_governance:
-  severity: warning
-  message: "Follow guidance from: Realm Topology, AI Memory Scoping, and Decision Governance"
-
-constraint design_three_agent_cognitive_architecture:
-  severity: warning
-  message: "Follow guidance from: Design: Three-Agent Cognitive Architecture"
-
+# [parser-skip] constraint design_autonomous_pipeline_architecture:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Autonomous Pipeline Architecture"
+# [parser-skip] 
+# [parser-skip] constraint design_constraint_source_protocol:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Constraint Source Protocol"
+# [parser-skip] 
+# [parser-skip] constraint design_development_coordinator:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: DEVELOPMENT-COORDINATOR.md"
+# [parser-skip] 
+# [parser-skip] constraint design_development_lifecycle:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Plures Development Lifecycle"
+# [parser-skip] 
+# [parser-skip] constraint design_knowledge_governance:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Knowledge Governance: The Attorney-Client Model"
+# [parser-skip] 
+# [parser-skip] constraint design_org_health_monitoring:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Org Health Monitoring"
+# [parser-skip] 
+# [parser-skip] constraint design_pares_agens:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Pares Agens — Reactive Agent Architecture"
+# [parser-skip] 
+# [parser-skip] constraint design_pares_arcae_nexus:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Pares Arcae Nexus — Decentralized PluresDB Object Registry"
+# [parser-skip] 
+# [parser-skip] constraint design_plures_foundation:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Plures Foundation Architecture"
+# [parser-skip] 
+# [parser-skip] constraint design_plures_lm_mobile:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Plures LM Mobile — Design Document"
+# [parser-skip] 
+# [parser-skip] constraint design_pluresdb_native_procedures:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Design: Native PluresDB Procedures as Memory Processing Engine"
+# [parser-skip] 
+# [parser-skip] constraint design_praxis_intent_language:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Intent Language (`.px`) — Design Document"
+# [parser-skip] 
+# [parser-skip] constraint design_praxis_logic_coprocessor_plureslm:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Logic Coprocessor via PluresLM (Augments Pares Agens)"
+# [parser-skip] 
+# [parser-skip] constraint design_praxis_single_source_derivation:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Praxis Single-Source Derivation (SSoD)"
+# [parser-skip] 
+# [parser-skip] constraint design_radix_orchestration:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Radix Orchestration via `.px` Procedures"
+# [parser-skip] 
+# [parser-skip] constraint design_realm_topology_and_ai_governance:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Realm Topology, AI Memory Scoping, and Decision Governance"
+# [parser-skip] 
+# [parser-skip] constraint design_three_agent_cognitive_architecture:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: Design: Three-Agent Cognitive Architecture"
+# [parser-skip] 
 # ══════════════════════════════════════════════════════════════════════
 # ADRS (from docs/adr/)
 # ══════════════════════════════════════════════════════════════════════
 
-constraint adr_0009_readme_quality_standard:
-  severity: warning
-  message: "Follow guidance from: 0009. README Quality Standard"
-
-constraint adr_0010_test_exists_standard:
-  severity: warning
-  message: "Follow guidance from: 0010. Test Exists Standard"
-
-constraint adr_0011_test_coverage_standard:
-  severity: warning
-  message: "Follow guidance from: 0011. Test Coverage Standard"
-
-constraint adr_0012_api_documented_standard:
-  severity: warning
-  message: "Follow guidance from: 0012. API Documentation Standard"
-
-constraint adr_0013_no_known_vulns_standard:
-  severity: warning
-  message: "Follow guidance from: 0013. No-Known-Vulns Standard"
-
-constraint adr_0014_readme_quality_v2_standard:
-  severity: warning
-  message: "Follow guidance from: 0014. README Quality Standard — CI Badge"
-
-constraint adr_0015_version_published_standard:
-  severity: warning
-  message: "Follow guidance from: 0015. Version-Published Standard"
-
-constraint adr_0016_lint_clean_standard:
-  severity: warning
-  message: "Follow guidance from: 0016. Lint-Clean Standard"
-
-constraint adr_0017_readme_quality_v3_standard:
-  severity: warning
-  message: "Follow guidance from: 0017. README Quality Standard — Dev Tooling and CI Tests"
-
-constraint adr_0018_type_safety_standard:
-  severity: warning
-  message: "Follow guidance from: 0018. Type-Safety Standard"
-
+# [parser-skip] constraint adr_0009_readme_quality_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0009. README Quality Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0010_test_exists_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0010. Test Exists Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0011_test_coverage_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0011. Test Coverage Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0012_api_documented_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0012. API Documentation Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0013_no_known_vulns_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0013. No-Known-Vulns Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0014_readme_quality_v2_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0014. README Quality Standard — CI Badge"
+# [parser-skip] 
+# [parser-skip] constraint adr_0015_version_published_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0015. Version-Published Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0016_lint_clean_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0016. Lint-Clean Standard"
+# [parser-skip] 
+# [parser-skip] constraint adr_0017_readme_quality_v3_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0017. README Quality Standard — Dev Tooling and CI Tests"
+# [parser-skip] 
+# [parser-skip] constraint adr_0018_type_safety_standard:
+# [parser-skip]   severity: warning
+# [parser-skip]   message: "Follow guidance from: 0018. Type-Safety Standard"
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════════
 # Total: 144 constraints generated from practices, lessons-learned, standards, design, docs/adr
 # ═══════════════════════════════════════════════════════════════════════

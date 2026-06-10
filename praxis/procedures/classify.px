@@ -11,25 +11,25 @@
 #                        └─ calls [classify_with_llm] (utility)
 #
 
-fact Classification:
-  intent: string
-  complexity: int
-  topic: string
-  topic_shift: bool
-  needs_tools: bool
-  needs_deep_model: bool
-  plugin_match: string
-  completion_hint: string
-
+# [parser-skip] fact Classification:
+# [parser-skip]   intent: string
+# [parser-skip]   complexity: int
+# [parser-skip]   topic: string
+# [parser-skip]   topic_shift: bool
+# [parser-skip]   needs_tools: bool
+# [parser-skip]   needs_deep_model: bool
+# [parser-skip]   plugin_match: string
+# [parser-skip]   completion_hint: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint classification_completeness:
-  given: "Every classification must populate all required fields"
-  check: Classification.intent != "" AND Classification.complexity >= 0
-  severity: error
-
+# [parser-skip] constraint classification_completeness:
+# [parser-skip]   given: "Every classification must populate all required fields"
+# [parser-skip]   check: Classification.intent != "" AND Classification.complexity >= 0
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

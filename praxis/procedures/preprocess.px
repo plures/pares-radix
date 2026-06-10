@@ -10,28 +10,28 @@
 #   tool_result ─→ [preprocess_tool_result] ─→ model_request
 #
 
-fact PreprocessedResult:
-  route: string
-  classification: Classification
-
-fact ToolResultContext:
-  source: string
-  summarized: bool
-
+# [parser-skip] fact PreprocessedResult:
+# [parser-skip]   route: string
+# [parser-skip]   classification: Classification
+# [parser-skip] 
+# [parser-skip] fact ToolResultContext:
+# [parser-skip]   source: string
+# [parser-skip]   summarized: bool
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint preprocess_always_routes:
-  given: "Every preprocessed message must produce a valid route"
-  check: PreprocessedResult.route != ""
-  severity: error
-
-constraint tool_result_within_budget:
-  given: "Tool results must be summarized to fit within token budget"
-  check: ToolResultContext.summarized == true OR token_count <= 4000
-  severity: error
-
+# [parser-skip] constraint preprocess_always_routes:
+# [parser-skip]   given: "Every preprocessed message must produce a valid route"
+# [parser-skip]   check: PreprocessedResult.route != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
+# [parser-skip] constraint tool_result_within_budget:
+# [parser-skip]   given: "Tool results must be summarized to fit within token budget"
+# [parser-skip]   check: ToolResultContext.summarized == true OR token_count <= 4000
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

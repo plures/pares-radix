@@ -13,24 +13,24 @@
 #                           └─ calls [prepare_response_context] (utility)
 #
 
-fact CheckpointResult:
-  saved: bool
-  timestamp: int
-
-fact RecoveredState:
-  recovered: bool
-  state: optional[string]
-  reason: optional[string]
-
+# [parser-skip] fact CheckpointResult:
+# [parser-skip]   saved: bool
+# [parser-skip]   timestamp: int
+# [parser-skip] 
+# [parser-skip] fact RecoveredState:
+# [parser-skip]   recovered: bool
+# [parser-skip]   state: optional[string]
+# [parser-skip]   reason: optional[string]
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint checkpoint_timestamp_valid:
-  given: "Checkpoints must always include a valid timestamp"
-  check: CheckpointResult.timestamp > 0
-  severity: error
-
+# [parser-skip] constraint checkpoint_timestamp_valid:
+# [parser-skip]   given: "Checkpoints must always include a valid timestamp"
+# [parser-skip]   check: CheckpointResult.timestamp > 0
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

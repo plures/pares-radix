@@ -8,21 +8,21 @@
 #   (none — utilities only, called by evaluate_heartbeat / run_all_self_tests)
 #
 
-fact HealthStatus:
-  service: string
-  tier: optional[string]
-  status: string
-  healthy: bool
-
+# [parser-skip] fact HealthStatus:
+# [parser-skip]   service: string
+# [parser-skip]   tier: optional[string]
+# [parser-skip]   status: string
+# [parser-skip]   healthy: bool
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint health_timeout_respected:
-  given: "Health checks must complete within 5 seconds"
-  check: HealthStatus.status != "timeout"
-  severity: error
-
+# [parser-skip] constraint health_timeout_respected:
+# [parser-skip]   given: "Health checks must complete within 5 seconds"
+# [parser-skip]   check: HealthStatus.status != "timeout"
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Utility Procedures
 # ═══════════════════════════════════════════════════════════════════

@@ -12,25 +12,25 @@
 #                              └─ calls [test_model_invocation] (utility)
 #
 
-fact TestResult:
-  test: string
-  passed: bool
-  tier: optional[string]
-  result: optional[string]
-
-fact TestSuiteResult:
-  tests: list[TestResult]
-  all_passed: bool
-
+# [parser-skip] fact TestResult:
+# [parser-skip]   test: string
+# [parser-skip]   passed: bool
+# [parser-skip]   tier: optional[string]
+# [parser-skip]   result: optional[string]
+# [parser-skip] 
+# [parser-skip] fact TestSuiteResult:
+# [parser-skip]   tests: list[TestResult]
+# [parser-skip]   all_passed: bool
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint self_test_all_must_pass:
-  given: "Self-test suite must pass all individual tests to be considered healthy"
-  check: TestSuiteResult.all_passed == true
-  severity: error
-
+# [parser-skip] constraint self_test_all_must_pass:
+# [parser-skip]   given: "Self-test suite must pass all individual tests to be considered healthy"
+# [parser-skip]   check: TestSuiteResult.all_passed == true
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

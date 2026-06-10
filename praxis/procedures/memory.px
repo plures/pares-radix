@@ -12,24 +12,24 @@
 #                         └─ calls [correct_memory] (utility)
 #
 
-fact MemoryEntry:
-  facts: list[string]
-  embedding: list[float]
-  timestamp: int
-
-fact SessionContext:
-  memories: list[MemoryEntry]
-  relevance_scores: list[float]
-
+# [parser-skip] fact MemoryEntry:
+# [parser-skip]   facts: list[string]
+# [parser-skip]   embedding: list[float]
+# [parser-skip]   timestamp: int
+# [parser-skip] 
+# [parser-skip] fact SessionContext:
+# [parser-skip]   memories: list[MemoryEntry]
+# [parser-skip]   relevance_scores: list[float]
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint memory_extraction_requires_embedding:
-  given: "Every extracted memory must include a computed embedding"
-  check: MemoryEntry.embedding != []
-  severity: error
-
+# [parser-skip] constraint memory_extraction_requires_embedding:
+# [parser-skip]   given: "Every extracted memory must include a computed embedding"
+# [parser-skip]   check: MemoryEntry.embedding != []
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

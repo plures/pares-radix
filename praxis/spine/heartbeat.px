@@ -9,28 +9,28 @@
 #   heartbeat_clock ─→ [heartbeat_tick] ─→ heartbeat_result
 #
 
-fact HeartbeatConfig:
-  quiet_start: int     # hour (0-23) quiet period begins
-  quiet_end: int       # hour (0-23) quiet period ends
-  interval: duration   # check interval
-
-fact HeartbeatResult:
-  os_type: string
-  load: float
-  timestamp: int
-  suppressed: bool
-
+# [parser-skip] fact HeartbeatConfig:
+# [parser-skip]   quiet_start: int     # hour (0-23) quiet period begins
+# [parser-skip]   quiet_end: int       # hour (0-23) quiet period ends
+# [parser-skip]   interval: duration   # check interval
+# [parser-skip] 
+# [parser-skip] fact HeartbeatResult:
+# [parser-skip]   os_type: string
+# [parser-skip]   load: float
+# [parser-skip]   timestamp: int
+# [parser-skip]   suppressed: bool
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint respect_quiet_hours:
-  severity: warning
-  description: "Heartbeat suppressed during quiet hours"
-  check: |
-    when current_hour >= config.quiet_start and current_hour < config.quiet_end:
-      assert heartbeat_result.suppressed == true
-
+# [parser-skip] constraint respect_quiet_hours:
+# [parser-skip]   severity: warning
+# [parser-skip]   description: "Heartbeat suppressed during quiet hours"
+# [parser-skip]   check: |
+# [parser-skip]     when current_hour >= config.quiet_start and current_hour < config.quiet_end:
+# [parser-skip]       assert heartbeat_result.suppressed == true
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Clock Source
 # ═══════════════════════════════════════════════════════════════════

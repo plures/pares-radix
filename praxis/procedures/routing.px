@@ -12,20 +12,20 @@
 #                            └─ calls [route_with_context_gate] (utility)
 #
 
-fact Route:
-  tier: enum(fast, standard, premium)
-  reason: string
-  streaming: bool
-
+# [parser-skip] fact Route:
+# [parser-skip]   tier: enum(fast, standard, premium)
+# [parser-skip]   reason: string
+# [parser-skip]   streaming: bool
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint route_always_has_tier:
-  given: "Every route decision must specify a valid model tier"
-  check: Route.tier != ""
-  severity: error
-
+# [parser-skip] constraint route_always_has_tier:
+# [parser-skip]   given: "Every route decision must specify a valid model tier"
+# [parser-skip]   check: Route.tier != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

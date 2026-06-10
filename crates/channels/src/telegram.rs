@@ -636,6 +636,10 @@ pub struct TelegramAdapter {
     config: TelegramConfig,
     /// Handle to the event spine for spine-driven message delivery.
     pub event_spine: Option<EventSpineHandle>,
+    /// Broadcast sender for model streaming deltas.
+    /// Channel handlers subscribe to receive progressive token delivery.
+    /// When None, progressive editing is disabled (placeholder → full edit).
+    pub stream_tx: Option<tokio::sync::broadcast::Sender<pares_agens_core::model::StreamDelta>>,
 }
 
 #[derive(Debug)]
@@ -659,6 +663,7 @@ impl TelegramAdapter {
         Self {
             config,
             event_spine: None,
+            stream_tx: None,
         }
     }
 
@@ -667,6 +672,7 @@ impl TelegramAdapter {
         Self {
             config,
             event_spine: Some(spine),
+            stream_tx: None,
         }
     }
 
@@ -1234,6 +1240,7 @@ impl ChannelAdapter for TelegramAdapter {
         let write_gate = self.config.write_gate.clone();
         let task_manager = self.config.task_manager.clone();
         let event_spine = self.event_spine.clone();
+        let stream_tx = self.stream_tx.clone();
         let verbose_by_chat = Arc::new(TokioMutex::new(HashMap::<i64, bool>::new()));
         let installer = std::sync::Arc::new(TokioMutex::new(
             Installer::new(&self.config.marketplace_install_dir)
@@ -1257,6 +1264,7 @@ impl ChannelAdapter for TelegramAdapter {
             let task_manager = task_manager.clone();
             let verbose_by_chat = verbose_by_chat.clone();
             let event_spine = event_spine.clone();
+            let stream_tx = stream_tx.clone();
             let bot_username = bot_username.clone();
             let group_policy = group_policy.clone();
             let group_context = group_context.clone();
@@ -2279,11 +2287,56 @@ impl ChannelAdapter for TelegramAdapter {
                         }
                     });
 
+                    // Progressive streaming: subscribe to model deltas and
+                    // debounce edit_message_text calls every ~500ms.
+                    let progressive_cancel = tokio_util::sync::CancellationToken::new();
+                    let progressive_token = progressive_cancel.clone();
+                    if let (Some(ref stx), Some(pid)) = (&stream_tx, placeholder_id) {
+                        let mut stream_rx = stx.subscribe();
+                        let edit_bot = bot.clone();
+                        let edit_chat_id = msg.chat.id;
+                        tokio::spawn(async move {
+                            let mut accumulated = String::new();
+                            let mut last_edit = tokio::time::Instant::now();
+                            let debounce = std::time::Duration::from_millis(500);
+                            let min_chars = 20; // Don't edit for tiny fragments
+
+                            loop {
+                                tokio::select! {
+                                    delta = stream_rx.recv() => {
+                                        match delta {
+                                            Ok(pares_agens_core::model::StreamDelta::Content(chunk)) => {
+                                                accumulated.push_str(&chunk);
+                                                // Debounce: only edit if enough time passed AND enough content
+                                                if last_edit.elapsed() >= debounce && accumulated.len() >= min_chars {
+                                                    let display = format!("{}\u{25cf}", &accumulated); // ● = cursor
+                                                    let _ = edit_bot
+                                                        .edit_message_text(edit_chat_id, pid, &display)
+                                                        .await;
+                                                    last_edit = tokio::time::Instant::now();
+                                                }
+                                            }
+                                            Ok(pares_agens_core::model::StreamDelta::Done) => break,
+                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                                // Missed some deltas — skip to latest
+                                                continue;
+                                            }
+                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                            _ => {} // ToolCallStart/Delta — ignore for progressive text
+                                        }
+                                    }
+                                    _ = progressive_token.cancelled() => break,
+                                }
+                            }
+                        });
+                    }
+
                     if let Some(Event::ModelResponse {
                         request_id, content, ..
                     }) = on_event(event).await
                     {
                         typing_cancel.cancel();
+                        progressive_cancel.cancel(); // Stop progressive editor before final edit
 
                         // Emit model response to event spine
                         if let Some(ref spine) = event_spine {

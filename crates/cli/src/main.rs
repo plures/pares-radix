@@ -380,6 +380,10 @@ impl RuntimeAgentFactory {
             use pares_agens_core::cerebellum::dataflow_bridge::DataflowBridge;
             use pares_radix_praxis::dataflow::{ast_to_node, parse_px};
 
+            let action_handler_for_df = Arc::new(
+                pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal(),
+            );
+
             let home = std::env::var("HOME")
                 .or_else(|_| std::env::var("USERPROFILE"))
                 .unwrap_or_default();
@@ -391,7 +395,7 @@ impl RuntimeAgentFactory {
 
             let mut df_bridge = DataflowBridge::new(Arc::new(
                 pares_agens_core::cerebellum::dataflow_bridge::DataflowActionAdapter::new(
-                    Arc::new(pares_agens_core::cerebellum::actions::CerebellumActionHandler::new_minimal()),
+                    Arc::clone(&action_handler_for_df) as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
                 ),
             ));
             let mut df_count = 0usize;
@@ -4276,13 +4280,17 @@ async fn main() {
                         error!("--telegram-token is required for --channel telegram");
                         std::process::exit(1);
                     }
-                    let tg_channel = TelegramSpineChannel::new(TelegramSpineConfig {
-                        token: telegram_token.clone(),
-                    });
+                    // Create standalone stream broadcast for progressive Telegram editing.
+                    // The action handler sends tokens here; the Telegram channel subscribes.
+                    let (stream_sender, _) = tokio::sync::broadcast::channel::<pares_agens_core::model::StreamDelta>(256);
+                    let tg_channel = TelegramSpineChannel::with_stream(
+                        TelegramSpineConfig { token: telegram_token.clone() },
+                        stream_sender.clone(),
+                    );
                     tokio::spawn(async move {
                         tg_channel.run_delivery_loop(delivery_rx).await;
                     });
-                    info!("Telegram delivery loop started");
+                    info!("Telegram delivery loop started (progressive streaming enabled)");
 
                     // 6.5. Start heartbeat runner (proactive behavior)
                     let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) =
@@ -4306,9 +4314,10 @@ async fn main() {
 
                     // 7. Start receiving (blocks)
                     let emitter = pipeline.emitter();
-                    let receiver_channel = TelegramSpineChannel::new(TelegramSpineConfig {
-                        token: telegram_token,
-                    });
+                    let receiver_channel = TelegramSpineChannel::with_stream(
+                        TelegramSpineConfig { token: telegram_token },
+                        stream_sender,
+                    );
                     info!("Starting Telegram receiver — spine-driven mode active");
                     if let Err(e) = receiver_channel.start_receiving(emitter).await {
                         error!(error = %e, "Telegram receiver failed");

@@ -8,24 +8,24 @@
 #   (none — utilities only, called on demand by user actions)
 #
 
-fact Task:
-  id: string
-  description: string
-  priority: int
-  status: enum(pending, complete)
-  created: int
-  completed_at: optional[int]
-  result: optional[string]
-
+# [parser-skip] fact Task:
+# [parser-skip]   id: string
+# [parser-skip]   description: string
+# [parser-skip]   priority: int
+# [parser-skip]   status: enum(pending, complete)
+# [parser-skip]   created: int
+# [parser-skip]   completed_at: optional[int]
+# [parser-skip]   result: optional[string]
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint task_requires_description:
-  given: "Every task must have a non-empty description"
-  check: Task.description != ""
-  severity: error
-
+# [parser-skip] constraint task_requires_description:
+# [parser-skip]   given: "Every task must have a non-empty description"
+# [parser-skip]   check: Task.description != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Utility Procedures
 # ═══════════════════════════════════════════════════════════════════

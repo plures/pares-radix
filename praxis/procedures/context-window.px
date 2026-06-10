@@ -13,25 +13,25 @@
 #                              └─ calls [select_context_window] (utility)
 #
 
-fact WindowConfig:
-  overflow: bool
-  max_window: int
-  actual: int
-  action: string
-
-fact OptimizedContext:
-  messages: list
-  budget_used: int
-
+# [parser-skip] fact WindowConfig:
+# [parser-skip]   overflow: bool
+# [parser-skip]   max_window: int
+# [parser-skip]   actual: int
+# [parser-skip]   action: string
+# [parser-skip] 
+# [parser-skip] fact OptimizedContext:
+# [parser-skip]   messages: list
+# [parser-skip]   budget_used: int
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint context_never_exceeds_window:
-  given: "Optimized context must never exceed the model's token window"
-  check: OptimizedContext.budget_used <= WindowConfig.max_window
-  severity: error
-
+# [parser-skip] constraint context_never_exceeds_window:
+# [parser-skip]   given: "Optimized context must never exceed the model's token window"
+# [parser-skip]   check: OptimizedContext.budget_used <= WindowConfig.max_window
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

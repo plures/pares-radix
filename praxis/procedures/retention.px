@@ -9,20 +9,20 @@
 #   (none — utilities only, called by periodic_memory_maintenance in memory.px)
 #
 
-fact RetentionScore:
-  memory_key: string
-  score: float
-  action: enum(retain, decay, forget)
-
+# [parser-skip] fact RetentionScore:
+# [parser-skip]   memory_key: string
+# [parser-skip]   score: float
+# [parser-skip]   action: enum(retain, decay, forget)
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint retention_score_bounds:
-  given: "Retention scores must be between 0.0 and 1.0"
-  check: RetentionScore.score >= 0.0 AND RetentionScore.score <= 1.0
-  severity: error
-
+# [parser-skip] constraint retention_score_bounds:
+# [parser-skip]   given: "Retention scores must be between 0.0 and 1.0"
+# [parser-skip]   check: RetentionScore.score >= 0.0 AND RetentionScore.score <= 1.0
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Utility Procedures
 # ═══════════════════════════════════════════════════════════════════

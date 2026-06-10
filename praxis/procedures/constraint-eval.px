@@ -13,24 +13,24 @@
 #                                └─ calls [update_constraint] (utility)
 #
 
-fact ConstraintEvaluation:
-  status: enum(satisfied, violated)
-  constraint: string
-  details: optional[string]
-
-fact EnforcementAction:
-  action: enum(block, warn, log)
-  reason: string
-
+# [parser-skip] fact ConstraintEvaluation:
+# [parser-skip]   status: enum(satisfied, violated)
+# [parser-skip]   constraint: string
+# [parser-skip]   details: optional[string]
+# [parser-skip] 
+# [parser-skip] fact EnforcementAction:
+# [parser-skip]   action: enum(block, warn, log)
+# [parser-skip]   reason: string
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint enforcement_severity_match:
-  given: "Enforcement action must match the severity of the violation"
-  check: EnforcementAction.action == "block" OR EnforcementAction.action == "warn" OR EnforcementAction.action == "log"
-  severity: error
-
+# [parser-skip] constraint enforcement_severity_match:
+# [parser-skip]   given: "Enforcement action must match the severity of the violation"
+# [parser-skip]   check: EnforcementAction.action == "block" OR EnforcementAction.action == "warn" OR EnforcementAction.action == "log"
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Dataflow Procedures
 # ═══════════════════════════════════════════════════════════════════

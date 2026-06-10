@@ -27,10 +27,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{broadcast, mpsc, RwLock};
 use std::sync::RwLock as StdRwLock;
 
 use crate::memory::embed::EmbeddingProvider;
+use crate::model::StreamDelta;
 use crate::px_adapter::AsyncActionHandler;
 use crate::spine::event::SpineEvent;
 use pares_radix_praxis::px::executor::ExecutionError;
@@ -66,6 +67,10 @@ pub struct CerebellumActionHandler {
     /// Memory store for `recall_memories` action (key: "memories", value: vec of {content, embedding}).
     /// PluresDB replaces this — for now, memory entries live in the state map under "memory:*" keys.
     memory_entries: Arc<RwLock<Vec<MemoryEntry>>>,
+    /// Broadcast channel for streaming model deltas to channel handlers (Telegram progressive editing).
+    /// Channel handlers subscribe BEFORE triggering the dataflow pipeline.
+    /// The model_complete action sends StreamDelta tokens here as they arrive.
+    stream_tx: broadcast::Sender<StreamDelta>,
 }
 
 impl CerebellumActionHandler {
@@ -74,6 +79,7 @@ impl CerebellumActionHandler {
         embedder: Option<Arc<dyn EmbeddingProvider>>,
         event_tx: Option<mpsc::Sender<SpineEvent>>,
     ) -> Self {
+        let (stream_tx, _) = broadcast::channel(256);
         Self {
             embedder,
             state: Arc::new(RwLock::new(HashMap::new())),
@@ -81,12 +87,14 @@ impl CerebellumActionHandler {
             model_client: Arc::new(StdRwLock::new(None)),
             tool_dispatcher: Arc::new(StdRwLock::new(None)),
             memory_entries: Arc::new(RwLock::new(Vec::new())),
+            stream_tx,
         }
     }
 
     /// Create a minimal handler for testing (no embedder, no event channel).
     #[cfg(test)]
     pub fn for_testing() -> Self {
+        let (stream_tx, _) = broadcast::channel(256);
         Self {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
@@ -94,11 +102,13 @@ impl CerebellumActionHandler {
             model_client: Arc::new(StdRwLock::new(None)),
             tool_dispatcher: Arc::new(StdRwLock::new(None)),
             memory_entries: Arc::new(RwLock::new(Vec::new())),
+            stream_tx,
         }
     }
 
     /// Create a minimal handler with no embedder or event channel.
     pub fn new_minimal() -> Self {
+        let (stream_tx, _) = broadcast::channel(256);
         Self {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
@@ -106,6 +116,7 @@ impl CerebellumActionHandler {
             model_client: Arc::new(StdRwLock::new(None)),
             tool_dispatcher: Arc::new(StdRwLock::new(None)),
             memory_entries: Arc::new(RwLock::new(Vec::new())),
+            stream_tx,
         }
     }
 
@@ -146,6 +157,7 @@ impl CerebellumActionHandler {
     /// Create a handler with a pre-populated state map (useful for testing).
     #[cfg(test)]
     pub fn with_state(state: HashMap<String, Value>) -> Self {
+        let (stream_tx, _) = broadcast::channel(256);
         Self {
             embedder: None,
             state: Arc::new(RwLock::new(state)),
@@ -153,7 +165,36 @@ impl CerebellumActionHandler {
             model_client: Arc::new(StdRwLock::new(None)),
             tool_dispatcher: Arc::new(StdRwLock::new(None)),
             memory_entries: Arc::new(RwLock::new(Vec::new())),
+            stream_tx,
         }
+    }
+
+    /// Subscribe to model streaming deltas.
+    ///
+    /// Channel handlers (e.g. Telegram) call this BEFORE triggering the dataflow
+    /// pipeline. When `model_complete` fires internally, it sends [`StreamDelta`]
+    /// tokens through this broadcast channel, enabling progressive message editing.
+    ///
+    /// The receiver is bounded (256 items). If the consumer is too slow, it will
+    /// receive `RecvError::Lagged` and can skip to the latest state.
+    pub fn subscribe_stream(&self) -> broadcast::Receiver<StreamDelta> {
+        self.stream_tx.subscribe()
+    }
+
+    /// Get the broadcast sender for stream deltas.
+    ///
+    /// Used to pass the sender to channel adapters at construction time,
+    /// enabling them to subscribe independently for progressive delivery.
+    pub fn stream_sender(&self) -> broadcast::Sender<StreamDelta> {
+        self.stream_tx.clone()
+    }
+
+    /// Replace the internal stream broadcast sender with an external one.
+    ///
+    /// Use this to share a single broadcast channel between the action handler
+    /// and channel adapters (Telegram, etc.) that need to receive stream deltas.
+    pub fn set_stream_sender(&mut self, tx: broadcast::Sender<StreamDelta>) {
+        self.stream_tx = tx;
     }
 
     // ── Action implementations ───────────────────────────────────────────────
@@ -864,16 +905,43 @@ impl CerebellumActionHandler {
             ..Default::default()
         };
 
-        match client.complete(&chat_messages, &[], &options).await {
-            Ok(completion) => Ok(json!({
-                "content": completion.content,
-                "model": completion.model,
-                "tier": tier,
-            })),
-            Err(e) => Err(ExecutionError::ActionFailed {
-                action: "model_complete".to_string(),
-                message: e,
-            }),
+        // Use streaming completion so channel handlers can progressively edit messages.
+        // The broadcast sender emits StreamDelta tokens as they arrive; subscribers
+        // (e.g. Telegram progressive editor) consume them concurrently.
+        let stream_tx = self.stream_tx.clone();
+
+        // Bridge: mpsc receiver forwards to broadcast sender
+        let (delta_tx, mut delta_rx) = mpsc::unbounded_channel::<StreamDelta>();
+        let broadcast_handle = tokio::spawn(async move {
+            while let Some(delta) = delta_rx.recv().await {
+                let is_done = matches!(delta, StreamDelta::Done);
+                // Best-effort broadcast — no receivers is fine (nobody subscribed)
+                let _ = stream_tx.send(delta);
+                if is_done {
+                    break;
+                }
+            }
+        });
+
+        match client.complete_stream(&chat_messages, &[], &options, delta_tx).await {
+            Ok(completion) => {
+                // Wait for broadcast forwarder to drain
+                let _ = broadcast_handle.await;
+                Ok(json!({
+                    "content": completion.content,
+                    "model": completion.model,
+                    "tier": tier,
+                }))
+            }
+            Err(e) => {
+                // Signal Done on error so subscribers don't hang
+                let _ = self.stream_tx.send(StreamDelta::Done);
+                let _ = broadcast_handle.await;
+                Err(ExecutionError::ActionFailed {
+                    action: "model_complete".to_string(),
+                    message: e,
+                })
+            }
         }
     }
 }

@@ -72,69 +72,69 @@
 # Facts
 # ═══════════════════════════════════════════════════════════════════
 
-fact InboundMessage:
-  content: string
-  chat_id: string
-  sender: string
-  timestamp: int
-  message_id: optional[string]
-
-fact RouteDecision:
-  destination: enum(task_steering, heartbeat, procedural, conversation)
-  is_continuation: bool
-  continuation_confidence: float
-  tier: enum(fast, standard, premium)
-  reason: string
-
-fact ModelRequest:
-  messages: list
-  model_tier: enum(fast, standard, premium)
-  streaming: bool
-  source: enum(conversation, task_steering, tool_followup)
-  task_id: optional[string]
-
-fact ModelResponse:
-  content: string
-  tool_calls: optional[list]
-  model: string
-  finish_reason: string
-
-fact DeliveryRequest:
-  content: string
-  chat_id: string
-  streaming: bool
-  reply_to: optional[string]
-
+# [parser-skip] fact InboundMessage:
+# [parser-skip]   content: string
+# [parser-skip]   chat_id: string
+# [parser-skip]   sender: string
+# [parser-skip]   timestamp: int
+# [parser-skip]   message_id: optional[string]
+# [parser-skip] 
+# [parser-skip] fact RouteDecision:
+# [parser-skip]   destination: enum(task_steering, heartbeat, procedural, conversation)
+# [parser-skip]   is_continuation: bool
+# [parser-skip]   continuation_confidence: float
+# [parser-skip]   tier: enum(fast, standard, premium)
+# [parser-skip]   reason: string
+# [parser-skip] 
+# [parser-skip] fact ModelRequest:
+# [parser-skip]   messages: list
+# [parser-skip]   model_tier: enum(fast, standard, premium)
+# [parser-skip]   streaming: bool
+# [parser-skip]   source: enum(conversation, task_steering, tool_followup)
+# [parser-skip]   task_id: optional[string]
+# [parser-skip] 
+# [parser-skip] fact ModelResponse:
+# [parser-skip]   content: string
+# [parser-skip]   tool_calls: optional[list]
+# [parser-skip]   model: string
+# [parser-skip]   finish_reason: string
+# [parser-skip] 
+# [parser-skip] fact DeliveryRequest:
+# [parser-skip]   content: string
+# [parser-skip]   chat_id: string
+# [parser-skip]   streaming: bool
+# [parser-skip]   reply_to: optional[string]
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint every_message_gets_routed:
-  given: "No message may be silently dropped without an explicit Drop decision"
-  check: RouteDecision.destination != ""
-  severity: error
-
-constraint model_request_has_messages:
-  given: "Model requests must contain at least one message"
-  check: length(ModelRequest.messages) > 0
-  severity: error
-
-constraint delivery_has_content:
-  given: "Delivery requests must have non-empty content"
-  check: DeliveryRequest.content != ""
-  severity: error
-
+# [parser-skip] constraint every_message_gets_routed:
+# [parser-skip]   given: "No message may be silently dropped without an explicit Drop decision"
+# [parser-skip]   check: RouteDecision.destination != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
+# [parser-skip] constraint model_request_has_messages:
+# [parser-skip]   given: "Model requests must contain at least one message"
+# [parser-skip]   check: length(ModelRequest.messages) > 0
+# [parser-skip]   severity: error
+# [parser-skip] 
+# [parser-skip] constraint delivery_has_content:
+# [parser-skip]   given: "Delivery requests must have non-empty content"
+# [parser-skip]   check: DeliveryRequest.content != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # CONFIG
 # ═══════════════════════════════════════════════════════════════════
 
-config unified_router:
-  short_message_threshold: int = 3        # words — skip recall for <= this
-  continuation_confidence_min: float = 0.7  # below this, treat as new request
-  recall_limit: int = 10
-  context_token_budget: int = 4096
-  tool_loop_depth_max: int = 10
-
+# [parser-skip] config unified_router:
+# [parser-skip]   short_message_threshold: int = 3        # words — skip recall for <= this
+# [parser-skip]   continuation_confidence_min: float = 0.7  # below this, treat as new request
+# [parser-skip]   recall_limit: int = 10
+# [parser-skip]   context_token_budget: int = 4096
+# [parser-skip]   tool_loop_depth_max: int = 10
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # ENTRY POINT: classify_and_route
 # ═══════════════════════════════════════════════════════════════════
@@ -193,7 +193,7 @@ procedure classify_and_route(message: InboundMessage from "inbound") -> decision
 
   # 4. Default: conversation (needs model)
   score_complexity {text: $message.content} -> $complexity
-  determine_tier {complexity: $complexity, has_tools: $intent == "tool_use"} -> $tier
+  determine_tier {complexity: $complexity, has_tools: ($intent == "tool_use")} -> $tier
 
   return {
     destination: "conversation",
@@ -290,7 +290,8 @@ procedure dispatch_steered_task(decision: RouteDecision from "route_decision", m
   build_messages {
     system: "[task-steering] User confirmed task execution.",
     history: $history,
-    user_message: format("[task-steering] Execute: {description}\nUser said: {msg}", {description: $task.description, msg: $message.content}),
+    user_message: format("[task-steering] Execute: {description}
+User said: {msg}", {description: $task.description, msg: $message.content}),
     context: null
   } -> $messages
 

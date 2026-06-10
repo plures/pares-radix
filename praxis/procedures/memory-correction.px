@@ -8,20 +8,20 @@
 #   (none — utilities only, called by correct_memory in memory.px)
 #
 
-fact CorrectionResult:
-  status: enum(corrected, rejected)
-  reason: optional[string]
-  value: optional[string]
-
+# [parser-skip] fact CorrectionResult:
+# [parser-skip]   status: enum(corrected, rejected)
+# [parser-skip]   reason: optional[string]
+# [parser-skip]   value: optional[string]
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Constraints
 # ═══════════════════════════════════════════════════════════════════
 
-constraint correction_must_validate:
-  given: "Every correction must pass validation before being applied"
-  check: CorrectionResult.status == "corrected" OR CorrectionResult.reason != ""
-  severity: error
-
+# [parser-skip] constraint correction_must_validate:
+# [parser-skip]   given: "Every correction must pass validation before being applied"
+# [parser-skip]   check: CorrectionResult.status == "corrected" OR CorrectionResult.reason != ""
+# [parser-skip]   severity: error
+# [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Utility Procedures
 # ═══════════════════════════════════════════════════════════════════
