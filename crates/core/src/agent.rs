@@ -139,6 +139,8 @@ pub struct Agent {
     model_client: Option<Arc<dyn ModelClient>>,
     /// Optional deep model client for low-confidence escalation.
     deep_model_client: Option<Arc<dyn ModelClient>>,
+    /// Optional fast model client for simple responses.
+    fast_model_client: Option<Arc<dyn ModelClient>>,
     /// Tool dispatcher for model tool calls.
     tool_dispatcher: Option<Arc<dyn ToolDispatcher>>,
     /// Base system prompt (legacy fallback).
@@ -203,6 +205,7 @@ impl Agent {
             procedure_registry: ProcedureRegistry::new(),
             model_client: None,
             deep_model_client: None,
+            fast_model_client: None,
             tool_dispatcher: None,
             system_prompt: String::new(),
             personality: None,
@@ -239,6 +242,7 @@ impl Agent {
             procedure_registry: ProcedureRegistry::new(),
             model_client: None,
             deep_model_client: None,
+            fast_model_client: None,
             tool_dispatcher: None,
             system_prompt: String::new(),
             personality: None,
@@ -333,6 +337,12 @@ impl Agent {
     /// Attach a deep model client used for low-confidence escalation.
     pub fn with_deep_model(mut self, client: Arc<dyn ModelClient>) -> Self {
         self.deep_model_client = Some(client);
+        self
+    }
+
+    /// Attach a fast model client for simple/short responses.
+    pub fn with_fast_model(mut self, client: Arc<dyn ModelClient>) -> Self {
+        self.fast_model_client = Some(client);
         self
     }
 
@@ -453,11 +463,12 @@ impl Agent {
                         .await
                     }
                 }
-                Route::Conscious | Route::Deep { .. } => {
+                Route::Fast | Route::Conscious | Route::Deep { .. } => {
                     info!(
                         id,
                         channel,
-                        "handle_event: routing to Conscious/Deep, calling handle_model_message"
+                        route = ?route,
+                        "handle_event: routing to model (Fast/Conscious/Deep)"
                     );
                     self.handle_model_message(id, channel, content, &learned_context, clear_history)
                         .await
@@ -578,7 +589,7 @@ impl Agent {
                         .await
                     }
                 }
-                Route::Conscious | Route::Deep { .. } => {
+                Route::Fast | Route::Conscious | Route::Deep { .. } => {
                     self.handle_model_message_streaming(
                         id,
                         channel,
@@ -653,17 +664,27 @@ impl Agent {
         info!(id, channel, "handle_model_message: starting model call");
         let session_channel = self.resolve_branch_channel(channel);
         let session_id = Self::branch_label(&session_channel);
-        let model_client = match &self.model_client {
-            Some(client) => client,
-            None => {
-                warn!("agent: model client not configured");
-                return Some(Event::ModelResponse {
-                    request_id: id.to_string(),
-                    model: "unconfigured".into(),
-                    content: "⚠️ Model client not configured.".into(),
-                });
+
+        // Dynamic model selection: use fast client for short/simple messages
+        let word_count = content.split_whitespace().count();
+        let use_fast = word_count <= 5 && self.fast_model_client.is_some();
+        let effective_client = if use_fast {
+            tracing::info!(words = word_count, "using fast model for short message");
+            self.fast_model_client.as_ref().unwrap()
+        } else {
+            match &self.model_client {
+                Some(client) => client,
+                None => {
+                    warn!("agent: model client not configured");
+                    return Some(Event::ModelResponse {
+                        request_id: id.to_string(),
+                        model: "unconfigured".into(),
+                        content: "⚠️ Model client not configured.".into(),
+                    });
+                }
             }
         };
+        let model_client = effective_client;
         let tool_dispatcher = match &self.tool_dispatcher {
             Some(dispatcher) => dispatcher,
             None => {

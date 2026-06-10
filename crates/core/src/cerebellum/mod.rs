@@ -52,7 +52,9 @@ use tracing::{debug, info, instrument, warn};
 /// Where the cerebellum decides to send an event.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Route {
-    /// Conscious agent only (fast path).
+    /// Fast-tier model for simple/short responses (haiku, mini, flash).
+    Fast,
+    /// Conscious agent only — standard-tier model (sonnet, gpt-4o).
     Conscious,
     /// Both conscious and subconscious in parallel.
     /// The `reason` field is injected into the subconscious prompt.

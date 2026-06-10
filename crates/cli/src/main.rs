@@ -167,6 +167,7 @@ struct RuntimeAgentFactory {
     store: Arc<PluresDbStore>,
     model_client: Arc<dyn ModelClient>,
     deep_model_client: Arc<dyn ModelClient>,
+    fast_model_client: Option<Arc<dyn ModelClient>>,
     tool_dispatcher: Arc<dyn ToolDispatcher>,
     registry: Arc<AgentRegistry>,
     embed_url: Option<String>,
@@ -387,8 +388,7 @@ impl RuntimeAgentFactory {
         );
         let turn_store: Arc<dyn pares_agens_core::memory::store::MemoryStore> = self.store.clone();
 
-        Ok(Arc::new(
-            Agent::with_cerebellum(memory, cerebellum, plures_lm)
+        let agent = Agent::with_cerebellum(memory, cerebellum, plures_lm)
                 .with_model(
                     Arc::clone(&self.model_client),
                     Arc::clone(&self.tool_dispatcher),
@@ -403,8 +403,14 @@ impl RuntimeAgentFactory {
                         self.store.crdt_store_arc(),
                     );
                     Arc::new(chronos)
-                }),
-        ))
+                });
+        // Attach fast model if available
+        let agent = if let Some(ref fast_client) = self.fast_model_client {
+            agent.with_fast_model(Arc::clone(fast_client))
+        } else {
+            agent
+        };
+        Ok(Arc::new(agent))
     }
 
     fn build_agent(&self) -> Result<Arc<Agent>, String> {
@@ -3069,6 +3075,11 @@ enum Commands {
         #[arg(long, env = "PARES_DEEP_MODEL", default_value = "auto")]
         deep_model: String,
 
+        /// Fast model name for simple/short responses.
+        /// Set to "auto" for auto-detection or a specific model like "gpt-4o-mini".
+        #[arg(long, env = "PARES_FAST_MODEL", default_value = "auto")]
+        fast_model: String,
+
         /// Deep model API URL (defaults to --model-url).
         #[arg(long, env = "PARES_DEEP_MODEL_URL")]
         deep_model_url: Option<String>,
@@ -4127,6 +4138,7 @@ async fn main() {
             model,
             copilot,
             deep_model,
+            fast_model,
             deep_model_url,
             api_key,
             embed_url,
@@ -4152,6 +4164,7 @@ async fn main() {
             let mut model_url = model_url;
             let mut model = model;
             let mut deep_model = deep_model;
+            let mut fast_model = fast_model;
             let mut deep_escalation_enabled = default_deep_escalation_enabled();
             let mut runtime_log_level = "info".to_string();
 
@@ -4246,6 +4259,7 @@ async fn main() {
 
             let model_name = Arc::new(RwLock::new(model.clone()));
             let deep_model_name = Arc::new(RwLock::new(deep_model.clone()));
+            let fast_model_name = Arc::new(RwLock::new(fast_model.clone()));
             let deep_escalation_enabled_state = Arc::new(RwLock::new(deep_escalation_enabled));
             let runtime_log_level_state = Arc::new(RwLock::new(runtime_log_level.clone()));
             let runtime_model_control = Arc::new(RuntimeModelControl {
@@ -4256,12 +4270,13 @@ async fn main() {
             });
             let mut runtime_config_control: Option<Arc<dyn TelegramConfigControl>> = None;
 
-            let (model_client, deep_model_client): (Arc<dyn ModelClient>, Arc<dyn ModelClient>) =
+            #[allow(clippy::type_complexity)]
+            let (model_client, deep_model_client, fast_model_client_opt): (Arc<dyn ModelClient>, Arc<dyn ModelClient>, Option<Arc<dyn ModelClient>>) =
                 if let Some(ref bitnet_path) = bitnet_model_path {
                     tracing::info!(path = %bitnet_path.display(), "using local BitNet model");
                     let client: Arc<dyn ModelClient> =
                         Arc::new(BitnetModelClient::new(bitnet_path));
-                    (Arc::clone(&client), client)
+                    (Arc::clone(&client), client, None)
                 } else if copilot {
                     let auth_path = PathBuf::from(&home).join(".pares-radix/copilot-auth.json");
                     let cached = std::fs::read_to_string(&auth_path)
@@ -4330,11 +4345,13 @@ async fn main() {
                     };
 
                     let mut auth = CopilotAuth::new(oauth_token.clone());
-                    let deep_auth = CopilotAuth::new(oauth_token);
+                    let deep_auth = CopilotAuth::new(oauth_token.clone());
+                    let fast_auth_token = oauth_token; // Save for fast client creation later
 
                     // Smart model discovery: if model or deep_model is "auto",
                     // probe the Copilot API for available models and select the best.
-                    if model == "auto" || deep_model == "auto" {
+                    let mut discovered_fallbacks: Option<pares_agens_core::auth::copilot::ModelFallbacks> = None;
+                    if model == "auto" || deep_model == "auto" || fast_model == "auto" {
                         tracing::info!("auto-detecting available models...");
                         match auth.list_models().await {
                             Ok(available) if !available.is_empty() => {
@@ -4349,6 +4366,17 @@ async fn main() {
                                     deep_model = selection.deep;
                                     *deep_model_name.write().await = deep_model.clone();
                                 }
+                                if fast_model == "auto" {
+                                    if let Some(fast_pick) = selection.fast {
+                                        tracing::info!(selected = %fast_pick, "auto-selected fast model");
+                                        fast_model = fast_pick;
+                                    } else {
+                                        tracing::info!("no fast-tier models discovered, fast model disabled");
+                                        fast_model = String::new();
+                                    }
+                                    *fast_model_name.write().await = fast_model.clone();
+                                }
+                                discovered_fallbacks = Some(selection.fallbacks);
                                 tracing::info!(
                                     available_count = available.len(),
                                     models = %available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>().join(", "),
@@ -4365,6 +4393,10 @@ async fn main() {
                                     deep_model = "claude-opus-4.6".to_string();
                                     *deep_model_name.write().await = deep_model.clone();
                                 }
+                                if fast_model == "auto" {
+                                    fast_model = String::new();
+                                    *fast_model_name.write().await = fast_model.clone();
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!(error = %e, "model discovery failed, using defaults");
@@ -4376,24 +4408,61 @@ async fn main() {
                                     deep_model = "claude-opus-4.6".to_string();
                                     *deep_model_name.write().await = deep_model.clone();
                                 }
+                                if fast_model == "auto" {
+                                    fast_model = String::new();
+                                    *fast_model_name.write().await = fast_model.clone();
+                                }
                             }
                         }
                     }
 
-                    // Default fallback chain for Copilot: if the primary model
-                    // is unavailable (enterprise-only, rate-limited, etc.), try
-                    // progressively simpler models.
-                    let conscious_fallbacks = if radix_config.model.fallbacks.is_empty() {
-                        vec![
-                            "claude-sonnet-4.5".to_string(),
-                            "gpt-4o".to_string(),
-                            "gpt-4o-mini".to_string(),
-                        ]
-                    } else {
+                    // Build fallback chains: prefer discovery-based chains,
+                    // then cross-tier degradation (Premium→Standard→Fast).
+                    let conscious_fallbacks = if !radix_config.model.fallbacks.is_empty() {
                         radix_config.model.fallbacks.clone()
+                    } else if let Some(ref fb) = discovered_fallbacks {
+                        // Standard tier chain, excluding the primary, then fast tier as last resort
+                        let mut chain: Vec<String> = fb.standard.iter()
+                            .filter(|m| *m != &model)
+                            .cloned()
+                            .collect();
+                        chain.extend(fb.fast.iter().cloned());
+                        if chain.is_empty() {
+                            vec!["claude-sonnet-4.5".into(), "gpt-4o".into(), "gpt-4o-mini".into()]
+                        } else {
+                            chain
+                        }
+                    } else {
+                        vec!["claude-sonnet-4.5".into(), "gpt-4o".into(), "gpt-4o-mini".into()]
                     };
-                    let deep_fallbacks =
-                        vec!["claude-sonnet-4.5".to_string(), "gpt-4o".to_string()];
+
+                    let deep_fallbacks = if let Some(ref fb) = discovered_fallbacks {
+                        // Premium tier chain excluding the deep pick, then standard as fallback
+                        let mut chain: Vec<String> = fb.premium.iter()
+                            .filter(|m| *m != &deep_model)
+                            .cloned()
+                            .collect();
+                        chain.extend(fb.standard.iter().cloned());
+                        if chain.is_empty() {
+                            vec!["claude-sonnet-4.5".into(), "gpt-4o".into()]
+                        } else {
+                            chain
+                        }
+                    } else {
+                        vec!["claude-sonnet-4.5".into(), "gpt-4o".into()]
+                    };
+
+                    let fast_fallbacks = if let Some(ref fb) = discovered_fallbacks {
+                        // Fast tier chain excluding the pick, then standard as fallback
+                        let mut chain: Vec<String> = fb.fast.iter()
+                            .filter(|m| *m != &fast_model)
+                            .cloned()
+                            .collect();
+                        chain.extend(fb.standard.iter().cloned());
+                        chain
+                    } else {
+                        vec!["gpt-4o-mini".into(), "gpt-4o".into()]
+                    };
 
                     (
                         Arc::new(
@@ -4410,6 +4479,19 @@ async fn main() {
                             )
                             .with_fallbacks(deep_fallbacks),
                         ),
+                        // Fast model client: only created if a fast model was selected
+                        if !fast_model.is_empty() {
+                            let fast_auth = CopilotAuth::new(fast_auth_token);
+                            Some(Arc::new(
+                                CopilotModelClient::new_with_model_handle(
+                                    fast_auth,
+                                    Arc::clone(&fast_model_name),
+                                )
+                                .with_fallbacks(fast_fallbacks),
+                            ) as Arc<dyn ModelClient>)
+                        } else {
+                            None
+                        },
                     )
                 } else {
                     // Set up model router
@@ -4447,6 +4529,7 @@ async fn main() {
                     (
                         primary_router_client as Arc<dyn ModelClient>,
                         deep_router_client as Arc<dyn ModelClient>,
+                        None, // Router path doesn't support fast model yet
                     )
                 };
             let deep_model_client: Arc<dyn ModelClient> = Arc::new(ToggleableModelClient::new(
@@ -4768,6 +4851,7 @@ async fn main() {
                 store: Arc::clone(&store),
                 model_client: Arc::clone(&model_client),
                 deep_model_client: Arc::clone(&deep_model_client),
+                fast_model_client: fast_model_client_opt.clone(),
                 tool_dispatcher: Arc::clone(&tool_dispatcher),
                 registry: Arc::clone(&registry),
                 embed_url,

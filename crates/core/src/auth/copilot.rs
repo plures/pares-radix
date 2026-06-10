@@ -642,15 +642,33 @@ pub enum ModelTier {
     Premium,
 }
 
-/// Result of model discovery — recommended selections.
+/// Result of model discovery — recommended selections with fallback chains.
 #[derive(Debug, Clone)]
 pub struct ModelSelection {
     /// Primary model for standard inference.
     pub primary: String,
     /// Deep/escalation model for complex reasoning.
     pub deep: String,
+    /// Fast model for simple/short responses.
+    pub fast: Option<String>,
+    /// Ordered fallback chains per tier (best → worst within tier, then cross-tier).
+    pub fallbacks: ModelFallbacks,
     /// All available models.
     pub available: Vec<AvailableModel>,
+}
+
+/// Ordered fallback chains for graceful model degradation.
+/// Each chain is sorted by preference (best first). When the primary choice
+/// for a tier fails, iterate the chain to find the next usable model.
+/// If the entire tier is exhausted, fall through to the next lower tier's chain.
+#[derive(Debug, Clone, Default)]
+pub struct ModelFallbacks {
+    /// Premium tier fallback chain (for deep model failures).
+    pub premium: Vec<String>,
+    /// Standard tier fallback chain (for primary model failures).
+    pub standard: Vec<String>,
+    /// Fast tier fallback chain (for fast model failures).
+    pub fast: Vec<String>,
 }
 
 impl CopilotAuth {
@@ -834,13 +852,16 @@ fn model_preference_score(model_id: &str) -> u32 {
     50 // Unknown
 }
 
-/// Select the best primary and deep models from a list of available models.
+/// Select the best primary, deep, and fast models from a list of available models.
+/// Builds ordered fallback chains for graceful degradation when a model becomes unavailable.
 pub fn select_models(available: &[AvailableModel]) -> ModelSelection {
     if available.is_empty() {
         tracing::warn!("no models discovered, using hardcoded defaults");
         return ModelSelection {
             primary: "claude-sonnet-4.5".to_string(),
             deep: "claude-opus-4.6".to_string(),
+            fast: None,
+            fallbacks: ModelFallbacks::default(),
             available: vec![],
         };
     }
@@ -858,37 +879,45 @@ pub fn select_models(available: &[AvailableModel]) -> ModelSelection {
         }
     }
 
+    // Sort each tier by preference (highest score first)
+    premium.sort_by_key(|m| std::cmp::Reverse(model_preference_score(&m.id)));
+    standard.sort_by_key(|m| std::cmp::Reverse(model_preference_score(&m.id)));
+    fast.sort_by_key(|m| std::cmp::Reverse(model_preference_score(&m.id)));
+
+    // Build fallback chains (all models in tier, ordered by preference)
+    let premium_chain: Vec<String> = premium.iter().map(|m| m.id.clone()).collect();
+    let standard_chain: Vec<String> = standard.iter().map(|m| m.id.clone()).collect();
+    let fast_chain: Vec<String> = fast.iter().map(|m| m.id.clone()).collect();
+
     // Primary: best Standard-tier model (balanced speed/quality)
     let primary = standard
-        .iter()
-        .max_by_key(|m| model_preference_score(&m.id))
+        .first()
         .map(|m| m.id.clone())
-        .or_else(|| {
-            // Fallback to best Fast model if no Standard available
-            fast.iter()
-                .max_by_key(|m| model_preference_score(&m.id))
-                .map(|m| m.id.clone())
-        })
+        .or_else(|| fast.first().map(|m| m.id.clone()))
         .unwrap_or_else(|| available[0].id.clone());
 
     // Deep: best Premium-tier model (max reasoning for escalation)
     let deep = premium
-        .iter()
-        .max_by_key(|m| model_preference_score(&m.id))
+        .first()
         .map(|m| m.id.clone())
         .or_else(|| {
             // Fallback to best Standard model that's different from primary
             standard
                 .iter()
-                .filter(|m| m.id != primary)
-                .max_by_key(|m| model_preference_score(&m.id))
+                .find(|m| m.id != primary)
                 .map(|m| m.id.clone())
         })
         .unwrap_or_else(|| primary.clone());
 
+    // Fast: best Fast-tier model (cheapest/quickest)
+    let fast_pick = fast
+        .first()
+        .map(|m| m.id.clone());
+
     tracing::info!(
         primary = %primary,
         deep = %deep,
+        fast = ?fast_pick,
         total_available = available.len(),
         premium_count = premium.len(),
         standard_count = standard.len(),
@@ -899,6 +928,12 @@ pub fn select_models(available: &[AvailableModel]) -> ModelSelection {
     ModelSelection {
         primary,
         deep,
+        fast: fast_pick,
+        fallbacks: ModelFallbacks {
+            premium: premium_chain,
+            standard: standard_chain,
+            fast: fast_chain,
+        },
         available: available.to_vec(),
     }
 }

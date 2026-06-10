@@ -191,6 +191,12 @@ tar.extractall(os.environ['out'] + '/lib')
               description = "Deep model for low-confidence escalation. Set to 'auto' for smart detection.";
             };
 
+            fastModel = lib.mkOption {
+              type = lib.types.str;
+              default = "auto";
+              description = "Fast model for simple/short responses. Set to 'auto' for smart detection.";
+            };
+
             telegramTokenFile = lib.mkOption {
               type = lib.types.nullOr lib.types.path;
               default = null;
@@ -293,7 +299,8 @@ tar.extractall(os.environ['out'] + '/lib')
                   escapedTelegramTokenFile = lib.escapeShellArg (toString cfg.telegramTokenFile);
                   copilotArg = if cfg.copilot then "--copilot" else "";
                   modelArg = (if cfg.model != "auto" then "--model ${cfg.model}" else "")
-                    + (if cfg.deepModel != "auto" then " --deep-model ${cfg.deepModel}" else "");
+                    + (if cfg.deepModel != "auto" then " --deep-model ${cfg.deepModel}" else "")
+                    + (if cfg.fastModel != "auto" then " --fast-model ${cfg.fastModel}" else "");
                   promptArg = if cfg.systemPromptFile != null
                     then "--system-prompt ${cfg.systemPromptFile}"
                     else "";
