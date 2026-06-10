@@ -53,10 +53,10 @@ pub struct MemoryConfig {
 }
 
 fn default_model() -> String {
-    "claude-sonnet-4.5".into()
+    "auto".into()
 }
 fn default_deep_model() -> String {
-    "claude-opus-4.6".into()
+    "auto".into()
 }
 fn default_endpoint() -> String {
     "https://api.individual.githubcopilot.com".into()

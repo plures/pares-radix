@@ -181,14 +181,14 @@ tar.extractall(os.environ['out'] + '/lib')
 
             model = lib.mkOption {
               type = lib.types.str;
-              default = "gpt-4.1";
-              description = "Conscious model (80% of traffic).";
+              default = "auto";
+              description = "Primary model. Set to 'auto' for smart detection from available provider models.";
             };
 
             deepModel = lib.mkOption {
               type = lib.types.str;
-              default = "claude-opus-4.6";
-              description = "Deep model for low-confidence escalation.";
+              default = "auto";
+              description = "Deep model for low-confidence escalation. Set to 'auto' for smart detection.";
             };
 
             telegramTokenFile = lib.mkOption {
@@ -292,7 +292,8 @@ tar.extractall(os.environ['out'] + '/lib')
                 let
                   escapedTelegramTokenFile = lib.escapeShellArg (toString cfg.telegramTokenFile);
                   copilotArg = if cfg.copilot then "--copilot" else "";
-                  modelArg = "--model ${cfg.model} --deep-model ${cfg.deepModel}";
+                  modelArg = (if cfg.model != "auto" then "--model ${cfg.model}" else "")
+                    + (if cfg.deepModel != "auto" then " --deep-model ${cfg.deepModel}" else "");
                   promptArg = if cfg.systemPromptFile != null
                     then "--system-prompt ${cfg.systemPromptFile}"
                     else "";
