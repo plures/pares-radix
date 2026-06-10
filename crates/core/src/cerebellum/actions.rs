@@ -264,6 +264,168 @@ impl CerebellumActionHandler {
 
         Ok(json!({ "emitted": true }))
     }
+
+    // ── Dataflow classification actions ───────────────────────────────────────
+
+    /// Normalize text: lowercase, trim whitespace.
+    fn normalize_text(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        Ok(json!(text.to_lowercase().trim().to_string()))
+    }
+
+    /// Detect intent from text: question, command, statement, greeting, farewell.
+    fn detect_intent(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        let intent = if text.ends_with('?') || text.starts_with("what ") || text.starts_with("how ")
+            || text.starts_with("why ") || text.starts_with("when ") || text.starts_with("where ")
+            || text.starts_with("who ") || text.starts_with("can you")
+        {
+            "question"
+        } else if text.starts_with('/') || text.starts_with("do ") || text.starts_with("run ")
+            || text.starts_with("execute ") || text.starts_with("create ")
+            || text.starts_with("make ") || text.starts_with("build ")
+            || text.starts_with("deploy ") || text.starts_with("fix ")
+        {
+            "command"
+        } else if text.starts_with("hi") || text.starts_with("hey") || text.starts_with("hello") {
+            "greeting"
+        } else if text.starts_with("bye") || text.starts_with("goodbye") || text.starts_with("see you") {
+            "farewell"
+        } else {
+            "statement"
+        };
+        Ok(json!(intent))
+    }
+
+    /// Score complexity 0-6 based on structural cues.
+    fn score_complexity(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        let words: Vec<&str> = text.split_whitespace().collect();
+        let word_count = words.len();
+        let mut score: u32 = 0;
+
+        // Length factor
+        if word_count > 30 {
+            score += 2;
+        } else if word_count > 8 {
+            score += 1;
+        }
+
+        // Reasoning words
+        let reasoning = ["because", "therefore", "however", "although", "whereas",
+            "analyze", "compare", "evaluate", "explain", "consider"];
+        if words.iter().any(|w| reasoning.contains(&w.to_lowercase().as_str())) {
+            score += 1;
+        }
+
+        // Multi-step markers
+        let step_markers = ["first", "then", "next", "finally", "after", "before",
+            "step", "1.", "2.", "3."];
+        let step_count = words.iter().filter(|w| step_markers.contains(&w.to_lowercase().as_str())).count();
+        if step_count >= 2 {
+            score += 1;
+        }
+
+        // Code markers
+        if text.contains('`') || text.contains("fn ") || text.contains("def ")
+            || text.contains("->") || text.contains("::") || text.contains("impl ")
+        {
+            score += 1;
+        }
+
+        // Multi-clause
+        let clauses = text.matches(',').count() + text.matches(';').count()
+            + text.matches(" and ").count() + text.matches(" or ").count();
+        if clauses >= 3 {
+            score += 1;
+        }
+
+        Ok(json!(score.min(6)))
+    }
+
+    /// Detect if tools are needed based on text patterns.
+    fn detect_tools_needed(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        let needs_tools = text.contains("search") || text.contains("browse")
+            || text.contains("fetch") || text.contains("download")
+            || text.contains("run ") || text.contains("execute")
+            || text.contains("compile") || text.contains("build")
+            || text.contains("deploy") || text.contains("commit")
+            || text.contains("push") || text.contains("pull")
+            || text.starts_with('/');
+        Ok(json!(needs_tools))
+    }
+
+    /// Match against known plugin/tool patterns.
+    fn match_plugin(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        let plugin = if text.contains("weather") {
+            "weather"
+        } else if text.contains("calendar") || text.contains("schedule") {
+            "calendar"
+        } else if text.contains("email") || text.contains("mail") {
+            "email"
+        } else if text.contains("git") || text.contains("repo") || text.contains("pr ") {
+            "git"
+        } else if text.contains("memory") || text.contains("remember") {
+            "memory"
+        } else {
+            "none"
+        };
+        Ok(json!(plugin))
+    }
+
+    /// Extract topic from text (first noun phrase heuristic).
+    fn extract_topic(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        // Simple: take the first 3-5 significant words
+        let stop_words = ["the", "a", "an", "is", "are", "was", "were", "do", "does",
+            "did", "to", "of", "in", "on", "at", "for", "with", "and", "or", "but",
+            "can", "you", "i", "me", "my", "it", "this", "that"];
+        let significant: Vec<&str> = text.split_whitespace()
+            .filter(|w| !stop_words.contains(&w.to_lowercase().as_str()))
+            .take(4)
+            .collect();
+        Ok(json!(significant.join(" ")))
+    }
+
+    /// Detect topic shift (placeholder — needs embedding comparison).
+    fn detect_topic_shift_action(params: &Value) -> Result<Value, ExecutionError> {
+        // Without embeddings, assume no shift (conservative)
+        let _topic = params["topic"].as_str().unwrap_or_default();
+        Ok(json!(false))
+    }
+
+    /// Determine model tier based on complexity score.
+    fn determine_model_tier(params: &Value) -> Result<Value, ExecutionError> {
+        let complexity = params["complexity"].as_u64().unwrap_or(0);
+        let needs_deep = complexity > 3;
+        Ok(json!(needs_deep))
+    }
+
+    /// Generic classify action (combines intent + complexity + tools).
+    fn classify_action(params: &Value) -> Result<Value, ExecutionError> {
+        let text = params["text"].as_str().unwrap_or_default();
+        let intent = Self::detect_intent(&json!({"text": text}))?;
+        let complexity = Self::score_complexity(&json!({"text": text}))?;
+        let needs_tools = Self::detect_tools_needed(&json!({"text": text}))?;
+        Ok(json!({
+            "intent": intent,
+            "complexity": complexity,
+            "needs_tools": needs_tools,
+        }))
+    }
+
+    /// Stub for model_complete — returns placeholder.
+    /// Real implementation will call the model client.
+    fn model_complete_stub(params: &Value) -> Result<Value, ExecutionError> {
+        let tier = params["tier"].as_str().unwrap_or("standard");
+        Ok(json!({
+            "tier": tier,
+            "status": "stub",
+            "message": "model_complete not yet wired to real model client"
+        }))
+    }
 }
 
 #[async_trait]
@@ -276,6 +438,17 @@ impl AsyncActionHandler for CerebellumActionHandler {
             "write_state" => self.write_state(params).await,
             "get_current_time" => Self::get_current_time(),
             "emit_event" => self.emit_event(params).await,
+            // Dataflow classification actions
+            "normalize_text" => Self::normalize_text(params),
+            "detect_intent" => Self::detect_intent(params),
+            "score_complexity" => Self::score_complexity(params),
+            "detect_tools_needed" => Self::detect_tools_needed(params),
+            "match_plugin" => Self::match_plugin(params),
+            "extract_topic" => Self::extract_topic(params),
+            "detect_topic_shift" => Self::detect_topic_shift_action(params),
+            "determine_model_tier" => Self::determine_model_tier(params),
+            "classify" => Self::classify_action(params),
+            "model_complete" => Self::model_complete_stub(params),
             _ => Err(ExecutionError::UnknownAction(name.to_string())),
         }
     }
