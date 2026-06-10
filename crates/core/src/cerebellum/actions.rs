@@ -35,6 +35,14 @@ use crate::px_adapter::AsyncActionHandler;
 use crate::spine::event::SpineEvent;
 use pares_radix_praxis::px::executor::ExecutionError;
 
+/// A memory entry with pre-computed embedding for recall.
+#[derive(Clone)]
+struct MemoryEntry {
+    content: String,
+    embedding: Vec<f32>,
+    metadata: Value,
+}
+
 // ── CerebellumActionHandler ──────────────────────────────────────────────────
 
 /// Action handler providing IO boundaries for cerebellum `.px` procedures.
@@ -53,6 +61,11 @@ pub struct CerebellumActionHandler {
     /// Model client for `model_complete` action.
     /// Wrapped in RwLock so it can be set after construction (late binding).
     model_client: Arc<StdRwLock<Option<Arc<dyn crate::model::ModelClient>>>>,
+    /// Tool dispatcher for `dispatch_tools` action.
+    tool_dispatcher: Arc<StdRwLock<Option<Arc<dyn crate::model::ToolDispatcher>>>>,
+    /// Memory store for `recall_memories` action (key: "memories", value: vec of {content, embedding}).
+    /// PluresDB replaces this — for now, memory entries live in the state map under "memory:*" keys.
+    memory_entries: Arc<RwLock<Vec<MemoryEntry>>>,
 }
 
 impl CerebellumActionHandler {
@@ -66,6 +79,8 @@ impl CerebellumActionHandler {
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
             model_client: Arc::new(StdRwLock::new(None)),
+            tool_dispatcher: Arc::new(StdRwLock::new(None)),
+            memory_entries: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -77,20 +92,20 @@ impl CerebellumActionHandler {
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
             model_client: Arc::new(StdRwLock::new(None)),
+            tool_dispatcher: Arc::new(StdRwLock::new(None)),
+            memory_entries: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
     /// Create a minimal handler with no embedder or event channel.
-    ///
-    /// Useful at startup when the full infrastructure isn't available yet.
-    /// Actions that require an embedder will return errors; state operations
-    /// work against an in-memory map; events are silently dropped.
     pub fn new_minimal() -> Self {
         Self {
             embedder: None,
             state: Arc::new(RwLock::new(HashMap::new())),
             event_tx: None,
             model_client: Arc::new(StdRwLock::new(None)),
+            tool_dispatcher: Arc::new(StdRwLock::new(None)),
+            memory_entries: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -107,6 +122,27 @@ impl CerebellumActionHandler {
         *self.model_client.write().unwrap() = Some(client);
     }
 
+    /// Attach a tool dispatcher to enable `dispatch_tools` action.
+    pub fn with_tool_dispatcher(self, dispatcher: Arc<dyn crate::model::ToolDispatcher>) -> Self {
+        *self.tool_dispatcher.write().unwrap() = Some(dispatcher);
+        self
+    }
+
+    /// Set the tool dispatcher after construction (late binding).
+    pub fn set_tool_dispatcher(&self, dispatcher: Arc<dyn crate::model::ToolDispatcher>) {
+        *self.tool_dispatcher.write().unwrap() = Some(dispatcher);
+    }
+
+    /// Store a memory entry for later recall.
+    pub async fn store_memory(&self, content: &str, embedding: Vec<f32>, metadata: Value) {
+        let entry = MemoryEntry {
+            content: content.to_string(),
+            embedding,
+            metadata,
+        };
+        self.memory_entries.write().await.push(entry);
+    }
+
     /// Create a handler with a pre-populated state map (useful for testing).
     #[cfg(test)]
     pub fn with_state(state: HashMap<String, Value>) -> Self {
@@ -115,6 +151,8 @@ impl CerebellumActionHandler {
             state: Arc::new(RwLock::new(state)),
             event_tx: None,
             model_client: Arc::new(StdRwLock::new(None)),
+            tool_dispatcher: Arc::new(StdRwLock::new(None)),
+            memory_entries: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -540,13 +578,110 @@ impl CerebellumActionHandler {
         }
     }
 
-    /// Recall memories via embedding search (delegates to PluresLM).
-    /// For now returns empty since PluresLM isn't wired into the action handler.
+    /// Recall memories via embedding similarity search.
+    /// Embeds the query text, then finds closest memories by cosine similarity.
     async fn recall_memories_action(&self, params: &Value) -> Result<Value, ExecutionError> {
-        // TODO: Wire to PluresLM.recall() when available in action handler context
-        let _embedding = params.get("embedding");
-        let _limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10);
-        Ok(json!({"memories": []}))
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let min_score = params.get("min_score").and_then(|v| v.as_f64()).unwrap_or(0.5);
+
+        // Get the query embedding (either passed directly or computed from text)
+        let query_embedding: Vec<f32> = if let Some(emb) = params.get("embedding").and_then(|v| v.as_array()) {
+            emb.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).collect()
+        } else if let Some(text) = params.get("text").and_then(|v| v.as_str()) {
+            // Compute embedding from text
+            let Some(embedder) = &self.embedder else {
+                return Ok(json!({"memories": []}));
+            };
+            match embedder.embed(text).await {
+                Ok(emb) => emb,
+                Err(_) => return Ok(json!({"memories": []})),
+            }
+        } else {
+            return Ok(json!({"memories": []}));
+        };
+
+        // Search memory entries by cosine similarity
+        let entries = self.memory_entries.read().await;
+        let mut scored: Vec<(f64, &MemoryEntry)> = entries.iter()
+            .map(|entry| {
+                let sim = cosine_similarity(&query_embedding, &entry.embedding) as f64;
+                (sim, entry)
+            })
+            .filter(|(score, _)| *score >= min_score)
+            .collect();
+
+        // Sort by similarity descending
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(limit);
+
+        let memories: Vec<Value> = scored.iter()
+            .map(|(score, entry)| json!({
+                "content": entry.content,
+                "score": score,
+                "metadata": entry.metadata,
+            }))
+            .collect();
+
+        Ok(json!({"memories": memories}))
+    }
+
+    /// Store a memory entry with auto-computed embedding.
+    async fn store_memory_action(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let content = params.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        if content.is_empty() {
+            return Err(ExecutionError::ActionFailed {
+                action: "store_memory".to_string(),
+                message: "content parameter is required".to_string(),
+            });
+        }
+
+        let metadata = params.get("metadata").cloned().unwrap_or(json!({}));
+
+        // Compute embedding
+        let embedding = if let Some(embedder) = &self.embedder {
+            embedder.embed(content).await.unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        self.memory_entries.write().await.push(MemoryEntry {
+            content: content.to_string(),
+            embedding,
+            metadata,
+        });
+
+        Ok(json!({"stored": true}))
+    }
+
+    /// Dispatch tool calls to the tool dispatcher and return results.
+    async fn dispatch_tools_action(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let calls = params.get("calls").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+
+        let dispatcher = self.tool_dispatcher.read().unwrap().clone();
+        let Some(dispatcher) = dispatcher else {
+            return Err(ExecutionError::ActionFailed {
+                action: "dispatch_tools".to_string(),
+                message: "no tool dispatcher configured".to_string(),
+            });
+        };
+
+        let mut results = Vec::new();
+        for call in &calls {
+            let name = call.get("name").or(call.get("function").and_then(|f| f.get("name")))
+                .and_then(|v| v.as_str()).unwrap_or_default();
+            let arguments = call.get("arguments").or(call.get("function").and_then(|f| f.get("arguments")))
+                .cloned().unwrap_or(json!({}));
+            let call_id = call.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+
+            let result = dispatcher.call_tool(name, arguments).await;
+            results.push(json!({
+                "tool_call_id": call_id,
+                "name": name,
+                "content": result,
+            }));
+        }
+
+        Ok(json!({"results": results}))
     }
 
     /// Extract entities from text (lightweight NER).
@@ -771,13 +906,14 @@ impl AsyncActionHandler for CerebellumActionHandler {
             "match_patterns" => Self::match_patterns_action(params),
             "embed_text" => self.compute_embedding(params).await,
             "recall_memories" => self.recall_memories_action(params).await,
+            "store_memory" => self.store_memory_action(params).await,
             "extract_entities" => Self::extract_entities_action(params),
             "manage_context" => Self::manage_context_action(params),
             "build_messages" => Self::build_messages_action(params),
             "append_history" => self.write_state(params).await, // Uses state store for now
             "append_tail" => Self::append_tail_action(params),
             "channel_send" => Ok(json!({"sent": true})), // Handled by graph output, not inline
-            "dispatch_tools" => Ok(json!({"results": []})), // TODO: wire to tool registry
+            "dispatch_tools" => self.dispatch_tools_action(params).await,
             "build_tool_followup" => Self::build_tool_followup_action(params),
             "push_queue" => Ok(json!({"pushed": true})), // Graph handles queue routing
             "timestamp_now" => Self::get_current_time(),
