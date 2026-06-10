@@ -1,34 +1,57 @@
-# conversation.px — Conversation memory as reactive PluresDB procedures
+# conversation.px — Conversation memory as v3 dataflow procedures
 #
-# When a message arrives, store it. When the model needs context, read it.
-# No ConversationStore trait. No HistoryRecorder struct. Just PluresDB writes
-# triggered by events, and PluresDB reads when building model context.
+# Pure functions for recording messages and building context.
+# No triggers, no on_write patterns. Data flows through queues.
+#
+# Queue topology:
+#
+#   inbound ─→ [record_user_message] ─→ history_write
+#   model_response ─→ [record_assistant_response] ─→ history_write
+#   model_request ─→ [build_context] ─→ enriched_request
+#
 
-fact conversation:
-  chat_id: string
-  messages: list[string]
-  max_history: int
-
-fact message:
-  role: string
+fact Message:
+  role: enum(user, assistant, system, tool)
   content: string
   timestamp: int
+  tool_calls: optional[list[string]]
 
-# Record every inbound user message
-procedure record_user_message:
-  trigger: on_write {pattern: "inbound:*"}
-  pluresdb_append {key: "chat:history", value: "user_message"}
+fact ConversationContext:
+  history: list[Message]
+  max_history: int
 
-# Record final assistant responses (no tool_calls = final)
-procedure record_assistant_response:
-  trigger: on_write {pattern: "model_response:*"}
-  when event.tool_calls_empty:
-    pluresdb_append {key: "chat:history", value: "assistant_response"}
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Record every inbound user message to conversation history
+procedure record_user_message(message: Message from "inbound") -> write into "history_write":
+  given: "Store an inbound user message in conversation history"
+  pluresdb_append {key: "chat:history", value: message}
+  return {key: "chat:history", entry: message}
+
+
+# Record final assistant responses (no tool_calls = final response)
+procedure record_assistant_response(response: Message from "model_response") -> write into "history_write":
+  given: "Store a final assistant response in conversation history"
+
+  # Only record responses without tool_calls (those are final answers)
+  when response.tool_calls != null:
+    return null
   end
 
+  pluresdb_append {key: "chat:history", value: response}
+  return {key: "chat:history", entry: response}
+
+
 # Build conversation context for model invocation
-procedure build_context:
-  trigger: before_response
+procedure build_context(request: string from "model_request") -> enriched into "enriched_request":
+  given: "Assemble conversation history into an enriched model request"
   pluresdb_read {key: "chat:history"} -> $history
   slice {list: $history, last: 50} -> $recent
-  enrich_event {field: "conversation_history", value: $recent}
+  pluresdb_read {key: "config:system_prompt"} -> $system_prompt
+  return {
+    history: $recent,
+    system_prompt: $system_prompt,
+    source: request
+  }

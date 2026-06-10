@@ -1,18 +1,74 @@
-# heartbeat.px - Periodic health check as a reactive PluresDB procedure
+# heartbeat.px — Periodic health check as a v3 dataflow procedure
 #
-# Fires on a cron schedule, checks system load, records in PluresDB.
-# Cross-platform: delegates to OS-appropriate command.
+# Fires from the heartbeat_clock timer queue, checks system load,
+# records in PluresDB. Cross-platform: delegates to OS-appropriate command.
+# Respects quiet hours via constraint.
+#
+# Queue topology:
+#
+#   heartbeat_clock ─→ [heartbeat_tick] ─→ heartbeat_result
+#
+
+fact HeartbeatConfig:
+  quiet_start: int     # hour (0-23) quiet period begins
+  quiet_end: int       # hour (0-23) quiet period ends
+  interval: duration   # check interval
+
+fact HeartbeatResult:
+  os_type: string
+  load: float
+  timestamp: int
+  suppressed: bool
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
 
 constraint respect_quiet_hours:
-  when: event.type == "heartbeat_tick" and heartbeat_config.in_quiet_hours
-  require: false
   severity: warning
-  message: "Heartbeat suppressed during quiet hours"
+  description: "Heartbeat suppressed during quiet hours"
+  check: |
+    when current_hour >= config.quiet_start and current_hour < config.quiet_end:
+      assert heartbeat_result.suppressed == true
 
-procedure heartbeat_tick:
-  trigger: cron {schedule: "*/5 * * * *"}
+# ═══════════════════════════════════════════════════════════════════
+# Clock Source
+# ═══════════════════════════════════════════════════════════════════
+
+trigger heartbeat_clock:
+  on: timer
+  schedule: "*/5 * * * *"
+  run: heartbeat_timer
+
+procedure heartbeat_timer() -> tick into "heartbeat_clock":
+  given: "Emit a heartbeat tick on schedule"
+  read_state {key: "heartbeat:enabled"} -> $enabled
+  when !$enabled:
+    return null
+  end
+  return {timestamp: now()}
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Run periodic health check and record system load
+procedure heartbeat_tick(tick: string from "heartbeat_clock") -> result into "heartbeat_result":
   given: "Run a periodic health check and record system load"
+
+  # Check quiet hours — suppress if in quiet period
+  read_state {key: "heartbeat:config"} -> $config
+  check_quiet_hours {config: $config} -> $in_quiet
+
+  when $in_quiet:
+    return {os_type: "", load: 0.0, timestamp: tick.timestamp, suppressed: true}
+  end
+
+  # Detect OS and gather load
   detect_os {} -> $os_type
   gather_load {os: $os_type} -> $load
+
+  # Record in PluresDB
   pluresdb_write {key: "heartbeat:last_check", value: $load}
-  emit {type: "heartbeat_complete", load: $load}
+
+  return {os_type: $os_type, load: $load, timestamp: tick.timestamp, suppressed: false}

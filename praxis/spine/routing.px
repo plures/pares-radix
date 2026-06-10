@@ -1,16 +1,31 @@
-# routing.px — Message routing as reactive PluresDB procedures
+# routing.px — Message routing as v3 dataflow procedures
 #
 # Replaces InboundRouter + ResponseRouter — two Rust files (260 lines)
-# with two rules that describe what they do.
+# with two pure functions that describe what they do.
+#
+# Queue topology:
+#
+#   inbound ─→ [route_inbound] ─→ model_request
+#   model_response ─→ [route_response] ─→ delivery_request
+#
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
 
 # Route inbound messages to model invocation
-procedure route_inbound:
-  trigger: on_write {pattern: "inbound:*"}
-  emit {type: "model_request", source: "inbound"}
+procedure route_inbound(message: string from "inbound") -> request into "model_request":
+  given: "Route an inbound user message into the model request pipeline"
+  return {source: "inbound", message: message}
 
-# Route model responses to channel delivery
-procedure route_response:
-  trigger: on_write {pattern: "model_response:*"}
-  when event.tool_calls_empty:
-    emit {type: "delivery_request", channel: "default"}
+
+# Route model responses to channel delivery (only final responses)
+procedure route_response(response: string from "model_response") -> delivery into "delivery_request":
+  given: "Route a final model response to the delivery channel"
+
+  # Only route responses without tool_calls — those go to tool_execute
+  when response.has_tool_calls:
+    return null
   end
+
+  return {channel: "default", content: response}

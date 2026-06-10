@@ -1,0 +1,469 @@
+# inner-space.px — The Inner Space (v3 Dataflow)
+#
+# The inner-space is the virtual world / mental landscape.
+# Wind-chess is ONE game that can run INSIDE the inner-space.
+# Inner-space manages spatial environments: rooms, ambient effects,
+# entities (NPCs), and the rendering pipeline that composites
+# game frames into the larger world view.
+#
+# Queue topology:
+#
+#   frame_output (from wind-chess) ──────────────────────────────────────┐
+#                                                                        ▼
+#   spatial_command ─→ [process_command] ─→ world_state ─→ [compose_scene]
+#                                              ↑                    │
+#                                              │                    ▼
+#   ambient_clock ─→ [tick_ambience] ──────────┘           [render_world] ─→ world_frame
+#                                                                   ↑
+#   npc_input ─→ [npc_behavior] ─→ entity_update ──────────────────┘
+#
+
+import games::wind_chess
+
+# ═══════════════════════════════════════════════════════════════════
+# Entity Schemas
+# ═══════════════════════════════════════════════════════════════════
+
+fact Room:
+  id: string
+  name: string
+  description: string
+  bounds: Bounds3D
+  connections: list[Portal]
+  ambient: AmbientProfile
+  active_games: list[string]      # game IDs running in this room
+  entities: list[string]          # entity IDs present
+
+fact Bounds3D:
+  origin: Vec3
+  size: Vec3
+
+fact Vec3:
+  x: float
+  y: float
+  z: float
+
+fact Portal:
+  target_room: string
+  position: Vec3
+  label: string
+  traversable: bool
+
+fact Entity:
+  id: string
+  kind: enum(npc, object, effect, player, game_surface)
+  name: string
+  position: Vec3
+  rotation: float
+  state: string                   # FSM state key
+  dialogue_tree: optional[string] # for NPCs with conversation
+  behaviors: list[string]         # behavior procedure names
+  visible: bool
+
+fact AmbientEffect:
+  id: string
+  kind: enum(particle, light, sound, weather, fog, glow)
+  intensity: float                # 0.0 = off, 1.0 = full
+  color: optional[string]         # hex color for visual effects
+  position: optional[Vec3]        # null = room-wide
+  radius: float                   # effect spread
+  phase: float                    # animation phase (0.0 - 1.0)
+  loop: bool                      # repeating or one-shot
+
+fact AmbientProfile:
+  effects: list[AmbientEffect]
+  base_light: float               # 0.0 = pitch dark, 1.0 = bright
+  sound_bed: optional[string]     # ambient sound loop name
+  temperature: enum(cold, cool, neutral, warm, hot)
+
+fact WorldState:
+  current_room: string
+  rooms: list[Room]
+  entities: list[Entity]
+  time_of_day: float              # 0.0 = midnight, 0.5 = noon
+  tick_count: int
+
+fact SpatialCommand:
+  action: enum(move, look, interact, enter_room, spawn_entity, remove_entity, start_game, stop_game)
+  target: optional[string]        # entity or room id
+  position: optional[Vec3]
+  parameters: optional[string]    # JSON-encoded action-specific params
+
+fact GameSurface:
+  game_id: string
+  game_type: enum(wind_chess, future_game)
+  position: Vec3
+  size: Vec3
+  active: bool
+
+fact WorldFrame:
+  room: Room
+  entities: list[Entity]
+  ambient: list[AmbientEffect]
+  game_frames: list[Frame]        # composited game frames (from wind-chess etc.)
+  time_of_day: float
+  tick: int
+  camera_position: Vec3
+  camera_target: Vec3
+
+# ═══════════════════════════════════════════════════════════════════
+# Config
+# ═══════════════════════════════════════════════════════════════════
+
+config inner_space:
+  ambient_tick_rate: duration = "100ms"    # 10Hz for ambient effects
+  max_entities_per_room: int = 64
+  max_rooms: int = 16
+  npc_think_interval: int = 30            # ticks between NPC behavior updates
+  default_light: float = 0.7
+  time_scale: float = 60.0               # 1 real second = 1 game minute
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── Command Processing ──────────────────────────────────────────
+# Process spatial commands: movement, interaction, room transitions.
+
+procedure process_command(command: SpatialCommand from "spatial_command", world: WorldState from "world_state") -> state into "world_state":
+  given: "Process a spatial command and update world state"
+
+  match:
+    command.action == "move" -> handle_move
+    command.action == "look" -> handle_look
+    command.action == "interact" -> handle_interact
+    command.action == "enter_room" -> handle_enter_room
+    command.action == "spawn_entity" -> handle_spawn_entity
+    command.action == "remove_entity" -> handle_remove_entity
+    command.action == "start_game" -> handle_start_game
+    command.action == "stop_game" -> handle_stop_game
+  end
+
+  # Move player/entity to new position
+  when command.action == "move":
+    validate_position {position: command.position, room: world.current_room, rooms: world.rooms} -> $valid
+    when !$valid:
+      return null
+    end
+    move_entity {world: world, entity_id: command.target, position: command.position} -> $updated
+    return $updated
+  end
+
+  # Enter a different room via portal
+  when command.action == "enter_room":
+    find_portal {room_id: world.current_room, target: command.target, rooms: world.rooms} -> $portal
+    when $portal == null:
+      return null
+    end
+    when !$portal.traversable:
+      return null
+    end
+    transition_room {world: world, target_room: command.target} -> $updated
+    return $updated
+  end
+
+  # Spawn a new entity in the current room
+  when command.action == "spawn_entity":
+    count_entities {room_id: world.current_room, entities: world.entities} -> $count
+    when $count >= config.max_entities_per_room:
+      return null
+    end
+    create_entity {world: world, params: command.parameters, position: command.position} -> $updated
+    return $updated
+  end
+
+  # Start a game on a surface in the current room
+  when command.action == "start_game":
+    create_game_surface {
+      world: world,
+      game_type: command.parameters,
+      position: command.position
+    } -> $updated
+    queue_push {queue: "game_start", value: command.parameters}
+    return $updated
+  end
+
+  # Stop a running game
+  when command.action == "stop_game":
+    remove_game_surface {world: world, game_id: command.target} -> $updated
+    return $updated
+  end
+
+  # Interact with entity (NPC dialogue, object use)
+  when command.action == "interact":
+    find_entity {world: world, entity_id: command.target} -> $entity
+    when $entity == null:
+      return null
+    end
+    trigger_interaction {entity: $entity, world: world} -> $updated
+    return $updated
+  end
+
+  return world
+
+
+# ─── Ambient Tick ────────────────────────────────────────────────
+# Update ambient effects: animate particles, shift lighting, advance time.
+# Runs at 10Hz, independent of game physics.
+
+procedure tick_ambience(tick: int from "ambient_clock", world: WorldState from "world_state") -> state into "world_state":
+  given: "Advance ambient effects and time-of-day for the current room"
+
+  # Advance time of day
+  compute_time_advance {
+    current: world.time_of_day,
+    dt: config.ambient_tick_rate,
+    scale: config.time_scale
+  } -> $new_time
+
+  # Get current room
+  find_room {rooms: world.rooms, id: world.current_room} -> $room
+
+  # Update each ambient effect's phase
+  advance_effects {effects: $room.ambient.effects, dt: config.ambient_tick_rate} -> $updated_effects
+
+  # Adjust base lighting based on time of day
+  compute_lighting {time: $new_time, base: $room.ambient.base_light} -> $light
+
+  # Build updated ambient profile
+  update_ambient {
+    room: $room,
+    effects: $updated_effects,
+    light: $light
+  } -> $updated_room
+
+  # Write back
+  replace_room {world: world, room: $updated_room, time: $new_time, tick: tick} -> $new_world
+
+  return $new_world
+
+
+# ─── NPC Behavior ────────────────────────────────────────────────
+# NPCs have simple FSM-based behavior. They think every N ticks,
+# decide actions, and emit entity updates.
+
+procedure npc_behavior(tick: int from "ambient_clock", world: WorldState from "world_state") -> update into "entity_update":
+  given: "Run NPC behavior logic for entities in the current room"
+
+  # Only think every N ticks
+  when tick % config.npc_think_interval != 0:
+    return null
+  end
+
+  # Get NPCs in current room
+  filter_entities {
+    entities: world.entities,
+    room: world.current_room,
+    kind: "npc"
+  } -> $npcs
+
+  when $npcs == []:
+    return null
+  end
+
+  # Run behavior for each NPC
+  loop over $npcs as npc -> $updates:
+    evaluate_npc_state {entity: npc, world: world} -> $decision
+    apply_npc_decision {entity: npc, decision: $decision} -> $updated_npc
+  end
+
+  return $updates
+
+
+# ─── Scene Composition ───────────────────────────────────────────
+# Compose the scene: merge world state + game frames into one view.
+# This is where wind-chess frame_output gets composited into the world.
+
+procedure compose_scene(world: WorldState from "world_state", game_frame: Frame from "frame_output") -> composed into "scene_data":
+  given: "Composite game frames into the spatial world scene"
+
+  # Find the game surface in the current room for this game
+  find_game_surface {
+    world: world,
+    room_id: world.current_room
+  } -> $surface
+
+  when $surface == null:
+    # No active game surface — pass through world state only
+    return {world: world, game_frames: []}
+  end
+
+  # Transform game frame coordinates into world-space
+  transform_game_frame {
+    frame: game_frame,
+    surface_position: $surface.position,
+    surface_size: $surface.size
+  } -> $world_space_frame
+
+  return {world: world, game_frames: [$world_space_frame]}
+
+
+# ─── World Rendering ─────────────────────────────────────────────
+# Final render pass: takes composed scene data + entity updates,
+# produces a WorldFrame for the canvas/display layer.
+
+procedure render_world(scene: string from "scene_data", entities: list[Entity] from "entity_update") -> frame into "world_frame":
+  given: "Render the final world frame from scene data and entity updates"
+
+  # Apply entity updates to world state
+  apply_entity_updates {world: scene.world, updates: entities} -> $world
+
+  # Get current room with all its data
+  find_room {rooms: $world.rooms, id: $world.current_room} -> $room
+
+  # Collect visible entities
+  filter_entities {
+    entities: $world.entities,
+    room: $world.current_room,
+    kind: null
+  } -> $visible
+
+  # Determine camera
+  compute_camera {room: $room, focus: null} -> $camera
+
+  return {
+    room: $room,
+    entities: $visible,
+    ambient: $room.ambient.effects,
+    game_frames: scene.game_frames,
+    time_of_day: $world.time_of_day,
+    tick: $world.tick_count,
+    camera_position: $camera.position,
+    camera_target: $camera.target
+  }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Clock Source
+# ═══════════════════════════════════════════════════════════════════
+
+trigger ambient_clock:
+  on: timer
+  schedule: "every 100ms"
+  run: ambient_timer
+  condition: read_state {key: "inner_space:active"} == true
+
+procedure ambient_timer() -> tick into "ambient_clock":
+  given: "Emit ambient tick count for inner-space updates"
+  read_state {key: "inner_space:tick"} -> $current
+  write_state {key: "inner_space:tick", value: $current + 1}
+  return $current + 1
+
+
+# ═══════════════════════════════════════════════════════════════════
+# World Lifecycle
+# ═══════════════════════════════════════════════════════════════════
+
+procedure init_world(request: string from "world_start") -> state into "world_state":
+  given: "Initialize the inner-space world with a starting room"
+
+  # Create the starting room (The Atrium)
+  create_room {
+    id: "atrium",
+    name: "The Atrium",
+    description: "A vast circular chamber with shifting light. Portals line the walls — each leading somewhere different.",
+    bounds: {origin: {x: 0.0, y: 0.0, z: 0.0}, size: {x: 20.0, y: 20.0, z: 8.0}},
+    ambient: {
+      effects: [
+        {id: "atrium_glow", kind: "glow", intensity: 0.6, color: "#4488ff", position: null, radius: 10.0, phase: 0.0, loop: true},
+        {id: "atrium_particles", kind: "particle", intensity: 0.3, color: "#ffffff", position: null, radius: 15.0, phase: 0.0, loop: true}
+      ],
+      base_light: 0.7,
+      sound_bed: "ambient_crystal_hum",
+      temperature: "neutral"
+    },
+    connections: [
+      {target_room: "game_hall", position: {x: 10.0, y: 0.0, z: 4.0}, label: "Game Hall", traversable: true},
+      {target_room: "memory_garden", position: {x: 0.0, y: 10.0, z: 4.0}, label: "Memory Garden", traversable: true},
+      {target_room: "workshop", position: {x: -10.0, y: 0.0, z: 4.0}, label: "The Workshop", traversable: true}
+    ]
+  } -> $atrium
+
+  # Create the Game Hall (where wind-chess lives)
+  create_room {
+    id: "game_hall",
+    name: "The Game Hall",
+    description: "A warm room with floating tables. Wind currents swirl between them — perfect for wind-chess.",
+    bounds: {origin: {x: 25.0, y: 0.0, z: 0.0}, size: {x: 15.0, y: 15.0, z: 6.0}},
+    ambient: {
+      effects: [
+        {id: "hall_wind", kind: "weather", intensity: 0.4, color: null, position: null, radius: 12.0, phase: 0.0, loop: true},
+        {id: "hall_light", kind: "light", intensity: 0.8, color: "#ffaa44", position: {x: 32.0, y: 7.5, z: 5.0}, radius: 8.0, phase: 0.0, loop: false}
+      ],
+      base_light: 0.8,
+      sound_bed: "ambient_wind_gentle",
+      temperature: "warm"
+    },
+    connections: [
+      {target_room: "atrium", position: {x: 25.0, y: 7.5, z: 3.0}, label: "Back to Atrium", traversable: true}
+    ]
+  } -> $game_hall
+
+  # Mark world active
+  write_state {key: "inner_space:active", value: true}
+  write_state {key: "inner_space:tick", value: 0}
+
+  return {
+    current_room: "atrium",
+    rooms: [$atrium, $game_hall],
+    entities: [],
+    time_of_day: 0.25,
+    tick_count: 0
+  }
+
+
+procedure shutdown_world(command: string from "world_stop") -> result into "world_shutdown":
+  given: "Gracefully shut down the inner-space world"
+
+  # Stop all active games
+  read_state {key: "inner_space:active_games"} -> $games
+  loop over $games as game:
+    queue_push {queue: "game_stop", value: game}
+  end
+
+  # Deactivate
+  write_state {key: "inner_space:active", value: false}
+
+  return {shutdown: true, timestamp: now()}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint entity_room_limit:
+  severity: error
+  description: "No room can exceed max_entities_per_room"
+  check: |
+    for room in world.rooms:
+      let count = len(filter(world.entities, e -> e.room == room.id))
+      assert count <= config.max_entities_per_room
+
+constraint portal_bidirectional:
+  severity: warning
+  description: "Portals should be bidirectional — if A connects to B, B should connect to A"
+  check: |
+    for room in world.rooms:
+      for portal in room.connections:
+        let target = find(world.rooms, r -> r.id == portal.target_room)
+        assert any(target.connections, c -> c.target_room == room.id)
+
+constraint game_surface_in_room:
+  severity: error
+  description: "Game surfaces must be within room bounds"
+  check: |
+    for entity in world.entities where entity.kind == "game_surface":
+      let room = find(world.rooms, r -> r.id == world.current_room)
+      assert entity.position.x >= room.bounds.origin.x
+      assert entity.position.y >= room.bounds.origin.y
+      assert entity.position.z >= room.bounds.origin.z
+      assert entity.position.x <= room.bounds.origin.x + room.bounds.size.x
+      assert entity.position.y <= room.bounds.origin.y + room.bounds.size.y
+      assert entity.position.z <= room.bounds.origin.z + room.bounds.size.z
+
+constraint time_bounds:
+  severity: error
+  description: "Time of day must stay in [0.0, 1.0)"
+  check: |
+    assert world.time_of_day >= 0.0
+    assert world.time_of_day < 1.0

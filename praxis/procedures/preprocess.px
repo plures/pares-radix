@@ -1,10 +1,42 @@
-# preprocess.px - Cerebellum preprocessing orchestration
+# preprocess.px — Cerebellum preprocessing as v3 dataflow procedures
 #
-# Replaces: cerebellum/mod.rs preprocess() orchestration (~500 lines)
 # Orchestrates the full preprocessing pipeline: classify, enrich, route.
 # IO actions (embedding, memory recall, store reads) are Rust-backed;
 # all decision logic is here in .px.
+#
+# Queue topology:
+#
+#   inbound ─→ [preprocess] ─→ preprocessed
+#   tool_result ─→ [preprocess_tool_result] ─→ model_request
+#
 
+fact PreprocessedResult:
+  route: string
+  classification: Classification
+
+fact ToolResultContext:
+  source: string
+  summarized: bool
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint preprocess_always_routes:
+  given: "Every preprocessed message must produce a valid route"
+  check: PreprocessedResult.route != ""
+  severity: error
+
+constraint tool_result_within_budget:
+  given: "Tool results must be summarized to fit within token budget"
+  check: ToolResultContext.summarized == true OR token_count <= 4000
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Orchestrate full cerebellum preprocessing pipeline for inbound messages
 procedure preprocess(event: string from "inbound") -> preprocessed into "preprocessed":
   given: "Orchestrate full cerebellum preprocessing pipeline for inbound messages"
   classify_message {message: $event, plugins: $plugins, last_topic: $last_topic} -> $classification
@@ -18,6 +50,7 @@ procedure preprocess(event: string from "inbound") -> preprocessed into "preproc
   route_event {classification: $classification, context: $managed, guidance: $guidance} -> $route
   return {route: $route, classification: $classification}
 
+# Light preprocessing for tool results before feeding back to model
 procedure preprocess_tool_result(event: string from "tool_result") -> model_request into "model_request":
   given: "Light preprocessing for tool results before feeding back to model"
   summarize_if_large {content: $event, max_tokens: 4000} -> $summarized

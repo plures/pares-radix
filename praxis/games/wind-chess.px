@@ -1,0 +1,365 @@
+# wind-chess.px — Wind Chess (v3 Dataflow)
+#
+# A real-time chess variant played in the Inner Space.
+# Wind currents affect piece movement — pieces drift, captures ripple,
+# and the board breathes with a 30Hz physics tick.
+#
+# v3 dataflow: everything is a queue. Timers, inputs, physics state.
+# No triggers, no on_write patterns. Pure functions connected by data flow.
+#
+# Queue topology:
+#
+#   game_clock (30Hz) ──────────────────────────┐
+#   player_input ─→ [validate_move] ─→ move ─→ [apply_move] ─→ board_state
+#                                                     ↑              │
+#                                                     │              ▼
+#                                                     │    [compute_wind] ─→ wind_field
+#                                                     │              │
+#                                                     │              ▼
+#                                                     └── [physics_tick] ─→ drift_events
+#                                                                    │
+#                                                                    ▼
+#                                                          [render_frame] ─→ frame_output
+#
+
+# ═══════════════════════════════════════════════════════════════════
+# Entity Schemas
+# ═══════════════════════════════════════════════════════════════════
+
+fact Piece:
+  kind: enum(king, queen, rook, bishop, knight, pawn)
+  color: enum(white, black)
+  position: Vec2
+  drift_velocity: Vec2
+  weight: float         # heavier pieces resist wind more
+  grounded: bool        # on a stable square vs mid-drift
+
+fact Vec2:
+  x: float
+  y: float
+
+fact Board:
+  pieces: list[Piece]
+  wind_field: WindField
+  turn: enum(white, black)
+  phase: enum(waiting, animating, resolving)
+  tick_count: int
+
+fact WindField:
+  vectors: list[Vec2]   # 8x8 grid of wind vectors
+  intensity: float      # global multiplier (0.0 = calm, 1.0 = gale)
+  pattern: enum(steady, gusting, swirling, calm)
+  seed: int             # deterministic per-game
+
+fact MoveInput:
+  player: enum(white, black)
+  piece_id: int
+  target: Vec2
+  timestamp: int
+
+fact DriftEvent:
+  piece_id: int
+  from_pos: Vec2
+  to_pos: Vec2
+  cause: enum(wind, capture_ripple, gravity)
+
+fact Frame:
+  board: Board
+  drift_events: list[DriftEvent]
+  tick: int
+  interpolation_alpha: float
+
+# ═══════════════════════════════════════════════════════════════════
+# Config
+# ═══════════════════════════════════════════════════════════════════
+
+config wind_chess:
+  tick_rate: duration = "33ms"        # ~30Hz
+  max_drift_speed: float = 2.0       # squares per second
+  wind_change_interval: int = 90     # ticks between pattern shifts
+  piece_weights:
+    king: 5.0
+    queen: 3.0
+    rook: 4.0
+    bishop: 2.5
+    knight: 2.0      # lightest named piece — drifts most
+    pawn: 1.5        # lightest overall
+  gravity_after_capture: float = 0.3  # ripple strength
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# ─── Input Validation ─────────────────────────────────────────────
+# Pure: does the player's move obey chess rules + wind constraints?
+
+procedure validate_move(input: MoveInput from "player_input", board: Board from "board_state") -> move into "validated_move":
+  given: "Validate a player's move against current board state and wind conditions"
+
+  # Must be this player's turn
+  when input.player != board.turn:
+    return null   # swallowed — not your turn
+  end
+
+  # Board must be in waiting phase (not mid-animation)
+  when board.phase != "waiting":
+    return null
+  end
+
+  # Find the piece
+  lookup_piece {pieces: board.pieces, id: input.piece_id} -> $piece
+
+  when $piece == null:
+    return null
+  end
+
+  # Standard chess legality (ignoring wind — wind affects AFTER move)
+  check_legal_move {piece: $piece, target: input.target, board: board} -> $legal
+
+  when !$legal:
+    return null
+  end
+
+  # Wind-adjusted reach: pieces fighting strong headwind have reduced range
+  compute_wind_penalty {
+    piece: $piece,
+    target: input.target,
+    wind: board.wind_field
+  } -> $penalty
+
+  when $penalty > $piece.weight:
+    return null   # wind too strong for this piece to reach target
+  end
+
+  return input
+
+
+# ─── Apply Move ──────────────────────────────────────────────────
+# Takes a validated move + current board, produces new board state.
+# If capture occurs, also emits a ripple event.
+
+procedure apply_move(move: MoveInput from "validated_move", board: Board from "board_state") -> new_board into "board_state":
+  given: "Apply a validated move to the board, handling captures and turn switching"
+
+  # Move the piece
+  move_piece {board: board, piece_id: move.piece_id, target: move.target} -> $new_board
+
+  # Check for capture
+  detect_capture {board: board, target: move.target, mover_color: move.player} -> $captured
+
+  when $captured != null:
+    # Capture creates a gravity ripple — nearby pieces get nudged
+    emit_ripple {
+      origin: move.target,
+      strength: config.gravity_after_capture,
+      board: $new_board
+    } -> $ripple_events
+    queue_push {queue: "drift_events", value: $ripple_events}
+  end
+
+  # Switch turn, enter animating phase
+  set_phase {board: $new_board, phase: "animating"} -> $phased
+  switch_turn {board: $phased} -> $final
+
+  return $final
+
+
+# ─── Wind Computation ────────────────────────────────────────────
+# Pure function: given the current tick count and seed, compute wind vectors.
+# Wind shifts every N ticks based on a deterministic noise function.
+
+procedure compute_wind(board: Board from "board_state", tick: int from "game_clock") -> wind into "wind_field":
+  given: "Compute the wind field for the current tick"
+
+  # Deterministic wind from seed + tick
+  perlin_wind {
+    seed: board.wind_field.seed,
+    tick: tick,
+    change_interval: config.wind_change_interval
+  } -> $vectors
+
+  # Determine pattern from intensity distribution
+  classify_wind_pattern {vectors: $vectors} -> $pattern
+
+  # Compute global intensity
+  average_magnitude {vectors: $vectors} -> $intensity
+
+  return {
+    vectors: $vectors,
+    intensity: $intensity,
+    pattern: $pattern,
+    seed: board.wind_field.seed
+  }
+
+
+# ─── Physics Tick ────────────────────────────────────────────────
+# The heartbeat. Every 33ms, apply wind to all pieces that aren't grounded.
+# Pieces drift, collide, settle. Pure computation.
+
+procedure physics_tick(board: Board from "board_state", wind: WindField from "wind_field", tick: int from "game_clock") -> drift into "drift_events":
+  given: "Apply wind physics to all pieces for one tick"
+
+  # Only run physics during animating phase
+  when board.phase != "animating":
+    return null   # quiescent — no physics while waiting for input
+  end
+
+  # For each piece: apply wind force / weight = acceleration
+  apply_wind_forces {
+    pieces: board.pieces,
+    wind: wind,
+    max_speed: config.max_drift_speed,
+    dt: config.tick_rate
+  } -> $forces
+
+  # Integrate velocities, compute new positions
+  integrate_positions {pieces: board.pieces, forces: $forces, dt: config.tick_rate} -> $moved
+
+  # Detect collisions (pieces can't overlap squares)
+  resolve_collisions {pieces: $moved, board_size: 8} -> $resolved
+
+  # Check if all pieces have settled (velocity < epsilon)
+  all_settled {pieces: $resolved} -> $settled
+
+  # Emit drift events for anything that moved
+  compute_drift_deltas {old_pieces: board.pieces, new_pieces: $resolved} -> $events
+
+  # If everything settled, transition back to waiting phase
+  when $settled:
+    write_state {key: "board_phase", value: "waiting"}
+    switch_turn_if_needed {board: board} -> $_
+  end
+
+  return $events
+
+
+# ─── Frame Rendering ─────────────────────────────────────────────
+# Takes board state + drift events, produces a renderable frame.
+# The inner-space canvas consumes these frames.
+
+procedure render_frame(board: Board from "board_state", drift: list[DriftEvent] from "drift_events", tick: int from "game_clock") -> frame into "frame_output":
+  given: "Compose a renderable frame from board state and drift events"
+
+  # Compute interpolation alpha for smooth animation
+  compute_alpha {tick: tick, phase: board.phase} -> $alpha
+
+  return {
+    board: board,
+    drift_events: drift,
+    tick: tick,
+    interpolation_alpha: $alpha
+  }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Clock Source
+# ═══════════════════════════════════════════════════════════════════
+# The game_clock is a PluresDB timer queue that pushes tick counts at 30Hz.
+# Configured at game start, stopped on game end.
+
+trigger game_clock:
+  on: timer
+  schedule: "every 33ms"
+  run: tick_counter
+  condition: read_state {key: "wind_chess:active"} == true
+
+procedure tick_counter() -> tick into "game_clock":
+  given: "Increment and emit tick count"
+  read_state {key: "wind_chess:tick"} -> $current
+  write_state {key: "wind_chess:tick", value: $current + 1}
+  return $current + 1
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Game Lifecycle
+# ═══════════════════════════════════════════════════════════════════
+
+procedure start_game(request: string from "game_start") -> board into "board_state":
+  given: "Initialize a new wind-chess game with starting positions and random wind seed"
+
+  # Standard chess starting positions
+  init_standard_board {} -> $pieces
+
+  # Random seed for deterministic wind
+  random_seed {} -> $seed
+
+  # Initial wind (calm at start, builds over first 30 ticks)
+  init_wind {seed: $seed, intensity: 0.0, pattern: "calm"} -> $wind
+
+  # Mark game active
+  write_state {key: "wind_chess:active", value: true}
+  write_state {key: "wind_chess:tick", value: 0}
+
+  return {
+    pieces: $pieces,
+    wind_field: $wind,
+    turn: "white",
+    phase: "waiting",
+    tick_count: 0
+  }
+
+procedure end_game(board: Board from "board_state") -> result into "game_result":
+  given: "Check for game-ending conditions (checkmate, stalemate, king blown off board)"
+
+  # King blown off board = loss (unique to wind-chess!)
+  check_king_out_of_bounds {pieces: board.pieces} -> $blown
+
+  when $blown != null:
+    write_state {key: "wind_chess:active", value: false}
+    return {winner: opponent($blown), reason: "king_blown_off_board"}
+  end
+
+  # Standard checkmate
+  check_checkmate {board: board} -> $mated
+
+  when $mated != null:
+    write_state {key: "wind_chess:active", value: false}
+    return {winner: opponent($mated), reason: "checkmate"}
+  end
+
+  # Stalemate (no legal moves considering wind)
+  check_stalemate_with_wind {board: board} -> $stale
+
+  when $stale:
+    write_state {key: "wind_chess:active", value: false}
+    return {winner: null, reason: "stalemate"}
+  end
+
+  return null  # game continues
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint no_teleportation:
+  severity: error
+  description: "Pieces cannot move more than max_drift_speed per tick"
+  check: |
+    for piece in board.pieces:
+      assert magnitude(piece.drift_velocity) <= config.max_drift_speed
+
+constraint board_bounds:
+  severity: error
+  description: "Pieces must remain within 0..8 grid (except king-blown-off win condition)"
+  check: |
+    for piece in board.pieces where piece.kind != "king":
+      assert piece.position.x >= 0.0 and piece.position.x < 8.0
+      assert piece.position.y >= 0.0 and piece.position.y < 8.0
+
+constraint deterministic_wind:
+  severity: error
+  description: "Same seed + same tick must produce same wind vectors"
+  check: |
+    let w1 = perlin_wind(seed, tick, interval)
+    let w2 = perlin_wind(seed, tick, interval)
+    assert w1 == w2
+
+constraint weight_ordering:
+  severity: warning
+  description: "Heavier pieces should drift less than lighter ones under same wind"
+  check: |
+    for p1 in board.pieces:
+      for p2 in board.pieces:
+        when p1.weight > p2.weight and same_wind(p1, p2):
+          assert magnitude(p1.drift_velocity) <= magnitude(p2.drift_velocity)

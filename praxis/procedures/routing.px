@@ -1,9 +1,37 @@
-# routing.px - Message routing procedure
+# routing.px — Message routing as v3 dataflow procedures
 #
-# Replaces: cerebellum/router.rs (~300 lines of Rust)
-# Pure function: determines how to route a message based on classification.
+# Determines how to route a message based on classification.
+# route_message is queue-driven; route_with_context_gate is a utility
+# for overflow scenarios.
+#
+# Queue topology:
+#
+#   classification ─→ [route_message] ─→ route
+#        │                   │
+#   context ─────────────────┘
+#                            └─ calls [route_with_context_gate] (utility)
+#
 
-procedure route_message(classification: classification from "classification", context: string from "context") -> route into "route":
+fact Route:
+  tier: enum(fast, standard, premium)
+  reason: string
+  streaming: bool
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint route_always_has_tier:
+  given: "Every route decision must specify a valid model tier"
+  check: Route.tier != ""
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Determine which model tier and response strategy handles this message
+procedure route_message(classification: Classification from "classification", context: string from "context") -> route into "route":
   given: "Determine which model tier and response strategy handles this message"
   when classification.needs_deep_model:
     return {tier: "premium", reason: "high complexity", streaming: true}
@@ -22,7 +50,12 @@ procedure route_message(classification: classification from "classification", co
   end
   return {tier: "fast", reason: "simple message", streaming: true}
 
-procedure route_with_context_gate(classification: classification, context_size: int) -> route:
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by preprocess (context overflow fallback)
+procedure route_with_context_gate(classification: Classification, context_size: int) -> route:
   given: "Apply context-size gating: if context exceeds model window, cascade UP"
   determine_model_tier {complexity: $classification.complexity} -> $base_tier
   estimate_context_window {tier: $base_tier} -> $window

@@ -14,6 +14,8 @@ use tracing::{debug, info, warn};
 
 use crate::event_spine::EventSpineHandle;
 use crate::state::StateStore;
+use crate::task_executor::TaskExecutor;
+use crate::task_manager::TaskManager;
 
 /// Heartbeat configuration stored in PluresDB state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,7 @@ pub struct HeartbeatRunner {
     config: HeartbeatConfig,
     state: Arc<dyn StateStore>,
     event_spine: Option<EventSpineHandle>,
+    task_executor: Option<TaskExecutor>,
 }
 
 const STATE_KEY_CONFIG: &str = "heartbeat/config";
@@ -95,6 +98,7 @@ impl HeartbeatRunner {
             config: HeartbeatConfig::default(),
             state,
             event_spine: None,
+            task_executor: None,
         }
     }
 
@@ -102,6 +106,16 @@ impl HeartbeatRunner {
     #[must_use]
     pub fn with_event_spine(mut self, spine: EventSpineHandle) -> Self {
         self.event_spine = Some(spine);
+        self
+    }
+
+    /// Attach a task manager for autonomous task execution during heartbeats.
+    pub fn with_task_manager(mut self, task_manager: Arc<TaskManager>, state: Arc<dyn StateStore>) -> Self {
+        let mut executor = TaskExecutor::new(task_manager, state);
+        if let Some(spine) = &self.event_spine {
+            executor = executor.with_event_spine(spine.clone());
+        }
+        self.task_executor = Some(executor);
         self
     }
 
@@ -241,6 +255,14 @@ impl HeartbeatRunner {
             }
         }
 
+        // 4. Check TaskManager for evaluable tasks
+        if let Some(executor) = &self.task_executor {
+            let pending = executor.pending_count();
+            if pending > 0 {
+                work_items.push(format!("tasks: {} evaluable task(s) pending execution", pending));
+            }
+        }
+
         // ── Gate decision ─────────────────────────────────────────────
         if work_items.is_empty() {
             // Nothing to do — skip silently (zero tokens)
@@ -267,6 +289,20 @@ impl HeartbeatRunner {
             "heartbeat: work found, escalating"
         );
 
+        // ── Try autonomous task execution first ─────────────────────
+        // If there are evaluable tasks, dispatch the highest-priority one
+        // directly (without spending model tokens on the heartbeat message).
+        if let Some(executor) = &self.task_executor {
+            if executor.pending_count() > 0 {
+                if executor.try_execute_next().await {
+                    info!("heartbeat: dispatched autonomous task execution");
+                    self.save_daily_count(count + 1, &today).await;
+                    return; // Task dispatched — don't also send generic heartbeat
+                }
+            }
+        }
+
+        // ── Fallback: escalate to conscious (tokens spent here) ───────
         let combined = work_items.join("\n");
         if let Some(spine) = &self.event_spine {
             spine.emit_inbound_message(

@@ -1,9 +1,17 @@
-# classify.px - Message classification procedure
+# classify.px — Message classification as v3 dataflow procedures
 #
-# Replaces: cerebellum/classifier.rs (~800 lines of Rust)
-# Pure function: classify an inbound message by intent, complexity, and needs.
+# Pure functions for classifying inbound messages by intent, complexity,
+# and routing needs. classify_message consumes preprocessed output;
+# classify_with_llm is a utility for ambiguous cases.
+#
+# Queue topology:
+#
+#   preprocessed ─→ [classify_message] ─→ classification
+#                        │
+#                        └─ calls [classify_with_llm] (utility)
+#
 
-fact classification:
+fact Classification:
   intent: string
   complexity: int
   topic: string
@@ -13,7 +21,21 @@ fact classification:
   plugin_match: string
   completion_hint: string
 
-procedure classify_message(message: string, plugins: list, last_topic: string) -> classification:
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint classification_completeness:
+  given: "Every classification must populate all required fields"
+  check: Classification.intent != "" AND Classification.complexity >= 0
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Classify a preprocessed message by intent, complexity, topic, and routing needs
+procedure classify_message(message: string from "preprocessed", plugins: list, last_topic: string) -> classification into "classification":
   given: "Classify a message by intent, complexity, topic, and routing needs"
   normalize_text {text: $message} -> $lower
   detect_intent {text: $lower} -> $intent
@@ -25,6 +47,11 @@ procedure classify_message(message: string, plugins: list, last_topic: string) -
   determine_model_tier {complexity: $complexity} -> $needs_deep_model
   return $classification
 
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by classify_message (fallback for ambiguous heuristics)
 procedure classify_with_llm(message: string, system_prompt: string) -> classification:
   given: "Use an LLM to classify messages that are ambiguous to heuristics"
   model_complete {messages: [{role: "user", content: $message}], system_prompt: $system_prompt, tier: "fast"} -> $result

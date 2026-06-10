@@ -1,8 +1,38 @@
-# heartbeat-logic.px - Heartbeat evaluation procedure
+# heartbeat-logic.px — Heartbeat evaluation as v3 dataflow procedures
 #
 # Determines what to do on each heartbeat tick: check services,
 # evaluate proactive actions, decide whether to speak or stay quiet.
+#
+# Queue topology:
+#
+#   heartbeat_tick ─→ [evaluate_heartbeat] ─→ heartbeat_action
+#                          │
+#                          └─ calls [process_heartbeat_check] (utility)
+#
 
+fact HeartbeatAction:
+  action: enum(silent, check)
+  targets: optional[list[string]]
+
+fact HeartbeatResult:
+  notify: bool
+  message: optional[string]
+  urgency: optional[int]
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint heartbeat_respects_quiet_hours:
+  given: "Heartbeat must not produce notifications during quiet hours (23:00-08:00)"
+  check: HeartbeatResult.notify == false OR current_hour >= 8 AND current_hour < 23
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Evaluate what actions to take on a heartbeat tick
 procedure evaluate_heartbeat(tick: string from "heartbeat_tick") -> heartbeat_action into "heartbeat_action":
   given: "Evaluate what actions to take on a heartbeat tick"
   db_get {key: "heartbeat:last_checks"} -> $last_checks
@@ -13,6 +43,11 @@ procedure evaluate_heartbeat(tick: string from "heartbeat_tick") -> heartbeat_ac
   end
   return {action: "check", targets: $due}
 
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by evaluate_heartbeat
 procedure process_heartbeat_check(check_type: string, config: string) -> heartbeat_result:
   given: "Execute a specific heartbeat check and determine if notification is needed"
   run_check {type: $check_type, config: $config} -> $result

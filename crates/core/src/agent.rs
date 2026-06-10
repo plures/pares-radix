@@ -37,6 +37,7 @@ use crate::pii_guard::PiiGuard;
 use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
 use crate::procedure::ProcedureRegistry;
 use crate::session::{SessionManager, SessionMetadata};
+use crate::state::StateStore;
 
 // ---------------------------------------------------------------------------
 // Memory trait
@@ -175,6 +176,10 @@ pub struct Agent {
     chronos: Option<Arc<ChronosTimeline>>,
     /// PII guard for redacting sensitive data before model calls.
     pii_guard: PiiGuard,
+    /// Optional state store for persisting agent state (promises, preferences).
+    state_store: Option<Arc<dyn StateStore>>,
+    /// Optional task manager for autonomous work execution.
+    task_manager: Option<Arc<crate::task_manager::TaskManager>>,
     // Telemetry logger for interaction tracking.
 }
 
@@ -221,6 +226,8 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
+            state_store: None,
+            task_manager: None,
         }
     }
 
@@ -258,6 +265,8 @@ impl Agent {
             session_manager: None,
             chronos: None,
             pii_guard: PiiGuard::new(),
+            state_store: None,
+            task_manager: None,
         }
     }
 
@@ -270,6 +279,18 @@ impl Agent {
     /// Attach a Chronos timeline for tool execution auditing.
     pub fn with_chronos(mut self, chronos: Arc<ChronosTimeline>) -> Self {
         self.chronos = Some(chronos);
+        self
+    }
+
+    /// Attach a state store for persisting agent state.
+    pub fn with_state_store(mut self, state: Arc<dyn StateStore>) -> Self {
+        self.state_store = Some(state);
+        self
+    }
+
+    /// Attach a task manager for autonomous work execution.
+    pub fn with_task_manager(mut self, task_manager: Arc<crate::task_manager::TaskManager>) -> Self {
+        self.task_manager = Some(task_manager);
         self
     }
 
@@ -1622,7 +1643,10 @@ impl Agent {
     /// "I'm going to" and stores them as pending tasks that the heartbeat
     /// checks every 30 seconds.
     async fn detect_and_store_promises(&self, _user_msg: &str, agent_reply: &str) {
-        // Commitment patterns (case-insensitive)
+        // Use the structured commitment extractor from task_executor
+        let commitments = crate::task_executor::extract_commitments(agent_reply);
+
+        // Also check for simpler commitment patterns (broader net)
         let commitment_patterns = [
             "i'll ",
             "i will ",
@@ -1635,19 +1659,19 @@ impl Agent {
             "want me to ", // user asks, agent implies yes by responding
         ];
 
-        let _lower = agent_reply.to_lowercase();
-
-        // Find sentences containing commitment language
-        let mut promises: Vec<String> = Vec::new();
+        let mut promises: Vec<String> = commitments;
         for sentence in agent_reply.split(['.', '!', '\n']) {
             let sentence_lower = sentence.to_lowercase();
             let trimmed = sentence.trim();
             if trimmed.len() < 10 || trimmed.len() > 200 {
-                continue; // too short or too long
+                continue;
             }
             for pattern in &commitment_patterns {
                 if sentence_lower.contains(pattern) {
-                    promises.push(trimmed.to_string());
+                    // Deduplicate against structured extractions
+                    if !promises.iter().any(|p| p.contains(&trimmed[..trimmed.len().min(30)])) {
+                        promises.push(trimmed.to_string());
+                    }
                     break;
                 }
             }
@@ -1657,7 +1681,58 @@ impl Agent {
             return;
         }
 
-        // Store promises as Chronos entries for heartbeat to find
+        // Store promises in the STATE STORE (so heartbeat can find them)
+        if let Some(state) = &self.state_store {
+            let existing = state.get("agent_promises").await
+                .and_then(|v| serde_json::from_value::<Vec<serde_json::Value>>(v).ok())
+                .unwrap_or_default();
+
+            let mut updated = existing;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+
+            for p in &promises {
+                updated.push(serde_json::json!({
+                    "what": p,
+                    "completed": false,
+                    "created_at": now,
+                }));
+            }
+
+            // Cap at 20 most recent promises
+            if updated.len() > 20 {
+                updated = updated.into_iter().rev().take(20).collect();
+                updated.reverse();
+            }
+
+            state.set("agent_promises", serde_json::json!(updated)).await;
+        }
+
+        // Create tasks in TaskManager for actionable commitments
+        if let Some(task_mgr) = &self.task_manager {
+            use crate::task::{CompletionCondition, ConditionType};
+            for p in &promises {
+                task_mgr.create_task(
+                    p,
+                    "agent_self", // self-assigned task
+                    vec![CompletionCondition {
+                        description: format!("Complete: {}", &p[..p.len().min(80)]),
+                        condition_type: ConditionType::ModelEvaluation(
+                            format!("Verify completion: {}", &p[..p.len().min(120)])
+                        ),
+                        satisfied: false,
+                    }],
+                );
+            }
+            tracing::info!(
+                tasks_created = promises.len(),
+                "agent commitments stored as tasks in TaskManager"
+            );
+        }
+
+        // Also log to Chronos for audit trail
         if let Some(ref chronos) = self.chronos {
             for p in &promises {
                 let entry = chronos.build_entry(

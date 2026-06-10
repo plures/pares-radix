@@ -1,8 +1,33 @@
-# retention.px - Memory retention and decay evaluation
+# retention.px — Memory retention and decay as v3 dataflow procedures
 #
 # Evaluates whether memory entries should be retained, decayed, or forgotten.
 # Implements spaced-repetition-inspired scoring for long-term memory management.
+# Both are utilities called during periodic memory maintenance.
+#
+# Queue topology:
+#
+#   (none — utilities only, called by periodic_memory_maintenance in memory.px)
+#
 
+fact RetentionScore:
+  memory_key: string
+  score: float
+  action: enum(retain, decay, forget)
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint retention_score_bounds:
+  given: "Retention scores must be between 0.0 and 1.0"
+  check: RetentionScore.score >= 0.0 AND RetentionScore.score <= 1.0
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by periodic_memory_maintenance (memory.px)
 procedure evaluate_retention(all_memories: list) -> retention_results:
   given: "Evaluate whether memory entries should be retained, decayed, or forgotten"
   timestamp_now {} -> $now
@@ -19,6 +44,7 @@ procedure evaluate_retention(all_memories: list) -> retention_results:
   end
   return {evaluated_count: $all_memories}
 
+# utility: called by periodic_memory_maintenance (memory.px)
 procedure consolidate_memories(all_memories: list) -> consolidation_results:
   given: "Merge duplicate or highly similar memories into consolidated entries"
   find_duplicates {memories: $all_memories, similarity_threshold: 0.92} -> $duplicates

@@ -1,11 +1,11 @@
-# spine.px — The complete agent spine as praxis logic
+# spine.px — The complete agent spine as v3 dataflow
 #
 # This file IS the spine. Not 1,700 lines of Rust. Not 5 procedure structs.
-# Not pipeline wiring. Just logic that compiles to PluresDB procedures.
+# Not pipeline wiring. Just pure functions connected by queue topology.
 #
 # Side-effect actors (the only Rust):
-#   - telegram_adapter: network bytes ↔ PluresDB event write
-#   - model_client: HTTP request to LLM API
+#   - telegram_adapter: network bytes → writes to "inbound" queue
+#   - model_client: HTTP request to LLM API (via model_complete action)
 #   - shell_executor: spawn process, return output
 #   - file_system: read/write bytes to disk
 #   - tool_dispatch: route tool_call.name to the correct actor
@@ -18,18 +18,86 @@ import spine::model_invoke
 import spine::tool_execute
 import spine::heartbeat
 
-# The entire message flow, expressed as reactive procedure composition:
+# ═══════════════════════════════════════════════════════════════════
+# Queue Topology — The Full Dataflow Graph
+# ═══════════════════════════════════════════════════════════════════
 #
-# 1. telegram_adapter writes Inbound event to PluresDB
-# 2. PluresDB triggers: record_user_message, reset_tool_counter, route_inbound
-# 3. route_inbound emits model_request
-# 4. PluresDB triggers: build_context, invoke_model
-# 5. invoke_model calls model_client actor (IO boundary), emits model_response
-# 6. PluresDB triggers: record_assistant_response, route_response, execute_tools
-# 7. route_response emits delivery_request (if no tool_calls)
-# 8. telegram_adapter reads delivery_request, sends to Telegram (IO boundary)
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │                     AGENT SPINE DATAFLOW                            │
+#   └─────────────────────────────────────────────────────────────────────┘
 #
-# If tool_calls: execute_tools runs actors, records results, re-emits model_request → loop
+#   INBOUND (from telegram_adapter)
+#   ════════════════════════════════
+#
+#   "inbound" ─┬─→ [record_user_message] ─→ "history_write"
+#              │
+#              └─→ [route_inbound] ─→ "model_request"
+#
+#
+#   MODEL REQUEST → CONTEXT → INVOKE
+#   ═════════════════════════════════
+#
+#   "model_request" ─→ [build_context] ─→ "enriched_request"
+#                                               │
+#                                               ▼
+#                                      [invoke_model] ─→ "model_response"
+#
+#
+#   MODEL RESPONSE FAN-OUT
+#   ══════════════════════
+#
+#   "model_response" ─┬─→ [record_assistant_response] ─→ "history_write"
+#                     │
+#                     ├─→ [route_response] ─→ "delivery_request"
+#                     │       (only when NO tool_calls)
+#                     │
+#                     └─→ [execute_tools] ─→ "model_request"  (loop back)
+#                             (only when HAS tool_calls)
+#
+#
+#   OUTBOUND (to telegram_adapter)
+#   ══════════════════════════════
+#
+#   "delivery_request" ─→ telegram_adapter (IO boundary)
+#
+#
+#   HEARTBEAT (independent)
+#   ═══════════════════════
+#
+#   heartbeat_clock ─→ [heartbeat_tick] ─→ "heartbeat_result"
+#
+#
+#   TOOL EXECUTION LOOP
+#   ═══════════════════
+#
+#   "model_response" ─→ [execute_tools] ─→ "model_request"
+#       │                                       │
+#       │   tool_dispatch results appended      │
+#       │   to "chat:history" via PluresDB      │
+#       │                                       ▼
+#       │                              [build_context] (re-enriched)
+#       │                                       │
+#       │                                       ▼
+#       │                              [invoke_model] (re-invoked)
+#       │                                       │
+#       └───────────────────────────────────────┘  (loops until no tool_calls)
+#
+#   DEPTH GUARD: queue rejects writes when lineage depth > 25
+#
+#
+#   ┌─────────────────────────────────────────────────────────────────────┐
+#   │  QUEUES (named data channels):                                      │
+#   │                                                                     │
+#   │    inbound            - raw user messages from adapter              │
+#   │    model_request      - requests to build context & invoke model    │
+#   │    enriched_request   - context-enriched model invocation payload   │
+#   │    model_response     - raw model responses (may have tool_calls)   │
+#   │    delivery_request   - final responses for channel delivery        │
+#   │    history_write      - conversation history append operations       │
+#   │    heartbeat_clock    - periodic timer ticks                        │
+#   │    heartbeat_result   - health check outputs                        │
+#   │                                                                     │
+#   └─────────────────────────────────────────────────────────────────────┘
 #
 # Total Rust: ~200 lines of thin IO actors
 # Total .px: this file + 5 imports

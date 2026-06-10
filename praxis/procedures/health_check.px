@@ -1,12 +1,39 @@
-# health_check.px - System health check procedures
+# health_check.px — System health check as v3 dataflow procedures
 #
 # Validates that all subsystems are functioning correctly.
+# Both procedures are utilities called by heartbeat evaluation.
+#
+# Queue topology:
+#
+#   (none — utilities only, called by evaluate_heartbeat / run_all_self_tests)
+#
 
+fact HealthStatus:
+  service: string
+  tier: optional[string]
+  status: string
+  healthy: bool
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint health_timeout_respected:
+  given: "Health checks must complete within 5 seconds"
+  check: HealthStatus.status != "timeout"
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by evaluate_heartbeat, run_all_self_tests
 procedure check_pluresdb_health(endpoint: string) -> health_status:
   given: "Check PluresDB connectivity and response time"
   ping_service {url: $endpoint, timeout_ms: 5000} -> $result
   return {service: "pluresdb", status: $result, healthy: $result}
 
+# utility: called by evaluate_heartbeat, run_all_self_tests
 procedure check_model_health(model_tier: string) -> health_status:
   given: "Verify model API is responding for a given tier"
   model_complete {messages: [{role: "user", content: "ping"}], tier: $model_tier} -> $result
