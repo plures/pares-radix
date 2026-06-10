@@ -65,7 +65,7 @@ pub mod dataflow {
     pub use pluresdb_px::px::async_executor::execute_async_with_vars;
     pub use pluresdb_px::px::executor::ExecutionError;
     pub use pluresdb_px::px::{
-        PxDataflowParam, PxDataflowProcedure, PxDataflowReturn,
+        parse as parse_px, PxDataflowParam, PxDataflowProcedure, PxDataflowReturn,
     };
 }
 

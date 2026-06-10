@@ -375,6 +375,60 @@ impl RuntimeAgentFactory {
             }
         };
 
+        // Load dataflow procedures (queue-driven, no triggers)
+        let cerebellum = {
+            use pares_agens_core::cerebellum::dataflow_bridge::DataflowBridge;
+            use pares_radix_praxis::dataflow::{ast_to_node, parse_px};
+
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            let px_dir = std::path::PathBuf::from(&home)
+                .join(".pares-radix")
+                .join("praxis")
+                .join("procedures");
+            let local_dir = std::path::PathBuf::from("praxis/procedures");
+
+            let mut df_bridge = DataflowBridge::new();
+            let mut df_count = 0usize;
+
+            for dir in [&px_dir, &local_dir] {
+                if !dir.exists() {
+                    continue;
+                }
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if path.extension().and_then(|e| e.to_str()) != Some("px") {
+                            continue;
+                        }
+                        if let Ok(source) = std::fs::read_to_string(&path) {
+                            if let Ok(doc) = parse_px(&source) {
+                                for proc in &doc.dataflow_procedures {
+                                    let node = ast_to_node(proc);
+                                    let name = node.name.clone();
+                                    let rt = tokio::runtime::Handle::current();
+                                    if let Err(e) = rt.block_on(df_bridge.register(node)) {
+                                        tracing::warn!(name = %name, error = %e, "dataflow: failed to register procedure");
+                                    } else {
+                                        df_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if df_count > 0 {
+                tracing::info!(count = df_count, "dataflow_bridge: loaded procedures");
+                cerebellum.with_dataflow_bridge(Arc::new(df_bridge))
+            } else {
+                tracing::debug!("dataflow_bridge: no dataflow procedures found");
+                cerebellum
+            }
+        };
+
         let system_prompt = self.load_system_prompt()?;
 
         // Create default personality contract. Runtime seeding into PluresDB
@@ -5557,6 +5611,60 @@ async fn main() {
                     }
                 }
             };
+
+            // Load dataflow procedures (queue-driven, no triggers) for serve-spine
+            let cerebellum = {
+                use pares_agens_core::cerebellum::dataflow_bridge::DataflowBridge;
+                use pares_radix_praxis::dataflow::{ast_to_node, parse_px};
+
+                let home = std::env::var("HOME")
+                    .or_else(|_| std::env::var("USERPROFILE"))
+                    .unwrap_or_default();
+                let px_dir = std::path::PathBuf::from(&home)
+                    .join(".pares-radix")
+                    .join("praxis")
+                    .join("procedures");
+                let local_dir = std::path::PathBuf::from("praxis/procedures");
+
+                let mut df_bridge = DataflowBridge::new();
+                let mut df_count = 0usize;
+
+                for dir in [&px_dir, &local_dir] {
+                    if !dir.exists() {
+                        continue;
+                    }
+                    if let Ok(entries) = std::fs::read_dir(dir) {
+                        for entry in entries.flatten() {
+                            let path = entry.path();
+                            if path.extension().and_then(|e| e.to_str()) != Some("px") {
+                                continue;
+                            }
+                            if let Ok(source) = std::fs::read_to_string(&path) {
+                                if let Ok(doc) = parse_px(&source) {
+                                    for proc in &doc.dataflow_procedures {
+                                        let node = ast_to_node(proc);
+                                        let name = node.name.clone();
+                                        let rt = tokio::runtime::Handle::current();
+                                        if let Err(e) = rt.block_on(df_bridge.register(node)) {
+                                            tracing::warn!(name = %name, error = %e, "dataflow: failed to register (spine)");
+                                        } else {
+                                            df_count += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if df_count > 0 {
+                    tracing::info!(count = df_count, "dataflow_bridge: loaded procedures (spine)");
+                    cerebellum.with_dataflow_bridge(Arc::new(df_bridge))
+                } else {
+                    cerebellum
+                }
+            };
+
             let system_prompt_text = build_system_prompt(system_prompt).unwrap_or_else(|e| {
                 eprintln!("Warning: {e}");
                 "You are Pares Radix, an AI assistant. Be direct and helpful.".to_string()
