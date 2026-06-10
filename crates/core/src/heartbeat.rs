@@ -14,7 +14,7 @@ use tracing::{debug, info, warn};
 
 use crate::event_spine::EventSpineHandle;
 use crate::state::StateStore;
-use crate::task_executor::TaskExecutor;
+use crate::task_executor::TaskDispatcher;
 use crate::task_manager::TaskManager;
 
 /// Heartbeat configuration stored in PluresDB state.
@@ -83,7 +83,8 @@ pub struct HeartbeatRunner {
     config: HeartbeatConfig,
     state: Arc<dyn StateStore>,
     event_spine: Option<EventSpineHandle>,
-    task_executor: Option<TaskExecutor>,
+    task_manager: Option<Arc<TaskManager>>,
+    task_dispatcher: Option<TaskDispatcher>,
 }
 
 const STATE_KEY_CONFIG: &str = "heartbeat/config";
@@ -98,7 +99,8 @@ impl HeartbeatRunner {
             config: HeartbeatConfig::default(),
             state,
             event_spine: None,
-            task_executor: None,
+            task_manager: None,
+            task_dispatcher: None,
         }
     }
 
@@ -111,11 +113,12 @@ impl HeartbeatRunner {
 
     /// Attach a task manager for autonomous task execution during heartbeats.
     pub fn with_task_manager(mut self, task_manager: Arc<TaskManager>, state: Arc<dyn StateStore>) -> Self {
-        let mut executor = TaskExecutor::new(task_manager, state);
+        self.task_manager = Some(task_manager.clone());
+        let mut dispatcher = TaskDispatcher::new(state);
         if let Some(spine) = &self.event_spine {
-            executor = executor.with_event_spine(spine.clone());
+            dispatcher = dispatcher.with_event_spine(spine.clone());
         }
-        self.task_executor = Some(executor);
+        self.task_dispatcher = Some(dispatcher);
         self
     }
 
@@ -256,9 +259,9 @@ impl HeartbeatRunner {
         }
 
         // 4. Check TaskManager for evaluable tasks
-        if let Some(executor) = &self.task_executor {
-            let pending = executor.pending_count();
-            if pending > 0 {
+        if let Some(ref tm) = self.task_manager {
+            if TaskDispatcher::has_pending_work(tm) {
+                let pending = tm.evaluable_tasks().len();
                 work_items.push(format!("tasks: {} evaluable task(s) pending execution", pending));
             }
         }
@@ -289,15 +292,27 @@ impl HeartbeatRunner {
             "heartbeat: work found, escalating"
         );
 
-        // ── Try autonomous task execution first ─────────────────────
-        // If there are evaluable tasks, dispatch the highest-priority one
-        // directly (without spending model tokens on the heartbeat message).
-        if let Some(executor) = &self.task_executor {
-            if executor.pending_count() > 0 {
-                if executor.try_execute_next().await {
-                    info!("heartbeat: dispatched autonomous task execution");
-                    self.save_daily_count(count + 1, &today).await;
-                    return; // Task dispatched — don't also send generic heartbeat
+        // ── Try autonomous task dispatch first ─────────────────────
+        // Decision logic lives in autonomous-dispatch.px (via PxBridge).
+        // Here we only check the fast-path gate and call the IO dispatcher.
+        if let (Some(ref tm), Some(ref dispatcher)) = (&self.task_manager, &self.task_dispatcher) {
+            if TaskDispatcher::has_pending_work(tm) {
+                // TODO: Route through PxBridge.call("evaluate_dispatch", tick)
+                // For now, dispatch highest-priority directly (Rust fallback)
+                // This is a KNOWN .px gap — tracked for wiring once PxBridge
+                // is available in the heartbeat context.
+                let tasks = tm.evaluable_tasks();
+                if let Some(task) = tasks.first() {
+                    let prompt = format!(
+                        "[autonomous-task] Execute this task:\nTask: {}\nID: {}\nPriority: {}\n\nWork on this task using available tools.",
+                        task.description, task.id, task.priority
+                    );
+                    if dispatcher.dispatch(&task.id, &prompt) {
+                        dispatcher.record_dispatch(&task.id).await;
+                        info!("heartbeat: dispatched autonomous task via TaskDispatcher");
+                        self.save_daily_count(count + 1, &today).await;
+                        return;
+                    }
                 }
             }
         }

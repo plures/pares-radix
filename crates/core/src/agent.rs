@@ -1643,34 +1643,62 @@ impl Agent {
     /// "I'm going to" and stores them as pending tasks that the heartbeat
     /// checks every 30 seconds.
     async fn detect_and_store_promises(&self, _user_msg: &str, agent_reply: &str) {
-        // Use the structured commitment extractor from task_executor
-        let commitments = crate::task_executor::extract_commitments(agent_reply);
+        // Decision logic lives in commitment-detection.px (via PxBridge).
+        // This Rust function is the IO boundary: it stores results to state + TaskManager + Chronos.
+        //
+        // TODO: Route through PxBridge.call("detect_commitments", {response: agent_reply})
+        // and PxBridge.call("create_tasks_from_commitments", {commitments: ...})
+        //
+        // Until PxBridge is wired here, use a minimal Rust fallback
+        // that mirrors the .px logic (commitment-detection.px).
 
-        // Also check for simpler commitment patterns (broader net)
+        // Minimal fallback: detect numbered action items + "I will" statements
         let commitment_patterns = [
             "i'll ",
             "i will ",
             "let me ",
             "going to ",
-            "i'm going to ",
-            "i am going to ",
-            "i can ",
-            "i'll go ahead",
-            "want me to ", // user asks, agent implies yes by responding
         ];
 
-        let mut promises: Vec<String> = commitments;
-        for sentence in agent_reply.split(['.', '!', '\n']) {
-            let sentence_lower = sentence.to_lowercase();
-            let trimmed = sentence.trim();
-            if trimmed.len() < 10 || trimmed.len() > 200 {
+        let action_verbs = [
+            "diagnose", "fix", "implement", "write", "create", "update",
+            "check", "verify", "build", "deploy", "configure", "refactor",
+            "optimize", "debug", "test", "add", "remove", "migrate",
+            "install", "resolve", "investigate", "wire", "connect",
+            "integrate", "port", "rewrite",
+        ];
+
+        let mut promises: Vec<String> = Vec::new();
+
+        for line in agent_reply.lines() {
+            let trimmed = line.trim();
+            if trimmed.len() < 15 || trimmed.len() > 200 {
                 continue;
             }
+
+            // Numbered list items with action verbs
+            if trimmed.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                if let Some(text) = trimmed.split_once('.').map(|(_, t)| t.trim()) {
+                    let lower = text.to_lowercase();
+                    if action_verbs.iter().any(|v| lower.starts_with(v)) {
+                        promises.push(text.to_string());
+                    }
+                }
+            }
+
+            // "I will..." / "I'll..." with action verbs
+            let lower = trimmed.to_lowercase();
             for pattern in &commitment_patterns {
-                if sentence_lower.contains(pattern) {
-                    // Deduplicate against structured extractions
-                    if !promises.iter().any(|p| p.contains(&trimmed[..trimmed.len().min(30)])) {
-                        promises.push(trimmed.to_string());
+                if lower.contains(pattern) {
+                    if let Some(after) = lower.split_once(pattern).map(|(_, a)| a) {
+                        if action_verbs.iter().any(|v| after.starts_with(v)) && after.len() >= 15 {
+                            let dedup = !promises.iter().any(|p| {
+                                p.to_lowercase().contains(&after[..after.len().min(25)])
+                            });
+                            if dedup {
+                                promises.push(trimmed.to_string());
+                            }
+                        }
                     }
                     break;
                 }
@@ -1681,7 +1709,7 @@ impl Agent {
             return;
         }
 
-        // Store promises in the STATE STORE (so heartbeat can find them)
+        // IO: Store promises in state (for heartbeat + steering lookup)
         if let Some(state) = &self.state_store {
             let existing = state.get("agent_promises").await
                 .and_then(|v| serde_json::from_value::<Vec<serde_json::Value>>(v).ok())
@@ -1701,22 +1729,23 @@ impl Agent {
                 }));
             }
 
-            // Cap at 20 most recent promises
             if updated.len() > 20 {
                 updated = updated.into_iter().rev().take(20).collect();
                 updated.reverse();
             }
 
             state.set("agent_promises", serde_json::json!(updated)).await;
+            state.set("most_recent_task_id", serde_json::json!(null)).await;
         }
 
-        // Create tasks in TaskManager for actionable commitments
+        // IO: Create tasks in TaskManager
         if let Some(task_mgr) = &self.task_manager {
             use crate::task::{CompletionCondition, ConditionType};
+            let mut last_id = String::new();
             for p in &promises {
-                task_mgr.create_task(
+                let task = task_mgr.create_task(
                     p,
-                    "agent_self", // self-assigned task
+                    "agent_self",
                     vec![CompletionCondition {
                         description: format!("Complete: {}", &p[..p.len().min(80)]),
                         condition_type: ConditionType::ModelEvaluation(
@@ -1725,6 +1754,11 @@ impl Agent {
                         satisfied: false,
                     }],
                 );
+                last_id = task.id;
+            }
+            // Track most recent for steering
+            if let Some(state) = &self.state_store {
+                state.set("most_recent_task_id", serde_json::json!(last_id)).await;
             }
             tracing::info!(
                 tasks_created = promises.len(),
@@ -1732,7 +1766,7 @@ impl Agent {
             );
         }
 
-        // Also log to Chronos for audit trail
+        // IO: Log to Chronos for audit trail
         if let Some(ref chronos) = self.chronos {
             for p in &promises {
                 let entry = chronos.build_entry(

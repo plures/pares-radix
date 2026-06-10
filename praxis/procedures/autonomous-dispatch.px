@@ -1,0 +1,216 @@
+# autonomous-dispatch.px — Task dispatch decisions (v3 dataflow)
+#
+# Replaces the Rust-side TaskExecutor.try_execute_next() logic.
+# Pure decision logic: given evaluable tasks + clock, choose what to execute.
+# The ONLY Rust boundary is emit_inbound_message (IO).
+#
+# Queue topology:
+#
+#   heartbeat_tick ─→ [evaluate_dispatch] ─→ dispatch_decision
+#                           │                       │
+#                           │                       ▼
+#                           │            (Rust IO: emit_inbound_message)
+#                           │
+#                           └─ reads: evaluable tasks, cooldown state
+#
+#   task_dispatch ─→ [build_task_prompt] ─→ task_prompt
+#        (from task-steering.px)                │
+#                                              ▼
+#                                   (Rust IO: emit_inbound_message)
+#
+
+# ═══════════════════════════════════════════════════════════════════
+# Facts
+# ═══════════════════════════════════════════════════════════════════
+
+fact DispatchDecision:
+  should_dispatch: bool
+  task_id: optional[string]
+  reason: string
+  prompt: optional[string]
+
+fact EvaluableTask:
+  id: string
+  description: string
+  priority: int
+  created_at: int
+  last_evaluated_at: optional[int]
+  attempts: int
+  conditions: list
+
+# ═══════════════════════════════════════════════════════════════════
+# Config
+# ═══════════════════════════════════════════════════════════════════
+
+config autonomous_dispatch:
+  min_evaluation_interval_ms: int = 60000   # 1 minute cooldown per task
+  max_evaluations_per_tick: int = 1         # one task per heartbeat
+  max_attempts: int = 5                     # give up after 5 tries
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+constraint dispatch_respects_cooldown:
+  given: "Tasks cannot be dispatched more frequently than the minimum interval"
+  check: |
+    when DispatchDecision.should_dispatch == true:
+      task.last_evaluated_at == null OR
+      (now_ms() - task.last_evaluated_at) > config.min_evaluation_interval_ms
+  severity: error
+
+constraint dispatch_respects_max_attempts:
+  given: "Tasks that have failed too many times should not be retried"
+  check: |
+    when DispatchDecision.should_dispatch == true:
+      task.attempts < config.max_attempts
+  severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Heartbeat entry: should we dispatch a task this tick?
+procedure evaluate_dispatch(tick: int from "heartbeat_tick") -> decision into "dispatch_decision":
+  given: "Decide whether to dispatch an autonomous task on this heartbeat tick"
+
+  # Load all evaluable tasks
+  db_query {prefix: "task:", filter: {status: "pending"}} -> $all_tasks
+
+  when length($all_tasks) == 0:
+    return {should_dispatch: false, task_id: null, reason: "no_pending_tasks", prompt: null}
+  end
+
+  timestamp_now {} -> $now
+
+  # Filter by cooldown
+  filter_ready_tasks {tasks: $all_tasks, now: $now, cooldown: config.min_evaluation_interval_ms} -> $ready
+
+  when length($ready) == 0:
+    return {should_dispatch: false, task_id: null, reason: "all_cooling_down", prompt: null}
+  end
+
+  # Filter by max attempts
+  filter_retriable {tasks: $ready, max: config.max_attempts} -> $retriable
+
+  when length($retriable) == 0:
+    return {should_dispatch: false, task_id: null, reason: "all_exhausted", prompt: null}
+  end
+
+  # Select highest priority (lowest number), then oldest
+  select_best_task {tasks: $retriable} -> $best
+
+  # Build the execution prompt
+  build_task_prompt {task: $best} -> $prompt
+
+  # Mark as in-progress
+  pluresdb_write {key: "task:{$best.id}:status", value: "in_progress"}
+  pluresdb_write {key: "task:{$best.id}:last_evaluated_at", value: $now}
+  pluresdb_write {key: "task:{$best.id}:attempts", value: $best.attempts + 1}
+
+  return {
+    should_dispatch: true,
+    task_id: $best.id,
+    reason: "task_ready",
+    prompt: $prompt
+  }
+
+
+# Steering entry: user confirmed/redirected a task — build prompt and dispatch
+procedure build_steered_prompt(steer: SteerResult from "task_dispatch") -> prompt into "task_prompt":
+  given: "Build execution prompt for a steered task"
+
+  when steer.message_to_agent == null:
+    return null  # cancelled task — don't dispatch
+  end
+
+  db_get {key: "task:{steer.task_id}"} -> $task
+
+  when $task == null:
+    return null
+  end
+
+  # Mark dispatched
+  timestamp_now {} -> $now
+  pluresdb_write {key: "task:{steer.task_id}:status", value: "in_progress"}
+  pluresdb_write {key: "task:{steer.task_id}:last_evaluated_at", value: $now}
+
+  return steer.message_to_agent
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by evaluate_dispatch
+procedure filter_ready_tasks(tasks: list, now: int, cooldown: int) -> filtered:
+  given: "Filter tasks that have cooled down enough for re-evaluation"
+  define $ready = []
+  loop over $tasks as task:
+    when task.last_evaluated_at == null:
+      append $ready $task
+    end
+    when task.last_evaluated_at != null:
+      compute_elapsed {start: $task.last_evaluated_at, end: $now} -> $elapsed
+      when $elapsed > $cooldown:
+        append $ready $task
+      end
+    end
+  end
+  return $ready
+
+# utility: called by evaluate_dispatch
+procedure filter_retriable(tasks: list, max: int) -> filtered:
+  given: "Filter tasks that haven't exhausted their retry budget"
+  define $retriable = []
+  loop over $tasks as task:
+    when task.attempts < $max:
+      append $retriable $task
+    end
+  end
+  return $retriable
+
+# utility: called by evaluate_dispatch
+procedure select_best_task(tasks: list) -> best:
+  given: "Select highest-priority task (lowest number = highest priority), then oldest"
+  sort_by {items: $tasks, keys: ["priority", "created_at"], orders: ["asc", "asc"]} -> $sorted
+  return $sorted[0]
+
+# utility: called by evaluate_dispatch, build_steered_prompt
+procedure build_task_prompt(task: EvaluableTask) -> prompt:
+  given: "Build the execution prompt string for an autonomous task"
+
+  format_conditions {conditions: $task.conditions} -> $cond_text
+
+  format_string {
+    template: "[autonomous-task] Execute this task:\nTask: {description}\nID: {id}\nPriority: {priority}\nAttempts: {attempts}\nConditions:\n{conditions}\n\nWork on this task using available tools. When complete, indicate which conditions are satisfied. If blocked, explain why.",
+    vars: {
+      description: $task.description,
+      id: $task.id,
+      priority: $task.priority,
+      attempts: $task.attempts,
+      conditions: $cond_text
+    }
+  } -> $prompt
+
+  return $prompt
+
+# utility: called by build_task_prompt
+procedure format_conditions(conditions: list) -> text:
+  given: "Format task conditions into a readable checklist"
+  when length($conditions) == 0:
+    return "No specific conditions — use your judgment."
+  end
+  define $lines = []
+  loop over $conditions as c:\n    define $status = "⏳"
+    when c.satisfied:
+      define $status = "✅"
+    end
+    format_string {
+      template: "  {i}. {status} {description}",
+      vars: {i: index() + 1, status: $status, description: $c.description}
+    } -> $line
+    append $lines $line
+  end
+  join {items: $lines, separator: "\n"} -> $text
+  return $text
