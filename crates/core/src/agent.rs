@@ -689,6 +689,7 @@ impl Agent {
             model: None,
         };
 
+        let model_start = std::time::Instant::now();
         let (mut reply, logprobs, mut messages) = match self
             .run_model_loop(
                 model_client,
@@ -711,6 +712,8 @@ impl Agent {
                 });
             }
         };
+        let model_elapsed = model_start.elapsed();
+        tracing::info!(model_ms = model_elapsed.as_millis(), "model loop complete");
 
         let mut model_label = "model";
         if self.is_low_confidence(logprobs.as_deref()) {
