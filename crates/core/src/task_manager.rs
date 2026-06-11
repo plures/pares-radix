@@ -241,6 +241,28 @@ impl TaskManager {
     }
 
     // -----------------------------------------------------------------------
+    // Task Registry tool support
+    // -----------------------------------------------------------------------
+
+    /// Set task priority (1-10).
+    pub fn set_priority(&self, task_id: &str, priority: u8) {
+        if let Some(mut task) = self.load_task(task_id) {
+            task.priority = priority.clamp(1, 10);
+            task.updated_at = Self::now_ms();
+            self.store_task(&task);
+        }
+    }
+
+    /// Update task description.
+    pub fn update_description(&self, task_id: &str, description: &str) {
+        if let Some(mut task) = self.load_task(task_id) {
+            task.description = description.to_string();
+            task.updated_at = Self::now_ms();
+            self.store_task(&task);
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
 

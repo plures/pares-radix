@@ -3692,7 +3692,6 @@ async fn main() {
             };
             use pares_agens_core::spine::pipeline::Pipeline;
             use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
-            use pares_agens_core::spine::procedures::commitment_detector::CommitmentDetector;
             use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
@@ -4053,9 +4052,8 @@ async fn main() {
                     }),
                 },
             ];
-            let spine_tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(
-                SpineProcedureDispatcher::with_tools(spine_registry, spine_tool_definitions),
-            );
+            let spine_tool_dispatcher_builder =
+                SpineProcedureDispatcher::with_tools(spine_registry, spine_tool_definitions);
 
             // 3. Create the pipeline
             let (pipeline, rx) = Pipeline::new(256);
@@ -4088,6 +4086,13 @@ async fn main() {
             let spine_heartbeat_state: Arc<dyn pares_agens_core::state::StateStore> =
                 Arc::new(pares_agens_core::state::InMemoryStateStore::default());
             info!("TaskManager + StateStore initialized for ServeSpine");
+
+            // 3.8. Finalize tool dispatcher with task registry
+            use pares_agens_core::tools::TaskRegistryTool;
+            let task_registry = Arc::new(TaskRegistryTool::new(Arc::clone(&spine_task_manager)));
+            let spine_tool_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(
+                spine_tool_dispatcher_builder.with_task_registry(Arc::clone(&task_registry)),
+            );
 
             // 3.6. Load system prompt — compose from context files like OpenClaw
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
@@ -4166,6 +4171,14 @@ async fn main() {
             } else {
                 context_parts.join("\n\n")
             };
+
+            // Inject pending task list into system prompt (auto-populated context)
+            let task_context = task_registry.context_block();
+            let system_prompt = if task_context.is_empty() {
+                system_prompt
+            } else {
+                format!("{}\n{}", system_prompt, task_context)
+            };
             info!(prompt_source = %if system_prompt_path.exists() { "SYSTEM-PROMPT.md" } else if !context_parts.is_empty() { "workspace context" } else { "default" }, prompt_len = system_prompt.len(), "System prompt loaded");
 
             // 4. Register procedures (full pipeline: inbound → history → model → tools → response)
@@ -4194,10 +4207,9 @@ async fn main() {
                 .register(Arc::new(ToolExecutor::new(spine_tool_dispatcher)))
                 .await;
             pipeline.register(Arc::new(ResponseRouter)).await;
-            pipeline
-                .register(Arc::new(CommitmentDetector::new(Arc::clone(&spine_task_manager))))
-                .await;
-            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router, commitment_detector");
+            // Note: CommitmentDetector removed — task creation is now agent-driven
+            // via the task_create tool, not heuristic regex scanning.
+            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router");
 
             // 4.5. Load .px procedures from praxis/procedures/
             {

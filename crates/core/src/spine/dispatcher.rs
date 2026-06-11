@@ -15,11 +15,13 @@ use uuid::Uuid;
 use crate::event::Event;
 use crate::model::{ToolDefinition, ToolDispatcher};
 use crate::procedure::ProcedureRegistry;
+use crate::tools::TaskRegistryTool;
 
 /// A `ToolDispatcher` implementation backed by a `ProcedureRegistry`.
 ///
-/// Tool calls are routed to the first procedure whose `handles()` matches
-/// the tool name, with arguments passed as the event content.
+/// Tool calls are routed to:
+///   1. Built-in tools (TaskRegistryTool) first
+///   2. Then the procedure registry for MCP/external tools
 ///
 /// Tool definitions can be provided explicitly at construction time, or
 /// registered dynamically via `add_tool_definition`.
@@ -28,6 +30,8 @@ pub struct SpineProcedureDispatcher {
     registry: Arc<RwLock<ProcedureRegistry>>,
     /// Explicit tool definitions exposed to the model.
     tool_definitions: RwLock<Vec<ToolDefinition>>,
+    /// Built-in task registry tool (agent-controlled task management).
+    task_registry: Option<Arc<TaskRegistryTool>>,
 }
 
 impl SpineProcedureDispatcher {
@@ -39,6 +43,7 @@ impl SpineProcedureDispatcher {
         Self {
             registry,
             tool_definitions: RwLock::new(Vec::new()),
+            task_registry: None,
         }
     }
 
@@ -50,7 +55,23 @@ impl SpineProcedureDispatcher {
         Self {
             registry,
             tool_definitions: RwLock::new(tools),
+            task_registry: None,
         }
+    }
+
+    /// Attach the built-in task registry tool.
+    ///
+    /// When set, task_* tool calls are handled directly by the TaskRegistryTool
+    /// without going through the procedure registry.
+    #[must_use]
+    pub fn with_task_registry(mut self, task_registry: Arc<TaskRegistryTool>) -> Self {
+        // Add task tool definitions to the available tools
+        let task_tools = TaskRegistryTool::tool_definitions();
+        // Spawn a task to add them since we need async
+        let defs = self.tool_definitions.get_mut();
+        defs.extend(task_tools);
+        self.task_registry = Some(task_registry);
+        self
     }
 
     /// Add a tool definition dynamically.
@@ -71,6 +92,20 @@ impl ToolDispatcher for SpineProcedureDispatcher {
     }
 
     async fn call_tool(&self, name: &str, arguments: Value) -> String {
+        // 1. Check built-in task registry tools first
+        if TaskRegistryTool::handles_tool(name) {
+            if let Some(ref task_registry) = self.task_registry {
+                return task_registry.call(name, arguments).await;
+            } else {
+                warn!(
+                    tool = name,
+                    "spine dispatcher: task tool called but no task registry attached"
+                );
+                return format!("Error: task registry not configured");
+            }
+        }
+
+        // 2. Fall through to procedure registry for MCP/external tools
         let registry = self.registry.read().await;
 
         // Find the first procedure that handles this tool name

@@ -116,6 +116,9 @@ pub mod task;
 /// Task manager — CRUD and lifecycle for tasks backed by PluresDB.
 pub mod task_manager;
 
+/// Built-in tools — task registry, etc.
+pub mod tools;
+
 /// Autonomous task executor — dispatches evaluable tasks to the agent loop.
 pub mod task_executor;
 
