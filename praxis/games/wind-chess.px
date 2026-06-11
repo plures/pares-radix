@@ -506,8 +506,9 @@ trigger game_clock:
 procedure tick_counter() -> tick into "game_clock":
   given: "Increment and emit tick count"
   read_state {key: "wind_chess:tick"} -> $current
-  write_state {key: "wind_chess:tick", value: $current + 1}
-  return $current + 1
+  increment {value: $current} -> $next
+  write_state {key: "wind_chess:tick", value: $next}
+  return $next
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -246,7 +246,8 @@ procedure npc_behavior(tick: int from "ambient_clock", world: WorldState from "w
   given: "Run NPC behavior logic for entities in the current room"
 
   # Only think every N ticks
-  when tick % config.npc_think_interval != 0:
+  compute_modulo {value: tick, divisor: config.npc_think_interval} -> $remainder
+  when $remainder != 0:
     return null
   end
 
@@ -346,8 +347,9 @@ trigger ambient_clock:
 procedure ambient_timer() -> tick into "ambient_clock":
   given: "Emit ambient tick count for inner-space updates"
   read_state {key: "inner_space:tick"} -> $current
-  write_state {key: "inner_space:tick", value: $current + 1}
-  return $current + 1
+  increment {value: $current} -> $next
+  write_state {key: "inner_space:tick", value: $next}
+  return $next
 
 
 # ═══════════════════════════════════════════════════════════════════

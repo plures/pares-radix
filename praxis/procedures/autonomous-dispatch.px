@@ -216,9 +216,10 @@ procedure format_conditions(conditions: list) -> text:
     when c.satisfied:
       define $status = "✅"
     end
+    compute_index {offset: 1} -> $i
     format_string {
       template: "  {i}. {status} {description}",
-      vars: {i: (index() + 1), status: $status, description: $c.description}
+      vars: {i: $i, status: $status, description: $c.description}
     } -> $line
     append $lines $line
   end
