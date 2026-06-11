@@ -3,12 +3,17 @@
 //! Integrates with the `ModelClient` trait for real model calls.
 //! Builds conversation context from event metadata (tool results, history)
 //! and passes available tool definitions so the model can make tool calls.
+//!
+//! Streaming: When a `stream_tx` sender is configured, uses `complete_stream()`
+//! to emit `StreamDelta` tokens in real-time. Channel handlers (Telegram, etc.)
+//! subscribe to this sender for progressive message editing.
 
 use std::sync::Arc;
 
+use tokio::sync::broadcast;
 use tracing::{debug, error, info};
 
-use crate::model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher};
+use crate::model::{ChatMessage, ChatOptions, ModelClient, StreamDelta, ToolDispatcher};
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
@@ -24,6 +29,9 @@ pub struct ModelInvoker {
     default_system_prompt: Option<String>,
     /// Optional conversation store for multi-turn history.
     conversation_store: Option<Arc<dyn ConversationStore>>,
+    /// Broadcast sender for streaming deltas to channel handlers.
+    /// When set, uses `complete_stream()` for real-time token delivery.
+    stream_tx: Option<broadcast::Sender<StreamDelta>>,
 }
 
 impl ModelInvoker {
@@ -37,6 +45,7 @@ impl ModelInvoker {
             tool_dispatcher,
             default_system_prompt: None,
             conversation_store: None,
+            stream_tx: None,
         }
     }
 
@@ -51,12 +60,20 @@ impl ModelInvoker {
             tool_dispatcher,
             default_system_prompt: Some(system_prompt.into()),
             conversation_store: None,
+            stream_tx: None,
         }
     }
 
     /// Attach a conversation store for multi-turn history.
     pub fn with_conversation_store(mut self, store: Arc<dyn ConversationStore>) -> Self {
         self.conversation_store = Some(store);
+        self
+    }
+
+    /// Attach a broadcast sender for streaming deltas.
+    /// Channel handlers subscribe to this to receive real-time tokens.
+    pub fn with_stream_sender(mut self, tx: broadcast::Sender<StreamDelta>) -> Self {
+        self.stream_tx = Some(tx);
         self
     }
 
@@ -188,12 +205,30 @@ impl SpineProcedure for ModelInvoker {
         // Get available tools
         let tool_defs = self.tool_dispatcher.available_tools().await;
 
-        // Call the model
+        // Call the model — use streaming when a broadcast sender is configured
         let options = ChatOptions::default();
-        let result = self
-            .model_client
-            .complete(&messages, &tool_defs, &options)
-            .await;
+        let result = if let Some(broadcast_tx) = &self.stream_tx {
+            // Streaming path: bridge mpsc (what ModelClient expects) to broadcast (what channels subscribe to)
+            debug!(event_id = %id, "model_invoker: using streaming completion");
+            let (mpsc_tx, mut mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<StreamDelta>();
+            let broadcast_tx_clone = broadcast_tx.clone();
+
+            // Forward deltas from mpsc to broadcast in background
+            tokio::spawn(async move {
+                while let Some(delta) = mpsc_rx.recv().await {
+                    let _ = broadcast_tx_clone.send(delta);
+                }
+            });
+
+            self.model_client
+                .complete_stream(&messages, &tool_defs, &options, mpsc_tx)
+                .await
+        } else {
+            // Non-streaming path: full completion returned at once
+            self.model_client
+                .complete(&messages, &tool_defs, &options)
+                .await
+        };
 
         match result {
             Ok(completion) => {

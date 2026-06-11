@@ -4159,6 +4159,10 @@ async fn main() {
             info!(prompt_source = %if system_prompt_path.exists() { "SYSTEM-PROMPT.md" } else if !context_parts.is_empty() { "workspace context" } else { "default" }, prompt_len = system_prompt.len(), "System prompt loaded");
 
             // 4. Register procedures (full pipeline: inbound → history → model → tools → response)
+            // Create the streaming broadcast channel FIRST — ModelInvoker sends deltas here,
+            // channel handlers (Telegram) subscribe. Zero overhead if unused.
+            let (stream_broadcast_tx, _) = tokio::sync::broadcast::channel::<pares_agens_core::model::StreamDelta>(256);
+
             pipeline.register(Arc::new(InboundRouter)).await;
             pipeline
                 .register(Arc::new(HistoryRecorder::new(Arc::clone(
@@ -4172,7 +4176,8 @@ async fn main() {
                         Arc::clone(&spine_tool_dispatcher),
                         &system_prompt,
                     )
-                    .with_conversation_store(Arc::clone(&conversation_store)),
+                    .with_conversation_store(Arc::clone(&conversation_store))
+                    .with_stream_sender(stream_broadcast_tx.clone()),
                 ))
                 .await;
             pipeline
@@ -4280,12 +4285,11 @@ async fn main() {
                         error!("--telegram-token is required for --channel telegram");
                         std::process::exit(1);
                     }
-                    // Create standalone stream broadcast for progressive Telegram editing.
-                    // The action handler sends tokens here; the Telegram channel subscribes.
-                    let (stream_sender, _) = tokio::sync::broadcast::channel::<pares_agens_core::model::StreamDelta>(256);
+                    // Use the shared stream broadcast created at pipeline level.
+                    // ModelInvoker sends deltas here; TelegramSpineChannel subscribes.
                     let tg_channel = TelegramSpineChannel::with_stream(
                         TelegramSpineConfig { token: telegram_token.clone() },
-                        stream_sender.clone(),
+                        stream_broadcast_tx.clone(),
                     );
                     tokio::spawn(async move {
                         tg_channel.run_delivery_loop(delivery_rx).await;
@@ -4316,7 +4320,7 @@ async fn main() {
                     let emitter = pipeline.emitter();
                     let receiver_channel = TelegramSpineChannel::with_stream(
                         TelegramSpineConfig { token: telegram_token },
-                        stream_sender,
+                        stream_broadcast_tx,
                     );
                     info!("Starting Telegram receiver — spine-driven mode active");
                     if let Err(e) = receiver_channel.start_receiving(emitter).await {
