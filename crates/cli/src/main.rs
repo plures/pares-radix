@@ -3692,6 +3692,7 @@ async fn main() {
             };
             use pares_agens_core::spine::pipeline::Pipeline;
             use pares_agens_core::spine::procedures::history_recorder::HistoryRecorder;
+            use pares_agens_core::spine::procedures::commitment_detector::CommitmentDetector;
             use pares_agens_core::spine::procedures::inbound_router::InboundRouter;
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
@@ -4079,6 +4080,15 @@ async fn main() {
             let conversation_store: Arc<dyn ConversationStore> =
                 Arc::new(PluresConversationStore::new(Arc::clone(&shared_store)));
 
+            // 3.7. Create TaskManager + StateStore for autonomous task execution
+            // TaskManager uses the shared CrdtStore for task CRUD.
+            // Heartbeat state (config, counters) uses a separate in-memory store.
+            let spine_task_manager =
+                Arc::new(pares_agens_core::task_manager::TaskManager::new(Arc::clone(&shared_store)));
+            let spine_heartbeat_state: Arc<dyn pares_agens_core::state::StateStore> =
+                Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+            info!("TaskManager + StateStore initialized for ServeSpine");
+
             // 3.6. Load system prompt — compose from context files like OpenClaw
             let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
             let workspace = std::env::var("PARES_WORKSPACE").unwrap_or_else(|_| {
@@ -4184,7 +4194,10 @@ async fn main() {
                 .register(Arc::new(ToolExecutor::new(spine_tool_dispatcher)))
                 .await;
             pipeline.register(Arc::new(ResponseRouter)).await;
-            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router");
+            pipeline
+                .register(Arc::new(CommitmentDetector::new(Arc::clone(&spine_task_manager))))
+                .await;
+            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router, commitment_detector");
 
             // 4.5. Load .px procedures from praxis/procedures/
             {
@@ -4300,10 +4313,11 @@ async fn main() {
                     let (_heartbeat_shutdown_tx, heartbeat_shutdown_rx) =
                         tokio::sync::watch::channel(false);
                     {
-                        let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
-                            Arc::new(pares_agens_core::state::InMemoryStateStore::default());
+                        let pipeline_emitter_for_heartbeat = pipeline.emitter();
                         let mut heartbeat =
-                            pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                            pares_agens_core::heartbeat::HeartbeatRunner::new(Arc::clone(&spine_heartbeat_state))
+                                .with_pipeline_emitter(pipeline_emitter_for_heartbeat)
+                                .with_task_manager(Arc::clone(&spine_task_manager), Arc::clone(&spine_heartbeat_state));
                         heartbeat.load_config().await;
                         if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
                             let mut cfg = heartbeat.config().clone();
@@ -4313,7 +4327,7 @@ async fn main() {
                         tokio::spawn(async move {
                             heartbeat.run(heartbeat_shutdown_rx).await;
                         });
-                        info!("Heartbeat runner started (proactive behavior)");
+                        info!("Heartbeat runner started (proactive behavior + task dispatch)");
                     }
 
                     // 7. Start receiving (blocks)

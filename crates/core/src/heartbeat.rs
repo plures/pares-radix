@@ -13,6 +13,7 @@ use tokio::time::{self, Duration};
 use tracing::{debug, info, warn};
 
 use crate::event_spine::EventSpineHandle;
+use crate::spine::pipeline::PipelineEmitter;
 use crate::state::StateStore;
 use crate::task_executor::TaskDispatcher;
 use crate::task_manager::TaskManager;
@@ -83,6 +84,7 @@ pub struct HeartbeatRunner {
     config: HeartbeatConfig,
     state: Arc<dyn StateStore>,
     event_spine: Option<EventSpineHandle>,
+    pipeline_emitter: Option<PipelineEmitter>,
     task_manager: Option<Arc<TaskManager>>,
     task_dispatcher: Option<TaskDispatcher>,
 }
@@ -99,6 +101,7 @@ impl HeartbeatRunner {
             config: HeartbeatConfig::default(),
             state,
             event_spine: None,
+            pipeline_emitter: None,
             task_manager: None,
             task_dispatcher: None,
         }
@@ -111,12 +114,19 @@ impl HeartbeatRunner {
         self
     }
 
+    /// Attach a pipeline emitter for task dispatch (injects into SpinePipeline).
+    #[must_use]
+    pub fn with_pipeline_emitter(mut self, emitter: PipelineEmitter) -> Self {
+        self.pipeline_emitter = Some(emitter);
+        self
+    }
+
     /// Attach a task manager for autonomous task execution during heartbeats.
     pub fn with_task_manager(mut self, task_manager: Arc<TaskManager>, state: Arc<dyn StateStore>) -> Self {
         self.task_manager = Some(task_manager.clone());
         let mut dispatcher = TaskDispatcher::new(state);
-        if let Some(spine) = &self.event_spine {
-            dispatcher = dispatcher.with_event_spine(spine.clone());
+        if let Some(emitter) = &self.pipeline_emitter {
+            dispatcher = dispatcher.with_pipeline_emitter(emitter.clone());
         }
         self.task_dispatcher = Some(dispatcher);
         self

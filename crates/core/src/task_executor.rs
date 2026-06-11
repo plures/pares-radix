@@ -8,7 +8,7 @@
 //!
 //! This Rust module only does:
 //!   1. Receives dispatch decisions from PxBridge
-//!   2. Calls `EventSpine::emit_inbound_message()` (IO)
+//!   2. Emits `SpineEvent::Inbound` to the pipeline (IO)
 //!   3. Records execution timestamp (IO: state write)
 //!
 //! If you're tempted to add decision logic here, STOP.
@@ -18,45 +18,68 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::event_spine::EventSpineHandle;
+use crate::spine::event::SpineEvent;
+use crate::spine::pipeline::PipelineEmitter;
 use crate::state::StateStore;
 use crate::task_manager::TaskManager;
 
-/// IO boundary: dispatches task execution prompts to the agent via event spine.
+/// IO boundary: dispatches task execution prompts to the agent via spine pipeline.
 ///
 /// Does NOT decide what to execute — that's `.px`.
-/// Only performs the side-effect: injecting a message into the agent loop.
+/// Only performs the side-effect: injecting a task prompt as an Inbound event
+/// into the same SpinePipeline that handles user messages.
 pub struct TaskDispatcher {
     state: Arc<dyn StateStore>,
-    event_spine: Option<EventSpineHandle>,
+    pipeline_emitter: Option<PipelineEmitter>,
 }
 
 impl TaskDispatcher {
     pub fn new(state: Arc<dyn StateStore>) -> Self {
         Self {
             state,
-            event_spine: None,
+            pipeline_emitter: None,
         }
     }
 
     #[must_use]
-    pub fn with_event_spine(mut self, spine: EventSpineHandle) -> Self {
-        self.event_spine = Some(spine);
+    pub fn with_pipeline_emitter(mut self, emitter: PipelineEmitter) -> Self {
+        self.pipeline_emitter = Some(emitter);
         self
     }
 
-    /// IO boundary: emit a task execution prompt into the agent loop.
+    /// IO boundary: emit a task execution prompt into the spine pipeline.
     ///
-    /// Called by PxBridge after `autonomous-dispatch.px` or `task-steering.px`
-    /// produces a dispatch decision with a non-null prompt.
+    /// Called by the heartbeat after determining there's pending work.
+    /// The prompt is injected as a SpineEvent::Inbound with source "task_executor",
+    /// which flows through the same pipeline as user messages (model invoke → delivery).
     pub fn dispatch(&self, task_id: &str, prompt: &str) -> bool {
-        let Some(spine) = &self.event_spine else {
-            warn!("task_dispatcher: no event spine — cannot dispatch");
+        let Some(emitter) = &self.pipeline_emitter else {
+            warn!("task_dispatcher: no pipeline emitter — cannot dispatch");
             return false;
         };
 
-        info!(task_id = %task_id, "task_dispatcher: emitting task to agent");
-        spine.emit_inbound_message(0, "task_executor", prompt);
+        info!(task_id = %task_id, "task_dispatcher: emitting task to pipeline");
+
+        // Spawn the emit as a background task since PipelineEmitter::emit is async
+        let emitter = emitter.clone();
+        let task_id_owned = task_id.to_string();
+        let prompt_owned = prompt.to_string();
+        tokio::spawn(async move {
+            emitter
+                .emit(SpineEvent::Inbound {
+                    id: SpineEvent::new_id(),
+                    source: "task_executor".into(),
+                    chat_id: "0".into(), // internal task, no real chat
+                    sender: format!("task:{}", task_id_owned),
+                    content: prompt_owned,
+                    metadata: serde_json::json!({
+                        "task_id": task_id_owned,
+                        "autonomous": true,
+                    }),
+                })
+                .await;
+        });
+
         true
     }
 
