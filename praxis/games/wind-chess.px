@@ -4,6 +4,13 @@
 # Wind currents affect piece movement — pieces drift, captures ripple,
 # and the board breathes with a 30Hz physics tick.
 #
+# DESIGN PILLARS (fun > architecture):
+#   1. Agency over chaos — wind forecast lets you PLAN around drift
+#   2. Drift captures — wind pushing your piece into enemy = capture (cackle moments)
+#   3. Risk/reward weight — light pieces are fast+dangerous, heavy are safe+boring
+#   4. Turbulence edges — board edges punish, not instant-kill
+#   5. One gust per game — single wind-shift ability creates huge decision moments
+#
 # v3 dataflow: everything is a queue. Timers, inputs, physics state.
 # No triggers, no on_write patterns. Pure functions connected by data flow.
 #
@@ -11,15 +18,22 @@
 #
 #   game_clock (30Hz) ──────────────────────────┐
 #   player_input ─→ [validate_move] ─→ move ─→ [apply_move] ─→ board_state
-#                                                     ↑              │
-#                                                     │              ▼
-#                                                     │    [compute_wind] ─→ wind_field
-#                                                     │              │
-#                                                     │              ▼
+#        │                                            ↑              │
+#        │                                            │              ▼
+#        └─→ [use_gust] ─→ gust_event ───────────────►│    [compute_wind] ─→ wind_field
+#                                                     │         │    │
+#                                                     │         │    ▼
+#                                                     │         │  wind_forecast (next 3 turns)
+#                                                     │         │
+#                                                     │         ▼
 #                                                     └── [physics_tick] ─→ drift_events
-#                                                                    │
-#                                                                    ▼
-#                                                          [render_frame] ─→ frame_output
+#                                                              │         ↘
+#                                                              │     [check_drift_captures]
+#                                                              ▼              │
+#                                                    [render_frame] ←─────────┘
+#                                                              │
+#                                                              ▼
+#                                                        frame_output
 #
 
 # ═══════════════════════════════════════════════════════════════════
@@ -33,6 +47,8 @@
 # [parser-skip]   drift_velocity: Vec2
 # [parser-skip]   weight: float         # heavier pieces resist wind more
 # [parser-skip]   grounded: bool        # on a stable square vs mid-drift
+# [parser-skip]   in_turbulence: bool   # caught in edge turbulence zone
+# [parser-skip]   turbulence_ticks: int # how long stuck in turbulence (3 = blown off)
 # [parser-skip] 
 # [parser-skip] fact Vec2:
 # [parser-skip]   x: float
@@ -41,9 +57,13 @@
 # [parser-skip] fact Board:
 # [parser-skip]   pieces: list[Piece]
 # [parser-skip]   wind_field: WindField
+# [parser-skip]   wind_forecast: list[WindField]  # next 3 turns of wind (THE key info)
 # [parser-skip]   turn: enum(white, black)
 # [parser-skip]   phase: enum(waiting, animating, resolving)
 # [parser-skip]   tick_count: int
+# [parser-skip]   white_gust_available: bool      # one-shot wind shift ability
+# [parser-skip]   black_gust_available: bool
+# [parser-skip]   last_drift_captures: list[DriftCapture]  # for the schadenfreude
 # [parser-skip] 
 # [parser-skip] fact WindField:
 # [parser-skip]   vectors: list[Vec2]   # 8x8 grid of wind vectors
@@ -51,23 +71,50 @@
 # [parser-skip]   pattern: enum(steady, gusting, swirling, calm)
 # [parser-skip]   seed: int             # deterministic per-game
 # [parser-skip] 
+# [parser-skip] fact WindForecast:
+# [parser-skip]   upcoming: list[WindField]  # 3 future wind states
+# [parser-skip]   confidence: list[float]    # how certain (1.0 for next, 0.7, 0.4)
+# [parser-skip]   # Players see this! Planning > reacting.
+# [parser-skip] 
 # [parser-skip] fact MoveInput:
 # [parser-skip]   player: enum(white, black)
 # [parser-skip]   piece_id: int
 # [parser-skip]   target: Vec2
 # [parser-skip]   timestamp: int
 # [parser-skip] 
+# [parser-skip] fact GustInput:
+# [parser-skip]   player: enum(white, black)
+# [parser-skip]   direction: enum(north, south, east, west)  # 90° rotation target
+# [parser-skip]   # One per game. Use it or lose it.
+# [parser-skip] 
 # [parser-skip] fact DriftEvent:
 # [parser-skip]   piece_id: int
 # [parser-skip]   from_pos: Vec2
 # [parser-skip]   to_pos: Vec2
-# [parser-skip]   cause: enum(wind, capture_ripple, gravity)
+# [parser-skip]   cause: enum(wind, capture_ripple, gust, turbulence_bounce)
+# [parser-skip] 
+# [parser-skip] fact DriftCapture:
+# [parser-skip]   attacker_id: int      # piece that drifted INTO enemy
+# [parser-skip]   victim_id: int        # piece that got hit
+# [parser-skip]   attacker_kind: enum(king, queen, rook, bishop, knight, pawn)
+# [parser-skip]   victim_kind: enum(king, queen, rook, bishop, knight, pawn)
+# [parser-skip]   wind_speed: float     # how fast it was going (style points)
+# [parser-skip]   # This is where the fun lives. A pawn drifting into a queen = legendary.
+# [parser-skip] 
+# [parser-skip] fact TurbulenceZone:
+# [parser-skip]   edge: enum(north, south, east, west)
+# [parser-skip]   depth: float          # how far in from edge (default 0.5 squares)
+# [parser-skip]   bounce_strength: float # how hard it pushes back
+# [parser-skip]   # Pieces in turbulence get random bounces. 3 consecutive ticks = blown off.
+# [parser-skip]   # Creates dramatic near-misses instead of instant death.
 # [parser-skip] 
 # [parser-skip] fact Frame:
 # [parser-skip]   board: Board
 # [parser-skip]   drift_events: list[DriftEvent]
+# [parser-skip]   drift_captures: list[DriftCapture]
 # [parser-skip]   tick: int
 # [parser-skip]   interpolation_alpha: float
+# [parser-skip]   forecast_overlay: WindForecast  # rendered as arrows on board
 # [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
 # Config
@@ -77,13 +124,22 @@
 # [parser-skip]   tick_rate: duration = "33ms"        # ~30Hz
 # [parser-skip]   max_drift_speed: float = 2.0       # squares per second
 # [parser-skip]   wind_change_interval: int = 90     # ticks between pattern shifts
+# [parser-skip]   forecast_lookahead: int = 3        # how many future wind states to show
+# [parser-skip]   forecast_confidence_decay: float = 0.3  # each step less certain
+# [parser-skip]   turbulence_depth: float = 0.5      # edge zone width in squares
+# [parser-skip]   turbulence_bounce: float = 1.5     # bounce-back force
+# [parser-skip]   turbulence_death_ticks: int = 3    # consecutive ticks in zone = blown off
+# [parser-skip]   gust_rotation_degrees: int = 90    # how far a gust shifts wind
+# [parser-skip]   gust_intensity_multiplier: float = 1.8  # gust makes wind stronger briefly
+# [parser-skip]   gust_duration_ticks: int = 15      # how long gust effect lasts (~0.5s)
+# [parser-skip]   drift_capture_min_speed: float = 0.8  # minimum speed for drift to capture
 # [parser-skip]   piece_weights:
-# [parser-skip]     king: 5.0
-# [parser-skip]     queen: 3.0
-# [parser-skip]     rook: 4.0
-# [parser-skip]     bishop: 2.5
-# [parser-skip]     knight: 2.0      # lightest named piece — drifts most
-# [parser-skip]     pawn: 1.5        # lightest overall
+# [parser-skip]     king: 5.0         # barely moves in wind (safe but slow)
+# [parser-skip]     queen: 3.0        # moderate drift (versatile)
+# [parser-skip]     rook: 4.0         # heavy, anchoring presence
+# [parser-skip]     bishop: 2.5       # drifts on diagonals naturally
+# [parser-skip]     knight: 2.0       # lightest named piece — chaotic energy
+# [parser-skip]     pawn: 1.5         # lightest overall — drift missiles
 # [parser-skip]   gravity_after_capture: float = 0.3  # ripple strength
 # [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════
@@ -169,7 +225,7 @@ procedure apply_move(move: MoveInput from "validated_move", board: Board from "b
 # Wind shifts every N ticks based on a deterministic noise function.
 
 procedure compute_wind(board: Board from "board_state", tick: int from "game_clock") -> wind into "wind_field":
-  given: "Compute the wind field for the current tick"
+  given: "Compute the wind field for the current tick and generate forecast"
 
   # Deterministic wind from seed + tick
   perlin_wind {
@@ -184,12 +240,191 @@ procedure compute_wind(board: Board from "board_state", tick: int from "game_clo
   # Compute global intensity
   average_magnitude {vectors: $vectors} -> $intensity
 
+  # Generate forecast (the secret sauce for fun — lets players PLAN)
+  compute_forecast {
+    seed: board.wind_field.seed,
+    current_tick: tick,
+    lookahead: config.forecast_lookahead,
+    change_interval: config.wind_change_interval
+  } -> $forecast
+
+  # Store forecast for rendering
+  write_state {key: "wind_chess:forecast", value: $forecast}
+
   return {
     vectors: $vectors,
     intensity: $intensity,
     pattern: $pattern,
     seed: board.wind_field.seed
   }
+
+
+# ─── Gust Ability ──────────────────────────────────────────────────
+# ONE per game. The biggest decision you'll make.
+# Do you gust early to set up a drift-capture combo?
+# Or save it to blow the enemy king toward the edge?
+# Either way, your opponent SEES you still have it. Fear is a resource.
+
+procedure use_gust(input: GustInput from "gust_input", board: Board from "board_state") -> event into "gust_event":
+  given: "Player uses their one-per-game gust to rotate wind 90 degrees"
+
+  # Check if this player still has their gust
+  check_gust_available {player: input.player, board: board} -> $available
+
+  when !$available:
+    return null  # already used — too bad
+  end
+
+  # Must be this player's turn
+  when input.player != board.turn:
+    return null
+  end
+
+  # Consume the gust (mark used)
+  consume_gust {player: input.player, board: board} -> $updated_board
+
+  # Rotate wind field 90° in chosen direction + intensity spike
+  rotate_wind_field {
+    wind: board.wind_field,
+    direction: input.direction,
+    intensity_multiplier: config.gust_intensity_multiplier
+  } -> $gusted_wind
+
+  # Apply gust effect to board
+  apply_gust_to_board {
+    board: $updated_board,
+    wind: $gusted_wind,
+    duration: config.gust_duration_ticks
+  } -> $final_board
+
+  queue_push {queue: "board_state", value: $final_board}
+
+  return {
+    player: input.player,
+    direction: input.direction,
+    new_wind: $gusted_wind
+  }
+
+
+# ─── Drift Capture Detection ────────────────────────────────────
+# THE fun mechanic. Wind pushes your piece into an enemy = capture.
+# A pawn drifting sideways into a queen is peak wind-chess.
+# Minimum speed threshold prevents incidental taps from counting.
+
+procedure check_drift_captures(drift: list[DriftEvent] from "drift_events", board: Board from "board_state") -> captures into "drift_captures":
+  given: "Detect when drifting pieces collide with enemy pieces (drift = capture)"
+
+  # No drift, no captures
+  when drift == []:
+    return []
+  end
+
+  define $captures = []
+  define $drift_list = drift
+
+  # Check each drift event for collision with enemy piece
+  loop over $drift_list as event:
+    # Get the drifting piece
+    lookup_piece {pieces: board.pieces, id: event.piece_id} -> $attacker
+
+    # Is there an enemy piece at the destination?
+    find_piece_at {pieces: board.pieces, position: event.to_pos, exclude_id: event.piece_id} -> $victim
+
+    when $victim == null:
+      continue
+    end
+
+    # Must be enemy (friendly fire doesn't count)
+    when $attacker.color == $victim.color:
+      continue
+    end
+
+    # Must be going fast enough (no gentle taps)
+    compute_drift_speed {from_pos: event.from_pos, to_pos: event.to_pos, dt: config.tick_rate} -> $speed
+
+    when $speed >= config.drift_capture_min_speed:
+      # CAPTURE! Remove victim, record the glory
+      remove_piece {board: board, piece_id: $victim.id} -> $updated_board
+      queue_push {queue: "board_state", value: $updated_board}
+
+      append_to {list: $captures, value: {
+        attacker_id: $attacker.id,
+        victim_id: $victim.id,
+        attacker_kind: $attacker.kind,
+        victim_kind: $victim.kind,
+        wind_speed: $speed
+      }}
+    end
+  end
+
+  return $captures
+
+
+# ─── Turbulence Zones ────────────────────────────────────────────
+# Board edges are NOT instant death. They're turbulence.
+# Piece enters edge zone → random bouncing for up to 3 ticks.
+# If still in zone after 3 → blown off. Creates near-misses.
+# Players get a chance to rescue (move piece inward on their turn).
+# The tension of watching your piece bounce at the edge = *chef's kiss*
+
+procedure apply_turbulence(board: Board from "board_state", tick: int from "game_clock") -> drift into "drift_events":
+  given: "Apply turbulence bouncing to pieces in edge zones"
+
+  define $turbulence_events = []
+  define $blown_off = []
+  define $all_pieces = board.pieces
+
+  # Check each piece for edge proximity
+  loop over $all_pieces as piece:
+    check_in_turbulence_zone {
+      position: piece.position,
+      board_size: 8,
+      zone_depth: config.turbulence_depth
+    } -> $in_zone
+
+    when !$in_zone:
+      # Reset turbulence counter if piece escaped
+      when piece.in_turbulence:
+        reset_turbulence {piece_id: piece.id, board: board} -> $_
+      end
+      continue
+    end
+
+    # Piece IS in turbulence zone
+    increment_turbulence {piece_id: piece.id, board: board} -> $ticks_in_zone
+
+    when $ticks_in_zone >= config.turbulence_death_ticks:
+      # Blown off! (the dramatic moment)
+      append_to {list: $blown_off, value: piece}
+      remove_piece {board: board, piece_id: piece.id} -> $updated
+      queue_push {queue: "board_state", value: $updated}
+      continue
+    end
+
+    # Still alive — random bounce back toward center
+    compute_turbulence_bounce {
+      piece: piece,
+      board_size: 8,
+      bounce_strength: config.turbulence_bounce
+    } -> $bounce
+
+    apply_force {piece_id: piece.id, force: $bounce, board: board} -> $_
+
+    append_to {list: $turbulence_events, value: {
+      piece_id: piece.id,
+      from_pos: piece.position,
+      to_pos: $bounce.target,
+      cause: "turbulence_bounce"
+    }}
+  end
+
+  # Check if a blown-off piece was a king (game over!)
+  check_king_blown {blown_pieces: $blown_off} -> $king_lost
+  when $king_lost != null:
+    queue_push {queue: "game_end", value: {loser: $king_lost.color, reason: "king_blown_off_board"}}
+  end
+
+  return $turbulence_events
 
 
 # ─── Physics Tick ────────────────────────────────────────────────
@@ -237,17 +472,22 @@ procedure physics_tick(board: Board from "board_state", wind: WindField from "wi
 # Takes board state + drift events, produces a renderable frame.
 # The inner-space canvas consumes these frames.
 
-procedure render_frame(board: Board from "board_state", drift: list[DriftEvent] from "drift_events", tick: int from "game_clock") -> frame into "frame_output":
-  given: "Compose a renderable frame from board state and drift events"
+procedure render_frame(board: Board from "board_state", drift: list[DriftEvent] from "drift_events", captures: list[DriftCapture] from "drift_captures", tick: int from "game_clock") -> frame into "frame_output":
+  given: "Compose a renderable frame with forecast overlay and drift capture highlights"
 
   # Compute interpolation alpha for smooth animation
   compute_alpha {tick: tick, phase: board.phase} -> $alpha
 
+  # Get current forecast for overlay rendering
+  read_state {key: "wind_chess:forecast"} -> $forecast
+
   return {
     board: board,
     drift_events: drift,
+    drift_captures: captures,
     tick: tick,
-    interpolation_alpha: $alpha
+    interpolation_alpha: $alpha,
+    forecast_overlay: $forecast
   }
 
 
@@ -275,7 +515,7 @@ procedure tick_counter() -> tick into "game_clock":
 # ═══════════════════════════════════════════════════════════════════
 
 procedure start_game(request: string from "game_start") -> board into "board_state":
-  given: "Initialize a new wind-chess game with starting positions and random wind seed"
+  given: "Initialize a new wind-chess game with starting positions, wind seed, and gust abilities"
 
   # Standard chess starting positions
   init_standard_board {} -> $pieces
@@ -286,27 +526,42 @@ procedure start_game(request: string from "game_start") -> board into "board_sta
   # Initial wind (calm at start, builds over first 30 ticks)
   init_wind {seed: $seed, intensity: 0.0, pattern: "calm"} -> $wind
 
+  # Pre-compute forecast so players can plan from turn 1
+  compute_forecast {
+    seed: $seed,
+    current_tick: 0,
+    lookahead: config.forecast_lookahead,
+    change_interval: config.wind_change_interval
+  } -> $initial_forecast
+
   # Mark game active
   write_state {key: "wind_chess:active", value: true}
   write_state {key: "wind_chess:tick", value: 0}
+  write_state {key: "wind_chess:forecast", value: $initial_forecast}
 
   return {
     pieces: $pieces,
     wind_field: $wind,
+    wind_forecast: $initial_forecast,
     turn: "white",
     phase: "waiting",
-    tick_count: 0
+    tick_count: 0,
+    white_gust_available: true,
+    black_gust_available: true,
+    last_drift_captures: []
   }
 
 procedure end_game(board: Board from "board_state") -> result into "game_result":
-  given: "Check for game-ending conditions (checkmate, stalemate, king blown off board)"
+  given: "Check for game-ending conditions (checkmate, stalemate, king blown off via turbulence)"
 
-  # King blown off board = loss (unique to wind-chess!)
-  check_king_out_of_bounds {pieces: board.pieces} -> $blown
+  # King blown off board via turbulence = loss (the signature wind-chess moment)
+  # Note: this is now handled by apply_turbulence pushing to "game_end" queue
+  # but we also check here for the case where a drift-capture took the king
+  check_king_captured {captures: board.last_drift_captures} -> $king_captured
 
-  when $blown != null:
+  when $king_captured != null:
     write_state {key: "wind_chess:active", value: false}
-    return {winner: opponent($blown), reason: "king_blown_off_board"}
+    return {winner: opponent($king_captured), reason: "king_drift_captured"}
   end
 
   # Standard checkmate
@@ -340,12 +595,13 @@ procedure end_game(board: Board from "board_state") -> result into "game_result"
 # [parser-skip]       assert magnitude(piece.drift_velocity) <= config.max_drift_speed
 # [parser-skip] 
 # [parser-skip] constraint board_bounds:
-# [parser-skip]   severity: error
-# [parser-skip]   description: "Pieces must remain within 0..8 grid (except king-blown-off win condition)"
+# [parser-skip]   severity: warning  # NOT error — turbulence zone allows brief edge presence
+# [parser-skip]   description: "Pieces in turbulence zone get warnings, not instant removal"
 # [parser-skip]   check: |
-# [parser-skip]     for piece in board.pieces where piece.kind != "king":
-# [parser-skip]       assert piece.position.x >= 0.0 and piece.position.x < 8.0
-# [parser-skip]       assert piece.position.y >= 0.0 and piece.position.y < 8.0
+# [parser-skip]     for piece in board.pieces:
+# [parser-skip]       when not in_turbulence_zone(piece.position):
+# [parser-skip]         assert piece.position.x >= 0.0 and piece.position.x < 8.0
+# [parser-skip]         assert piece.position.y >= 0.0 and piece.position.y < 8.0
 # [parser-skip] 
 # [parser-skip] constraint deterministic_wind:
 # [parser-skip]   severity: error
@@ -363,4 +619,35 @@ procedure end_game(board: Board from "board_state") -> result into "game_result"
 # [parser-skip]       for p2 in board.pieces:
 # [parser-skip]         when p1.weight > p2.weight and same_wind(p1, p2):
 # [parser-skip]           assert magnitude(p1.drift_velocity) <= magnitude(p2.drift_velocity)
+# [parser-skip] 
+# [parser-skip] constraint gust_once_only:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Each player can only use their gust ability once per game"
+# [parser-skip]   check: |
+# [parser-skip]     # Once consumed, cannot be restored
+# [parser-skip]     when event == "gust_consumed":
+# [parser-skip]       assert previous_state.gust_available == true
+# [parser-skip]       assert current_state.gust_available == false
+# [parser-skip] 
+# [parser-skip] constraint drift_capture_speed_threshold:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Drift captures only count above minimum speed (no gentle taps)"
+# [parser-skip]   check: |
+# [parser-skip]     for capture in board.last_drift_captures:
+# [parser-skip]       assert capture.wind_speed >= config.drift_capture_min_speed
+# [parser-skip] 
+# [parser-skip] constraint turbulence_fairness:
+# [parser-skip]   severity: error
+# [parser-skip]   description: "Pieces always get 3 full ticks in turbulence before removal"
+# [parser-skip]   check: |
+# [parser-skip]     for piece in removed_pieces:
+# [parser-skip]       assert piece.turbulence_ticks >= config.turbulence_death_ticks
+# [parser-skip] 
+# [parser-skip] constraint forecast_accuracy:
+# [parser-skip]   severity: warning
+# [parser-skip]   description: "Forecast for next turn must be 100% accurate (builds trust)"
+# [parser-skip]   check: |
+# [parser-skip]     let predicted = forecast.upcoming[0]
+# [parser-skip]     let actual = current_wind_field
+# [parser-skip]     assert predicted == actual  # next-turn forecast is a promise
 # [parser-skip] 

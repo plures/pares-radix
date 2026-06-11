@@ -262,12 +262,12 @@ procedure npc_behavior(tick: int from "ambient_clock", world: WorldState from "w
   end
 
   # Run behavior for each NPC
-  loop over $npcs as npc -> $updates:
+  loop over $npcs as npc:
     evaluate_npc_state {entity: npc, world: world} -> $decision
     apply_npc_decision {entity: npc, decision: $decision} -> $updated_npc
   end
 
-  return $updates
+  return $npcs
 
 
 # ─── Scene Composition ───────────────────────────────────────────
