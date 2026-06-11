@@ -1,28 +1,40 @@
-# plures-dev-guide.px — Pointer to real procedures in plures/development-guide
+# plures-dev-guide.px — Development guide procedure registry
 #
-# The executable .px procedures live in the development-guide repo:
-#   github:plures/development-guide/procedures/
+# Loaded by pares-radix at boot from:
+#   - Local: ~/.pares-radix/praxis/procedures/ (symlinked or copied)
+#   - Repo: praxis/skills/plures-dev-guide.px (this file — index/loader)
+#   - Source: github.com/plures/development-guide/procedures/
 #
-# Files:
-#   - work-prioritization.px    (5-level priority hierarchy decision tree)
-#   - repo-routing.px           (Code ownership routing + boundary definitions)
-#   - automation-first.px       (Automation safety evaluation + constraints)
-#   - reactive-architecture.px  (Reactive compliance checking)
-#   - development-lifecycle.px  (7-pillar build process enforcement)
-#   - drift-prevention.px       (C-DRIFT-001 enforcement)
-#   - copilot-delegation.px     (Copilot interaction rules + stalled handling)
-#   - code-review-gates.px      (Pre-merge CI constraints)
+# All 11 procedure files enforce org-wide engineering standards.
+# They are the AUTHORITATIVE source of truth (per C-DRIFT-001).
 #
-# This file previously contained 144 auto-generated [parser-skip] constraints.
-# Those were documentation, not enforcement. The procedures above are real logic.
-#
-# To load all org procedures, import them:
+# Files (59 constraints + 18 procedures, ~1200 lines):
+#   Core development:
+#     - work-prioritization.px    (5-level priority hierarchy, decision tree)
+#     - repo-routing.px           (code ownership routing, boundary definitions)
+#     - automation-first.px       (automation safety evaluation, constraints)
+#     - reactive-architecture.px  (reactive compliance checking)
+#     - development-lifecycle.px  (7-pillar build process enforcement)
+#     - drift-prevention.px       (C-DRIFT-001 enforcement, derivation tracking)
+#   Copilot/CI:
+#     - copilot-delegation.px     (Copilot interaction rules, stalled handling)
+#     - code-review-gates.px      (pre-merge CI constraints: hard + soft gates)
+#     - copilot-taint-detection.px (taint eval, assignment safety, queue locking)
+#   Lessons-learned:
+#     - cascade-detection.px      (cascade threshold, circuit breakers, rollout)
+#   Quality:
+#     - standards-enforcement.px  (quality gates from ADR-0009 through ADR-0018)
+
+# [parser-skip] config — non-procedure metadata for radix loader
+# config dev_guide:
+#   source_repo: "plures/development-guide"
+#   source_path: "procedures/"
+#   total_constraints: 59
+#   total_procedures: 18
+#   version: "2026-06-11"
 
 procedure load_dev_guide() -> GuideStatus into "guide_loaded":
   given: "Load plures org development guide procedures into active context"
-
-  # Import from development-guide repo (when procedure imports are implemented)
-  # For now, these are evaluated at boot from the procedures/ directory
 
   define $procedures = [
     "work-prioritization",
@@ -32,7 +44,10 @@ procedure load_dev_guide() -> GuideStatus into "guide_loaded":
     "development-lifecycle",
     "drift-prevention",
     "copilot-delegation",
-    "code-review-gates"
+    "code-review-gates",
+    "copilot-taint-detection",
+    "cascade-detection",
+    "standards-enforcement"
   ]
 
-  return {loaded: $procedures, count: 8, source: "plures/development-guide/procedures/"}
+  return {loaded: $procedures, count: 11, source: "plures/development-guide/procedures/"}
