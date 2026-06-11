@@ -28,6 +28,7 @@ impl SpineProcedure for ResponseRouter {
             chat_id,
             content,
             tool_calls,
+            metadata,
             ..
         } = event
         else {
@@ -48,7 +49,7 @@ impl SpineProcedure for ResponseRouter {
                 channel: source.clone(),
                 chat_id: chat_id.clone(),
                 content: content.clone(),
-                metadata: serde_json::json!({}),
+                metadata: metadata.clone(),
             })
             .await;
     }

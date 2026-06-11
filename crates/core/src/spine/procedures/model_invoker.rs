@@ -251,7 +251,7 @@ impl SpineProcedure for ModelInvoker {
                         content: response_content,
                         model: completion.model.unwrap_or_else(|| "unknown".into()),
                         tool_calls,
-                        metadata: serde_json::json!({}),
+                        metadata: metadata.clone(),
                     })
                     .await;
             }
