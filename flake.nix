@@ -68,6 +68,14 @@ tar.extractall(os.environ['out'] + '/lib')
         ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
         FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
 
+        postInstall = ''
+          # Install praxis procedures and plugins alongside the binary
+          mkdir -p $out/share/pares-radix
+          cp -r ${pkgs.lib.cleanSource ./praxis} $out/share/pares-radix/praxis || true
+          cp -r ${pkgs.lib.cleanSource ./plugins} $out/share/pares-radix/plugins || true
+          cp -r ${pkgs.lib.cleanSource ./config} $out/share/pares-radix/config || true
+        '';
+
         meta = {
           description = "Pares Radix CLI — headless AI agent daemon";
           homepage = "https://github.com/plures/pares-radix";
@@ -277,6 +285,22 @@ tar.extractall(os.environ['out'] + '/lib')
                 RUST_LOG = "info";
                 HOME = cfg.dataDir;
               };
+
+              preStart = ''
+                # Sync praxis procedures and plugins from package to data dir
+                pkg_share="${cfg.package}/share/pares-radix"
+                if [ -d "$pkg_share/praxis" ]; then
+                  rm -rf "${cfg.dataDir}/praxis"
+                  cp -r "$pkg_share/praxis" "${cfg.dataDir}/praxis"
+                fi
+                if [ -d "$pkg_share/plugins" ]; then
+                  rm -rf "${cfg.dataDir}/plugins"
+                  cp -r "$pkg_share/plugins" "${cfg.dataDir}/plugins"
+                fi
+                if [ -d "$pkg_share/config" ]; then
+                  cp -rn "$pkg_share/config/." "${cfg.dataDir}/" 2>/dev/null || true
+                fi
+              '';
 
               serviceConfig = {
                 Type = "notify";

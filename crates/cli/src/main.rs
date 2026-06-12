@@ -4207,9 +4207,17 @@ async fn main() {
                 .register(Arc::new(ToolExecutor::new(spine_tool_dispatcher)))
                 .await;
             pipeline.register(Arc::new(ResponseRouter)).await;
-            // Note: CommitmentDetector removed — task creation is now agent-driven
-            // via the task_create tool, not heuristic regex scanning.
-            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router");
+            // CommitmentDetector: fallback task creation for when the model commits to work
+            // without explicitly calling task_create. Only fires on DeliveryRequest (text-only
+            // responses — tool_call responses are handled by ToolExecutor and never reach here).
+            pipeline
+                .register(Arc::new(
+                    pares_agens_core::spine::procedures::commitment_detector::CommitmentDetector::new(
+                        Arc::clone(&spine_task_manager),
+                    ),
+                ))
+                .await;
+            info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router, commitment_detector");
 
             // 4.5. Load .px procedures from praxis/procedures/
             {
@@ -4990,6 +4998,46 @@ async fn main() {
                 }
             }
 
+            // Auto-discover and load plugins from plugins/ directory
+            {
+                let plugins_dir = std::path::Path::new("plugins");
+                if plugins_dir.is_dir() {
+                    if let Ok(entries) = std::fs::read_dir(plugins_dir) {
+                        for entry in entries.flatten() {
+                            let manifest_path = entry.path().join("manifest.toml");
+                            if manifest_path.is_file() {
+                                match std::fs::read_to_string(&manifest_path) {
+                                    Ok(toml_str) => {
+                                        match plugin_runtime.install_from_toml(&toml_str).await {
+                                            Ok(name) => {
+                                                tracing::info!(plugin = %name, path = %manifest_path.display(), "auto-loaded plugin from directory");
+                                                // Persist to PluresDB so it survives restarts even without the directory
+                                                if let Some(manifest) = plugin_runtime.get(&name).await {
+                                                    if let Ok(manifest_json) = serde_json::to_value(&manifest) {
+                                                        let _ = plugin_executor.persist_manifest(&name, &manifest_json);
+                                                    }
+                                                }
+                                            }
+                                            Err(pares_agens_core::plugins::PluginError::AlreadyInstalled(_)) => {
+                                                // Already loaded from PluresDB persistence — skip
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(path = %manifest_path.display(), error = %e, "failed to auto-load plugin");
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(path = %manifest_path.display(), error = %e, "failed to read plugin manifest");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let loaded = plugin_runtime.list().await;
+                tracing::info!(count = loaded.len(), "plugin framework ready");
+            }
+
             // Register plugin CRUD procedures
             for tool_name in &[
                 "plugin_create",
@@ -5201,6 +5249,7 @@ async fn main() {
 
             // Initialize the event spine if enabled
             let mut adapter = adapter;
+            let mut heartbeat_spine_handle: Option<pares_agens_core::event_spine::EventSpineHandle> = None;
             if !no_event_spine {
                 let crdt = store.crdt_store();
                 let spine = pares_agens_core::event_spine::EventSpine::new(crdt, "pares-radix");
@@ -5209,6 +5258,13 @@ async fn main() {
                 let handle = pares_agens_core::event_spine::EventSpineHandle::from_arc_store(
                     store.crdt_store_arc(),
                     "pares-radix",
+                );
+                // Create a second handle for the heartbeat
+                heartbeat_spine_handle = Some(
+                    pares_agens_core::event_spine::EventSpineHandle::from_arc_store(
+                        store.crdt_store_arc(),
+                        "pares-radix-heartbeat",
+                    ),
                 );
                 adapter.event_spine = Some(handle);
                 tracing::info!("AgensRuntime event spine initialized with core procedures");
@@ -5279,7 +5335,11 @@ async fn main() {
                 let heartbeat_store: Arc<dyn pares_agens_core::state::StateStore> =
                     Arc::new(pares_agens_core::state::InMemoryStateStore::default());
                 let mut heartbeat =
-                    pares_agens_core::heartbeat::HeartbeatRunner::new(heartbeat_store);
+                    pares_agens_core::heartbeat::HeartbeatRunner::new(Arc::clone(&heartbeat_store))
+                        .with_task_manager(Arc::clone(&task_manager), Arc::clone(&heartbeat_store));
+                if let Some(spine_handle) = heartbeat_spine_handle {
+                    heartbeat = heartbeat.with_event_spine(spine_handle);
+                }
                 heartbeat.load_config().await;
                 // Disable quiet hours if env var says so
                 if std::env::var("PARES_HEARTBEAT_NO_QUIET").is_ok() {
@@ -5291,11 +5351,61 @@ async fn main() {
                 tokio::spawn(async move {
                     heartbeat.run(shutdown_rx).await;
                 });
-                tracing::info!("Heartbeat runner started");
+                tracing::info!("Heartbeat runner started (with task manager + event spine)");
             }
 
             let memory_monitor = spawn_memory_monitor();
             let watchdog = spawn_systemd_watchdog();
+
+            // Spawn autonomous task dispatch loop
+            // This runs alongside the adapter and processes pending tasks
+            // by calling the agent directly (no Telegram round-trip needed).
+            let task_dispatch_shutdown = shutdown_tx.subscribe();
+            {
+                let agent_for_tasks = Arc::clone(&agent_handle);
+                let tm_for_dispatch = Arc::clone(&task_manager);
+                tokio::spawn(async move {
+                    let mut shutdown = task_dispatch_shutdown;
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                    interval.tick().await; // skip first immediate tick
+                    loop {
+                        tokio::select! {
+                            _ = interval.tick() => {
+                                let tasks = tm_for_dispatch.evaluable_tasks();
+                                if let Some(task) = tasks.first() {
+                                    let prompt = format!(
+                                        "[autonomous-task] Execute this pending task:\nTask: {}\nID: {}\nPriority: {}\n\nWork on this task using available tools. When complete, call task_complete.",
+                                        task.description, task.id, task.priority
+                                    );
+                                    let event = pares_agens_core::event::Event::Message {
+                                        id: format!("task-dispatch-{}", task.id),
+                                        channel: "internal".into(),
+                                        content: prompt,
+                                        sender: "task_dispatcher".into(),
+                                    };
+                                    let agent = agent_for_tasks.read().await.clone();
+                                    if let Some(response) = agent.handle_event(event).await {
+                                        if let pares_agens_core::event::Event::Message { content, .. } = &response {
+                                            tracing::info!(
+                                                task_id = %task.id,
+                                                response_len = content.len(),
+                                                "autonomous task dispatched and processed"
+                                            );
+                                        }
+                                    } else {
+                                        tracing::debug!(task_id = %task.id, "task dispatch produced no response");
+                                    }
+                                }
+                            }
+                            _ = shutdown.changed() => {
+                                tracing::info!("task dispatch loop shutting down");
+                                break;
+                            }
+                        }
+                    }
+                });
+                tracing::info!("Autonomous task dispatch loop started (60s interval)");
+            }
 
             let adapter_result =
                 run_adapter_with_recovery(&adapter, Arc::clone(&agent_handle), tool_trace_store)
