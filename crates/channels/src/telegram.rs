@@ -1339,14 +1339,18 @@ impl ChannelAdapter for TelegramAdapter {
                                 } else {
                                     "Cerebellum: heuristic"
                                 };
+                                let hostname = std::fs::read_to_string("/etc/hostname")
+                                    .unwrap_or_else(|_| "unknown".into())
+                                    .trim().to_string();
                                 let status = format!(
-                                    "Pares Radix v{version} ({commit})\n\
-                                     PID: {} | RSS: {memory} | Uptime: {uptime}\n\
-                                     Model: {model_line}\n\
-                                     {cerebellum_line}\n\
-                                     Event Spine: {event_spine_status}\n\
-                                     {plugin_line}\n\
-                                     PluresDB: {home}/.pares-radix/memory/",
+                                    "🤖 <b>Pares Radix v{version}</b> (<code>{commit}</code>)\n\
+                                     ⏱️ Uptime: {uptime} · PID: {} · RSS: {memory}\n\
+                                     🧠 Model: <code>{model_line}</code>\n\
+                                     🔑 {cerebellum_line}\n\
+                                     ⚡️ Event Spine: {event_spine_status}\n\
+                                     🔌 {plugin_line}\n\
+                                     🗄 PluresDB: <code>{home}/.pares-radix/memory/</code>\n\
+                                     🖥 Host: <code>{hostname}</code>",
                                     std::process::id(),
                                 );
                                 let full_status = if let Some(health) = health_section {
