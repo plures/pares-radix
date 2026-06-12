@@ -5357,45 +5357,106 @@ async fn main() {
             let memory_monitor = spawn_memory_monitor();
             let watchdog = spawn_systemd_watchdog();
 
-            // Spawn autonomous task dispatch loop
-            // This runs alongside the adapter and processes pending tasks
-            // by calling the agent directly (no Telegram round-trip needed).
+            // Spawn autonomous task dispatch loop (IO boundary for autonomous-dispatch.px)
+            //
+            // Decision logic lives in praxis/procedures/autonomous-dispatch.px.
+            // This Rust code is the IO boundary ONLY: it reads the dispatch decision
+            // and performs the side-effect (inject event into agent).
+            //
+            // TODO: Route through PxBridge.call("evaluate_dispatch", {tick}) once
+            // PxBridge is available in the serve path. Until then, this is a minimal
+            // Rust fallback that mirrors the .px contracts (cooldown, max_attempts,
+            // priority sort).
+            //
+            // Channel-independent: calls agent.handle_event() directly.
+            // Works regardless of which channel adapter (Telegram, Discord, stdin)
+            // is running alongside.
             let task_dispatch_shutdown = shutdown_tx.subscribe();
             {
+                const DISPATCH_INTERVAL_SECS: u64 = 60;
+                const MAX_ATTEMPTS: u32 = 5;
+                const COOLDOWN_MS: u64 = 60_000;
+
                 let agent_for_tasks = Arc::clone(&agent_handle);
                 let tm_for_dispatch = Arc::clone(&task_manager);
                 tokio::spawn(async move {
                     let mut shutdown = task_dispatch_shutdown;
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                    let mut interval = tokio::time::interval(
+                        std::time::Duration::from_secs(DISPATCH_INTERVAL_SECS),
+                    );
                     interval.tick().await; // skip first immediate tick
+                    // Track last dispatch time per task (mirrors .px cooldown contract)
+                    let mut last_dispatched: std::collections::HashMap<String, std::time::Instant> =
+                        std::collections::HashMap::new();
+
                     loop {
                         tokio::select! {
                             _ = interval.tick() => {
-                                let tasks = tm_for_dispatch.evaluable_tasks();
-                                if let Some(task) = tasks.first() {
-                                    let prompt = format!(
-                                        "[autonomous-task] Execute this pending task:\nTask: {}\nID: {}\nPriority: {}\n\nWork on this task using available tools. When complete, call task_complete.",
-                                        task.description, task.id, task.priority
-                                    );
-                                    let event = pares_agens_core::event::Event::Message {
-                                        id: format!("task-dispatch-{}", task.id),
-                                        channel: "internal".into(),
-                                        content: prompt,
-                                        sender: "task_dispatcher".into(),
-                                    };
-                                    let agent = agent_for_tasks.read().await.clone();
-                                    if let Some(response) = agent.handle_event(event).await {
-                                        if let pares_agens_core::event::Event::Message { content, .. } = &response {
-                                            tracing::info!(
-                                                task_id = %task.id,
-                                                response_len = content.len(),
-                                                "autonomous task dispatched and processed"
-                                            );
-                                        }
-                                    } else {
-                                        tracing::debug!(task_id = %task.id, "task dispatch produced no response");
-                                    }
+                                let mut tasks = tm_for_dispatch.evaluable_tasks();
+                                if tasks.is_empty() {
+                                    continue;
                                 }
+
+                                // Filter: cooldown (mirrors .px filter_ready_tasks)
+                                let now = std::time::Instant::now();
+                                tasks.retain(|t| {
+                                    last_dispatched.get(&t.id).map_or(true, |last| {
+                                        now.duration_since(*last).as_millis() as u64 > COOLDOWN_MS
+                                    })
+                                });
+
+                                // Filter: max attempts (mirrors .px filter_retriable)
+                                tasks.retain(|t| t.attempts < MAX_ATTEMPTS);
+
+                                if tasks.is_empty() {
+                                    continue;
+                                }
+
+                                // Select: highest priority (lowest number), then oldest
+                                // (mirrors .px select_best_task)
+                                tasks.sort_by(|a, b| {
+                                    a.priority.cmp(&b.priority)
+                                        .then(a.created_at.cmp(&b.created_at))
+                                });
+
+                                let task = &tasks[0];
+
+                                // Build prompt (mirrors .px build_task_prompt)
+                                let prompt = format!(
+                                    "[autonomous-task] Execute this task:\n\
+                                    Task: {}\n\
+                                    ID: {}\n\
+                                    Priority: {}\n\
+                                    Attempts: {}\n\n\
+                                    Work on this task using available tools. \
+                                    When complete, call task_complete.",
+                                    task.description, task.id, task.priority, task.attempts
+                                );
+
+                                // IO boundary: inject as internal event (channel-agnostic)
+                                let event = pares_agens_core::event::Event::Message {
+                                    id: format!("task-dispatch-{}", task.id),
+                                    channel: "internal".into(),
+                                    content: prompt,
+                                    sender: "task_dispatcher".into(),
+                                };
+
+                                let task_id = task.id.clone();
+                                let agent = agent_for_tasks.read().await.clone();
+                                if let Some(response) = agent.handle_event(event).await {
+                                    if let pares_agens_core::event::Event::Message { content, .. } = &response {
+                                        tracing::info!(
+                                            task_id = %task_id,
+                                            response_len = content.len(),
+                                            "autonomous task dispatched and processed"
+                                        );
+                                    }
+                                } else {
+                                    tracing::debug!(task_id = %task_id, "task dispatch produced no response");
+                                }
+
+                                // Record dispatch time (cooldown tracking)
+                                last_dispatched.insert(task_id, std::time::Instant::now());
                             }
                             _ = shutdown.changed() => {
                                 tracing::info!("task dispatch loop shutting down");
@@ -5404,7 +5465,7 @@ async fn main() {
                         }
                     }
                 });
-                tracing::info!("Autonomous task dispatch loop started (60s interval)");
+                tracing::info!("Autonomous task dispatch loop started (channel-independent, 60s interval)");
             }
 
             let adapter_result =
