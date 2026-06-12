@@ -20,6 +20,8 @@ struct Signals {
     decomposable: bool,
     /// Whether the message is pure noise (bare ack with no actionable content).
     noise: bool,
+    /// Whether the message is conversational/social (greetings, check-ins).
+    conversational: bool,
 }
 
 /// Decide routing for an event.
@@ -42,6 +44,11 @@ fn decide_message(content: &str, learned_context: &str, config: &CerebellumConfi
     // Pure noise gets dropped
     if signals.noise {
         return Route::Drop;
+    }
+
+    // Conversational/social messages go straight to conscious — never delegate
+    if signals.conversational && !signals.code {
+        return Route::Conscious;
     }
 
     // Short commands go to conscious
@@ -134,6 +141,35 @@ fn analyze(content: &str) -> Signals {
     ];
     let noise = noise_patterns.iter().any(|p| lower.trim() == *p);
 
+    // Conversational / social messages that should NOT be delegated or decomposed.
+    let conversational_keywords = [
+        "hello",
+        "hi ",
+        "hey ",
+        "hey,",
+        "howdy",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "what's up",
+        "whats up",
+        "sup",
+        "yo ",
+        "greetings",
+        "say hello",
+        "loud and clear",
+        "nice to meet",
+        "can you hear me",
+        "are you there",
+        "are you online",
+        "you around",
+        "checking in",
+    ];
+    let conversational = conversational_keywords.iter().any(|kw| lower.contains(kw))
+        || lower.trim() == "hi"
+        || lower.trim() == "hey"
+        || lower.trim() == "yo";
+
     let simple_patterns = [
         "yes",
         "no",
@@ -181,6 +217,7 @@ fn analyze(content: &str) -> Signals {
         research,
         decomposable,
         noise,
+        conversational,
     }
 }
 
