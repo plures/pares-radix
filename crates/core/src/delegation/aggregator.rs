@@ -44,17 +44,19 @@ impl ResultAggregator {
 
     /// Merge `results` into an [`AggregatedResult`].
     ///
-    /// Successful results are concatenated under per-agent Markdown headings.
-    /// Failed results are recorded but do not contribute to the content.
+    /// When a single agent succeeds, its output is returned verbatim.
+    /// When multiple agents succeed, their outputs are concatenated under
+    /// per-agent Markdown headings.  Failed results are recorded but do not
+    /// contribute to the content.
     pub fn aggregate(&self, results: Vec<SubTaskResult>) -> AggregatedResult {
-        let mut sections: Vec<String> = Vec::new();
+        let mut sections: Vec<(String, String)> = Vec::new();
         let mut succeeded: Vec<String> = Vec::new();
         let mut failed: Vec<(String, String)> = Vec::new();
 
         for result in results {
             match result.output {
                 Ok(output) if !output.trim().is_empty() => {
-                    sections.push(format!("## {}\n\n{}", result.agent_name, output.trim()));
+                    sections.push((result.agent_name.clone(), output.trim().to_string()));
                     succeeded.push(result.agent_name);
                 }
                 Ok(_) => {
@@ -68,8 +70,20 @@ impl ResultAggregator {
             }
         }
 
+        // Single agent: return output verbatim without a heading.
+        // Multiple agents: use ## headings to separate sections.
+        let content = if sections.len() == 1 {
+            sections.into_iter().next().unwrap().1
+        } else {
+            sections
+                .into_iter()
+                .map(|(name, output)| format!("## {name}\n\n{output}"))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        };
+
         AggregatedResult {
-            content: sections.join("\n\n"),
+            content,
             succeeded,
             failed,
         }
@@ -124,6 +138,19 @@ mod tests {
             result.failed,
             vec![("coder".to_string(), "model timeout".to_string())]
         );
+        // Single successful agent: no heading prefix
+        assert_eq!(result.content, "some output");
+    }
+
+    #[test]
+    fn aggregate_single_agent_no_heading() {
+        let agg = ResultAggregator::new();
+        let result = agg.aggregate(vec![ok("analyst", "Analysis complete.")]);
+        assert!(result.all_succeeded());
+        assert!(result.has_output());
+        // Single agent output should be verbatim, no ## heading
+        assert!(!result.content.contains("## analyst"));
+        assert_eq!(result.content, "Analysis complete.");
     }
 
     #[test]
