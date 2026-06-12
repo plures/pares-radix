@@ -50,7 +50,33 @@ impl GroupContextBuffer {
     /// Format recent context for prompt injection.
     ///
     /// Returns `None` if there are no buffered messages for this chat.
-    pub fn format_context(&self, chat_id: i64) -> Option<String> {
+    /// Annotates messages with directionality to help the model distinguish
+    /// background conversation from messages directed at the bot.
+    pub fn format_context(&self, chat_id: i64, bot_username: Option<&str>) -> Option<String> {
+        let buf = self.buffers.get(&chat_id)?;
+        if buf.is_empty() {
+            return None;
+        }
+        let mut lines = Vec::with_capacity(buf.len() + 3);
+        lines.push("[Group context — these are recent messages for reference only. Only respond to the triggered message below, not to the context messages.]".to_string());
+        for m in buf.iter() {
+            let direction = if let Some(bot_name) = bot_username {
+                if m.text.contains(&format!("@{bot_name}")) {
+                    " (directed at you)"
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+            lines.push(format!("[{}]{}: {}", m.sender, direction, m.text));
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// Legacy format without bot awareness.
+    #[allow(dead_code)]
+    pub fn format_context_simple(&self, chat_id: i64) -> Option<String> {
         let buf = self.buffers.get(&chat_id)?;
         if buf.is_empty() {
             return None;
@@ -94,7 +120,7 @@ mod tests {
             },
         );
 
-        let ctx = buf.format_context(1).unwrap();
+        let ctx = buf.format_context(1, None).unwrap();
         assert!(ctx.contains("[Alice]: hello"));
         assert!(ctx.contains("[Bob]: hi"));
     }
@@ -127,7 +153,7 @@ mod tests {
             },
         );
 
-        let ctx = buf.format_context(1).unwrap();
+        let ctx = buf.format_context(1, None).unwrap();
         assert!(!ctx.contains("[A]: 1"), "oldest should be evicted");
         assert!(ctx.contains("[B]: 2"));
         assert!(ctx.contains("[C]: 3"));
@@ -136,6 +162,32 @@ mod tests {
     #[test]
     fn empty_chat_returns_none() {
         let buf = GroupContextBuffer::new(10);
-        assert!(buf.format_context(999).is_none());
+                assert!(buf.format_context(999, None).is_none());
+    }
+
+    #[test]
+    fn directionality_annotation() {
+        let mut buf = GroupContextBuffer::new(5);
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "Human".into(),
+                text: "@mybot do something".into(),
+                timestamp: 100,
+            },
+        );
+        buf.push(
+            1,
+            GroupMessage {
+                sender: "OtherBot".into(),
+                text: "just chatting".into(),
+                timestamp: 101,
+            },
+        );
+
+        let ctx = buf.format_context(1, Some("mybot")).unwrap();
+        assert!(ctx.contains("(directed at you)"));
+        assert!(ctx.contains("[OtherBot]: just chatting"));
+        assert!(!ctx.contains("OtherBot] (directed at you)"));
     }
 }

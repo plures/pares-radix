@@ -2242,8 +2242,8 @@ impl ChannelAdapter for TelegramAdapter {
                         if group_policy.passive_observe {
                             if let Event::Message { content, .. } = &mut event {
                                 let ctx_lock = group_context.lock().await;
-                                if let Some(context_str) = ctx_lock.format_context(msg.chat.id.0) {
-                                    *content = format!("{context_str}\n\n---\nTriggered message: {content}");
+                                if let Some(context_str) = ctx_lock.format_context(msg.chat.id.0, Some(&bot_username)) {
+                                    *content = format!("{context_str}\n\n---\nTriggered message (respond to THIS): {content}");
                                 }
                             }
                         }
