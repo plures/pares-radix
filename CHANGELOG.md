@@ -1,3 +1,8 @@
+## [1.46.8] — 2026-06-13
+
+- chore: bump version to v1.46.8 [skip ci] (1cf7601)
+- feat(spine): RSI + model-selection + topic-routing boundary actors (b098214)
+
 ## [1.46.7] — 2026-06-13
 
 - chore: bump version to v1.46.7 [skip ci] (f0b51c8)
