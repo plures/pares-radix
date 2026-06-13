@@ -1,3 +1,8 @@
+## [1.46.7] — 2026-06-13
+
+- chore: bump version to v1.46.7 [skip ci] (f0b51c8)
+- feat(praxis): RSI as core architectural principle (ADR-0006) (8ebd48b)
+
 ## [1.46.6] — 2026-06-13
 
 - chore: bump version to v1.46.6 [skip ci] (0a4f900)
