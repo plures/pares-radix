@@ -77,6 +77,20 @@ impl ModelInvoker {
         self
     }
 
+    /// Map a model tier string to a specific model name.
+    ///
+    /// Returns `None` for "standard" (use client's default) or unknown tiers.
+    /// This allows the .px routing decision to influence which model handles
+    /// a request without hardcoding model names in the .px procedures.
+    fn tier_to_model(tier: &str) -> Option<String> {
+        match tier {
+            "fast" => Some("qwen2.5:3b".to_string()),
+            "standard" => None, // use default
+            "premium" => Some("qwen2.5:14b".to_string()),
+            _ => None,
+        }
+    }
+
     /// Build the message list for the model from the spine event.
     ///
     /// If the event metadata contains `conversation_history`, those messages
@@ -202,11 +216,35 @@ impl SpineProcedure for ModelInvoker {
             return;
         }
 
+        // Determine model tier from .px routing metadata (if present)
+        let model_tier = metadata
+            .get("model_tier")
+            .and_then(|v| v.as_str())
+            .unwrap_or("standard");
+        let routed_by_px = metadata
+            .get("routed_by")
+            .and_then(|v| v.as_str())
+            == Some("px");
+
+        if routed_by_px {
+            debug!(
+                event_id = %id,
+                tier = %model_tier,
+                reason = metadata.get("route_reason").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                "model_invoker: using .px-routed model tier"
+            );
+        }
+
         // Get available tools
         let tool_defs = self.tool_dispatcher.available_tools().await;
 
+        // Build options with tier-based model selection
+        let options = ChatOptions {
+            model: Self::tier_to_model(model_tier),
+            ..ChatOptions::default()
+        };
+
         // Call the model — use streaming when a broadcast sender is configured
-        let options = ChatOptions::default();
         let result = if let Some(broadcast_tx) = &self.stream_tx {
             // Streaming path: bridge mpsc (what ModelClient expects) to broadcast (what channels subscribe to)
             debug!(event_id = %id, "model_invoker: using streaming completion");
@@ -652,5 +690,74 @@ mod tests {
         // No events should be emitted
         let result = tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await;
         assert!(result.is_err(), "should timeout — no events emitted");
+    }
+
+    #[test]
+    fn tier_to_model_maps_correctly() {
+        assert_eq!(ModelInvoker::tier_to_model("fast"), Some("qwen2.5:3b".to_string()));
+        assert_eq!(ModelInvoker::tier_to_model("standard"), None);
+        assert_eq!(ModelInvoker::tier_to_model("premium"), Some("qwen2.5:14b".to_string()));
+        assert_eq!(ModelInvoker::tier_to_model("unknown"), None);
+    }
+
+    #[tokio::test]
+    async fn respects_px_model_tier_in_metadata() {
+        // Use a model client that captures the model override
+        struct CapturingClient {
+            called_with_model: std::sync::Arc<tokio::sync::Mutex<Option<Option<String>>>>,
+        }
+
+        #[async_trait]
+        impl ModelClient for CapturingClient {
+            async fn complete(
+                &self,
+                _messages: &[ChatMessage],
+                _tools: &[ToolDefinition],
+                options: &ChatOptions,
+            ) -> Result<ModelCompletion, String> {
+                *self.called_with_model.lock().await = Some(options.model.clone());
+                Ok(ModelCompletion {
+                    content: Some("ok".into()),
+                    model: Some("test".into()),
+                    tool_calls: vec![],
+                    logprobs: None,
+                })
+            }
+        }
+
+        let captured = std::sync::Arc::new(tokio::sync::Mutex::new(None));
+        let client: Arc<dyn ModelClient> = Arc::new(CapturingClient {
+            called_with_model: captured.clone(),
+        });
+        let dispatcher: Arc<dyn ToolDispatcher> = Arc::new(EmptyTools);
+
+        let invoker = ModelInvoker::new(client, dispatcher);
+        let (tx, mut rx) = mpsc::channel(16);
+        let emitter = PipelineEmitter { tx };
+
+        // Simulate a .px-routed event with premium tier
+        let event = SpineEvent::ModelRequest {
+            id: "tier-test".into(),
+            source: "telegram".into(),
+            chat_id: "test".into(),
+            sender: "user".into(),
+            content: "complex question".into(),
+            system_prompt: None,
+            metadata: json!({
+                "model_tier": "premium",
+                "routed_by": "px",
+                "route_reason": "high complexity"
+            }),
+        };
+
+        invoker.handle(&event, &emitter).await;
+
+        // Verify model override was passed
+        let model_used = captured.lock().await.take().unwrap();
+        assert_eq!(model_used, Some("qwen2.5:14b".to_string()));
+
+        // Verify response was emitted
+        let emitted = rx.recv().await.unwrap();
+        assert_eq!(emitted.event_type(), "model_response");
     }
 }
