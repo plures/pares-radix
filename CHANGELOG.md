@@ -1,3 +1,8 @@
+## [1.46.4] — 2026-06-13
+
+- chore: bump version to v1.46.4 [skip ci] (e9a68a4)
+- fix(build): show version tag instead of 'unknown' in sandboxed builds (3dd66dd)
+
 ## [1.46.3] — 2026-06-13
 
 - chore: bump version to v1.46.3 [skip ci] (6458ce2)
