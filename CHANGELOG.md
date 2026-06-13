@@ -1,3 +1,11 @@
+## [1.46.1] — 2026-06-13
+
+- chore: bump version to v1.46.1 [skip ci] (e13c25c)
+- chore: update Cargo.lock for v1.46.0 (c306454)
+- fix(ci): harden version parsing — strip newlines, validate numeric fields (a69a918)
+- test(spine): add integration test verifying real .px files compile (6b54d59)
+- fix(ci): pass target_version to release workflow dispatch (941e8a7)
+
 ## [1.44.3] — 2026-05-16
 
 - fix: pin fastembed 5.13.2 / ort rc.11 (static linking, no dlopen) (afba0d7)
