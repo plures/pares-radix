@@ -1,3 +1,9 @@
+## [1.46.6] — 2026-06-13
+
+- chore: bump version to v1.46.6 [skip ci] (0a4f900)
+- feat(praxis): ADR-0005 orchestration-as-dataflow + topic-routing.px + clippy fix (a51327b)
+- feat(spine): add dev-lifecycle orchestration runtime (225187f)
+
 ## [1.46.5] — 2026-06-13
 
 - chore: bump version to v1.46.5 [skip ci] (b772a30)
