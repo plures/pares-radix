@@ -14,6 +14,7 @@
 //!                              Channel Adapter (broadcast subscriber)
 //! ```
 
+pub mod actions;
 pub mod bootstrap;
 pub mod channel;
 pub mod conversation;

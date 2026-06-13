@@ -4228,9 +4228,14 @@ async fn main() {
             // 4.5. Load .px procedures into the ReactiveRegistry via bootstrap
             {
                 use pares_agens_core::px_adapter::{AsyncActionHandler, ToolDispatchActionHandler};
+                use pares_agens_core::spine::actions::CompositeActionHandler;
 
+                let tool_handler = Arc::new(ToolDispatchActionHandler::new_lazy());
                 let px_action_handler: Arc<dyn AsyncActionHandler> =
-                    Arc::new(ToolDispatchActionHandler::new_lazy());
+                    Arc::new(CompositeActionHandler::new(
+                        Arc::clone(&conversation_store),
+                        Arc::clone(&tool_handler),
+                    ));
 
                 // Load from repo-local praxis/ (shipped with the binary)
                 let praxis_dirs = [
