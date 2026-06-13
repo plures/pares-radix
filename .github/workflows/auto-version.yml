@@ -20,21 +20,33 @@ jobs:
       - name: Determine next version
         id: version
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
+          set -euo pipefail
 
-          # Find the highest existing tag to prevent version regression
-          HIGHEST_TAG=$(git tag -l 'v*' | sort -V | tail -1 | sed 's/^v//')
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/' | tr -d '\r\n')
+          echo "Cargo.toml version: $VERSION"
+
+          # Find the highest existing semver tag to prevent version regression
+          HIGHEST_TAG=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sed 's/^v//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1 | tr -d '\r\n')
+          echo "Highest tag: v${HIGHEST_TAG:-none}"
+
           if [ -n "$HIGHEST_TAG" ]; then
-            H_MAJOR=$(echo $HIGHEST_TAG | cut -d. -f1)
-            H_MINOR=$(echo $HIGHEST_TAG | cut -d. -f2)
-            H_PATCH=$(echo $HIGHEST_TAG | cut -d. -f3)
+            H_MAJOR=$(echo "$HIGHEST_TAG" | cut -d. -f1)
+            H_MINOR=$(echo "$HIGHEST_TAG" | cut -d. -f2)
+            H_PATCH=$(echo "$HIGHEST_TAG" | cut -d. -f3 | grep -oE '^[0-9]+')
           else
             H_MAJOR=0; H_MINOR=0; H_PATCH=0
           fi
 
-          C_MAJOR=$(echo $VERSION | cut -d. -f1)
-          C_MINOR=$(echo $VERSION | cut -d. -f2)
-          C_PATCH=$(echo $VERSION | cut -d. -f3)
+          C_MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          C_MINOR=$(echo "$VERSION" | cut -d. -f2)
+          C_PATCH=$(echo "$VERSION" | cut -d. -f3 | grep -oE '^[0-9]+')
+
+          # Default to 0 if any field is empty
+          H_MAJOR=${H_MAJOR:-0}; H_MINOR=${H_MINOR:-0}; H_PATCH=${H_PATCH:-0}
+          C_MAJOR=${C_MAJOR:-0}; C_MINOR=${C_MINOR:-0}; C_PATCH=${C_PATCH:-0}
+
+          echo "Parsed highest tag: $H_MAJOR.$H_MINOR.$H_PATCH"
+          echo "Parsed Cargo.toml:  $C_MAJOR.$C_MINOR.$C_PATCH"
 
           # Use whichever is higher: Cargo.toml version or highest tag
           if [ "$H_MAJOR" -gt "$C_MAJOR" ] || \
@@ -46,19 +58,19 @@ jobs:
           fi
 
           NEW_PATCH=$((BASE_PATCH + 1))
-          NEW_VERSION="$BASE_MAJOR.$BASE_MINOR.$NEW_PATCH"
+          NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.${NEW_PATCH}"
 
           # Safety: skip if this version tag already exists
           if git tag -l "v$NEW_VERSION" | grep -q .; then
             echo "Tag v$NEW_VERSION already exists, incrementing further"
             NEW_PATCH=$((NEW_PATCH + 1))
-            NEW_VERSION="$BASE_MAJOR.$BASE_MINOR.$NEW_PATCH"
+            NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.${NEW_PATCH}"
           fi
 
+          echo "Will bump: $VERSION -> $NEW_VERSION"
           sed -i "s/^version = \"$VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "Bumping: $VERSION -> $NEW_VERSION (highest tag: v$HIGHEST_TAG)"
 
       - name: Commit and tag
         id: push
