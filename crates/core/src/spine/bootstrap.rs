@@ -81,6 +81,25 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("evaluate_gate", "stage_complete:*");
     m.insert("report_result", "task_complete:*");
 
+    // RSI (recursive self-improvement)
+    m.insert("evaluate_performance", "task_complete:*");
+    m.insert("identify_improvement", "perf_signal:*");
+    m.insert("validate_improvement", "improvement:proposed:*");
+    m.insert("apply_improvement", "improvement:validated:*");
+    m.insert("check_regression", "perf_metric:*");
+    m.insert("rollback_improvement", "regression:detected:*");
+
+    // Model selection
+    m.insert("select_model", "model_request:*");
+    m.insert("build_session_context", "model_request:*");
+    m.insert("record_model_performance", "model_response:*");
+
+    // Topic routing
+    m.insert("classify_topic", "inbound:*");
+    m.insert("switch_context", "topic_switch:*");
+    m.insert("steer_continuation", "route_decision:*");
+    m.insert("force_topic_resolution", "topic:timeout:*");
+
     m
 }
 
