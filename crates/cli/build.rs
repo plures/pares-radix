@@ -2,11 +2,15 @@ use std::process::Command;
 
 fn main() {
     // Embed git commit hash at compile time.
-    // Strategy: git CLI → GIT_COMMIT_HASH env var → .git/HEAD file → "unknown"
+    // Strategy: git CLI → GIT_COMMIT_HASH env var → .git/HEAD file → Cargo.toml version
     let output = git_hash_from_cli()
         .or_else(git_hash_from_env)
         .or_else(git_hash_from_head_file)
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| {
+            // In sandboxed builds (Nix, Docker) with no git access, use the package version.
+            // This IS the release version from the tag that triggered the build.
+            format!("v{}", env!("CARGO_PKG_VERSION"))
+        });
 
     println!("cargo:rustc-env=GIT_COMMIT_HASH={output}");
     println!("cargo:rerun-if-changed=.git/HEAD");
@@ -24,7 +28,7 @@ fn git_hash_from_cli() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Fall back to the `GIT_COMMIT_HASH` env var (can be set by nix or CI).
+/// Fall back to the `GIT_COMMIT_HASH` env var (can be set by CI or build systems).
 fn git_hash_from_env() -> Option<String> {
     std::env::var("GIT_COMMIT_HASH")
         .ok()
@@ -38,7 +42,7 @@ fn git_hash_from_head_file() -> Option<String> {
     let full_hash = if let Some(ref_path) = head.strip_prefix("ref: ") {
         std::fs::read_to_string(format!(".git/{ref_path}")).ok()?
     } else {
-        // Detached HEAD — HEAD contains the hash directly
+        // Detached HEAD - HEAD contains the hash directly
         head.to_string()
     };
     let trimmed = full_hash.trim();
