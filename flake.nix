@@ -1,5 +1,5 @@
 {
-  description = "Pares Radix — unified platform: Svelte UI + Rust agent crates + Tauri desktop shell";
+  description = "Pares Radix - unified platform: Svelte UI + Rust agent crates + Tauri desktop shell";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -12,13 +12,14 @@
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     let
-      # Read version from Cargo.toml workspace — single source of truth
+      # Read version from Cargo.toml workspace - single source of truth
       cargoVersion = let
         cargo = builtins.readFile ./Cargo.toml;
-        lines = builtins.filter (l: builtins.match ''version = ".*"'' l != null)
-          (nixpkgs.lib.splitString "\n" cargo);
+        # Strip \r (Windows CRLF) before matching
+        lines = builtins.filter (l: builtins.match ''version = "[^"]+".*'' l != null)
+          (nixpkgs.lib.splitString "\n" (builtins.replaceStrings ["\r"] [""] cargo));
         raw = builtins.head lines;
-      in builtins.head (builtins.match ''.*"(.*)".*'' raw);
+      in builtins.head (builtins.match ''.*"([^"]+)".*'' raw);
 
       # Prefetch ONNX Runtime static library for ort-sys.
       onnxruntimeLib = { pkgs }: pkgs.stdenvNoCC.mkDerivation {
@@ -42,7 +43,7 @@ tar.extractall(os.environ['out'] + '/lib')
         '';
       };
 
-      # CLI binary — headless agent daemon
+      # CLI binary - headless agent daemon
       mkCliPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix";
         version = cargoVersion;
@@ -55,7 +56,7 @@ tar.extractall(os.environ['out'] + '/lib')
 
         cargoBuildFlags = [ "-p" "pares-radix-cli" ];
 
-        # Skip tests — 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
+        # Skip tests - 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
         # TODO: fix the tests properly and re-enable
         doCheck = false;
 
@@ -77,14 +78,14 @@ tar.extractall(os.environ['out'] + '/lib')
         '';
 
         meta = {
-          description = "Pares Radix CLI — headless AI agent daemon";
+          description = "Pares Radix CLI - headless AI agent daemon";
           homepage = "https://github.com/plures/pares-radix";
           license = pkgs.lib.licenses.bsl11;
           mainProgram = "pares-radix";
         };
       };
 
-      # Tauri desktop app — requires npm build for Svelte frontend first
+      # Tauri desktop app - requires npm build for Svelte frontend first
       mkTauriPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix-desktop";
         version = cargoVersion;
@@ -112,7 +113,7 @@ tar.extractall(os.environ['out'] + '/lib')
         '';
 
         meta = {
-          description = "Pares Radix — Tauri 2 desktop shell with Svelte UI";
+          description = "Pares Radix - Tauri 2 desktop shell with Svelte UI";
           homepage = "https://github.com/plures/pares-radix";
           license = pkgs.lib.licenses.bsl11;
           mainProgram = "pares-radix";
@@ -147,7 +148,7 @@ tar.extractall(os.environ['out'] + '/lib')
         pares-radix-desktop = mkTauriPkg final;
       };
 
-      # NixOS module — headless agent daemon service
+      # NixOS module - headless agent daemon service
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.pares-radix;
@@ -276,7 +277,7 @@ tar.extractall(os.environ['out'] + '/lib')
             users.groups.${cfg.group} = lib.mkIf cfg.createUser {};
 
             systemd.services.pares-radix = {
-              description = "Pares Agens — AI Agent Daemon";
+              description = "Pares Agens - AI Agent Daemon";
               wantedBy = [ "multi-user.target" ];
               after = [ "network-online.target" ];
               wants = [ "network-online.target" ];
