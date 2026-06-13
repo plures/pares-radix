@@ -76,6 +76,11 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("task_evaluation", "inbound:*");
     m.insert("task_steering", "task:*");
 
+    // Dev-lifecycle orchestration
+    m.insert("plan_task", "task_request:*");
+    m.insert("evaluate_gate", "stage_complete:*");
+    m.insert("report_result", "task_complete:*");
+
     m
 }
 

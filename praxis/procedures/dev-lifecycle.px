@@ -1,21 +1,21 @@
 # dev-lifecycle.px - Development lifecycle orchestration as .px procedures
 #
 # Pure logic for staged development work. No side effects.
-# The TypeScript runner (dev-lifecycle.mjs) executes what these procedures define.
+# The Rust action handlers execute what these procedures define.
 #
 # Architecture:
 #   .px defines: stages, transitions, gates, retry logic, escalation rules
-#   TypeScript does: spawn subagents, read files, send messages, run git/cargo
+#   Rust actors do: spawn subagents, read/write PluresDB, send notifications
 #
 # Queue topology:
-#   task_request → [plan_task] → task_plan
-#   stage_complete → [evaluate_gate] → next_stage | retry | escalate
-#   task_complete → [report_result] → notification
+#   task_request:*  → [plan_task]  → writes devtask:{id}
+#   stage_complete:*  → [evaluate_gate]  → writes next_action:{task_id}
+#   task_complete:*  → [report_result]  → writes notification:{task_id}
 #
 
-# ═══════════════════════════════════════════════════════════════════════
-# Facts (data shapes)
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
+# Facts (data shapes) — documentation only
+# ─────────────────────────────────────────────────────────────────────────
 
 # [parser-skip] fact DevTask:
 # [parser-skip]   id: string
@@ -41,14 +41,15 @@
 # [parser-skip]
 # [parser-skip] fact StageResult:
 # [parser-skip]   stage_name: string
+# [parser-skip]   task_id: string
 # [parser-skip]   status: enum(passed, failed, blocked)
 # [parser-skip]   output: string
 # [parser-skip]   duration_ms: int
 # [parser-skip]
 
-# ═══════════════════════════════════════════════════════════════════════
-# Constraints
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
+# Constraints — documentation only
+# ─────────────────────────────────────────────────────────────────────────
 
 # [parser-skip] constraint stages_must_be_ordered:
 # [parser-skip]   given: "Stage transitions must respect dependency order"
@@ -72,184 +73,90 @@
 # [parser-skip]   check: Stage.attempts <= Stage.max_retries + 1
 # [parser-skip]   severity: error
 
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
 # Dataflow Procedures
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
 
 # Entry point: decompose a task request into a staged plan
-procedure plan_task(request: DevTask from "task_request") -> write into "task_plan":
+procedure plan_task:
+  trigger: on_write
   given: "Decompose a development task into ordered lifecycle stages"
 
-  # Default stage configuration for pares-radix
-  define stages:
-    - name: "analyze"
-      max_retries: 1
-      timeout_seconds: 300
-      depends_on: []
+  # Get default stage definitions from Rust action handler
+  get_default_stages {repo: $new_value.repo} -> $defaults
 
-    - name: "fix"
-      max_retries: 2
-      timeout_seconds: 600
-      depends_on: ["analyze"]
+  # Merge task-specific prompts with default stage config
+  merge_stage_config {defaults: $defaults, overrides: $new_value.stages} -> $stages
 
-    - name: "test"
-      max_retries: 2
-      timeout_seconds: 600
-      depends_on: ["fix"]
-
-    - name: "deploy"
-      max_retries: 1
-      timeout_seconds: 300
-      depends_on: ["test"]
-
-    - name: "verify"
-      max_retries: 2
-      timeout_seconds: 300
-      depends_on: ["deploy"]
-
-  # Merge task-specific prompts into default stages
-  loop over $stages as stage:
-    merge {stage: $stage, overrides: $request.stages[stage.name]} -> $merged
-  end
-
+  # Persist the task plan
   timestamp_now {} -> $now
-  pluresdb_write {key: "devtask:{$request.id}", value: {
-    id: $request.id,
-    description: $request.description,
-    repo: $request.repo,
-    workdir: $request.workdir,
+  generate_id {} -> $plan_id
+
+  write_state {key: "devtask:{$new_value.id}", value: {
+    id: $new_value.id,
+    description: $new_value.description,
+    repo: $new_value.repo,
+    workdir: $new_value.workdir,
     stages: $stages,
     status: "planning",
     created_at: $now
-  }}
+  }} -> $written
 
-  return {task_id: $request.id, stages: $stages, status: "planned"}
+  return {task_id: $new_value.id, stages: $stages, status: "planned"}
 
 
 # Gate evaluation: called after each stage completes
-procedure evaluate_gate(result: StageResult from "stage_complete") -> write into "next_action":
+procedure evaluate_gate:
+  trigger: on_write
   given: "Evaluate a completed stage and determine next action"
 
-  db_get {key: "devtask:{$result.task_id}"} -> $task
+  # Read the full task record
+  read_state {key: "devtask:{$new_value.task_id}"} -> $task
 
-  # Update the completed stage
-  update_stage_in_task {task: $task, stage_name: $result.stage_name, result: $result} -> $updated_task
+  # Update the completed stage with its result
+  update_stage_status {task: $task, stage_name: $new_value.stage_name, status: $new_value.status, output: $new_value.output, attempts: $new_value.attempts} -> $updated_task
 
-  # Determine next action based on result
-  when $result.status == "passed":
-    find_next_stage {task: $updated_task, after: $result.stage_name} -> $next
-    when $next == null:
-      # All stages complete
-      return {action: "complete", task_id: $result.task_id, status: "passed"}
-    otherwise:
-      return {action: "spawn_stage", task_id: $result.task_id, stage: $next}
+  # Persist the updated task
+  write_state {key: "devtask:{$new_value.task_id}", value: $updated_task} -> $persisted
 
-  when $result.status == "failed":
-    get_stage {task: $updated_task, name: $result.stage_name} -> $stage
-    when $stage.attempts < $stage.max_retries + 1:
-      return {action: "retry", task_id: $result.task_id, stage: $result.stage_name, attempt: $stage.attempts + 1}
-    otherwise:
-      return {action: "escalate", task_id: $result.task_id, stage: $result.stage_name, reason: $result.output}
+  # Find the next stage to run (returns null if all done)
+  find_next_stage {task: $updated_task, after: $new_value.stage_name} -> $next
 
-  when $result.status == "blocked":
-    return {action: "escalate", task_id: $result.task_id, stage: $result.stage_name, reason: $result.output}
+  # Return the gate decision
+  return {task_id: $new_value.task_id, completed_stage: $new_value.stage_name, status: $new_value.status, next_stage: $next}
 
 
 # Report task completion or failure
-procedure report_result(task_id: string from "task_complete") -> write into "notification":
+procedure report_result:
+  trigger: on_write
   given: "Generate a completion or failure report for a dev task"
 
-  db_get {key: "devtask:{$task_id}"} -> $task
+  # Read the task record
+  read_state {key: "devtask:{$new_value.task_id}"} -> $task
 
   # Build summary from all stage outputs
   collect_stage_outputs {task: $task} -> $summary
 
-  when $task.status == "passed":
-    return {
-      notify: $task.notify_on_success,
-      severity: "info",
-      message: "✅ Task {$task.id} complete: {$task.description}\n{$summary}"
-    }
+  # Format the notification message
+  format_stage_brief {task: $task, summary: $summary} -> $message
 
-  when $task.status == "failed":
-    return {
-      notify: true,
-      severity: "error",
-      message: "❌ Task {$task.id} FAILED at stage {$task.failed_stage}: {$task.description}\n{$summary}"
-    }
+  return {task_id: $new_value.task_id, status: $task.status, message: $message, summary: $summary}
 
 
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
 # Utility Procedures
-# ═══════════════════════════════════════════════════════════════════════
+# ─────────────────────────────────────────────────────────────────────────
 
 # Build the subagent prompt for a specific stage
-procedure build_stage_brief(task_id: string, stage_name: string) -> brief:
+procedure build_stage_brief:
   given: "Construct a complete subagent task brief for a lifecycle stage"
 
-  db_get {key: "devtask:{$task_id}"} -> $task
+  read_state {key: "devtask:{$task_id}"} -> $task
   get_stage {task: $task, name: $stage_name} -> $stage
 
   # Collect outputs from dependency stages as context
-  loop over $stage.depends_on as dep_name:
-    get_stage {task: $task, name: $dep_name} -> $dep
-    collect {key: $dep_name, value: $dep.output} -> $context
-  end
+  collect_stage_outputs {task: $task} -> $context
 
-  format_brief {
-    task: $task,
-    stage: $stage,
-    context: $context,
-    workdir: $task.workdir
-  } -> $brief
+  format_stage_brief {task: $task, stage: $stage, context: $context, workdir: $task.workdir} -> $brief
 
   return $brief
-
-
-# Determine the default test criteria for pares-radix
-procedure default_test_criteria(repo: string) -> criteria:
-  given: "Return the default test pass/fail criteria for a repo"
-
-  when $repo == "plures/pares-radix":
-    return {
-      commands: [
-        "cargo test --workspace",
-        "cargo clippy --workspace -- -D warnings",
-        "cargo build --release"
-      ],
-      pass_condition: "all commands exit 0",
-      smoke_test: "run binary with --version, verify output matches Cargo.toml version"
-    }
-
-
-# Determine the default deploy verification for pares-radix
-procedure default_deploy_verification(repo: string) -> verification:
-  given: "Return the default deploy verification steps for a repo"
-
-  when $repo == "plures/pares-radix":
-    return {
-      steps: [
-        "git push origin main",
-        "wait 30s, check auto-version workflow succeeded",
-        "check release workflow triggered and completed",
-        "verify gh release list shows new version"
-      ],
-      pass_condition: "all steps succeed, GitHub release exists with correct version"
-    }
-
-
-# Determine the default production verification for pares-radix
-procedure default_verify_steps(repo: string) -> steps:
-  given: "Return the default production verification steps for a repo"
-
-  when $repo == "plures/pares-radix":
-    return {
-      steps: [
-        "check latest GitHub release version",
-        "send /status to praxisbot via Telegram",
-        "validate version in response matches latest release",
-        "if behavioral fix: test specific behavior"
-      ],
-      pass_condition: "praxisbot reports correct version AND behavior is fixed",
-      note: "If praxisbot not yet rebuilt, report drift — not failure"
-    }

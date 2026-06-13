@@ -145,15 +145,22 @@ impl AsyncActionHandler for CoreActionHandler {
     }
 }
 
+use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
+use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
+
 /// Composite action handler that delegates to multiple handlers in priority order.
 ///
 /// When a .px procedure calls an action:
 /// 1. `CoreActionHandler` handles state/history actions (read_state, append_history, etc.)
-/// 2. `ToolDispatchActionHandler` handles everything else as tool calls
+/// 2. `DevLifecycleActionHandler` handles stage management actions
+/// 3. `SubagentActor` handles spawn_subagent calls
+/// 4. `ToolDispatchActionHandler` handles everything else as tool calls
 ///
-/// This gives .px procedures access to both system state AND external tools.
+/// This gives .px procedures access to system state, lifecycle logic, subagent spawning, AND external tools.
 pub struct CompositeActionHandler {
     core: CoreActionHandler,
+    dev_lifecycle: DevLifecycleActionHandler,
+    subagent: Option<Arc<SubagentActor>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
 
@@ -164,8 +171,15 @@ impl CompositeActionHandler {
     ) -> Self {
         Self {
             core: CoreActionHandler::new(conversation_store),
+            dev_lifecycle: DevLifecycleActionHandler::new(),
+            subagent: None,
             tool_handler,
         }
+    }
+
+    /// Set the subagent actor after construction (breaks circular dependency).
+    pub fn set_subagent_actor(&mut self, actor: Arc<SubagentActor>) {
+        self.subagent = Some(actor);
     }
 }
 
@@ -182,6 +196,18 @@ impl AsyncActionHandler for CompositeActionHandler {
     async fn call(&self, action: &str, params: &Value) -> Result<Value, ExecutionError> {
         if CORE_ACTIONS.contains(&action) {
             self.core.call(action, params).await
+        } else if is_dev_lifecycle_action(action) {
+            self.dev_lifecycle.call(action, params).await
+        } else if is_subagent_action(action) {
+            if let Some(ref actor) = self.subagent {
+                actor.call(action, params).await
+            } else {
+                warn!(action = %action, "subagent actor not configured");
+                Err(ExecutionError::ActionFailed {
+                    action: action.to_string(),
+                    message: "subagent actor not wired — SubAgentManager not available".into(),
+                })
+            }
         } else {
             // Delegate to tool dispatcher for unknown actions (tool calls)
             self.tool_handler.call(action, params).await
