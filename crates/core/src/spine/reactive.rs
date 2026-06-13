@@ -100,7 +100,8 @@ pub struct ReactiveRegistry {
     emitter: RwLock<Option<PipelineEmitter>>,
     /// Pending result waiters: key → list of oneshot senders waiting for that write.
     /// Used by callers who need to await the output of a reactive chain.
-    waiters: RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>,
+    /// Wrapped in Arc so spawned tasks can notify waiters.
+    waiters: Arc<RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>>,
 }
 
 impl ReactiveRegistry {
@@ -112,7 +113,7 @@ impl ReactiveRegistry {
         Self {
             triggers: RwLock::new(Vec::new()),
             emitter: RwLock::new(None),
-            waiters: RwLock::new(HashMap::new()),
+            waiters: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -121,7 +122,7 @@ impl ReactiveRegistry {
         Self {
             triggers: RwLock::new(Vec::new()),
             emitter: RwLock::new(Some(emitter)),
-            waiters: RwLock::new(HashMap::new()),
+            waiters: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -203,9 +204,10 @@ impl ReactiveRegistry {
                 let emitter = self.emitter.read().await.clone();
                 let key_owned = key.to_string();
                 let value_owned = value.clone();
+                let waiters_arc = Arc::clone(&self.waiters);
 
                 tokio::spawn(async move {
-                    Self::execute_triggered(adapter, emitter, &key_owned, &value_owned).await;
+                    Self::execute_triggered(adapter, emitter, &key_owned, &value_owned, waiters_arc).await;
                 });
             }
         }
@@ -234,6 +236,7 @@ impl ReactiveRegistry {
         emitter: Option<PipelineEmitter>,
         key: &str,
         value: &Value,
+        waiters_ref: Arc<RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>>,
     ) {
         let proc_name = Procedure::name(&*adapter);
 
@@ -254,6 +257,33 @@ impl ReactiveRegistry {
                         key = %key,
                         "reactive: procedure executed successfully"
                     );
+
+                    // Write result back to the registry for awaiting subscribers.
+                    // Convention: the procedure's output goes to `result.variables["result"]`
+                    // or the return value from the last step.
+                    // The destination key is derived from the trigger key:
+                    //   inbound:msg-123 → route_decision:msg-123
+                    // If there's no explicit return, procedures can set `$emit` to forward.
+                    if let Some(return_val) = result.variables.get("result")
+                        .or_else(|| result.variables.get("output"))
+                        .or_else(|| result.variables.get("decision"))
+                        .or_else(|| result.variables.get("return"))
+                    {
+                        if !return_val.is_null() {
+                            // Derive the output key from the source key + procedure name
+                            let output_key = Self::derive_output_key(key, proc_name);
+                            if let Some(ref out_key) = output_key {
+                                debug!(
+                                    procedure = proc_name,
+                                    input_key = %key,
+                                    output_key = %out_key,
+                                    "reactive: writing procedure result back to registry"
+                                );
+                                // Notify waiters for this output key
+                                Self::notify_waiters_static(waiters_ref, out_key, return_val).await;
+                            }
+                        }
+                    }
 
                     // Forward emitted events to the pipeline
                     if let Some(ref emitter) = emitter {
@@ -323,6 +353,49 @@ impl ReactiveRegistry {
     /// Return the number of registered trigger patterns.
     pub async fn trigger_count(&self) -> usize {
         self.triggers.read().await.len()
+    }
+
+    /// Derive the output key from a trigger source key and procedure name.
+    ///
+    /// Maps well-known procedure names to their expected output queue:
+    ///   - classify_and_route / unified_router on inbound:X → route_decision:X
+    ///   - assemble_context on route_decision:X → model_request:X
+    ///   - route_model_response on model_response:X → delivery:X
+    ///
+    /// Returns None if no known mapping exists (procedure output is fire-and-forget).
+    fn derive_output_key(source_key: &str, proc_name: &str) -> Option<String> {
+        // Extract the event id from the key (format: "type:id")
+        let id = source_key.split_once(':').map(|(_, id)| id)?;
+
+        match proc_name {
+            "classify_and_route" | "unified_router" | "classify_message" => {
+                Some(format!("route_decision:{id}"))
+            }
+            "assemble_context" | "dispatch_steered_task" => {
+                Some(format!("model_request:{id}"))
+            }
+            "route_model_response" => Some(format!("delivery:{id}")),
+            _ => None,
+        }
+    }
+
+    /// Notify waiters for a specific key from a spawned task context.
+    async fn notify_waiters_static(
+        waiters: Arc<RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>>,
+        key: &str,
+        value: &Value,
+    ) {
+        let mut guard = waiters.write().await;
+        if let Some(senders) = guard.remove(key) {
+            debug!(
+                key = %key,
+                waiter_count = senders.len(),
+                "reactive: notifying result waiters (from procedure output)"
+            );
+            for tx in senders {
+                let _ = tx.send(value.clone());
+            }
+        }
     }
 }
 
@@ -627,5 +700,117 @@ mod tests {
         // Should timeout because key doesn't match
         let result = timeout(Duration::from_millis(50), rx).await;
         assert!(result.is_err());
+    }
+
+    // ── Output Writeback / Cascade Tests ─────────────────────────────────
+
+    /// Test action handler that returns fixed values per action name.
+    struct CascadeTestHandler {
+        responses: HashMap<String, Value>,
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncActionHandler for CascadeTestHandler {
+        async fn call(
+            &self,
+            name: &str,
+            _params: &Value,
+        ) -> Result<Value, pares_radix_praxis::px::executor::ExecutionError> {
+            Ok(self
+                .responses
+                .get(name)
+                .cloned()
+                .unwrap_or(Value::Null))
+        }
+    }
+
+    #[tokio::test]
+    async fn procedure_output_cascades_to_route_decision() {
+        use tokio::time::{timeout, Duration};
+
+        let registry = ReactiveRegistry::new();
+
+        // Register a classify_and_route procedure that returns a decision.
+        // It calls "classify_intent" which our test handler returns a result for.
+        let compiled = serde_json::json!({
+            "type": "procedure",
+            "name": "classify_and_route",
+            "trigger": { "kind": "on_write" },
+            "steps": [
+                {
+                    "kind": "call",
+                    "name": "classify_intent",
+                    "params": {},
+                    "output_var": "result"
+                }
+            ]
+        });
+
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(CascadeTestHandler {
+            responses: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "classify_intent".to_string(),
+                    serde_json::json!({
+                        "destination": "conversation",
+                        "tier": "premium",
+                        "reason": "complex question"
+                    }),
+                );
+                m
+            },
+        });
+
+        let adapter = PxProcedureAdapter::from_compiled(compiled, handler)
+            .expect("test adapter");
+        registry
+            .register_procedure("inbound:*", Arc::new(adapter))
+            .await;
+
+        // Subscribe to route_decision:msg-99 BEFORE firing
+        let rx = registry.subscribe_result("route_decision:msg-99").await;
+
+        // Write inbound:msg-99 — triggers classify_and_route
+        registry
+            .on_write(
+                "inbound:msg-99",
+                &serde_json::json!({"content": "tell me about Rust", "sender": "user"}),
+            )
+            .await;
+
+        // The procedure should write its output to route_decision:msg-99
+        let result = timeout(Duration::from_millis(500), rx).await;
+        assert!(
+            result.is_ok(),
+            "should receive route_decision from procedure output cascade"
+        );
+
+        let decision = result.unwrap().unwrap();
+        assert_eq!(decision["destination"], "conversation");
+        assert_eq!(decision["tier"], "premium");
+    }
+
+    #[test]
+    fn derive_output_key_maps_correctly() {
+        assert_eq!(
+            ReactiveRegistry::derive_output_key("inbound:msg-1", "classify_and_route"),
+            Some("route_decision:msg-1".to_string())
+        );
+        assert_eq!(
+            ReactiveRegistry::derive_output_key("inbound:msg-2", "unified_router"),
+            Some("route_decision:msg-2".to_string())
+        );
+        assert_eq!(
+            ReactiveRegistry::derive_output_key("route_decision:x", "assemble_context"),
+            Some("model_request:x".to_string())
+        );
+        assert_eq!(
+            ReactiveRegistry::derive_output_key("model_response:r1", "route_model_response"),
+            Some("delivery:r1".to_string())
+        );
+        assert_eq!(
+            ReactiveRegistry::derive_output_key("inbound:x", "some_unknown_proc"),
+            None
+        );
     }
 }
