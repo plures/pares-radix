@@ -210,6 +210,16 @@ impl PxProcedureAdapter {
         })
     }
 
+    /// The procedure name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The trigger kind this procedure responds to (e.g. "on_write", "manual").
+    pub fn trigger_kind(&self) -> &str {
+        &self.trigger_kind
+    }
+
     /// The compiled procedure data (for introspection/debugging).
     pub fn compiled_data(&self) -> &Value {
         &self.compiled

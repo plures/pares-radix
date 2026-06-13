@@ -27,7 +27,6 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use crate::procedure::Procedure;
 use crate::px_adapter::{load_px_procedures, AsyncActionHandler, PxProcedureAdapter};
 
 /// Holds loaded .px procedures for cerebellum logic, keyed by procedure name.
