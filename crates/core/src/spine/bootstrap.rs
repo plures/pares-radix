@@ -41,8 +41,14 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
 
     // Core pipeline procedures
     m.insert("classify_message", "inbound:*");
+    m.insert("classify_and_route", "inbound:*");
     m.insert("route_event", "classification:*");
     m.insert("unified_router", "inbound:*");
+    m.insert("track_inbound", "inbound:*");
+
+    // Context assembly (fires on route_decision writes)
+    m.insert("assemble_context", "route_decision:*");
+    m.insert("dispatch_steered_task", "route_decision:*");
 
     // Context and preprocessing
     m.insert("manage_context_window", "inbound:*");
@@ -57,9 +63,14 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("heartbeat_logic", "heartbeat:*");
     m.insert("heartbeat_check", "heartbeat:*");
 
-    // Response post-processing
-    m.insert("commitment_detection", "response:*");
-    m.insert("session_continuity", "response:*");
+    // Response post-processing (fires on model_response events)
+    m.insert("commitment_detection", "model_response:*");
+    m.insert("detect_and_store_commitments", "model_response:*");
+    m.insert("session_continuity", "model_response:*");
+    m.insert("route_model_response", "model_response:*");
+
+    // Delivery (fires on delivery_request events)
+    m.insert("deliver_response", "delivery_request:*");
 
     // Task management
     m.insert("task_evaluation", "inbound:*");

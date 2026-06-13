@@ -146,12 +146,16 @@ impl Pipeline {
                 }
             }
 
-            // Notify reactive registry — fire .px procedures on matching writes
+            // Notify reactive registry — fire .px procedures on matching writes.
+            // Pass the FULL event as the value so .px procedures have all context
+            // (content, chat_id, sender, metadata, etc.)
             if let Some(ref reactive) = self.reactive {
                 let key = format!("{}:{}", event.event_type(), event.id());
-                let value = serde_json::json!({
-                    "type": event.event_type(),
-                    "id": event.id(),
+                let value = serde_json::to_value(&event).unwrap_or_else(|_| {
+                    serde_json::json!({
+                        "type": event.event_type(),
+                        "id": event.id(),
+                    })
                 });
                 reactive.on_write(&key, &value).await;
             }
