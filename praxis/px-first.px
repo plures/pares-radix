@@ -78,6 +78,23 @@
 # [parser-skip]   message: "All state mutations go through PluresDB writes, which trigger reactive .px procedures. This is how memory, indexing, consolidation, and decay happen. No background threads polling for changes."
 # [parser-skip] 
 # ═══════════════════════════════════════════════════════════════════════
+# ORCHESTRATION IS .PX (ADR-0005)
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint orchestration_is_px:
+# [parser-skip]   when: event.type == "pr_audit" or event.type == "architecture_review"
+# [parser-skip]   require: NOT (change.adds_orchestration_logic_in_non_px == true)
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Orchestration (task staging, retry logic, gating, context switching, topic routing) MUST be .px procedures. The orchestrator writes data that triggers existing procedures — it never calls LLMs, spawns processes, or sends messages directly. If your orchestration code imports an HTTP client or spawns a subprocess, it belongs in a boundary actor that a .px procedure triggers."
+# [parser-skip] 
+# [parser-skip] constraint orchestrator_writes_not_calls:
+# [parser-skip]   when: event.type == "architecture_review"
+# [parser-skip]   require: orchestration_procedure.only_writes_data == true
+# [parser-skip]   severity: error
+# [parser-skip]   message: "An orchestration procedure orchestrates by writing datums to PluresDB queues/keys. Pre-existing procedures handle the actual work (LLM calls, tool dispatch, delivery). The orchestrator focuses on WHAT to do and WHEN, never HOW. See ADR-0005."
+# [parser-skip] 
+
+# ═══════════════════════════════════════════════════════════════════════
 # PROCEDURE-FIRST WORKFLOW
 # ═══════════════════════════════════════════════════════════════════════
 

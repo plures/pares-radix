@@ -80,6 +80,12 @@ fn default_stages() -> Value {
 /// to manage task state, stages, and brief generation.
 pub struct DevLifecycleActionHandler;
 
+impl Default for DevLifecycleActionHandler {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl DevLifecycleActionHandler {
     pub fn new() -> Self {
         Self
