@@ -1,3 +1,8 @@
+## [1.46.5] — 2026-06-13
+
+- chore: bump version to v1.46.5 [skip ci] (b772a30)
+- feat(praxis): add dev-lifecycle.px — staged orchestration as .px procedure (6e3f6aa)
+
 ## [1.46.4] — 2026-06-13
 
 - chore: bump version to v1.46.4 [skip ci] (e9a68a4)
