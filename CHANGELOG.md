@@ -1,3 +1,8 @@
+## [1.46.3] — 2026-06-13
+
+- chore: bump version to v1.46.3 [skip ci] (6458ce2)
+- fix(nix): embed git commit hash in Nix builds via GIT_COMMIT_HASH env (941278c)
+
 ## [1.46.2] — 2026-06-13
 
 - chore: bump version to v1.46.2 [skip ci] (dbf0230)
