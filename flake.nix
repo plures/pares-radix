@@ -12,6 +12,9 @@
 
   outputs = { self, nixpkgs, flake-utils, rust-overlay }:
     let
+      # Git commit hash for version embedding (null when tree is dirty)
+      gitCommitHash = self.shortRev or self.dirtyShortRev or "dirty";
+
       # Read version from Cargo.toml workspace - single source of truth
       cargoVersion = let
         cargo = builtins.readFile ./Cargo.toml;
@@ -68,6 +71,7 @@ tar.extractall(os.environ['out'] + '/lib')
 
         ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
         FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
+        GIT_COMMIT_HASH = gitCommitHash;
 
         postInstall = ''
           # Install praxis procedures and plugins alongside the binary
@@ -106,6 +110,7 @@ tar.extractall(os.environ['out'] + '/lib')
 
         ORT_LIB_LOCATION = "${onnxruntimeLib { inherit pkgs; }}/lib";
         FASTEMBED_CACHE_PATH = "/tmp/fastembed-cache";
+        GIT_COMMIT_HASH = gitCommitHash;
 
         preBuild = ''
           npm ci --ignore-scripts
