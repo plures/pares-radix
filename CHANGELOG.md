@@ -1,3 +1,8 @@
+## [1.46.2] — 2026-06-13
+
+- chore: bump version to v1.46.2 [skip ci] (dbf0230)
+- fix(nix): handle CRLF in flake version extraction + normalize line endings (29764bc)
+
 ## [1.46.1] — 2026-06-13
 
 - chore: bump version to v1.46.1 [skip ci] (e13c25c)
