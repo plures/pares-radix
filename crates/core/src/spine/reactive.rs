@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use tokio::sync::RwLock;
+use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::procedure::Procedure;
@@ -95,17 +95,24 @@ pub struct ReactiveRegistry {
     /// Registered trigger entries (pattern + adapter pairs).
     triggers: RwLock<Vec<TriggerEntry>>,
     /// Pipeline emitter for forwarding events produced by procedure execution.
-    emitter: Option<PipelineEmitter>,
+    /// Wrapped in RwLock so it can be set after construction (breaking the
+    /// circular dependency between Pipeline and Registry).
+    emitter: RwLock<Option<PipelineEmitter>>,
+    /// Pending result waiters: key → list of oneshot senders waiting for that write.
+    /// Used by callers who need to await the output of a reactive chain.
+    waiters: RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>,
 }
 
 impl ReactiveRegistry {
     /// Create a new empty registry without a pipeline emitter.
     ///
-    /// Events emitted by triggered procedures will be logged but discarded.
+    /// Events emitted by triggered procedures will be logged but discarded
+    /// until [`set_emitter`] is called.
     pub fn new() -> Self {
         Self {
             triggers: RwLock::new(Vec::new()),
-            emitter: None,
+            emitter: RwLock::new(None),
+            waiters: RwLock::new(HashMap::new()),
         }
     }
 
@@ -113,8 +120,40 @@ impl ReactiveRegistry {
     pub fn with_emitter(emitter: PipelineEmitter) -> Self {
         Self {
             triggers: RwLock::new(Vec::new()),
-            emitter: Some(emitter),
+            emitter: RwLock::new(Some(emitter)),
+            waiters: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Set (or replace) the pipeline emitter after construction.
+    ///
+    /// This breaks the circular dependency: create the registry first, pass it
+    /// to `Pipeline::with_reactive`, then set the emitter from the pipeline.
+    pub async fn set_emitter(&self, emitter: PipelineEmitter) {
+        *self.emitter.write().await = Some(emitter);
+    }
+
+    /// Subscribe to the result of a specific key write.
+    ///
+    /// Returns a oneshot receiver that will fire when `on_write` is called
+    /// with the exact key. Used to await the output of reactive procedure chains.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let rx = registry.subscribe_result("route_decision:msg-123").await;
+    /// registry.on_write("inbound:msg-123", &value).await; // triggers chain
+    /// let result = tokio::time::timeout(Duration::from_secs(5), rx).await;
+    /// ```
+    pub async fn subscribe_result(&self, key: &str) -> oneshot::Receiver<Value> {
+        let (tx, rx) = oneshot::channel();
+        self.waiters
+            .write()
+            .await
+            .entry(key.to_string())
+            .or_default()
+            .push(tx);
+        rx
     }
 
     /// Register a `.px` procedure to be triggered on writes matching the pattern.
@@ -161,13 +200,27 @@ impl ReactiveRegistry {
                 );
 
                 let adapter = entry.adapter.clone();
-                let emitter = self.emitter.clone();
+                let emitter = self.emitter.read().await.clone();
                 let key_owned = key.to_string();
                 let value_owned = value.clone();
 
                 tokio::spawn(async move {
                     Self::execute_triggered(adapter, emitter, &key_owned, &value_owned).await;
                 });
+            }
+        }
+
+        // Notify any waiters subscribed to this exact key
+        let mut waiters = self.waiters.write().await;
+        if let Some(senders) = waiters.remove(key) {
+            debug!(
+                key = %key,
+                waiter_count = senders.len(),
+                "reactive: notifying result waiters"
+            );
+            for tx in senders {
+                // Ignore send error (receiver may have been dropped/timed out)
+                let _ = tx.send(value.clone());
             }
         }
     }
@@ -497,5 +550,82 @@ mod tests {
             "steps": []
         });
         PxProcedureAdapter::from_compiled(compiled, handler).expect("test adapter should be valid")
+    }
+
+    // ── Subscribe Result Tests ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn subscribe_result_receives_value_on_write() {
+        let registry = ReactiveRegistry::new();
+
+        // Subscribe before write
+        let rx = registry.subscribe_result("route_decision:msg-42").await;
+
+        // Write the key
+        let value = serde_json::json!({"tier": "premium", "destination": "conversation"});
+        registry.on_write("route_decision:msg-42", &value).await;
+
+        // Should receive the value
+        let received = rx.await.unwrap();
+        assert_eq!(received["tier"], "premium");
+        assert_eq!(received["destination"], "conversation");
+    }
+
+    #[tokio::test]
+    async fn subscribe_result_only_fires_once() {
+        let registry = ReactiveRegistry::new();
+
+        let rx = registry.subscribe_result("test:key").await;
+        registry.on_write("test:key", &Value::String("first".into())).await;
+
+        // Subscriber consumed
+        let received = rx.await.unwrap();
+        assert_eq!(received, "first");
+
+        // Second write has no subscribers
+        registry.on_write("test:key", &Value::String("second".into())).await;
+        // No panic = success
+    }
+
+    #[tokio::test]
+    async fn subscribe_result_timeout_on_no_write() {
+        use tokio::time::{timeout, Duration};
+
+        let registry = ReactiveRegistry::new();
+        let rx = registry.subscribe_result("never:written").await;
+
+        // Should timeout since no write happens
+        let result = timeout(Duration::from_millis(50), rx).await;
+        assert!(result.is_err(), "should timeout when no write occurs");
+    }
+
+    #[tokio::test]
+    async fn subscribe_result_multiple_waiters_all_receive() {
+        let registry = ReactiveRegistry::new();
+
+        // Two subscribers on the same key
+        let rx1 = registry.subscribe_result("shared:key").await;
+        let rx2 = registry.subscribe_result("shared:key").await;
+
+        let value = serde_json::json!({"hello": "world"});
+        registry.on_write("shared:key", &value).await;
+
+        assert_eq!(rx1.await.unwrap()["hello"], "world");
+        assert_eq!(rx2.await.unwrap()["hello"], "world");
+    }
+
+    #[tokio::test]
+    async fn subscribe_result_non_matching_key_not_notified() {
+        use tokio::time::{timeout, Duration};
+
+        let registry = ReactiveRegistry::new();
+        let rx = registry.subscribe_result("specific:key-1").await;
+
+        // Write a DIFFERENT key
+        registry.on_write("specific:key-2", &Value::Null).await;
+
+        // Should timeout because key doesn't match
+        let result = timeout(Duration::from_millis(50), rx).await;
+        assert!(result.is_err());
     }
 }

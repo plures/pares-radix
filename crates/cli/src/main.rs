@@ -3696,6 +3696,8 @@ async fn main() {
             use pares_agens_core::spine::procedures::model_invoker::ModelInvoker;
             use pares_agens_core::spine::procedures::response_router::ResponseRouter;
             use pares_agens_core::spine::procedures::tool_executor::ToolExecutor;
+            use pares_agens_core::spine::reactive::ReactiveRegistry;
+            use pares_agens_core::spine::bootstrap;
 
             // Load .px config (CLI flags override config file values)
             let px_cfg = px_config::load_config(config.as_deref()).unwrap_or_default();
@@ -4055,8 +4057,12 @@ async fn main() {
             let spine_tool_dispatcher_builder =
                 SpineProcedureDispatcher::with_tools(spine_registry, spine_tool_definitions);
 
-            // 3. Create the pipeline
-            let (pipeline, rx) = Pipeline::new(256);
+            // 3. Create the reactive registry + pipeline
+            let reactive_registry = Arc::new(ReactiveRegistry::new());
+            let (pipeline, rx) = Pipeline::with_reactive(256, Arc::clone(&reactive_registry));
+
+            // Set the emitter on the registry so .px procedures can emit back into the pipeline
+            reactive_registry.set_emitter(pipeline.emitter()).await;
 
             // 3.5. Open THE shared PluresDB instance — all state goes here
             use pares_agens_core::{CrdtStore, SledStorage, StorageEngine};
@@ -4186,7 +4192,7 @@ async fn main() {
             // channel handlers (Telegram) subscribe. Zero overhead if unused.
             let (stream_broadcast_tx, _) = tokio::sync::broadcast::channel::<pares_agens_core::model::StreamDelta>(256);
 
-            pipeline.register(Arc::new(InboundRouter)).await;
+            pipeline.register(Arc::new(InboundRouter::with_reactive(Arc::clone(&reactive_registry)))).await;
             pipeline
                 .register(Arc::new(HistoryRecorder::new(Arc::clone(
                     &conversation_store,
@@ -4219,31 +4225,42 @@ async fn main() {
                 .await;
             info!("Pipeline procedures registered: inbound_router, history_recorder, model_invoker, tool_executor, response_router, commitment_detector");
 
-            // 4.5. Load .px procedures from praxis/procedures/
+            // 4.5. Load .px procedures into the ReactiveRegistry via bootstrap
             {
-                use pares_agens_core::px_adapter::{
-                    load_px_directory, AsyncActionHandler, ToolDispatchActionHandler,
-                };
+                use pares_agens_core::px_adapter::{AsyncActionHandler, ToolDispatchActionHandler};
 
-                let px_action_handler = Arc::new(ToolDispatchActionHandler::new_lazy());
-                let praxis_dir = PathBuf::from(&home).join(".pares-radix/praxis/procedures");
-                if praxis_dir.is_dir() {
-                    let adapters = load_px_directory(
-                        &praxis_dir,
-                        px_action_handler.clone() as Arc<dyn AsyncActionHandler>,
-                    );
-                    if !adapters.is_empty() {
-                        info!(
-                            count = adapters.len(),
-                            dir = %praxis_dir.display(),
-                            "Loaded .px procedures for spine pipeline"
-                        );
-                        for adapter in adapters {
-                            pipeline.register(Arc::new(adapter)).await;
-                        }
+                let px_action_handler: Arc<dyn AsyncActionHandler> =
+                    Arc::new(ToolDispatchActionHandler::new_lazy());
+
+                // Load from repo-local praxis/ (shipped with the binary)
+                let praxis_dirs = [
+                    PathBuf::from(&home).join(".pares-radix/praxis/procedures"),
+                    PathBuf::from(&home).join(".pares-radix/praxis/spine"),
+                ];
+
+                let mut total_registered = 0;
+                for praxis_dir in &praxis_dirs {
+                    if praxis_dir.is_dir() {
+                        let count = bootstrap::register_reactive_procedures(
+                            praxis_dir,
+                            &reactive_registry,
+                            px_action_handler.clone(),
+                        )
+                        .await;
+                        total_registered += count;
+                    } else {
+                        debug!(dir = %praxis_dir.display(), ".px directory not found, skipping");
                     }
+                }
+
+                if total_registered > 0 {
+                    info!(
+                        registered = total_registered,
+                        triggers = reactive_registry.trigger_count().await,
+                        "Reactive .px procedures loaded via bootstrap"
+                    );
                 } else {
-                    debug!(dir = %praxis_dir.display(), ".px procedures directory not found, skipping");
+                    warn!("No .px procedures found for reactive bootstrap");
                 }
             }
 
