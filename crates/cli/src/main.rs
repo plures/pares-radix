@@ -5274,11 +5274,12 @@ async fn main() {
             config.tool_count = Some(procedure_registry.len());
 
             // Initialize ModelPool from config/models.toml
-            // Search order: $HOME/.pares-radix/config/ → $HOME/ → exe_dir/config/
+            // Search order covers NixOS deploy, dev, and manual install layouts
             let models_toml = {
                 let h = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
                 let candidates = [
                     std::path::PathBuf::from(&h).join(".pares-radix/config/models.toml"),
+                    std::path::PathBuf::from(&h).join(".pares-radix/models.toml"),
                     std::path::PathBuf::from(&h).join("config/models.toml"),
                     std::path::PathBuf::from(&h).join("models.toml"),
                 ];
