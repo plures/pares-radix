@@ -458,6 +458,8 @@ pub struct TelegramConfig {
     pub write_gate: Option<Arc<pares_agens_core::praxis::write_gate::PraxisWriteGate>>,
     /// Optional task manager for `/tasks` and `/task` commands.
     pub task_manager: Option<Arc<TaskManager>>,
+    /// Number of registered tools/procedures (for `/status` display).
+    pub tool_count: Option<usize>,
 }
 
 impl TelegramConfig {
@@ -477,6 +479,7 @@ impl TelegramConfig {
             plugin_executor: None,
             write_gate: None,
             task_manager: None,
+            tool_count: None,
         }
     }
 
@@ -1239,6 +1242,7 @@ impl ChannelAdapter for TelegramAdapter {
         let plugin_executor = self.config.plugin_executor.clone();
         let write_gate = self.config.write_gate.clone();
         let task_manager = self.config.task_manager.clone();
+        let tool_count = self.config.tool_count;
         let event_spine = self.event_spine.clone();
         let stream_tx = self.stream_tx.clone();
         let verbose_by_chat = Arc::new(TokioMutex::new(HashMap::<i64, bool>::new()));
@@ -1328,11 +1332,10 @@ impl ChannelAdapter for TelegramAdapter {
                                     format!("{hours}h {mins}m")
                                 };
                                 let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
-                                let plugin_line = if let Some(ref pr) = plugin_runtime {
-                                    let count = pr.list().await.len();
-                                    format!("Plugins: {count} installed")
+                                let tools_line = if let Some(count) = tool_count {
+                                    format!("Tools: {count} registered")
                                 } else {
-                                    "Plugins: none".to_string()
+                                    "Tools: unknown".to_string()
                                 };
                                 let cerebellum_line = if std::path::Path::new(&format!("{home}/.pares-radix/models/bitnet")).exists() {
                                     "Cerebellum: BitNet (local)"
@@ -1348,7 +1351,7 @@ impl ChannelAdapter for TelegramAdapter {
                                      🧠 Model: <code>{model_line}</code>\n\
                                      🔑 {cerebellum_line}\n\
                                      ⚡️ Event Spine: {event_spine_status}\n\
-                                     🔌 {plugin_line}\n\
+                                     🔧 {tools_line}\n\
                                      🗄 PluresDB: <code>{home}/.pares-radix/memory/</code>\n\
                                      🖥 Host: <code>{hostname}</code>",
                                     std::process::id(),

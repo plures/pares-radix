@@ -5271,6 +5271,7 @@ async fn main() {
                 store.crdt_store_arc(),
             ));
             config = config.with_task_manager(Arc::clone(&task_manager));
+            config.tool_count = Some(procedure_registry.len());
 
             let adapter = TelegramAdapter::new(config);
 
