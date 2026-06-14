@@ -1,3 +1,8 @@
+## [1.46.18] — 2026-06-14
+
+- chore: bump version to v1.46.18 [skip ci] (30902bf)
+- fix(deploy): add ~/.pares-radix/models.toml to config search path (4ad9746)
+
 ## [1.46.17] — 2026-06-14
 
 - chore: bump version to v1.46.17 [skip ci] (81a8d81)
