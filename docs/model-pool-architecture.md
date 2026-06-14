@@ -219,15 +219,30 @@ Migration path:
 2. The `select()` logic inside `ModelChain` delegates to `ModelPool::select_for_task()`
 3. Once stable, remove `ModelChain` entirely
 
-### Provider Auto-Discovery
+### Provider Auto-Discovery (Primary)
 
-For known provider types, we can auto-discover available models:
-- **Copilot**: Hit the models endpoint to enumerate what's available
-- **OpenAI-compatible**: `GET /v1/models` returns the list
-- **Ollama**: `GET /api/tags` returns local models
-- **Anthropic**: Known fixed list (or API enumeration)
+Models are NOT hardcoded. The system discovers what's available at runtime:
 
-This replaces the hardcoded list in `ModelSelectionActionHandler::list_available_models()`.
+- **GitHub Copilot**: `GET /models` → returns full catalog with capabilities, context windows
+- **OpenAI**: `GET /v1/models` → model list, augmented with known cost data
+- **Anthropic**: Known model roster from API version headers
+- **Ollama**: `GET /api/tags` → local models
+
+Discovery runs:
+1. On startup (always)
+2. Periodically (configurable, default 1 hour)
+3. On-demand via `/model refresh`
+
+Results are cached in both PluresDB and config file (`[discovery_cache]` section) so
+the system works even if a provider is temporarily unreachable.
+
+The config file ONLY stores:
+- Provider definitions (where to look)
+- User overrides (enable/disable/prefer)
+- Discovery cache (last known state, auto-managed)
+- Cost overrides (when enterprise pricing differs)
+
+It does NOT maintain a static model catalog.
 
 ### Cost Tracking
 
@@ -323,217 +338,29 @@ Principle: **PluresDB is not a replacement for files. Both coexist.**
 
 ### Config File: `config/models.toml`
 
+The config file defines **providers** and **user overrides** — NOT a static model catalog.
+Models are discovered dynamically from providers at runtime.
+
 ```toml
-# Model Pool Configuration
-# Human-readable, editable, works without PluresDB
-
-[pool]
-default_provider = "copilot"
-selection_weights = { capability = 0.35, rsi = 0.30, cost = 0.20, speed = 0.15 }
-
+# Providers define WHERE to look for models
 [providers.copilot]
 kind = "github-copilot"
-endpoint = "https://api.githubcopilot.com"
-auth = "gh-token"  # uses `gh auth token`
-auto_discover = true  # hit /models endpoint
+endpoint = "https://api.individual.githubcopilot.com"
+auth = "gh-token"
+discovery = "refreshable"  # hit /models endpoint
 enabled = true
 
-[providers.openai-direct]
-kind = "openai"
-endpoint = "https://api.openai.com/v1"
-auth = "env:OPENAI_API_KEY"
-auto_discover = true
-enabled = false  # disabled until user adds key
-
-[providers.local]
-kind = "ollama"
-endpoint = "http://localhost:11434"
-auto_discover = true
-enabled = false
-
-# Models discovered from providers at runtime.
-# This section is auto-updated by the sync process.
-# User edits here are respected (enable/disable/exclude).
-
-[[models]]
-id = "claude-opus-4.8"
-provider = "copilot"
-vendor = "Anthropic"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
-enabled = true
-
-[[models]]
-id = "claude-opus-4.7"
-provider = "copilot"
-vendor = "Anthropic"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
-enabled = true
-
-[[models]]
-id = "claude-opus-4.6"
-provider = "copilot"
-vendor = "Anthropic"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high", "max"]
-enabled = true
-
-[[models]]
-id = "claude-sonnet-4.6"
-provider = "copilot"
-vendor = "Anthropic"
-category = "versatile"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high", "max"]
-enabled = true
-
-[[models]]
-id = "claude-sonnet-4.5"
-provider = "copilot"
-vendor = "Anthropic"
-category = "versatile"
-context_window = 200_000
-max_output = 32_000
-capabilities = ["code", "vision", "tools", "streaming"]
-enabled = true
-
-[[models]]
-id = "claude-haiku-4.5"
-provider = "copilot"
-vendor = "Anthropic"
-category = "lightweight"
-context_window = 200_000
-max_output = 64_000
-capabilities = ["code", "vision", "tools", "streaming"]
-enabled = true
-
-[[models]]
-id = "gpt-5.5"
-provider = "copilot"
-vendor = "OpenAI"
-category = "powerful"
-context_window = 1_050_000
-max_output = 128_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
-enabled = true
-
-[[models]]
-id = "gpt-5.4"
-provider = "copilot"
-vendor = "OpenAI"
-category = "powerful"
-context_window = 1_050_000
-max_output = 128_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
-enabled = true
-
-[[models]]
-id = "gpt-5.4-mini"
-provider = "copilot"
-vendor = "OpenAI"
-category = "lightweight"
-context_window = 400_000
-max_output = 128_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
-enabled = true
-
-[[models]]
-id = "gpt-5.3-codex"
-provider = "copilot"
-vendor = "OpenAI"
-category = "powerful"
-context_window = 400_000
-max_output = 128_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high", "xhigh"]
-enabled = true
-
-[[models]]
-id = "gpt-5-mini"
-provider = "copilot"
-vendor = "OpenAI"
-category = "lightweight"
-context_window = 264_000
-max_output = 64_000
-capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
-reasoning_levels = ["low", "medium", "high"]
-enabled = true
-
-[[models]]
-id = "gpt-4.1"
-provider = "copilot"
-vendor = "Azure OpenAI"
-category = "versatile"
-context_window = 128_000
-max_output = 16_384
-capabilities = ["code", "vision", "tools", "streaming"]
-enabled = true
-
-[[models]]
+# User overrides are applied AFTER discovery
+[[models.overrides]]
 id = "gpt-4o"
 provider = "copilot"
-vendor = "Azure OpenAI"
-category = "versatile"
-context_window = 128_000
-max_output = 16_384
-capabilities = ["vision", "tools", "streaming"]
-enabled = false  # older, superseded by gpt-4.1
+enabled = false
+reason = "superseded by gpt-4.1"
 
-[[models]]
-id = "gpt-4o-mini"
-provider = "copilot"
-vendor = "Azure OpenAI"
-category = "lightweight"
-context_window = 128_000
-max_output = 4_096
-capabilities = ["tools", "streaming"]
-enabled = false  # superseded by gpt-5-mini
-
-[[models]]
-id = "gemini-3.5-flash"
-provider = "copilot"
-vendor = "Google"
-category = "lightweight"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["code", "vision", "tools", "streaming"]
-enabled = true
-
-[[models]]
-id = "gemini-2.5-pro"
-provider = "copilot"
-vendor = "Google"
-category = "powerful"
-context_window = 128_000
-max_output = 64_000
-capabilities = ["code", "vision", "tools", "streaming"]
-enabled = true
-
-[[models]]
-id = "gemini-3.1-pro-preview"
-provider = "copilot"
-vendor = "Google"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-capabilities = ["code", "vision", "tools", "streaming"]
-preview = true
-enabled = true
+# Discovery cache (auto-managed, fallback when providers unreachable)
+# [discovery_cache]
+# last_refresh = "2026-06-14T18:30:00Z"
+# copilot_models = 14
 ```
 
 ### Sync Protocol

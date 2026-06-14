@@ -3,11 +3,11 @@
 # Source of truth at startup. Works without PluresDB.
 # Runtime changes (via /model command) sync back here.
 #
-# Models are enabled by default. Disable ones you don't want.
-# The orchestrator dynamically selects the best model per task.
+# Models are discovered dynamically from providers, NOT hardcoded.
+# This file defines providers + user overrides (enable/disable/preferences).
+# The model catalog is populated at runtime via provider discovery.
 #
 # Cost is per 1M tokens (USD). Copilot cost is $0 (subscription).
-# Cost data sourced from OpenClaw model catalogs (2026-06-14).
 
 [pool]
 default_provider = "copilot"
@@ -18,14 +18,21 @@ rsi = 0.30
 cost = 0.20
 speed = 0.15
 
+[pool.discovery]
+# How often to refresh model lists from providers (seconds)
+refresh_interval = 3600         # 1 hour
+refresh_on_startup = true       # always discover on boot
+
 # ─── Providers ────────────────────────────────────────────────────────
+# Each provider is queried for its available models at startup
+# and periodically thereafter. No hardcoded model lists.
 
 [providers.copilot]
 kind = "github-copilot"
 endpoint = "https://api.individual.githubcopilot.com"
-auth = "gh-token"
-api = "openai-responses"        # default; claude models use anthropic-messages
-discovery = "refreshable"       # live discovery from /models endpoint
+auth = "gh-token"               # uses `gh auth token`
+api = "openai-responses"        # default; claude models override to anthropic-messages
+discovery = "refreshable"       # GET /models
 enabled = true
 
 [providers.openai]
@@ -33,7 +40,7 @@ kind = "openai"
 endpoint = "https://api.openai.com/v1"
 auth = "env:OPENAI_API_KEY"
 api = "openai-responses"
-discovery = "static"
+discovery = "refreshable"       # GET /v1/models
 enabled = false                 # enable when API key is configured
 
 [providers.anthropic]
@@ -41,7 +48,7 @@ kind = "anthropic"
 endpoint = "https://api.anthropic.com"
 auth = "env:ANTHROPIC_API_KEY"
 api = "anthropic-messages"
-discovery = "static"
+discovery = "refreshable"       # known models list from API
 enabled = false                 # enable when API key is configured
 
 [providers.local]
@@ -51,383 +58,67 @@ api = "openai-completions"
 discovery = "refreshable"       # GET /api/tags
 enabled = false
 
-# ─── Models: GitHub Copilot (subscription, $0 per-token cost) ─────────
-# Context windows from Copilot API; cost = 0 (flat rate subscription)
+# ─── User Model Overrides ─────────────────────────────────────────────
+# Models are discovered dynamically from providers.
+# Use this section ONLY for user overrides (disable/enable/prefer).
+# Format: [[models.overrides]]
+#
+# The orchestrator discovers all models from enabled providers at startup.
+# These overrides are applied AFTER discovery.
 
-[[models]]
-id = "claude-opus-4.8"
+[[models.overrides]]
+id = "gpt-4o"
 provider = "copilot"
-vendor = "Anthropic"
-name = "Claude Opus 4.8"
-api = "anthropic-messages"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+enabled = false
+reason = "superseded by gpt-4.1"
 
-[[models]]
-id = "claude-opus-4.7"
+[[models.overrides]]
+id = "gpt-4o-mini"
 provider = "copilot"
-vendor = "Anthropic"
-name = "Claude Opus 4.7"
-api = "anthropic-messages"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+enabled = false
+reason = "superseded by gpt-5-mini"
 
-[[models]]
-id = "claude-opus-4.6"
+[[models.overrides]]
+id = "gpt-3.5-turbo"
 provider = "copilot"
-vendor = "Anthropic"
-name = "Claude Opus 4.6"
-api = "anthropic-messages"
-category = "powerful"
-context_window = 1_000_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-reasoning_levels = ["low", "medium", "high", "max"]
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+enabled = false
+reason = "legacy"
 
-[[models]]
-id = "claude-sonnet-4.6"
-provider = "copilot"
-vendor = "Anthropic"
-name = "Claude Sonnet 4.6"
-api = "anthropic-messages"
-category = "versatile"
-context_window = 1_000_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-reasoning_levels = ["low", "medium", "high", "max"]
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+# Example: disable a model that gives bad results
+# [[models.overrides]]
+# id = "gpt-5.4-nano"
+# provider = "openai"
+# enabled = false
+# reason = "too dumb for our use case"
 
-[[models]]
-id = "gpt-5.5"
-provider = "copilot"
-vendor = "OpenAI"
-name = "GPT-5.5"
-category = "powerful"
-context_window = 400_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+# Example: prefer a model (soft boost to selection score)
+# [[models.overrides]]
+# id = "claude-opus-4.8"
+# provider = "copilot"
+# prefer = true
 
-[[models]]
-id = "gpt-5.4"
-provider = "copilot"
-vendor = "OpenAI"
-name = "GPT-5.4"
-category = "powerful"
-context_window = 128_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+# ─── Cost Overrides ───────────────────────────────────────────────────
+# Provider-level cost info. Only needed when providers don't report it
+# or when you want to override (e.g., enterprise pricing differs).
+# Cost = USD per 1M tokens. Copilot is always $0 (subscription).
 
-[[models]]
-id = "gpt-5.4-mini"
-provider = "copilot"
-vendor = "OpenAI"
-name = "GPT-5.4 mini"
-category = "lightweight"
-context_window = 128_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+[costs]
+# Copilot is free (subscription), so no per-token cost
+copilot = "subscription"        # signals $0 per-token to the selection algorithm
 
-[[models]]
-id = "gpt-5.4-nano"
-provider = "copilot"
-vendor = "OpenAI"
-name = "GPT-5.4 nano"
-category = "lightweight"
-context_window = 128_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
+# OpenAI/Anthropic costs are discovered from provider metadata when available.
+# Override here only if your contract pricing differs from public rates.
+# [costs.overrides."openai/gpt-5.5"]
+# input = 4.0   # your enterprise rate
+# output = 25.0
 
-[[models]]
-id = "gpt-5.3-codex"
-provider = "copilot"
-vendor = "OpenAI"
-name = "GPT-5.3 Codex"
-category = "powerful"
-context_window = 400_000
-max_output = 128_000
-input = ["text"]
-reasoning = true
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "gemini-3.1-pro"
-provider = "copilot"
-vendor = "Google"
-name = "Gemini 3.1 Pro"
-category = "powerful"
-context_window = 128_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = false
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "gemini-3-flash"
-provider = "copilot"
-vendor = "Google"
-name = "Gemini 3 Flash"
-category = "lightweight"
-context_window = 128_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = false
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "gemini-2.5-pro"
-provider = "copilot"
-vendor = "Google"
-name = "Gemini 2.5 Pro"
-category = "powerful"
-context_window = 128_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = false
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "raptor-mini"
-provider = "copilot"
-vendor = "Unknown"
-name = "Raptor mini"
-category = "lightweight"
-context_window = 128_000
-max_output = 8_192
-input = ["text"]
-reasoning = false
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "goldeneye"
-provider = "copilot"
-vendor = "Unknown"
-name = "Goldeneye"
-category = "experimental"
-context_window = 128_000
-max_output = 8_192
-input = ["text"]
-reasoning = false
-cost = { input = 0, output = 0, cache_read = 0 }
-enabled = true
-
-# ─── Models: OpenAI Direct (pay-per-token) ────────────────────────────
-# Real pricing from OpenClaw openai plugin catalog
-
-[[models]]
-id = "gpt-5.5"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.5"
-category = "powerful"
-context_window = 1_000_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 5.0, output = 30.0, cache_read = 0.5 }
-enabled = true
-
-[[models]]
-id = "gpt-5.5-pro"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.5 Pro"
-category = "powerful"
-context_window = 1_000_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 30.0, output = 180.0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "gpt-5.4"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.4"
-category = "powerful"
-context_window = 272_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 2.5, output = 15.0, cache_read = 0.25 }
-enabled = true
-
-[[models]]
-id = "gpt-5.4-pro"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.4 Pro"
-category = "powerful"
-context_window = 1_050_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 30.0, output = 180.0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "gpt-5.4-mini"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.4 mini"
-category = "lightweight"
-context_window = 400_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0.75, output = 4.5, cache_read = 0.075 }
-enabled = true
-
-[[models]]
-id = "gpt-5.4-nano"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.4 nano"
-category = "lightweight"
-context_window = 400_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 0.2, output = 1.25, cache_read = 0.02 }
-enabled = true
-
-[[models]]
-id = "gpt-5.3-codex"
-provider = "openai"
-vendor = "OpenAI"
-name = "GPT-5.3 Codex"
-api = "openai-chatgpt-responses"
-category = "powerful"
-context_window = 400_000
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 1.75, output = 14.0, cache_read = 0.175 }
-enabled = true
-
-[[models]]
-id = "o3"
-provider = "openai"
-vendor = "OpenAI"
-name = "o3"
-category = "powerful"
-context_window = 200_000
-max_output = 100_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 2.0, output = 8.0, cache_read = 0.5 }
-enabled = true
-
-[[models]]
-id = "o3-pro"
-provider = "openai"
-vendor = "OpenAI"
-name = "o3-pro"
-category = "powerful"
-context_window = 200_000
-max_output = 100_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 20.0, output = 80.0, cache_read = 0 }
-enabled = true
-
-[[models]]
-id = "o4-mini"
-provider = "openai"
-vendor = "OpenAI"
-name = "o4-mini"
-category = "lightweight"
-context_window = 200_000
-max_output = 100_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 1.1, output = 4.4, cache_read = 0.28 }
-enabled = true
-
-# ─── Models: Anthropic Direct (pay-per-token) ─────────────────────────
-
-[[models]]
-id = "claude-opus-4-8"
-provider = "anthropic"
-vendor = "Anthropic"
-name = "Claude Opus 4.8"
-category = "powerful"
-context_window = 1_048_576
-max_output = 128_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 15.0, output = 75.0, cache_read = 1.5 }
-enabled = true
-
-[[models]]
-id = "claude-opus-4-7"
-provider = "anthropic"
-vendor = "Anthropic"
-name = "Claude Opus 4.7"
-category = "powerful"
-context_window = 200_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 15.0, output = 75.0, cache_read = 1.5 }
-enabled = true
-
-[[models]]
-id = "claude-sonnet-4-6"
-provider = "anthropic"
-vendor = "Anthropic"
-name = "Claude Sonnet 4.6"
-category = "versatile"
-context_window = 200_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 3.0, output = 15.0, cache_read = 0.3 }
-enabled = true
-
-[[models]]
-id = "claude-opus-4-6"
-provider = "anthropic"
-vendor = "Anthropic"
-name = "Claude Opus 4.6"
-category = "powerful"
-context_window = 200_000
-max_output = 64_000
-input = ["text", "image"]
-reasoning = true
-cost = { input = 15.0, output = 75.0, cache_read = 1.5 }
-enabled = true
+# ─── Discovery Cache ──────────────────────────────────────────────────
+# Last successful discovery results are cached here by the runtime.
+# This section is auto-managed. DO NOT edit manually.
+# It ensures the system works if providers are temporarily unreachable.
+#
+# [discovery_cache]
+# last_refresh = "2026-06-14T18:30:00Z"
+# copilot_models = 14
+# openai_models = 0   (provider disabled)
+# anthropic_models = 0 (provider disabled)
