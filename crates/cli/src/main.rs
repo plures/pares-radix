@@ -3023,15 +3023,18 @@ async fn run_adapter_with_recovery(
     adapter: &TelegramAdapter,
     agent: Arc<RwLock<Arc<Agent>>>,
     trace_store: ToolTraceStore,
+    stream_broadcast_tx: Option<tokio::sync::broadcast::Sender<pares_agens_core::model::StreamDelta>>,
 ) -> Result<(), String> {
     let mut attempts = 0u32;
     loop {
         let agent_clone = Arc::clone(&agent);
         let trace_store = trace_store.clone();
+        let stream_broadcast_tx = stream_broadcast_tx.clone();
         match adapter
             .run(move |mut event: Event| {
                 let agent = Arc::clone(&agent_clone);
                 let trace_store = trace_store.clone();
+                let stream_broadcast_tx = stream_broadcast_tx.clone();
                 Box::pin(async move {
                     let mut trace_request_id: Option<String> = None;
                     let mut verbose_tool_details = false;
@@ -3066,11 +3069,15 @@ async fn run_adapter_with_recovery(
                                 .await
                         });
 
-                        // Drain stream — we don't use it here yet (Telegram edits
-                        // are handled in the adapter's progressive delivery), but
-                        // consuming it prevents unbounded channel backpressure.
+                        // Bridge mpsc → broadcast: forward streaming deltas to the
+                        // TelegramAdapter's progressive delivery subscriber.
+                        let broadcast_tx_for_bridge = stream_broadcast_tx.clone();
                         tokio::spawn(async move {
-                            while stream_rx.recv().await.is_some() {}
+                            while let Some(delta) = stream_rx.recv().await {
+                                if let Some(ref btx) = broadcast_tx_for_bridge {
+                                    let _ = btx.send(delta);
+                                }
+                            }
                         });
 
                         handle.await.unwrap_or(None)
@@ -5269,8 +5276,13 @@ async fn main() {
 
             tracing::info!("Telegram adapter starting — bot is live");
 
+            // Create streaming broadcast channel — ModelInvoker sends deltas here,
+            // TelegramAdapter subscribes for progressive editing. Zero overhead if unused.
+            let (stream_broadcast_tx, _) = tokio::sync::broadcast::channel::<pares_agens_core::model::StreamDelta>(256);
+
             // Initialize the event spine if enabled
             let mut adapter = adapter;
+            adapter.stream_tx = Some(stream_broadcast_tx.clone());
             let mut heartbeat_spine_handle: Option<pares_agens_core::event_spine::EventSpineHandle> = None;
             if !no_event_spine {
                 let crdt = store.crdt_store();
@@ -5491,7 +5503,7 @@ async fn main() {
             }
 
             let adapter_result =
-                run_adapter_with_recovery(&adapter, Arc::clone(&agent_handle), tool_trace_store)
+                run_adapter_with_recovery(&adapter, Arc::clone(&agent_handle), tool_trace_store, Some(stream_broadcast_tx))
                     .await;
 
             // Stop heartbeat
