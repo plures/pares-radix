@@ -370,8 +370,8 @@ impl Agent {
     /// Select the appropriate model client for a request based on context size and complexity.
     ///
     /// Algorithm:
-    /// 1. Context size is the GATE — if a tier's model can't fit the context, skip it
-    /// 2. Complexity is the SELECTOR — pick the cheapest tier that handles the task
+    /// 1. Context size is the GATE - if a tier's model can't fit the context, skip it
+    /// 2. Complexity is the SELECTOR - pick the cheapest tier that handles the task
     /// 3. Failover is handled at the client level (fallback chains per tier)
     ///
     /// Context size gate: estimate total tokens, reject models where
@@ -381,7 +381,7 @@ impl Agent {
         let complexity = Self::estimate_complexity(content, word_count);
 
         // Rough token estimate: ~1.3 tokens per word for English text.
-        // This doesn't include system prompt or history — those are managed
+        // This doesn't include system prompt or history - those are managed
         // separately by the context window manager. This is just the MESSAGE
         // itself as a quick filter.
         let estimated_message_tokens = (word_count as u64).saturating_mul(13) / 10;
@@ -398,7 +398,7 @@ impl Agent {
         // Context-size gate check for a model client.
         // Returns true if the model's window can accommodate this message
         // (with headroom). Note: full context (history + system prompt) is
-        // managed elsewhere — this prevents obviously-too-large messages
+        // managed elsewhere - this prevents obviously-too-large messages
         // from being sent to small-context models.
         let fits_context = |client: &Arc<dyn ModelClient>| -> bool {
             match client.context_window() {
@@ -450,7 +450,7 @@ impl Agent {
                 self.deep_model_client.as_ref().or(self.model_client.as_ref())
             }
             _ => {
-                // Premium tier directly — these have the largest context windows
+                // Premium tier directly - these have the largest context windows
                 if let Some(ref deep) = self.deep_model_client {
                     tracing::info!("routing to Premium tier (complexity={})", complexity);
                     Some(deep)
@@ -464,7 +464,7 @@ impl Agent {
     /// Estimate request complexity from content signals.
     /// Returns a score 0-6 where higher = more complex.
     ///
-    /// This is intentionally heuristic — no embedding or model call needed.
+    /// This is intentionally heuristic - no embedding or model call needed.
     /// The goal is: short contextual follow-ups → 0-1, moderate questions → 2-3,
     /// complex analytical/design/comparison tasks → 4+.
     fn estimate_complexity(content: &str, word_count: usize) -> u8 {
@@ -478,7 +478,7 @@ impl Agent {
         if word_count <= 8 {
             score += 1; // Short but might have substance
         } else if word_count <= 30 {
-            score += 2; // Medium — could be anything
+            score += 2; // Medium - could be anything
         } else {
             score += 2; // Long context doesn't mean complex (could be pasting a log)
         }
@@ -572,18 +572,30 @@ impl Agent {
         // procedures. This handles routing, context, model invocation, tool loops,
         // and delivery all within the PluresDB dataflow graph.
         if let Some(cerebellum) = &self.cerebellum {
-            if let Event::Message { ref id, ref sender, ref content, .. } = event {
+            if let Event::Message { ref id, ref sender, ref content, ref channel, .. } = event {
                 // Parse chat_id from message id (format: "chat_id:msg_id" or just numeric)
                 let chat_id = id.split(':').next()
                     .and_then(|s| s.parse::<i64>().ok())
                     .unwrap_or(0);
+                // Load conversation history so the dataflow pipeline has multi-turn context
+                let session_channel = self.resolve_branch_channel(channel);
+                let history = self.load_history(&session_channel).await;
                 if let Some(delivery) = cerebellum.try_full_dataflow(
                     chat_id,
                     sender,
                     content,
                     Some(id.as_str()),
+                    if history.is_empty() { None } else { Some(&history) },
                 ).await {
-                    // Full pipeline handled — package as ModelResponse
+                    // Persist the exchange in history so future turns have context
+                    let session_id = Self::branch_label(&session_channel);
+                    let new_messages = vec![
+                        ChatMessage { role: "user".into(), content: content.clone(), tool_call_id: None, tool_calls: None },
+                        ChatMessage { role: "assistant".into(), content: delivery.content.clone(), tool_call_id: None, tool_calls: None },
+                    ];
+                    self.persist_turn(&session_channel, &session_id, &new_messages).await;
+
+                    // Full pipeline handled - package as ModelResponse
                     return Some(Event::ModelResponse {
                         request_id: request_id.to_string(),
                         content: delivery.content,
@@ -626,7 +638,7 @@ impl Agent {
             (default_route, String::new(), false)
         };
 
-        // Log routing decision (Chronos recording disabled — causes sled deadlock in async context)
+        // Log routing decision (Chronos recording disabled - causes sled deadlock in async context)
         info!(route = ?route, event_kind = event.kind(), context_len = learned_context.len(), "cerebellum routing decision");
 
         if route == Route::Drop {
@@ -680,7 +692,7 @@ impl Agent {
                 Route::Drop => {
                     info!(
                         id,
-                        channel, "handle_event: Route::Drop — message suppressed"
+                        channel, "handle_event: Route::Drop - message suppressed"
                     );
                     None
                 }
@@ -1285,7 +1297,7 @@ impl Agent {
                 tool_count = tools.len(),
                 "ABOUT TO CALL model_client.complete"
             );
-            // Use streaming when a StreamSender is provided (first turn only —
+            // Use streaming when a StreamSender is provided (first turn only -
             // subsequent tool-loop turns use non-streaming since the UI already
             // shows the tool execution phase).
             let completion = if let (Some(tx), 0) = (stream_tx, turn) {
@@ -1572,11 +1584,11 @@ impl Agent {
         let total_tokens: usize = messages.iter().map(Self::estimate_tokens).sum();
 
         if total_tokens <= Self::MAX_HISTORY_TOKENS {
-            // Fits — return all.
+            // Fits - return all.
             return messages.to_vec();
         }
 
-        // Exceeds budget — keep most recent messages that fit
+        // Exceeds budget - keep most recent messages that fit
         let mut budget = Self::MAX_HISTORY_TOKENS - Self::SUMMARY_TOKEN_BUDGET;
         let mut keep_from = messages.len();
         for (i, msg) in messages.iter().enumerate().rev() {
@@ -1621,7 +1633,7 @@ impl Agent {
                 }
                 let truncated: String = compact.chars().take(160).collect();
                 let snippet = if compact.chars().count() > 160 {
-                    format!("{truncated}…")
+                    format!("{truncated}...")
                 } else {
                     truncated
                 };
@@ -2175,7 +2187,7 @@ impl Agent {
                 let subcommand = parts.next().unwrap_or("").to_ascii_lowercase();
                 match subcommand.as_str() {
                     "list" | "" if subcommand == "list" => {
-                        // /resume list — show recent sessions
+                        // /resume list - show recent sessions
                         if let Some(session_mgr) = &self.session_manager {
                             let sessions = session_mgr.list_sessions(channel, 10).await;
                             if sessions.is_empty() {
@@ -2192,7 +2204,7 @@ impl Agent {
                                     .unwrap_or_else(|| s.started_at.to_string());
                                 let topic = s.topic_summary.as_deref().unwrap_or("(no topic)");
                                 lines.push(format!(
-                                    "• {} — {} msgs, {} — {}",
+                                    "• {} - {} msgs, {} - {}",
                                     s.key, s.message_count, ts, topic
                                 ));
                             }
@@ -2210,7 +2222,7 @@ impl Agent {
                         }
                     }
                     _ => {
-                        // /resume (no args) — restore most recent session
+                        // /resume (no args) - restore most recent session
                         if let Some(session_mgr) = &self.session_manager {
                             if let Some(saved) = session_mgr.load_active_session(channel).await {
                                 let count = saved.messages.len();
@@ -2262,7 +2274,7 @@ impl Agent {
                             .unwrap_or_else(|| s.started_at.to_string());
                         let topic = s.topic_summary.as_deref().unwrap_or("(no topic)");
                         lines.push(format!(
-                            "• {} — {} msgs, {} — {}",
+                            "• {} - {} msgs, {} - {}",
                             s.key, s.message_count, ts, topic
                         ));
                     }
@@ -2832,7 +2844,7 @@ mod history_persistence_tests {
         )
         .await;
 
-        // Turn 3 via another Arc clone — must see all history
+        // Turn 3 via another Arc clone - must see all history
         let a3 = Arc::clone(&agent);
         let history = a3.load_history("telegram").await;
 
@@ -2874,7 +2886,7 @@ mod history_persistence_tests {
         )
         .await;
 
-        // Ask about the task — history must include it
+        // Ask about the task - history must include it
         let a3 = Arc::clone(&agent);
         let history = a3.load_history("telegram").await;
 

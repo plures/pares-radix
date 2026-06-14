@@ -548,13 +548,14 @@ impl Cerebellum {
         sender: &str,
         content: &str,
         message_id: Option<&str>,
+        history: Option<&[crate::model::ChatMessage]>,
     ) -> Option<dataflow_bridge::DeliveryResult> {
         let df_bridge = self.dataflow_bridge.as_ref()?;
         if !df_bridge.is_active() {
             return None;
         }
 
-        match df_bridge.process_message(chat_id, sender, content, message_id).await {
+        match df_bridge.process_message(chat_id, sender, content, message_id, history).await {
             Ok(Some(delivery)) => {
                 info!(
                     chat_id,

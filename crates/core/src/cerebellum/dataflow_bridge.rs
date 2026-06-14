@@ -82,10 +82,26 @@ impl DataflowBridge {
         sender: &str,
         content: &str,
         message_id: Option<&str>,
+        history: Option<&[crate::model::ChatMessage]>,
     ) -> Result<Option<DeliveryResult>, String> {
         if !self.active {
             return Ok(None);
         }
+
+        // Format conversation history for context injection
+        let history_text = if let Some(messages) = history {
+            if messages.is_empty() {
+                String::new()
+            } else {
+                // Take last N messages to fit reasonable context
+                let recent: Vec<_> = messages.iter().rev().take(20).collect::<Vec<_>>().into_iter().rev().collect();
+                recent.iter().map(|m| {
+                    format!("{}: {}", m.role, m.content)
+                }).collect::<Vec<_>>().join("\n")
+            }
+        } else {
+            String::new()
+        };
 
         let event_datum = Datum::root(json!({
             "content": content,
@@ -93,6 +109,7 @@ impl DataflowBridge {
             "sender": sender,
             "timestamp": chrono::Utc::now().timestamp_millis(),
             "message_id": message_id,
+            "conversation_history": history_text,
         }));
 
         // Push to inbound — graph fires from here
