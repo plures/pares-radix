@@ -1,3 +1,8 @@
+## [1.46.16] — 2026-06-14
+
+- chore: bump version to v1.46.16 [skip ci] (03f7872)
+- feat(model_pool): automatic hourly rediscovery + /model refresh + auto-deploy config (a36bef7)
+
 ## [1.46.15] — 2026-06-14
 
 - chore: bump version to v1.46.15 [skip ci] (f5b4c04)
