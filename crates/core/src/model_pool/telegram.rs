@@ -32,6 +32,9 @@ pub trait PoolControl: Send + Sync {
     /// Reset all user overrides: `/model reset`.
     async fn reset(&self) -> Result<String, String>;
 
+    /// Trigger re-discovery from all providers: `/model refresh`.
+    async fn refresh(&self) -> String;
+
     /// Legacy compat: return (primary, deep) strings for old status display.
     async fn legacy_model_pair(&self) -> (String, String);
 }
@@ -248,6 +251,17 @@ impl PoolControl for PoolControlAdapter {
     async fn reset(&self) -> Result<String, String> {
         self.pool.reset().await?;
         Ok("🔄 All model overrides and preferences cleared. All models re-enabled.".to_string())
+    }
+
+    async fn refresh(&self) -> String {
+        self.pool.discover_all().await;
+        let status = self.pool.status().await;
+        format!(
+            "🔄 Discovery complete: {} models from {} providers ({} enabled)",
+            status.total_models,
+            status.providers.iter().filter(|p| p.status == ProviderStatus::Active).count(),
+            status.enabled_models
+        )
     }
 
     async fn legacy_model_pair(&self) -> (String, String) {

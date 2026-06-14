@@ -5278,20 +5278,44 @@ async fn main() {
                 let h = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
                 std::path::PathBuf::from(h).join(".pares-radix/config/models.toml")
             };
+            // Auto-deploy bundled config if none exists at runtime location
+            if !models_toml.exists() {
+                if let Ok(exe_dir) = std::env::current_exe().map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()) {
+                    let bundled = exe_dir.join("config").join("models.toml");
+                    if bundled.exists() {
+                        if let Some(parent) = models_toml.parent() {
+                            std::fs::create_dir_all(parent).ok();
+                        }
+                        if let Err(e) = std::fs::copy(&bundled, &models_toml) {
+                            tracing::warn!(error = %e, "failed to deploy bundled models.toml");
+                        } else {
+                            tracing::info!(src = %bundled.display(), dst = %models_toml.display(), "deployed bundled models.toml");
+                        }
+                    }
+                }
+            }
             if models_toml.exists() {
                 match pares_agens_core::model_pool::ModelPool::from_config(&models_toml) {
                     Ok(pool) => {
                         let pool = Arc::new(pool);
                         let pool_for_discovery = Arc::clone(&pool);
-                        // Spawn background discovery
+                        // Spawn background discovery + periodic refresh (every hour)
                         tokio::spawn(async move {
                             pool_for_discovery.discover_all().await;
+                            // Re-discover every hour
+                            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+                            interval.tick().await; // first tick fires immediately, skip it
+                            loop {
+                                interval.tick().await;
+                                tracing::debug!("ModelPool: periodic rediscovery starting");
+                                pool_for_discovery.discover_all().await;
+                            }
                         });
                         let adapter_ctrl = Arc::new(
                             pares_agens_core::model_pool::PoolControlAdapter::new(Arc::clone(&pool)),
                         );
                         config = config.with_pool_control(adapter_ctrl as Arc<dyn pares_agens_core::model_pool::PoolControl>);
-                        tracing::info!(config = %models_toml.display(), "ModelPool initialized");
+                        tracing::info!(config = %models_toml.display(), "ModelPool initialized (hourly refresh enabled)");
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "Failed to load ModelPool config, falling back to legacy model control");

@@ -1468,7 +1468,8 @@ impl ChannelAdapter for TelegramAdapter {
                                         ["reset"] => {
                                             pc.reset().await.unwrap_or_else(|e| format!("⚠️ {e}"))
                                         }
-                                        _ => "Usage: /model [list|disable <id> [reason]|enable <id>|prefer <id>|stats [id]|reset]".to_string(),
+                                        ["refresh"] => pc.refresh().await,
+                                        _ => "Usage: /model [list|disable <id> [reason]|enable <id>|prefer <id>|stats [id]|reset|refresh]".to_string(),
                                     };
                                     Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
                                     Self::acknowledge_message(&bot, &msg).await;
