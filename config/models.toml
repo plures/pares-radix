@@ -1,0 +1,252 @@
+# Model Pool Configuration
+# ========================
+# Human-readable, editable, works without PluresDB.
+# This file is the source of truth at startup.
+# Runtime changes (via /model command) sync back here.
+#
+# Models are enabled by default. Disable ones you don't want.
+# The orchestrator dynamically selects the best model per task.
+
+[pool]
+default_provider = "copilot"
+
+[pool.selection_weights]
+capability = 0.35
+rsi = 0.30
+cost = 0.20
+speed = 0.15
+
+# ─── Providers ────────────────────────────────────────────────────────
+
+[providers.copilot]
+kind = "github-copilot"
+endpoint = "https://api.githubcopilot.com"
+auth = "gh-token"
+auto_discover = true
+enabled = true
+
+[providers.openai-direct]
+kind = "openai"
+endpoint = "https://api.openai.com/v1"
+auth = "env:OPENAI_API_KEY"
+auto_discover = true
+enabled = false
+
+[providers.local]
+kind = "ollama"
+endpoint = "http://localhost:11434"
+auto_discover = true
+enabled = false
+
+# ─── Models ───────────────────────────────────────────────────────────
+# Auto-populated from provider discovery + manual overrides.
+# Set enabled = false to disable a model from selection.
+
+# --- Anthropic (via Copilot) ---
+
+[[models]]
+id = "claude-opus-4.8"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+enabled = true
+
+[[models]]
+id = "claude-opus-4.7"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+enabled = true
+
+[[models]]
+id = "claude-opus-4.6"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "max"]
+enabled = true
+
+[[models]]
+id = "claude-sonnet-4.6"
+provider = "copilot"
+vendor = "Anthropic"
+category = "versatile"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "max"]
+enabled = true
+
+[[models]]
+id = "claude-sonnet-4.5"
+provider = "copilot"
+vendor = "Anthropic"
+category = "versatile"
+context_window = 200_000
+max_output = 32_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "claude-haiku-4.5"
+provider = "copilot"
+vendor = "Anthropic"
+category = "lightweight"
+context_window = 200_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+# --- OpenAI (via Copilot) ---
+
+[[models]]
+id = "gpt-5.5"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 1_050_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.4"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 1_050_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.4-mini"
+provider = "copilot"
+vendor = "OpenAI"
+category = "lightweight"
+context_window = 400_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.3-codex"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 400_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5-mini"
+provider = "copilot"
+vendor = "OpenAI"
+category = "lightweight"
+context_window = 264_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high"]
+enabled = true
+
+[[models]]
+id = "gpt-4.1"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "versatile"
+context_window = 128_000
+max_output = 16_384
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gpt-4o"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "versatile"
+context_window = 128_000
+max_output = 16_384
+capabilities = ["vision", "tools", "streaming"]
+enabled = false  # superseded by gpt-4.1
+
+[[models]]
+id = "gpt-4o-mini"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "lightweight"
+context_window = 128_000
+max_output = 4_096
+capabilities = ["tools", "streaming"]
+enabled = false  # superseded by gpt-5-mini
+
+# --- Google (via Copilot) ---
+
+[[models]]
+id = "gemini-3.5-flash"
+provider = "copilot"
+vendor = "Google"
+category = "lightweight"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gemini-3.1-pro-preview"
+provider = "copilot"
+vendor = "Google"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+preview = true
+enabled = true
+
+[[models]]
+id = "gemini-2.5-pro"
+provider = "copilot"
+vendor = "Google"
+category = "powerful"
+context_window = 128_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+enabled = true
+
+# ─── Legacy / Dated versions ─────────────────────────────────────────
+# These are available but disabled by default (older, superseded).
+
+[[models]]
+id = "gpt-3.5-turbo"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "legacy"
+context_window = 16_384
+max_output = 4_096
+capabilities = ["tools", "streaming"]
+enabled = false
+
+[[models]]
+id = "gpt-4"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "legacy"
+context_window = 32_768
+max_output = 4_096
+capabilities = ["tools"]
+enabled = false

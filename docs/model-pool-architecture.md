@@ -311,6 +311,320 @@ This preserves the "RSI is slow by design" philosophy while giving users an imme
 - `crates/channels/src/telegram.rs` — /status, /models, /model commands
 - `crates/cli/src/main.rs` — construct ModelPool, wire into adapter
 
+## Dual-Mode: Config File + PluresDB
+
+Principle: **PluresDB is not a replacement for files. Both coexist.**
+
+- Config file = source of truth at startup, human-readable, works when PluresDB is down
+- PluresDB = runtime state, dynamic changes, RSI learning data
+- On startup: load config file → seed PluresDB
+- On runtime change: write to PluresDB → sync back to config file
+- On restart: config file wins for structural config, PluresDB wins for learned state
+
+### Config File: `config/models.toml`
+
+```toml
+# Model Pool Configuration
+# Human-readable, editable, works without PluresDB
+
+[pool]
+default_provider = "copilot"
+selection_weights = { capability = 0.35, rsi = 0.30, cost = 0.20, speed = 0.15 }
+
+[providers.copilot]
+kind = "github-copilot"
+endpoint = "https://api.githubcopilot.com"
+auth = "gh-token"  # uses `gh auth token`
+auto_discover = true  # hit /models endpoint
+enabled = true
+
+[providers.openai-direct]
+kind = "openai"
+endpoint = "https://api.openai.com/v1"
+auth = "env:OPENAI_API_KEY"
+auto_discover = true
+enabled = false  # disabled until user adds key
+
+[providers.local]
+kind = "ollama"
+endpoint = "http://localhost:11434"
+auto_discover = true
+enabled = false
+
+# Models discovered from providers at runtime.
+# This section is auto-updated by the sync process.
+# User edits here are respected (enable/disable/exclude).
+
+[[models]]
+id = "claude-opus-4.8"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+enabled = true
+
+[[models]]
+id = "claude-opus-4.7"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh", "max"]
+enabled = true
+
+[[models]]
+id = "claude-opus-4.6"
+provider = "copilot"
+vendor = "Anthropic"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "max"]
+enabled = true
+
+[[models]]
+id = "claude-sonnet-4.6"
+provider = "copilot"
+vendor = "Anthropic"
+category = "versatile"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "max"]
+enabled = true
+
+[[models]]
+id = "claude-sonnet-4.5"
+provider = "copilot"
+vendor = "Anthropic"
+category = "versatile"
+context_window = 200_000
+max_output = 32_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "claude-haiku-4.5"
+provider = "copilot"
+vendor = "Anthropic"
+category = "lightweight"
+context_window = 200_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gpt-5.5"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 1_050_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.4"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 1_050_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.4-mini"
+provider = "copilot"
+vendor = "OpenAI"
+category = "lightweight"
+context_window = 400_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["none", "low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5.3-codex"
+provider = "copilot"
+vendor = "OpenAI"
+category = "powerful"
+context_window = 400_000
+max_output = 128_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high", "xhigh"]
+enabled = true
+
+[[models]]
+id = "gpt-5-mini"
+provider = "copilot"
+vendor = "OpenAI"
+category = "lightweight"
+context_window = 264_000
+max_output = 64_000
+capabilities = ["reasoning", "code", "vision", "tools", "streaming"]
+reasoning_levels = ["low", "medium", "high"]
+enabled = true
+
+[[models]]
+id = "gpt-4.1"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "versatile"
+context_window = 128_000
+max_output = 16_384
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gpt-4o"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "versatile"
+context_window = 128_000
+max_output = 16_384
+capabilities = ["vision", "tools", "streaming"]
+enabled = false  # older, superseded by gpt-4.1
+
+[[models]]
+id = "gpt-4o-mini"
+provider = "copilot"
+vendor = "Azure OpenAI"
+category = "lightweight"
+context_window = 128_000
+max_output = 4_096
+capabilities = ["tools", "streaming"]
+enabled = false  # superseded by gpt-5-mini
+
+[[models]]
+id = "gemini-3.5-flash"
+provider = "copilot"
+vendor = "Google"
+category = "lightweight"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gemini-2.5-pro"
+provider = "copilot"
+vendor = "Google"
+category = "powerful"
+context_window = 128_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+enabled = true
+
+[[models]]
+id = "gemini-3.1-pro-preview"
+provider = "copilot"
+vendor = "Google"
+category = "powerful"
+context_window = 1_000_000
+max_output = 64_000
+capabilities = ["code", "vision", "tools", "streaming"]
+preview = true
+enabled = true
+```
+
+### Sync Protocol
+
+```
+Startup:
+  1. Read config/models.toml → build ModelPool
+  2. Write pool state to PluresDB (providers, models, enabled/disabled)
+  3. Load learned state FROM PluresDB (RSI scores, performance history)
+  4. Merge: config file enabled/disabled wins, PluresDB performance data preserved
+
+Runtime change (user /model disable gpt-4o):
+  1. Update PluresDB immediately (model disabled)
+  2. Async: write change back to config/models.toml
+  3. Emit Chronos event: model_disabled {model: "gpt-4o", reason: "user"}
+
+Shutdown:
+  1. Flush any pending config file writes
+  2. PluresDB state persists naturally
+
+PluresDB unavailable:
+  1. Config file provides full working state
+  2. Runtime changes held in memory, flushed to file only
+  3. RSI scoring degrades to static weights (no history)
+  4. Log warning: "PluresDB offline — running in config-only mode"
+```
+
+### Chronos File Logging
+
+Chronos events go to both PluresDB AND log files:
+
+```
+~/.pares-radix/logs/chronos/
+  2026-06-14.jsonl    ← one file per day, append-only
+  2026-06-13.jsonl
+  ...
+```
+
+Format (JSONL):
+```json
+{"ts":"2026-06-14T11:43:00Z","event":"model_selected","data":{"model":"claude-opus-4.7","task_type":"code","score":87.3}}
+{"ts":"2026-06-14T11:43:01Z","event":"model_disabled","data":{"model":"gpt-4o","reason":"user: too slow"}}
+{"ts":"2026-06-14T11:45:00Z","event":"generation_complete","data":{"model":"claude-opus-4.7","latency_ms":2340,"tokens_in":1200,"tokens_out":800}}
+```
+
+This ensures:
+- Logs survive PluresDB corruption/reset
+- Human-readable history for debugging
+- Can rebuild PluresDB state from logs if needed (event sourcing)
+- Standard tooling works (grep, jq, tail -f)
+
+## /model Command (Updated)
+
+`/model` stays. It controls enable/disable per model:
+
+```
+/model                      — show current model pool status (brief)
+/model list                 — all models with enabled/disabled status
+/model enable <name>        — enable a model for selection
+/model disable <name>       — disable a model (immediate, with optional reason)
+/model info <name>          — detailed info: capabilities, RSI score, usage stats
+/model providers            — show provider status
+/model stats                — RSI performance rankings
+/model prefer <name>        — soft preference (boost score +20%)
+/model reset                — clear all preferences, re-enable all
+```
+
+All models enabled by default. User actions are subtractive (disable what you don't want).
+
+## Available Models (from GitHub Copilot API, June 2026)
+
+| Model | Vendor | Category | Context | Max Output | Reasoning | Vision |
+|-------|--------|----------|---------|------------|-----------|--------|
+| claude-opus-4.8 | Anthropic | powerful | 1M | 64K | ✓ (low→max) | ✓ |
+| claude-opus-4.7 | Anthropic | powerful | 1M | 64K | ✓ (low→max) | ✓ |
+| claude-opus-4.6 | Anthropic | powerful | 1M | 64K | ✓ (low→max) | ✓ |
+| claude-sonnet-4.6 | Anthropic | versatile | 1M | 64K | ✓ (low→max) | ✓ |
+| claude-sonnet-4.5 | Anthropic | versatile | 200K | 32K | ✗ | ✓ |
+| claude-haiku-4.5 | Anthropic | lightweight | 200K | 64K | ✗ | ✓ |
+| gpt-5.5 | OpenAI | powerful | 1.05M | 128K | ✓ (none→xhigh) | ✓ |
+| gpt-5.4 | OpenAI | powerful | 1.05M | 128K | ✓ (none→xhigh) | ✓ |
+| gpt-5.4-mini | OpenAI | lightweight | 400K | 128K | ✓ (none→xhigh) | ✓ |
+| gpt-5.3-codex | OpenAI | powerful | 400K | 128K | ✓ (low→xhigh) | ✓ |
+| gpt-5-mini | OpenAI | lightweight | 264K | 64K | ✓ (low→high) | ✓ |
+| gpt-4.1 | Azure OpenAI | versatile | 128K | 16K | ✗ | ✓ |
+| gpt-4o | Azure OpenAI | versatile | 128K | 16K | ✗ | ✓ |
+| gpt-4o-mini | Azure OpenAI | lightweight | 128K | 4K | ✗ | ✗ |
+| gemini-3.5-flash | Google | lightweight | 1M | 64K | ✗ | ✓ |
+| gemini-3.1-pro-preview | Google | powerful | 1M | 64K | ✗ | ✓ |
+| gemini-2.5-pro | Google | powerful | 128K | 64K | ✓ | ✓ |
+
 ## Non-Goals (for now)
 - Multi-provider load balancing (one request → multiple providers in parallel)
 - Automatic cost budgeting (hard spend caps)
