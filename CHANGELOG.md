@@ -1,3 +1,14 @@
+## [1.46.12] — 2026-06-14
+
+- chore: bump version to v1.46.12 [skip ci] (d3b35d4)
+- chore: lock file + telegram split analysis doc (60605f7)
+- feat(model_pool): dynamic model discovery + selection + user overrides (d22a30d)
+- config: dynamic discovery, no static model catalog (d04f96f)
+- config: model catalog from OpenClaw source (accurate data) (169f916)
+- design: model pool with dual-mode config + PluresDB sync (130f59b)
+- docs: model pool architecture design (8417acd)
+- status: show registered tools count instead of plugins (25eea46)
+
 ## [1.46.11] — 2026-06-14
 
 - chore: bump version to v1.46.11 [skip ci] (efd3764)
