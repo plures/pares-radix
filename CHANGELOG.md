@@ -1,3 +1,8 @@
+## [1.46.10] — 2026-06-14
+
+- chore: bump version to v1.46.10 [skip ci] (6931520)
+- fix(serve): wire streaming broadcast + stop aggregator heading leaks (fa5765d)
+
 ## [1.46.9] — 2026-06-14
 
 - chore: bump version to v1.46.9 [skip ci] (dee27c1)
