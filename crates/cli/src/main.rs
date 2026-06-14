@@ -5273,27 +5273,36 @@ async fn main() {
             config = config.with_task_manager(Arc::clone(&task_manager));
             config.tool_count = Some(procedure_registry.len());
 
-            // Initialize ModelPool from config/models.toml if available
+            // Initialize ModelPool from config/models.toml
+            // Search order: $HOME/.pares-radix/config/ → $HOME/ → exe_dir/config/
             let models_toml = {
                 let h = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-                std::path::PathBuf::from(h).join(".pares-radix/config/models.toml")
+                let candidates = [
+                    std::path::PathBuf::from(&h).join(".pares-radix/config/models.toml"),
+                    std::path::PathBuf::from(&h).join("config/models.toml"),
+                    std::path::PathBuf::from(&h).join("models.toml"),
+                ];
+                candidates.into_iter().find(|p| p.exists())
             };
-            // Auto-deploy bundled config if none exists at runtime location
-            if !models_toml.exists() {
+            // Auto-deploy bundled config if none found anywhere
+            let models_toml = models_toml.unwrap_or_else(|| {
+                let h = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                let target = std::path::PathBuf::from(&h).join(".pares-radix/config/models.toml");
                 if let Ok(exe_dir) = std::env::current_exe().map(|p| p.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()) {
                     let bundled = exe_dir.join("config").join("models.toml");
                     if bundled.exists() {
-                        if let Some(parent) = models_toml.parent() {
+                        if let Some(parent) = target.parent() {
                             std::fs::create_dir_all(parent).ok();
                         }
-                        if let Err(e) = std::fs::copy(&bundled, &models_toml) {
+                        if let Err(e) = std::fs::copy(&bundled, &target) {
                             tracing::warn!(error = %e, "failed to deploy bundled models.toml");
                         } else {
-                            tracing::info!(src = %bundled.display(), dst = %models_toml.display(), "deployed bundled models.toml");
+                            tracing::info!(src = %bundled.display(), dst = %target.display(), "deployed bundled models.toml");
                         }
                     }
                 }
-            }
+                target
+            });
             if models_toml.exists() {
                 match pares_agens_core::model_pool::ModelPool::from_config(&models_toml) {
                     Ok(pool) => {

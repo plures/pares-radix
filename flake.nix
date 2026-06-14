@@ -299,7 +299,8 @@ tar.extractall(os.environ['out'] + '/lib')
                   cp -r "$pkg_share/plugins" "${cfg.dataDir}/plugins"
                 fi
                 if [ -d "$pkg_share/config" ]; then
-                  cp -rn "$pkg_share/config/." "${cfg.dataDir}/" 2>/dev/null || true
+                  mkdir -p "${cfg.dataDir}/config"
+                  cp -rn "$pkg_share/config/." "${cfg.dataDir}/config/" 2>/dev/null || true
                 fi
               '';
 
