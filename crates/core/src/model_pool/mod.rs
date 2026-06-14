@@ -12,7 +12,9 @@ pub mod exclusion;
 pub mod pool;
 pub mod provider;
 pub mod selection;
+pub mod telegram;
 pub mod types;
 
 pub use pool::ModelPool;
+pub use telegram::{PoolControl, PoolControlAdapter};
 pub use types::*;

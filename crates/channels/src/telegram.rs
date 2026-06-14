@@ -460,6 +460,8 @@ pub struct TelegramConfig {
     pub task_manager: Option<Arc<TaskManager>>,
     /// Number of registered tools/procedures (for `/status` display).
     pub tool_count: Option<usize>,
+    /// Optional pool-aware model control (replaces model_control when set).
+    pub pool_control: Option<Arc<dyn pares_agens_core::model_pool::PoolControl>>,
 }
 
 impl TelegramConfig {
@@ -480,6 +482,7 @@ impl TelegramConfig {
             write_gate: None,
             task_manager: None,
             tool_count: None,
+            pool_control: None,
         }
     }
 
@@ -501,6 +504,13 @@ impl TelegramConfig {
     #[must_use]
     pub fn with_model_control(mut self, model_control: Arc<dyn TelegramModelControl>) -> Self {
         self.model_control = Some(model_control);
+        self
+    }
+
+    /// Enable pool-aware `/model` commands (replaces legacy model_control).
+    #[must_use]
+    pub fn with_pool_control(mut self, pool_control: Arc<dyn pares_agens_core::model_pool::PoolControl>) -> Self {
+        self.pool_control = Some(pool_control);
         self
     }
 
@@ -1234,6 +1244,7 @@ impl ChannelAdapter for TelegramAdapter {
 
         let index_url = self.config.marketplace_index_url.clone();
         let model_control = self.config.model_control.clone();
+        let pool_control = self.config.pool_control.clone();
         let runtime_control = self.config.runtime_control.clone();
         let config_control = self.config.config_control.clone();
         let personality_control = self.config.personality_control.clone();
@@ -1258,6 +1269,7 @@ impl ChannelAdapter for TelegramAdapter {
             let installer = installer.clone();
             let index_url = index_url.clone();
             let model_control = model_control.clone();
+            let pool_control = pool_control.clone();
             let runtime_control = runtime_control.clone();
             let config_control = config_control.clone();
             let personality_control = personality_control.clone();
@@ -1304,7 +1316,9 @@ impl ChannelAdapter for TelegramAdapter {
                                 let memory = current_process_rss_kib()
                                     .map(|rss| format!("{rss} KiB"))
                                     .unwrap_or_else(|| "n/a".to_string());
-                                let model_line = if let Some(control) = &model_control {
+                                let model_line = if let Some(pc) = &pool_control {
+                                    pc.status_line().await
+                                } else if let Some(control) = &model_control {
                                     let (primary, deep) = control.current_models().await;
                                     format!("{primary} + {deep}")
                                 } else {
@@ -1431,6 +1445,37 @@ impl ChannelAdapter for TelegramAdapter {
                                 return respond(());
                             }
                             "model" => {
+                                // Pool-aware model commands (new)
+                                if let Some(pc) = &pool_control {
+                                    let args: Vec<&str> = cmd_parts.collect();
+                                    let reply = match args.as_slice() {
+                                        [] | ["list"] => pc.model_list().await,
+                                        ["stats"] => pc.stats(None).await,
+                                        ["stats", id] => pc.stats(Some(id)).await,
+                                        ["disable", id] => {
+                                            pc.disable(id, None).await.unwrap_or_else(|e| format!("⚠️ {e}"))
+                                        }
+                                        ["disable", id, rest @ ..] => {
+                                            let reason = rest.join(" ");
+                                            pc.disable(id, Some(&reason)).await.unwrap_or_else(|e| format!("⚠️ {e}"))
+                                        }
+                                        ["enable", id] => {
+                                            pc.enable(id).await.unwrap_or_else(|e| format!("⚠️ {e}"))
+                                        }
+                                        ["prefer", id] => {
+                                            pc.prefer(id).await.unwrap_or_else(|e| format!("⚠️ {e}"))
+                                        }
+                                        ["reset"] => {
+                                            pc.reset().await.unwrap_or_else(|e| format!("⚠️ {e}"))
+                                        }
+                                        _ => "Usage: /model [list|disable <id> [reason]|enable <id>|prefer <id>|stats [id]|reset]".to_string(),
+                                    };
+                                    Self::send_reply_with_fallback(&bot, &msg, &reply, None, event_spine.as_ref()).await;
+                                    Self::acknowledge_message(&bot, &msg).await;
+                                    return respond(());
+                                }
+
+                                // Legacy fallback (old model_control trait)
                                 let Some(control) = &model_control else {
                                     Self::send_reply_with_fallback(
                                         &bot,
