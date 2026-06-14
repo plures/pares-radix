@@ -1,3 +1,8 @@
+## [1.46.9] — 2026-06-14
+
+- chore: bump version to v1.46.9 [skip ci] (dee27c1)
+- Add local HTTP verify test harness (C-TEST-001) (d26f0a9)
+
 ## [1.46.8] — 2026-06-13
 
 - chore: bump version to v1.46.8 [skip ci] (1cf7601)
