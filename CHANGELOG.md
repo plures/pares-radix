@@ -1,3 +1,8 @@
+## [1.46.11] — 2026-06-14
+
+- chore: bump version to v1.46.11 [skip ci] (efd3764)
+- test: add streaming bridge integration tests (e0db51f)
+
 ## [1.46.10] — 2026-06-14
 
 - chore: bump version to v1.46.10 [skip ci] (6931520)
