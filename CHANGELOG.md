@@ -1,3 +1,8 @@
+## [1.46.17] — 2026-06-14
+
+- chore: bump version to v1.46.17 [skip ci] (81a8d81)
+- fix(deploy): correct config path resolution for NixOS + multi-location search (21b8730)
+
 ## [1.46.16] — 2026-06-14
 
 - chore: bump version to v1.46.16 [skip ci] (03f7872)
