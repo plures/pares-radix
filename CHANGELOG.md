@@ -1,3 +1,10 @@
+## [1.46.15] — 2026-06-14
+
+- chore: bump version to v1.46.15 [skip ci] (f5b4c04)
+- feat(chronos): always write JSONL logs to ~/.pares-radix/logs/chronos/ (7e3d31d)
+- chore: bump version to v1.46.14 [skip ci] (e524861)
+- feat(startup): init ModelPool on boot, background provider discovery (1b6f474)
+
 ## [1.46.13] — 2026-06-14
 
 - chore: bump version to v1.46.13 [skip ci] (d3638a6)
