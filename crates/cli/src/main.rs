@@ -5273,6 +5273,32 @@ async fn main() {
             config = config.with_task_manager(Arc::clone(&task_manager));
             config.tool_count = Some(procedure_registry.len());
 
+            // Initialize ModelPool from config/models.toml if available
+            let models_toml = {
+                let h = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+                std::path::PathBuf::from(h).join(".pares-radix/config/models.toml")
+            };
+            if models_toml.exists() {
+                match pares_agens_core::model_pool::ModelPool::from_config(&models_toml) {
+                    Ok(pool) => {
+                        let pool = Arc::new(pool);
+                        let pool_for_discovery = Arc::clone(&pool);
+                        // Spawn background discovery
+                        tokio::spawn(async move {
+                            pool_for_discovery.discover_all().await;
+                        });
+                        let adapter_ctrl = Arc::new(
+                            pares_agens_core::model_pool::PoolControlAdapter::new(Arc::clone(&pool)),
+                        );
+                        config = config.with_pool_control(adapter_ctrl as Arc<dyn pares_agens_core::model_pool::PoolControl>);
+                        tracing::info!(config = %models_toml.display(), "ModelPool initialized");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to load ModelPool config, falling back to legacy model control");
+                    }
+                }
+            }
+
             let adapter = TelegramAdapter::new(config);
 
             tracing::info!("Telegram adapter starting — bot is live");
