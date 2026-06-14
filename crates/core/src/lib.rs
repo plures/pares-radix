@@ -60,6 +60,8 @@ pub mod memory;
 pub mod model;
 /// Model selection chain — BitNet → conscious → deep fallback.
 pub mod model_chain;
+
+pub mod model_pool;
 /// Optimization safety gates for runtime enforcement.
 pub mod optimization;
 #[cfg(feature = "otel")]
