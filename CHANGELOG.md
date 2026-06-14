@@ -1,3 +1,8 @@
+## [1.46.19] — 2026-06-14
+
+- chore: bump version to v1.46.19 [skip ci] (015f30d)
+- fix: inject conversation history into dataflow pipeline (session loss bug) (e3a0864)
+
 ## [1.46.18] — 2026-06-14
 
 - chore: bump version to v1.46.18 [skip ci] (30902bf)
