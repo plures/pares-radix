@@ -153,21 +153,19 @@ impl ChronosTimeline {
 
     /// Enable JSONL output from an environment variable.
     pub fn with_jsonl_from_env(store: Arc<CrdtStore>) -> Self {
-        if let Ok(dir) = std::env::var("PARES_TELEMETRY_DIR") {
-            let path = std::path::PathBuf::from(dir);
-            std::fs::create_dir_all(&path).ok();
-            tracing::info!(dir = %path.display(), "chronos JSONL output enabled");
-            Self {
-                store,
-                jsonl_dir: Some(path),
-                min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
-            }
+        let path = if let Ok(dir) = std::env::var("PARES_TELEMETRY_DIR") {
+            std::path::PathBuf::from(dir)
         } else {
-            Self {
-                store,
-                jsonl_dir: None,
-                min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
-            }
+            // Default: always log to ~/.pares-radix/logs/chronos/
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+            std::path::PathBuf::from(home).join(".pares-radix/logs/chronos")
+        };
+        std::fs::create_dir_all(&path).ok();
+        tracing::info!(dir = %path.display(), "chronos JSONL output enabled");
+        Self {
+            store,
+            jsonl_dir: Some(path),
+            min_level: AtomicU8::new(ChronosLevel::Info.as_u8()),
         }
     }
 
