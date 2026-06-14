@@ -1,3 +1,8 @@
+## [1.46.13] — 2026-06-14
+
+- chore: bump version to v1.46.13 [skip ci] (d3638a6)
+- feat(telegram): wire ModelPool into /model and /status commands (80568c9)
+
 ## [1.46.12] — 2026-06-14
 
 - chore: bump version to v1.46.12 [skip ci] (d3b35d4)
