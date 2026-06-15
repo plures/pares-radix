@@ -1,3 +1,8 @@
+## [1.46.21] — 2026-06-15
+
+- chore: bump version to v1.46.21 [skip ci] (2d8fd68)
+- feat: conversation threading engine (all phases) (b698087)
+
 ## [1.46.20] — 2026-06-15
 
 - chore: bump version to v1.46.20 [skip ci] (50253ba)
