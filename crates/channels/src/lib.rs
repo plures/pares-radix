@@ -17,6 +17,7 @@ pub mod http_spine;
 pub mod stdin;
 pub mod tauri_ipc;
 pub mod telegram;
+pub mod threading;
 
 pub mod stdio_spine;
 pub mod telegram_spine;

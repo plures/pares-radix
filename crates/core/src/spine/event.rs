@@ -98,6 +98,41 @@ pub enum SpineEvent {
         /// The timer's logical name (e.g. "task_eval").
         name: String,
     },
+
+    /// A new conversation thread was created.
+    ThreadCreated {
+        id: String,
+        chat_id: String,
+        thread_id: String,
+        topic: String,
+        /// Channel-specific anchor data (opaque to core).
+        channel_anchor: serde_json::Value,
+    },
+
+    /// Active thread switched for a chat.
+    ThreadSwitched {
+        id: String,
+        chat_id: String,
+        from_thread_id: String,
+        to_thread_id: String,
+    },
+
+    /// A thread was archived (inactivity or user action).
+    ThreadArchived {
+        id: String,
+        chat_id: String,
+        thread_id: String,
+    },
+
+    /// Topic classification result from .px procedure (reactive bridge).
+    TopicClassified {
+        id: String,
+        chat_id: String,
+        /// The classification result from topic-routing.px.
+        classification: serde_json::Value,
+        /// Original inbound event metadata for correlation.
+        original_metadata: serde_json::Value,
+    },
 }
 
 impl SpineEvent {
@@ -117,7 +152,11 @@ impl SpineEvent {
             | Self::DeliveryFailure { id, .. }
             | Self::ToolRequest { id, .. }
             | Self::ToolResult { id, .. }
-            | Self::Timer { id, .. } => id,
+            | Self::Timer { id, .. }
+            | Self::ThreadCreated { id, .. }
+            | Self::ThreadSwitched { id, .. }
+            | Self::ThreadArchived { id, .. }
+            | Self::TopicClassified { id, .. } => id,
         }
     }
 
@@ -133,6 +172,10 @@ impl SpineEvent {
             Self::ToolRequest { .. } => "tool_request",
             Self::ToolResult { .. } => "tool_result",
             Self::Timer { .. } => "timer",
+            Self::ThreadCreated { .. } => "thread_created",
+            Self::ThreadSwitched { .. } => "thread_switched",
+            Self::ThreadArchived { .. } => "thread_archived",
+            Self::TopicClassified { .. } => "topic_classified",
         }
     }
 }

@@ -131,3 +131,5 @@ pub mod pii_guard;
 pub mod px_adapter;
 pub mod shell_executor;
 pub mod spine;
+/// Thread engine — multi-topic conversation threading.
+pub mod threading;
