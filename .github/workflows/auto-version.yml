@@ -57,20 +57,48 @@ jobs:
             BASE_MAJOR=$C_MAJOR; BASE_MINOR=$C_MINOR; BASE_PATCH=$C_PATCH
           fi
 
-          NEW_PATCH=$((BASE_PATCH + 1))
-          NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.${NEW_PATCH}"
+          # Determine bump type from conventional commit message
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          echo "Commit message: $COMMIT_MSG"
+
+          BUMP_TYPE="patch"
+
+          # BREAKING CHANGE in body/footer or ! after type → major
+          if echo "$COMMIT_MSG" | grep -qiE '^[a-z]+\!:|BREAKING CHANGE:'; then
+            BUMP_TYPE="major"
+          # feat: or feature: → minor
+          elif echo "$COMMIT_MSG" | grep -qiE '^feat(\(.*\))?:'; then
+            BUMP_TYPE="minor"
+          fi
+
+          echo "Bump type: $BUMP_TYPE (from conventional commit)"
+
+          case "$BUMP_TYPE" in
+            major)
+              NEW_VERSION="$((BASE_MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="${BASE_MAJOR}.$((BASE_MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 1))"
+              ;;
+          esac
 
           # Safety: skip if this version tag already exists
           if git tag -l "v$NEW_VERSION" | grep -q .; then
-            echo "Tag v$NEW_VERSION already exists, incrementing further"
-            NEW_PATCH=$((NEW_PATCH + 1))
-            NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.${NEW_PATCH}"
+            echo "Tag v$NEW_VERSION already exists, falling back to patch increment"
+            NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 1))"
+            if git tag -l "v$NEW_VERSION" | grep -q .; then
+              NEW_VERSION="${BASE_MAJOR}.${BASE_MINOR}.$((BASE_PATCH + 2))"
+            fi
           fi
 
-          echo "Will bump: $VERSION -> $NEW_VERSION"
+          echo "Will bump: $VERSION -> $NEW_VERSION ($BUMP_TYPE)"
           sed -i "s/^version = \"$VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
       - name: Commit and tag
         id: push
@@ -83,7 +111,7 @@ jobs:
             echo "pushed=false" >> $GITHUB_OUTPUT
             exit 0
           fi
-          git commit -m "chore: bump version to v$NEW_VERSION [skip ci]"
+          git commit -m "chore(release): v$NEW_VERSION [skip ci]"
           git tag "v$NEW_VERSION"
           git push --follow-tags
           echo "pushed=true" >> $GITHUB_OUTPUT
