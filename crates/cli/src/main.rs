@@ -416,7 +416,10 @@ impl RuntimeAgentFactory {
                                     let node = ast_to_node(proc);
                                     let name = node.name.clone();
                                     let rt = tokio::runtime::Handle::current();
-                                    if let Err(e) = rt.block_on(df_bridge.register(node)) {
+                                    let result = tokio::task::block_in_place(|| {
+                                        rt.block_on(df_bridge.register(node))
+                                    });
+                                    if let Err(e) = result {
                                         tracing::warn!(name = %name, error = %e, "dataflow: failed to register procedure");
                                     } else {
                                         df_count += 1;
@@ -6114,7 +6117,10 @@ async fn main() {
                                         let node = ast_to_node(proc);
                                         let name = node.name.clone();
                                         let rt = tokio::runtime::Handle::current();
-                                        if let Err(e) = rt.block_on(df_bridge.register(node)) {
+                                        let result = tokio::task::block_in_place(|| {
+                                            rt.block_on(df_bridge.register(node))
+                                        });
+                                        if let Err(e) = result {
                                             tracing::warn!(name = %name, error = %e, "dataflow: failed to register (spine)");
                                         } else {
                                             df_count += 1;
