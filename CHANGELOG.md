@@ -1,3 +1,8 @@
+## [1.46.20] — 2026-06-15
+
+- chore: bump version to v1.46.20 [skip ci] (50253ba)
+- fix: use block_in_place for dataflow registration during startup (c554d45)
+
 ## [1.46.19] — 2026-06-14
 
 - chore: bump version to v1.46.19 [skip ci] (015f30d)

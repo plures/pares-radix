@@ -1,7 +1,7 @@
 {
   "name": "@plures/design-dojo",
   "private": true,
-  "version": "1.46.19",
+  "version": "1.46.20",
   "description": "Local shim — re-exports npm @plures/design-dojo + adds missing components. Remove when npm is updated to v0.13+",
   "type": "module",
   "svelte": "./src/index.ts",
