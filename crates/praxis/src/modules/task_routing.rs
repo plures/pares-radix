@@ -17,7 +17,7 @@
 //!
 //! ## Data rules
 //! - `priority_in_range` — `priority` must be an integer 1 – 10 (1 = highest)
-//! - `load_balance_headroom` — warn when `queue_depth` exceeds 80 % of
+//! - `load_balance_saturation` — warn when `queue_depth` exceeds 80 % of
 //!   `agent_capacity` (load-balancing trigger)
 
 use crate::module::PraxisModule;
@@ -199,10 +199,10 @@ impl Rule for PriorityInRange {
     }
 }
 
-struct LoadBalanceHeadroom;
-impl Rule for LoadBalanceHeadroom {
+struct LoadBalanceSaturation;
+impl Rule for LoadBalanceSaturation {
     fn name(&self) -> &str {
-        "load_balance_headroom"
+        "load_balance_saturation"
     }
     fn category(&self) -> RuleCategory {
         RuleCategory::Data
@@ -249,7 +249,7 @@ impl Default for TaskRoutingModule {
             Box::new(TaskStateTransitionValid),
             Box::new(AssignedAgentPresentWhenInProgress),
             Box::new(PriorityInRange),
-            Box::new(LoadBalanceHeadroom),
+            Box::new(LoadBalanceSaturation),
         ];
         Self { rules }
     }
@@ -405,7 +405,7 @@ mod tests {
         let results = module().evaluate_category(&ctx, RuleCategory::Data);
         let r = results
             .iter()
-            .find(|(n, _)| n == "load_balance_headroom")
+            .find(|(n, _)| n == "load_balance_saturation")
             .unwrap();
         assert!(matches!(r.1, RuleResult::Warning { .. }));
     }
@@ -419,7 +419,7 @@ mod tests {
         let results = module().evaluate_category(&ctx, RuleCategory::Data);
         let r = results
             .iter()
-            .find(|(n, _)| n == "load_balance_headroom")
+            .find(|(n, _)| n == "load_balance_saturation")
             .unwrap();
         assert_eq!(r.1, RuleResult::Pass);
     }
