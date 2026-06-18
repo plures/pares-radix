@@ -7125,6 +7125,7 @@ mod tests {
             store,
             model_client,
             deep_model_client,
+            fast_model_client: None,
             tool_dispatcher,
             registry: Arc::new(registry),
             embed_url: None,
