@@ -147,7 +147,6 @@ impl FileNodeBuilder {
     /// Reads the file, computes hash, detects MIME type.
     pub fn build_from_fs(&self) -> std::io::Result<FileNode> {
         use sha2::{Digest, Sha256};
-        use std::os::unix::fs::PermissionsExt;
 
         let metadata = std::fs::metadata(&self.path)?;
         let content = std::fs::read(&self.path)?;
@@ -156,7 +155,24 @@ impl FileNodeBuilder {
             .first_or_octet_stream()
             .to_string();
         let content_class = classify_mime(&mime, &self.path);
-        let permissions = metadata.permissions().mode();
+        // POSIX mode where available; on non-Unix (Windows) derive a portable
+        // approximation from the read-only flag so `permissions: u32` stays meaningful
+        // cross-platform. (Pre-existing code was Unix-only and broke the Windows build.)
+        let permissions: u32 = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                metadata.permissions().mode()
+            }
+            #[cfg(not(unix))]
+            {
+                if metadata.permissions().readonly() {
+                    0o444
+                } else {
+                    0o644
+                }
+            }
+        };
         let modified = metadata
             .modified()
             .map(DateTime::<Utc>::from)
