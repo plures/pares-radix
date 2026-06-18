@@ -1,0 +1,93 @@
+// Evolved by pares-umbra
+// Accuracy: 95.8%
+//
+// SHADOW CANDIDATE - deployed INERT (trigger: manual) so it ships to praxisbot via the normal
+// praxis/ sync but NEVER serves live traffic. Loaded into the shadow holder (ShadowProcedures)
+// at startup, separate from the live ReactiveRegistry. Numeric evaluation of the evolved network
+// lives in pares-umbra (the arena), per C-PLURES - pares-radix only LOADS this candidate and
+// (later) evaluates/promotes it once it consistently beats the live classifier.
+// See praxis/shadow/README.md.
+//
+// NOTE: pares-radix's .px engine (pluresdb-px) does NOT parse umbra's brace-block dialect
+// (verified). The original evolved source is preserved verbatim in the EVOLVED-SOURCE block at
+// the bottom (each line //-prefixed) for provenance / re-evolution. The executable procedure
+// below is the loadable, manual-trigger pares-radix form; it routes through the umbra-backed
+// evaluate_shadow_classifier action carrying model id "classify_intent".
+
+procedure shadow_classify_intent:
+  trigger: manual
+  given: "Umbra-evolved intent classifier (95.8%). Shadow-only; never serves live output."
+  extract_features {content: $content} -> $features
+  evaluate_shadow_classifier {model: "classify_intent", features: $features} -> $result
+  emit {shadow: "classify_intent", result: $result}
+
+// ==============================================================================================
+// EVOLVED-SOURCE (verbatim, //-prefixed, do not edit)
+// ==============================================================================================
+// // Evolved by pares-umbra
+// // Accuracy: 95.8%
+// // Expression nodes: 140
+// // Categories: question, command, statement
+// //
+// // This procedure was evolved, not hand-written.
+// // Modify at your own risk — or re-evolve with more data.
+//
+// procedure classify_intent {
+//   // Feature extraction from input message
+//   facts {
+//     f0: number  // normalized text length
+//     f1: number  // normalized word count
+//     f2: number  // average word length
+//     f3: number  // has question mark (0 or 1)
+//     f4: number  // has exclamation mark (0 or 1)
+//     f5: number  // uppercase ratio
+//     f6: number  // digit ratio
+//     f7: number  // punctuation ratio
+//   }
+//
+//   // Hidden features (evolved)
+//   let hidden_0 = when input.f1 > 0.272285133134583
+//   then 1
+//   else 0
+//   let hidden_1 = when input.f3 > 0.8237098626860071
+//   then 1
+//   else 0
+//   let hidden_2 = input.f1 * 0.27365428676089076
+//   let hidden_3 = input.f0 * 1.9706093247065768 + input.f1 * 1.2366740429643999
+//   let hidden_4 = input.f2 * 2.3561035874412215
+//   let hidden_5 = input.f2 * 0.7039639575233769 + input.f6 * -1.8091233125537833
+//   let hidden_6 = when input.f3 > input.f6
+//   then 1
+//   else -1
+//   let hidden_7 = input.f2 * -0.8141877545180272 + input.f7 * 1.8274512819359447
+//   let hidden_8 = input.f6 * 0.987175096320885
+//   let hidden_9 = when input.f7 > 0.7658562886753051
+//   then 1
+//   else 0
+//   let hidden_10 = when input.f0 > input.f0
+//   then 1
+//   else -1
+//   let hidden_11 = when input.f2 > input.f7
+//   then 1
+//   else -1
+//   let hidden_12 = input.f7 * -1.3752930485647434 + input.f6 * 0.7633488559469495
+//   let hidden_13 = input.f4 * -0.6112596897521163 + input.f6 * 0.4531826342343521
+//   let hidden_14 = when input.f2 > 0.42744017192154216
+//   then 1
+//   else 0
+//   let hidden_15 = input.f0 * 0.12449401759927668
+//
+//   // Category scores (evolved)
+//   let score_question = 0 + hidden_9 * -0.40183650863410936 + hidden_3 * 0.24254901424142972 + hidden_6 * 0.6051100482155203 + hidden_1 * 1.9651325192626405 + hidden_8 * -0.6656243985831356
+//   let score_command = 0 + hidden_15 * 1.7921551403199754 + hidden_7 * -0.34589246841885757
+//   let score_statement = 0 + hidden_14 * 1.4155926357539386 + hidden_3 * 1.4049269089584202 + hidden_15 * -0.9995176725009856 + hidden_12 * 0.8913120590099011 + hidden_9 * -1.9819154978835538
+//
+//   // Route to highest-scoring category
+//   when score_question > score_command and score_question > score_statement
+//     then emit "question"
+//   when score_command > score_question and score_command > score_statement
+//     then emit "command"
+//   else emit "statement"
+// }
+//
+// ==============================================================================================

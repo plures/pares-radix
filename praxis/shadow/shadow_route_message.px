@@ -1,0 +1,130 @@
+// Evolved by pares-umbra
+// Accuracy: 97.5%
+//
+// SHADOW CANDIDATE - deployed INERT (trigger: manual) so it ships to praxisbot via the normal
+// praxis/ sync but NEVER serves live traffic. Loaded into the shadow holder (ShadowProcedures)
+// at startup, separate from the live ReactiveRegistry. Numeric evaluation of the evolved network
+// lives in pares-umbra (the arena), per C-PLURES - pares-radix only LOADS this candidate and
+// (later) evaluates/promotes it once it consistently beats the live classifier.
+// See praxis/shadow/README.md.
+//
+// NOTE: pares-radix's .px engine (pluresdb-px) does NOT parse umbra's brace-block dialect
+// (verified). The original evolved source is preserved verbatim in the EVOLVED-SOURCE block at
+// the bottom (each line //-prefixed) for provenance / re-evolution. The executable procedure
+// below is the loadable, manual-trigger pares-radix form; it routes through the umbra-backed
+// evaluate_shadow_classifier action carrying model id "route_message".
+
+procedure shadow_route_message:
+  trigger: manual
+  given: "Umbra-evolved router candidate (97.5%). Shadow-only; never serves live output."
+  extract_features {content: $content} -> $features
+  evaluate_shadow_classifier {model: "route_message", features: $features} -> $result
+  emit {shadow: "route_message", result: $result}
+
+// ==============================================================================================
+// EVOLVED-SOURCE (verbatim, //-prefixed, do not edit)
+// ==============================================================================================
+// // Evolved by pares-umbra
+// // Accuracy: 97.5%
+// // Expression nodes: 201
+// // Routes: code_review, bug_report, deploy, monitoring, chat
+// //
+// // This procedure was evolved, not hand-written.
+// // Modify at your own risk — or re-evolve with more data.
+//
+// procedure route_message {
+//   // Feature extraction from input message
+//   facts {
+//     f0: number  // normalized text length
+//     f1: number  // normalized word count
+//     f2: number  // average word length
+//     f3: number  // has question mark (0 or 1)
+//     f4: number  // has exclamation mark (0 or 1)
+//     f5: number  // uppercase ratio
+//     f6: number  // digit ratio
+//     f7: number  // punctuation ratio
+//     f8: number  // code_review keyword density
+//     f9: number  // bug_report keyword density
+//     f10: number  // deploy keyword density
+//     f11: number  // monitoring keyword density
+//     f12: number  // chat/social keyword density
+//     f13: number  // social question/address word density
+//     f14: number  // has percentage figure (0 or 1)
+//     f15: number  // has version/PR token (0 or 1)
+//     f16: number  // has uppercase alert word (0 or 1)
+//     f17: number  // has code identifier signal (0 or 1)
+//     f18: number  // has metric-unit/host signal (0 or 1)
+//     f19: number  // approval/merge action density
+//     f20: number  // crash/failure verb density
+//   }
+//
+//   // Route features (evolved)
+//   let hidden_0 = input.f0 * 2.24367871482975
+//   let hidden_1 = input.f2 * 2.7164913926512115
+//   let hidden_2 = input.f3 * -0.7623191945657783 + input.f1 * 0.3823165382564673
+//   let hidden_3 = when input.f10 > input.f7
+//   then 1
+//   else -1
+//   let hidden_4 = input.f10 * 0.9888788210016095 + input.f9 * -1.0260488740588167
+//   let hidden_5 = input.f18 * 2.593299445539706
+//   let hidden_6 = when input.f16 > 0.8496467887104626
+//   then 1
+//   else 0
+//   let hidden_7 = when input.f12 > input.f2
+//   then 1
+//   else -1
+//   let hidden_8 = input.f17 * 2.6889019755496033
+//   let hidden_9 = when input.f4 > input.f10
+//   then 1
+//   else -1
+//   let hidden_10 = when input.f10 > 0.6620602426503335
+//   then 1
+//   else 0
+//   let hidden_11 = when input.f12 > 0.5030784953675871
+//   then 1
+//   else 0
+//   let hidden_12 = when input.f11 > 0.2355247171520487
+//   then 1
+//   else 0
+//   let hidden_13 = when input.f5 > 0.42600326350483386
+//   then 1
+//   else 0
+//   let hidden_14 = input.f5 * 0.9214899502844833
+//   let hidden_15 = input.f8 * 1.670455827639401 + input.f0 * 1.991313323027776
+//   let hidden_16 = when input.f9 > input.f20
+//   then 1
+//   else -1
+//   let hidden_17 = input.f1 * 0.4552154771663357 + input.f11 * -0.4737232314857369
+//   let hidden_18 = when input.f8 > input.f17
+//   then 1
+//   else -1
+//   let hidden_19 = input.f15 * 0.21799797868067916 + input.f9 * 1.5526518784255119
+//   let hidden_20 = input.f18 * 0.9029258090691694
+//   let hidden_21 = input.f7 * 1.7672604597851058
+//   let hidden_22 = when input.f8 > input.f16
+//   then 1
+//   else -1
+//   let hidden_23 = when input.f11 > input.f10
+//   then 1
+//   else -1
+//
+//   // Route scores (evolved)
+//   let route_code_review = 0 + hidden_22 * 1.887016373002349 + hidden_9 * -0.8553092357938494 + hidden_21 * 0.7703226335795241
+//   let route_bug_report = 0 + hidden_13 * 1.9272502265013411 + hidden_20 * 1.1181294944992803 + hidden_0 * -0.6553209264878541
+//   let route_deploy = 0 + hidden_3 * 0.4213195799466467 + hidden_0 * 0.5708335169384293 + hidden_4 * 1.6527526900274143
+//   let route_monitoring = 0 + hidden_21 * -1.8171126984767731 + hidden_19 * -1.2440506125482091 + hidden_23 * 1.9305946772111824 + hidden_14 * -1.0025467599950533
+//   let route_chat = 0 + hidden_19 * -1.9787142412631846 + hidden_15 * 0.8654715408998843 + hidden_15 * 0.4353902230042177 + hidden_15 * 1.0584845479846807
+//
+//   // Route to highest-scoring handler
+//   when route_code_review > route_bug_report and route_code_review > route_deploy and route_code_review > route_monitoring and route_code_review > route_chat
+//     then emit "code_review"
+//   when route_bug_report > route_code_review and route_bug_report > route_deploy and route_bug_report > route_monitoring and route_bug_report > route_chat
+//     then emit "bug_report"
+//   when route_deploy > route_code_review and route_deploy > route_bug_report and route_deploy > route_monitoring and route_deploy > route_chat
+//     then emit "deploy"
+//   when route_monitoring > route_code_review and route_monitoring > route_bug_report and route_monitoring > route_deploy and route_monitoring > route_chat
+//     then emit "monitoring"
+//   else emit "chat"
+// }
+//
+// ==============================================================================================

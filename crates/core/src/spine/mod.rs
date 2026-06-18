@@ -28,4 +28,5 @@ pub mod event;
 pub mod pipeline;
 pub mod procedures;
 pub mod reactive;
+pub mod shadow;
 pub mod subagent_actor;

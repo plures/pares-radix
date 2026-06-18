@@ -594,6 +594,26 @@ pub fn load_px_directory(
     dir: &std::path::Path,
     handler: Arc<dyn AsyncActionHandler>,
 ) -> Vec<PxProcedureAdapter> {
+    // Default behaviour: recurse the whole tree, excluding nothing. Existing
+    // callers rely on this. Shadow isolation uses the `_excluding` variant.
+    load_px_directory_excluding(dir, &[], handler)
+}
+
+/// Like [`load_px_directory`], but skips any immediate subdirectory whose name
+/// matches an entry in `exclude_subdirs` (case-sensitive, matched at every level
+/// of the recursion).
+///
+/// This is how the live `serve` loader keeps `praxis/shadow/` out of the live
+/// procedure registry: umbra-evolved shadow candidates live under `praxis/shadow/`
+/// and must be loaded ONLY into the out-of-band shadow holder
+/// ([`crate::spine::shadow::ShadowProcedures`]), never swept into the live tree by
+/// the recursive directory load. Excluding by directory name makes that isolation
+/// airtight at the loader, independent of each procedure's `trigger: manual` flag.
+pub fn load_px_directory_excluding(
+    dir: &std::path::Path,
+    exclude_subdirs: &[&str],
+    handler: Arc<dyn AsyncActionHandler>,
+) -> Vec<PxProcedureAdapter> {
     let mut adapters = Vec::new();
 
     let entries = match std::fs::read_dir(dir) {
@@ -607,8 +627,20 @@ pub fn load_px_directory(
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            // Recurse into subdirectories
-            adapters.extend(load_px_directory(&path, handler.clone()));
+            // Skip excluded subdirectories (e.g. `shadow`) by name.
+            let skip = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| exclude_subdirs.contains(&name));
+            if skip {
+                tracing::debug!(
+                    dir = %path.display(),
+                    "load_px_directory: skipping excluded subdir"
+                );
+                continue;
+            }
+            // Recurse into subdirectories, carrying the same exclusion set.
+            adapters.extend(load_px_directory_excluding(&path, exclude_subdirs, handler.clone()));
         } else if path.extension().is_some_and(|ext| ext == "px") {
             match std::fs::read_to_string(&path) {
                 Ok(source) => match load_px_procedures(&source, handler.clone()) {

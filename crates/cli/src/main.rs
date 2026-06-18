@@ -5086,21 +5086,25 @@ async fn main() {
                 )));
             }
 
-            // Load .px procedures from praxis/ directory
+            // Load .px procedures from praxis/ directory (live, reactive tree).
+            // NOTE: excludes praxis/shadow/ — those are umbra-evolved candidates that
+            // must NOT enter the live procedure registry. They are loaded separately,
+            // inert, into the ShadowProcedures holder immediately below.
             let px_action_handler =
                 Arc::new(pares_agens_core::px_adapter::ToolDispatchActionHandler::new_lazy());
             {
                 let praxis_dir = std::path::Path::new("praxis");
                 if praxis_dir.is_dir() {
-                    let adapters = pares_agens_core::px_adapter::load_px_directory(
+                    let adapters = pares_agens_core::px_adapter::load_px_directory_excluding(
                         praxis_dir,
+                        &["shadow"],
                         px_action_handler.clone()
                             as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
                     );
                     if !adapters.is_empty() {
                         tracing::info!(
                             count = adapters.len(),
-                            "loaded .px procedures from praxis/"
+                            "loaded .px procedures from praxis/ (excluding shadow/)"
                         );
                         for adapter in adapters {
                             procedure_registry.register(Box::new(adapter));
@@ -5108,6 +5112,31 @@ async fn main() {
                     }
                 }
             }
+
+            // Load umbra-evolved SHADOW candidates from praxis/shadow/ into the
+            // inert shadow holder. CWD is the daemon WorkingDirectory (/home/kbristol
+            // on praxisbot), so this resolves to ~/praxis/shadow — the same tree the
+            // nixos service syncs from the package. These declare `trigger: manual`
+            // and are loaded OUT-OF-BAND (never into procedure_registry above), so they
+            // ship to praxisbot and accumulate fitness for promotion, but never serve
+            // live output. See crates/core/src/spine/shadow.rs + praxis/shadow/README.md.
+            let _shadow_procedures = {
+                use pares_agens_core::spine::shadow::ShadowProcedures;
+                let shadow_dir = std::path::Path::new("praxis/shadow");
+                let mut shadow = ShadowProcedures::new();
+                let loaded = shadow.load_dir(
+                    shadow_dir,
+                    px_action_handler.clone()
+                        as Arc<dyn pares_agens_core::px_adapter::AsyncActionHandler>,
+                );
+                if loaded > 0 {
+                    tracing::info!(
+                        shadow_candidates = loaded,
+                        "loaded umbra-evolved shadow candidates from praxis/shadow/ (inert; not live)"
+                    );
+                }
+                shadow
+            };
 
             // Create scheduler (shared via Arc for cron tools)
             let scheduler = Arc::new(
