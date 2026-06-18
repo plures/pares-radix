@@ -1,3 +1,8 @@
+## [1.47.3] — 2026-06-18
+
+- chore(release): v1.47.3 [skip ci] (121d3f1)
+- refactor(praxis): rename load_balance_headroom rule to load_balance_saturation (82b7bc8)
+
 ## [1.47.2] — 2026-06-18
 
 - chore(release): v1.47.2 [skip ci] (4fbc6df)
