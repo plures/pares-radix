@@ -1,3 +1,10 @@
+## [1.47.2] — 2026-06-18
+
+- chore(release): v1.47.2 [skip ci] (4fbc6df)
+- docs(shadow): add _generate_shadow.ps1 generator referenced by README (11b7757)
+- chore(release): v1.47.1 [skip ci] (0105c8b)
+- test(cli): add missing fast_model_client field in RuntimeAgentFactory test init (3b4377b)
+
 ## [1.47.0] — 2026-06-18
 
 - chore(release): v1.47.0 [skip ci] (23535fc)
