@@ -1,3 +1,10 @@
+## [1.47.0] — 2026-06-18
+
+- chore(release): v1.47.0 [skip ci] (23535fc)
+- feat: shadow-deploy umbra-evolved .px (inert, not live) + shadow loader (f03669f)
+- fix(omniscient): cross-platform file permissions in FileNodeBuilder (51fb7bf)
+- ci: add conventional commit parsing to auto-version (32b4106)
+
 ## [1.46.21] — 2026-06-15
 
 - chore: bump version to v1.46.21 [skip ci] (2d8fd68)
