@@ -7,7 +7,11 @@
 //! pares-radix serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
 //! ```
 
-mod command_provider;
+// The CommandProvider plugin surface now lives in the standalone
+// `pares-radix-cli-api` crate so external plugins (pares-agens) can depend on
+// the trait without pulling this 297KB host binary. Re-export it under the
+// historical `command_provider` module path so in-crate references keep working.
+pub(crate) use pares_radix_cli_api as command_provider;
 mod config;
 mod px_config;
 

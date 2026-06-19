@@ -1,6 +1,7 @@
+#![warn(missing_docs)]
 //! Plugin command surface for the Pares Radix host CLI.
 //!
-//! This module defines the seam that lets an *external* crate (notably the
+//! This crate defines the seam that lets an *external* crate (notably the
 //! private `pares-agens` plugin) contribute additional `clap` subcommands to
 //! the public `pares-radix` host binary **without** the host depending on the
 //! plugin. The host owns the command surface; plugins register into it.

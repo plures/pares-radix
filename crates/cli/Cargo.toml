@@ -19,6 +19,7 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 pares-radix-praxis = { path = "../praxis" }
+pares-radix-cli-api = { path = "../cli-api" }
 tokio.workspace = true
 async-trait.workspace = true
 thiserror.workspace = true

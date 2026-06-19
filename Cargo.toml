@@ -7,6 +7,7 @@ members = [
     "crates/models",
     "crates/mcp-client",
     "crates/cli",
+    "crates/cli-api",
     "crates/privacy",
     "crates/marketplace",
     "crates/agenda",
