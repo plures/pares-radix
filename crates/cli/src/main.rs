@@ -7,6 +7,7 @@
 //! pares-radix serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
 //! ```
 
+mod command_provider;
 mod config;
 mod px_config;
 
