@@ -3559,7 +3559,21 @@ fn migrate_data_dir(home: &str) {
 
 #[tokio::main]
 async fn main() {
-    // Set up default log directory
+    // Public host entrypoint: run with NO plugin providers. The private
+    // `pares-agens` plugin composes its own binary that calls
+    // `run_with_providers` with a populated registry (decision C1).
+    run_with_providers(command_provider::ProviderRegistry::new()).await;
+}
+
+/// Run the Pares Radix CLI with an explicit set of plugin command providers.
+///
+/// This is the reusable composition seam (decision C1): the public host bin
+/// calls it with an empty [`command_provider::ProviderRegistry`]; an external
+/// plugin (e.g. `pares-agens`) builds its own binary that registers providers
+/// (such as the agent `serve-spine` surface) and calls this with them. Plugin
+/// subcommands are augmented onto the host `clap` command before parsing and
+/// offered to the registry before the host's own command dispatch.
+pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
 
     // Migrate data directory from ~/.pares-radix to ~/.pares-radix if needed
@@ -3597,7 +3611,32 @@ async fn main() {
         )
         .init();
 
-    let cli = Cli::parse();
+    // Compose the host command surface with any plugin providers (decision C1).
+    // Plugins augment their subcommands onto the derived `Cli` command, then get
+    // first refusal on the matched top-level subcommand before the host's own
+    // dispatch runs. With an empty registry this is exactly `Cli::parse()`.
+    let base = <Cli as clap::CommandFactory>::command();
+    let augmented = registry.augment_all(base);
+    let matches = augmented.get_matches();
+
+    if !registry.is_empty() {
+        if let Some((name, sub_matches)) = matches.subcommand() {
+            if let Some(result) = registry.dispatch(name, sub_matches).await {
+                match result {
+                    Ok(()) => return,
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    }
+
+    let cli = match <Cli as clap::FromArgMatches>::from_arg_matches(&matches) {
+        Ok(cli) => cli,
+        Err(e) => e.exit(),
+    };
     let radix_config = config::RadixConfig::load();
 
     match cli.command {
