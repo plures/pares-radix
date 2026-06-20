@@ -27,7 +27,6 @@ pub use pares_radix_cli_api::{
 };
 
 mod config;
-mod px_config;
 
 use std::path::PathBuf;
 use std::sync::Arc;
