@@ -1,4 +1,10 @@
-//! `pares-radix` CLI binary.
+//! `pares-radix-cli-runtime` - the reusable Pares Radix host runtime library.
+//!
+//! This crate holds the full host command surface and the [`run_with_providers`]
+//! composition entrypoint (decision C1). The public `pares-radix` bin is a thin
+//! wrapper that calls [`run_with_providers`] with an empty registry; an external
+//! plugin (e.g. `pares-agens`) composes its own binary that registers providers
+//! and calls [`run_with_providers`] with them.
 //!
 //! # Usage
 //!
@@ -7,11 +13,19 @@
 //! pares-radix serve --telegram-token <TOKEN> [--model-url <URL>] [--model <MODEL>]
 //! ```
 
-// The CommandProvider plugin surface now lives in the standalone
+// The CommandProvider plugin surface lives in the standalone
 // `pares-radix-cli-api` crate so external plugins (pares-agens) can depend on
-// the trait without pulling this 297KB host binary. Re-export it under the
+// the trait without pulling this host runtime. Re-export it under the
 // historical `command_provider` module path so in-crate references keep working.
 pub(crate) use pares_radix_cli_api as command_provider;
+
+/// Re-export of the plugin command seam so external composers (e.g. the
+/// `pares-agens` plugin binary) can build a registry without a separate
+/// dependency line on `pares-radix-cli-api`.
+pub use pares_radix_cli_api::{
+    CommandError, CommandProvider, CommandResult, ProviderOutcome, ProviderRegistry,
+};
+
 mod config;
 mod px_config;
 
@@ -3555,14 +3569,6 @@ fn migrate_data_dir(home: &str) {
             Err(e) => eprintln!("Warning: failed to migrate {old:?} → {new:?}: {e}"),
         }
     }
-}
-
-#[tokio::main]
-async fn main() {
-    // Public host entrypoint: run with NO plugin providers. The private
-    // `pares-agens` plugin composes its own binary that calls
-    // `run_with_providers` with a populated registry (decision C1).
-    run_with_providers(command_provider::ProviderRegistry::new()).await;
 }
 
 /// Run the Pares Radix CLI with an explicit set of plugin command providers.

@@ -1,0 +1,54 @@
+[package]
+name = "pares-radix-cli-runtime"
+description = "Reusable Pares Radix host runtime (run_with_providers composition seam)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "pares_radix_cli_runtime"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pares-radix"
+path = "src/bin/pares-radix.rs"
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+pares-radix-praxis = { path = "../praxis" }
+pares-radix-cli-api = { path = "../cli-api" }
+pares-radix-cli = { path = "../cli" }
+tokio.workspace = true
+async-trait.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+reqwest.workspace = true
+html2text.workspace = true
+futures-util = "0.3"
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+pares-agens-core = { path = "../core", features = ["embeddings"] }
+pares-agens-channels = { path = "../channels" }
+pares-models = { path = "../models" }
+pares-agens-agenda = { path = "../agenda" }
+pares-radix-tui = { path = "../tui" }
+pares-agens-bitnet = { path = "../bitnet", features = ["model-client"] }
+pares-radix-mcp-server = { path = "../mcp-server" }
+crossterm = "0.28"
+ratatui = "0.29"
+pares-rector = { path = "../rector" }
+toml = "0.8"
+
+[features]
+default = []
+# Enable native BitNet CPU inference. Requires the third_party/bitnet
+# submodule and CMake ≥ 3.21 in the build environment.
+bitnet-native = ["pares-agens-bitnet/inference"]
+
+[dev-dependencies]
+tempfile = "3"
