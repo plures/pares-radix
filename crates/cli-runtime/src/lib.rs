@@ -29,56 +29,14 @@ pub use pares_radix_cli_api::{
 mod config;
 mod px_config;
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
 use clap::{Parser, Subcommand};
-use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tokio::sync::{Mutex, RwLock};
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::Message;
 #[allow(unused_imports)]
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use uuid::Uuid;
 
-use reqwest::header::{HeaderMap, HeaderValue};
-
-use pares_agens_bitnet::BitnetModelClient;
-use pares_agens_channels::adapter::ChannelAdapter;
-use pares_agens_channels::telegram::{
-    TelegramAdapter, TelegramConfig, TelegramConfigControl, TelegramModelControl,
-    TelegramPersonalityControl, TelegramRuntimeConfig, TelegramRuntimeControl,
-    TELEGRAM_VERBOSE_TOOL_DETAILS_MARKER,
-};
-use pares_agens_core::agent::{Agent, Memory};
-use pares_agens_core::auth::copilot::{CopilotAuth, CopilotModelClient};
-use pares_agens_core::cerebellum::px_bridge::PxBridge;
-use pares_agens_core::cerebellum::{Cerebellum, CerebellumConfig};
-use pares_agens_core::delegation::{broker::DelegationBroker, registry::AgentRegistry};
-use pares_agens_core::memory::{
-    embed::{EmbeddingProvider, MockEmbedder, OpenAiEmbedder},
-    entry::Exchange,
-    store::{HostAdapterConfig, HostAdapterRecord, PluresDbStore},
-    PluresLm,
-};
-use pares_agens_core::model::{
-    ChatMessage as CoreChatMessage, ChatOptions, ModelClient, ToolDefinition, ToolDispatcher,
-};
-use pares_agens_core::plugins::{PluginCrudExecutor, PluginRuntime};
-use pares_agens_core::procedure::{Procedure, ProcedureRegistry};
-use pares_agens_core::shell_executor::{ExecRequest, ShellExecutor};
-use pares_agens_core::tool_governance::{GovernanceVerdict, ToolGovernor};
-use pares_agens_core::Event;
-use pares_agens_core::{PluresDbStateStore, StateStore};
-use pares_models::config::{ProviderConfig, RouterConfig};
-use pares_models::router::ModelRouter;
-use pares_models::types::{ChatCompletionRequest, ChatMessage, Role, Tool};
 use pares_radix_migrate::{migrate, openclaw};
 
 #[derive(Debug, Parser)]
@@ -246,7 +204,7 @@ pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
     }
 
     let initial_filter = build_env_filter("info").expect("default log level should be valid");
-    let (filter_layer, log_filter_handle) = tracing_subscriber::reload::Layer::new(initial_filter);
+    let (filter_layer, _log_filter_handle) = tracing_subscriber::reload::Layer::new(initial_filter);
 
     let log_file_path = log_dir.join("pares-radix.log");
     let log_file = std::fs::OpenOptions::new()
