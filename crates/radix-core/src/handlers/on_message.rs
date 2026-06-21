@@ -5,7 +5,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::{
     event::Event,
-    memory::{MemoryCapture, MemoryClient},
+    memory_client::{MemoryCapture, MemoryClient},
     model::{ChatMessage, ChatOptions, ModelClient, ToolDispatcher},
     procedure::Procedure,
 };
@@ -198,7 +198,7 @@ impl Procedure for OnMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::Memory;
+    use crate::memory_client::Memory;
     use crate::model::{ChatOptions, ModelCompletion, ToolCall, ToolDefinition};
     use serde_json::json;
     use std::sync::Mutex;

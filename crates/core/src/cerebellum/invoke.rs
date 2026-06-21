@@ -26,8 +26,8 @@ use pares_agens_privacy::PrivacyFilter;
 use tokio::time::{timeout, Duration};
 use tracing::info;
 
-use crate::model::{ChatMessage, ChatOptions, ModelClient};
-use crate::procedure::Procedure;
+use pares_radix_core::model::{ChatMessage, ChatOptions, ModelClient};
+use pares_radix_core::procedure::Procedure;
 
 // ── InvokeConfig ─────────────────────────────────────────────────────────────
 
@@ -281,7 +281,7 @@ pub trait InvokableProcedure: Procedure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatOptions, ModelCompletion, ToolDefinition};
+    use pares_radix_core::model::{ChatOptions, ModelCompletion, ToolDefinition};
     use std::time::Duration as StdDuration;
     use tokio::time::sleep;
 
@@ -534,7 +534,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl crate::procedure::Procedure for ClassifyProcedure {
+    impl pares_radix_core::procedure::Procedure for ClassifyProcedure {
         fn name(&self) -> &str {
             "classify"
         }
@@ -543,8 +543,8 @@ mod tests {
             "message"
         }
 
-        async fn execute(&self, event: &crate::event::Event) -> Vec<crate::event::Event> {
-            if let crate::event::Event::Message { content, .. } = event {
+        async fn execute(&self, event: &pares_radix_core::event::Event) -> Vec<pares_radix_core::event::Event> {
+            if let pares_radix_core::event::Event::Message { content, .. } = event {
                 let result = self
                     .invoker
                     .invoke(
@@ -555,7 +555,7 @@ mod tests {
                     .await;
 
                 match result {
-                    Ok(label) => vec![crate::event::Event::StateChange {
+                    Ok(label) => vec![pares_radix_core::event::Event::StateChange {
                         key: "spam_label".into(),
                         old_value: None,
                         new_value: serde_json::Value::String(label),
@@ -581,7 +581,7 @@ mod tests {
             invoker: Arc::new(AgentInvoke::new(Arc::new(MockModelClient::new("not-spam")))),
         };
 
-        let event = crate::event::Event::Message {
+        let event = pares_radix_core::event::Event::Message {
             id: "1".into(),
             channel: "general".into(),
             sender: "user".into(),
@@ -590,7 +590,7 @@ mod tests {
 
         let output = procedure.execute(&event).await;
         assert_eq!(output.len(), 1);
-        if let crate::event::Event::StateChange { key, new_value, .. } = &output[0] {
+        if let pares_radix_core::event::Event::StateChange { key, new_value, .. } = &output[0] {
             assert_eq!(key, "spam_label");
             assert_eq!(new_value, &serde_json::Value::String("not-spam".into()));
         } else {

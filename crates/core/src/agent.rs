@@ -23,21 +23,21 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::cerebellum::{Cerebellum, Route};
-use crate::chronos::{ChronosAction, ChronosTimeline};
+use pares_radix_core::chronos::{ChronosAction, ChronosTimeline};
 use crate::delegation::aggregator::ResultAggregator;
 use crate::delegation::broker::DelegationBroker;
-use crate::event::Event;
+use pares_radix_core::event::Event;
 use crate::memory::entry::Exchange;
 use crate::memory::store::MemoryStore;
 use crate::memory::{passes_quality_gate, PluresLm};
-use crate::model::{
+use pares_radix_core::model::{
     ChatMessage, ChatOptions, ModelClient, StreamDelta, StreamSender, ToolDispatcher,
 };
-use crate::pii_guard::PiiGuard;
-use crate::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
-use crate::procedure::ProcedureRegistry;
-use crate::session::{SessionManager, SessionMetadata};
-use crate::state::StateStore;
+use pares_radix_core::pii_guard::PiiGuard;
+use pares_radix_core::plugins::hooks::{HookAction, HookContext, HookManager, HookPoint};
+use pares_radix_core::procedure::ProcedureRegistry;
+use pares_radix_core::session::{SessionManager, SessionMetadata};
+use pares_radix_core::state::StateStore;
 
 // ---------------------------------------------------------------------------
 // Memory trait
@@ -179,7 +179,7 @@ pub struct Agent {
     /// Optional state store for persisting agent state (promises, preferences).
     state_store: Option<Arc<dyn StateStore>>,
     /// Optional task manager for autonomous work execution.
-    task_manager: Option<Arc<crate::task_manager::TaskManager>>,
+    task_manager: Option<Arc<pares_radix_core::task_manager::TaskManager>>,
     // Telemetry logger for interaction tracking.
 }
 
@@ -289,7 +289,7 @@ impl Agent {
     }
 
     /// Attach a task manager for autonomous work execution.
-    pub fn with_task_manager(mut self, task_manager: Arc<crate::task_manager::TaskManager>) -> Self {
+    pub fn with_task_manager(mut self, task_manager: Arc<pares_radix_core::task_manager::TaskManager>) -> Self {
         self.task_manager = Some(task_manager);
         self
     }
@@ -1031,7 +1031,7 @@ impl Agent {
             let entry = chronos.build_entry(
                 &format!("agent:interaction:{channel}"),
                 "agent",
-                crate::chronos::ChronosAction::ResponseGenerated,
+                pares_radix_core::chronos::ChronosAction::ResponseGenerated,
                 &serde_json::json!({
                     "user_message": content,
                     "response": &reply,
@@ -1779,7 +1779,7 @@ impl Agent {
 
         // IO: Create tasks in TaskManager
         if let Some(task_mgr) = &self.task_manager {
-            use crate::task::{CompletionCondition, ConditionType};
+            use pares_radix_core::task::{CompletionCondition, ConditionType};
             let mut last_id = String::new();
             for p in &promises {
                 let task = task_mgr.create_task(
@@ -1811,7 +1811,7 @@ impl Agent {
                 let entry = chronos.build_entry(
                     "agent:promise",
                     "agent",
-                    crate::chronos::ChronosAction::Create,
+                    pares_radix_core::chronos::ChronosAction::Create,
                     &serde_json::json!({
                         "what": p,
                         "completed": false,
@@ -2380,7 +2380,7 @@ impl Agent {
 mod tests {
     use super::*;
     use crate::memory::store::InMemoryStore as InMemoryTurnStore;
-    use crate::model::{ChatOptions, ModelCompletion, ToolDefinition};
+    use pares_radix_core::model::{ChatOptions, ModelCompletion, ToolDefinition};
     use serde_json::json;
 
     fn msg(content: &str) -> Event {
@@ -2803,7 +2803,7 @@ mod tests {
 #[cfg(test)]
 mod history_persistence_tests {
     use super::*;
-    use crate::model::ChatMessage;
+    use pares_radix_core::model::ChatMessage;
 
     struct NullMem;
     #[async_trait::async_trait]

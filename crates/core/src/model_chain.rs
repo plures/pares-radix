@@ -5,7 +5,7 @@
 //! based on the cerebellum's [`MessageClassification`].
 
 use crate::cerebellum::classifier::MessageClassification;
-use crate::model::ModelClient;
+use pares_radix_core::model::ModelClient;
 use std::sync::Arc;
 
 /// Model selection chain — tries cheap first, escalates on need.
@@ -129,7 +129,7 @@ pub struct ModelChainStatus {
 mod tests {
     use super::*;
     use crate::cerebellum::classifier::{MessageClassification, MessageIntent};
-    use crate::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition};
+    use pares_radix_core::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition};
     use async_trait::async_trait;
 
     struct MockClient(&'static str);

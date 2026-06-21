@@ -14,9 +14,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::debug;
 
-use crate::event::Event;
+use pares_radix_core::event::Event;
 use crate::memory::PluresLm;
-use crate::procedure::Procedure;
+use pares_radix_core::procedure::Procedure;
 
 // ── stop-word list ────────────────────────────────────────────────────────────
 
@@ -554,7 +554,7 @@ impl Procedure for CerebellumSweep {
 /// Register all built-in cerebellum procedures into a registry.
 #[cfg(test)]
 pub(crate) fn register_builtins(
-    registry: &mut crate::procedure::ProcedureRegistry,
+    registry: &mut pares_radix_core::procedure::ProcedureRegistry,
     memory: Arc<PluresLm>,
     config: &super::CerebellumConfig,
 ) {
@@ -585,7 +585,7 @@ mod tests {
         store::{InMemoryStore, MemoryStore},
         PluresLm,
     };
-    use crate::procedure::ProcedureRegistry;
+    use pares_radix_core::procedure::ProcedureRegistry;
     use std::sync::Arc;
 
     fn test_memory() -> Arc<PluresLm> {

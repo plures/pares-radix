@@ -2,7 +2,7 @@
 //! seam for the cognition [`SubAgentManager`].
 //!
 //! This is the `COGNITION -> PLATFORM` direction (allowed): cognition depends
-//! on the platform-owned trait/DTOs in [`crate::subagent_spawn`] and adapts its
+//! on the platform-owned trait/DTOs in [`pares_radix_core::subagent_spawn`] and adapts its
 //! own internal session model onto them. Platform code (`spine::subagent_actor`)
 //! depends only on the trait, never on `delegation`.
 //!
@@ -13,7 +13,7 @@
 use async_trait::async_trait;
 
 use crate::delegation::manager::{SessionStatus, SpawnOptions, SubAgentManager};
-use crate::subagent_spawn::{
+use pares_radix_core::subagent_spawn::{
     SessionStatus as PlatSessionStatus, SpawnOptions as PlatSpawnOptions, SpawnedInfo,
     SubAgentSpawner,
 };

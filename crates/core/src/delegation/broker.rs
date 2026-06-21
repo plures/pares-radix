@@ -12,7 +12,7 @@
 //!
 //! All sub-tasks are executed **concurrently** using `tokio::spawn`.
 //!
-//! [`ModelClient`]: crate::model::ModelClient
+//! [`ModelClient`]: pares_radix_core::model::ModelClient
 
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use tracing::{debug, instrument, warn};
 use crate::delegation::{
     context::AgentContext, registry::AgentRegistry, steering::SteeringRx, DelegationError,
 };
-use crate::model::{ChatOptions, ModelClient, ToolDefinition, ToolDispatcher};
+use pares_radix_core::model::{ChatOptions, ModelClient, ToolDefinition, ToolDispatcher};
 
 // ── SubTask ──────────────────────────────────────────────────────────────────
 
@@ -235,7 +235,7 @@ async fn run_sub_task(
                 "dispatching tool calls"
             );
             // Record the assistant's turn (with its tool call requests).
-            use crate::model::ChatMessage;
+            use pares_radix_core::model::ChatMessage;
             context.messages.push(ChatMessage {
                 role: "assistant".into(),
                 content: completion.content.unwrap_or_default(),
@@ -277,7 +277,7 @@ async fn run_sub_task(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition};
+    use pares_radix_core::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition};
     use async_trait::async_trait;
     use serde_json::Value;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -358,7 +358,7 @@ mod tests {
                 // First call — request a tool
                 Ok(ModelCompletion {
                     content: None,
-                    tool_calls: vec![crate::model::ToolCall {
+                    tool_calls: vec![pares_radix_core::model::ToolCall {
                         id: "tc1".into(),
                         name: "read_file".into(),
                         arguments: serde_json::json!({"path": "foo.txt"}),
@@ -591,7 +591,7 @@ mod tests {
                     // First turn: call a tool so we get another iteration
                     Ok(ModelCompletion {
                         content: None,
-                        tool_calls: vec![crate::model::ToolCall {
+                        tool_calls: vec![pares_radix_core::model::ToolCall {
                             id: "tc1".into(),
                             name: "noop".into(),
                             arguments: serde_json::json!({}),

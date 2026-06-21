@@ -1,29 +1,30 @@
 //! Cognition-side adapter onto the PluresDB procedure engine.
 //!
 //! The platform execution half of the bridge now lives in
-//! [`crate::pluresdb_bridge`] (procedure / constraint execution against a
+//! [`pares_radix_core::pluresdb_bridge`] (procedure / constraint execution against a
 //! [`CrdtStore`]). This module keeps the **cognition seam**:
 //!
 //! - [`StoreAdapter`] populates an in-process [`CrdtStore`] from a pares-radix
 //!   [`MemoryStore`], making the full corpus of memory entries available to the
 //!   PluresDB procedure engine without any network hop.
 //! - Cognition-side convenience constructors on [`PluresDbBridge`]
-//!   ([`PluresDbBridge::new`] / [`PluresDbBridge::reload`]) that snapshot a
+//!   ([`PluresDbBridgeExt::from_memory_store`] /
+//!   [`PluresDbBridgeExt::reload_from_memory_store`]) that snapshot a
 //!   `MemoryStore` first, then delegate to the platform bridge.
 //!
 //! [`PluresDbBridge`] and [`BridgeError`] are re-exported from
-//! [`crate::pluresdb_bridge`] so existing cognition callers continue to use
+//! [`pares_radix_core::pluresdb_bridge`] so existing cognition callers continue to use
 //! `crate::cerebellum::bridge::{PluresDbBridge, BridgeError}` unchanged.
 //!
 //! # Example
 //!
 //! ```rust,no_run
 //! # use std::sync::Arc;
-//! # use pares_agens_core::cerebellum::bridge::{PluresDbBridge, BridgeError};
+//! # use pares_agens_core::cerebellum::bridge::{PluresDbBridge, PluresDbBridgeExt, BridgeError};
 //! # use pares_agens_core::memory::store::InMemoryStore;
 //! # #[tokio::main] async fn main() -> Result<(), BridgeError> {
 //! let store = Arc::new(InMemoryStore::new());
-//! let bridge = PluresDbBridge::new(store).await?;
+//! let bridge = PluresDbBridge::from_memory_store(store).await?;
 //!
 //! use pluresdb_procedures::ir::{Predicate, Step};
 //! let steps = vec![
@@ -43,7 +44,7 @@ use crate::memory::store::MemoryStore;
 
 // Re-export the platform bridge types so existing cognition callers that use
 // `crate::cerebellum::bridge::{PluresDbBridge, BridgeError}` keep working.
-pub use crate::pluresdb_bridge::{BridgeError, PluresDbBridge};
+pub use pares_radix_core::pluresdb_bridge::{BridgeError, PluresDbBridge};
 
 // ---------------------------------------------------------------------------
 // StoreAdapter (cognition seam: MemoryStore -> CrdtStore)
@@ -115,12 +116,20 @@ impl StoreAdapter {
 // ---------------------------------------------------------------------------
 // Cognition-side convenience constructors on the platform bridge.
 //
-// Inherent impls may live in any module of the defining crate, so these
-// `MemoryStore`-aware helpers extend the platform `PluresDbBridge` without
-// adding a `crate::memory` dependency to the platform module itself.
+// `PluresDbBridge` is now defined in the platform crate
+// (`pares_radix_core::pluresdb_bridge`), so the orphan rule forbids an inherent
+// `impl` here. Instead these `MemoryStore`-aware helpers are exposed via the
+// [`PluresDbBridgeExt`] extension trait, implemented for the platform bridge.
+// This keeps the cognition seam (no `crate::memory` dependency leaks into the
+// platform module) while remaining ergonomic for cognition callers.
 // ---------------------------------------------------------------------------
 
-impl PluresDbBridge {
+/// Cognition-side extension methods for the platform [`PluresDbBridge`].
+///
+/// Brings `MemoryStore`-aware constructors to the platform bridge without
+/// adding a cognition dependency to `pares_radix_core`.
+#[async_trait::async_trait]
+pub trait PluresDbBridgeExt: Sized {
     /// Create a bridge connected to the given pares-radix memory store.
     ///
     /// All existing memory entries are snapshotted into the internal
@@ -130,11 +139,7 @@ impl PluresDbBridge {
     /// # Errors
     ///
     /// Returns [`BridgeError::Store`] if the initial load fails.
-    pub async fn new(store: Arc<dyn MemoryStore>) -> Result<Self, BridgeError> {
-        let adapter = StoreAdapter::new(store);
-        let crdt = adapter.load().await?;
-        Ok(Self::from_crdt(crdt))
-    }
+    async fn from_memory_store(store: Arc<dyn MemoryStore>) -> Result<Self, BridgeError>;
 
     /// Reload the internal [`CrdtStore`] snapshot from a pares-radix store.
     ///
@@ -145,7 +150,24 @@ impl PluresDbBridge {
     /// # Errors
     ///
     /// Returns [`BridgeError::Store`] if the reload fails.
-    pub async fn reload(&mut self, store: Arc<dyn MemoryStore>) -> Result<(), BridgeError> {
+    async fn reload_from_memory_store(
+        &mut self,
+        store: Arc<dyn MemoryStore>,
+    ) -> Result<(), BridgeError>;
+}
+
+#[async_trait::async_trait]
+impl PluresDbBridgeExt for PluresDbBridge {
+    async fn from_memory_store(store: Arc<dyn MemoryStore>) -> Result<Self, BridgeError> {
+        let adapter = StoreAdapter::new(store);
+        let crdt = adapter.load().await?;
+        Ok(Self::from_crdt(crdt))
+    }
+
+    async fn reload_from_memory_store(
+        &mut self,
+        store: Arc<dyn MemoryStore>,
+    ) -> Result<(), BridgeError> {
         let adapter = StoreAdapter::new(store);
         let crdt = adapter.load().await?;
         self.reload_from(crdt);
@@ -252,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn new_snapshots_memory_store() {
         let store = store_with_entries().await;
-        let bridge = PluresDbBridge::new(store as Arc<dyn MemoryStore>)
+        let bridge = PluresDbBridge::from_memory_store(store as Arc<dyn MemoryStore>)
             .await
             .unwrap();
         let result = bridge.run_steps(vec![]).await.unwrap();
@@ -273,7 +295,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut bridge = PluresDbBridge::new(Arc::clone(&store) as Arc<dyn MemoryStore>)
+        let mut bridge = PluresDbBridge::from_memory_store(Arc::clone(&store) as Arc<dyn MemoryStore>)
             .await
             .unwrap();
         // Before reload, only 1 entry is visible.
@@ -288,7 +310,7 @@ mod tests {
 
         // After reload, both entries are visible.
         bridge
-            .reload(Arc::clone(&store) as Arc<dyn MemoryStore>)
+            .reload_from_memory_store(Arc::clone(&store) as Arc<dyn MemoryStore>)
             .await
             .unwrap();
         let after = bridge.run_steps(vec![]).await.unwrap();

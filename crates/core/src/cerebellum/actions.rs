@@ -31,9 +31,9 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use std::sync::RwLock as StdRwLock;
 
 use crate::memory::embed::EmbeddingProvider;
-use crate::model::StreamDelta;
-use crate::px_adapter::AsyncActionHandler;
-use crate::spine::event::SpineEvent;
+use pares_radix_core::model::StreamDelta;
+use pares_radix_core::px_adapter::AsyncActionHandler;
+use pares_radix_core::spine::event::SpineEvent;
 use pares_radix_praxis::px::executor::ExecutionError;
 
 /// A memory entry with pre-computed embedding for recall.
@@ -61,9 +61,9 @@ pub struct CerebellumActionHandler {
     event_tx: Option<mpsc::Sender<SpineEvent>>,
     /// Model client for `model_complete` action.
     /// Wrapped in RwLock so it can be set after construction (late binding).
-    model_client: Arc<StdRwLock<Option<Arc<dyn crate::model::ModelClient>>>>,
+    model_client: Arc<StdRwLock<Option<Arc<dyn pares_radix_core::model::ModelClient>>>>,
     /// Tool dispatcher for `dispatch_tools` action.
-    tool_dispatcher: Arc<StdRwLock<Option<Arc<dyn crate::model::ToolDispatcher>>>>,
+    tool_dispatcher: Arc<StdRwLock<Option<Arc<dyn pares_radix_core::model::ToolDispatcher>>>>,
     /// Memory store for `recall_memories` action (key: "memories", value: vec of {content, embedding}).
     /// PluresDB replaces this — for now, memory entries live in the state map under "memory:*" keys.
     memory_entries: Arc<RwLock<Vec<MemoryEntry>>>,
@@ -122,25 +122,25 @@ impl CerebellumActionHandler {
 
     /// Attach a model client to enable `model_complete` action.
     /// Can be called after construction (late binding pattern).
-    pub fn with_model_client(self, client: Arc<dyn crate::model::ModelClient>) -> Self {
+    pub fn with_model_client(self, client: Arc<dyn pares_radix_core::model::ModelClient>) -> Self {
         *self.model_client.write().unwrap() = Some(client);
         self
     }
 
     /// Set the model client after construction (for late binding when
     /// the model client isn't available at cerebellum init time).
-    pub fn set_model_client(&self, client: Arc<dyn crate::model::ModelClient>) {
+    pub fn set_model_client(&self, client: Arc<dyn pares_radix_core::model::ModelClient>) {
         *self.model_client.write().unwrap() = Some(client);
     }
 
     /// Attach a tool dispatcher to enable `dispatch_tools` action.
-    pub fn with_tool_dispatcher(self, dispatcher: Arc<dyn crate::model::ToolDispatcher>) -> Self {
+    pub fn with_tool_dispatcher(self, dispatcher: Arc<dyn pares_radix_core::model::ToolDispatcher>) -> Self {
         *self.tool_dispatcher.write().unwrap() = Some(dispatcher);
         self
     }
 
     /// Set the tool dispatcher after construction (late binding).
-    pub fn set_tool_dispatcher(&self, dispatcher: Arc<dyn crate::model::ToolDispatcher>) {
+    pub fn set_tool_dispatcher(&self, dispatcher: Arc<dyn pares_radix_core::model::ToolDispatcher>) {
         *self.tool_dispatcher.write().unwrap() = Some(dispatcher);
     }
 
@@ -873,7 +873,7 @@ impl CerebellumActionHandler {
             .unwrap_or("standard");
 
         // Build ChatMessage list
-        use crate::model::{ChatMessage, ChatOptions};
+        use pares_radix_core::model::{ChatMessage, ChatOptions};
         let mut chat_messages: Vec<ChatMessage> = vec![];
 
         if !system_prompt.is_empty() {

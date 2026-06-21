@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::StateStore;
+use pares_radix_core::StateStore;
 
 /// A single behavioral rule that governs agent behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -413,7 +413,7 @@ pub fn format_documents_for_prompt(docs: &[PersonalityDocument]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::InMemoryStateStore;
+    use pares_radix_core::InMemoryStateStore;
 
     #[test]
     fn default_contract_has_core_rules() {

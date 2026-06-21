@@ -82,7 +82,7 @@ impl DataflowBridge {
         sender: &str,
         content: &str,
         message_id: Option<&str>,
-        history: Option<&[crate::model::ChatMessage]>,
+        history: Option<&[pares_radix_core::model::ChatMessage]>,
     ) -> Result<Option<DeliveryResult>, String> {
         if !self.active {
             return Ok(None);
@@ -231,11 +231,11 @@ pub use super::actions::CerebellumActionHandler;
 /// Both traits have `async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError>`
 /// but they're from different crates, so we need a thin wrapper.
 pub struct DataflowActionAdapter {
-    inner: Arc<dyn crate::px_adapter::AsyncActionHandler>,
+    inner: Arc<dyn pares_radix_core::px_adapter::AsyncActionHandler>,
 }
 
 impl DataflowActionAdapter {
-    pub fn new(handler: Arc<dyn crate::px_adapter::AsyncActionHandler>) -> Self {
+    pub fn new(handler: Arc<dyn pares_radix_core::px_adapter::AsyncActionHandler>) -> Self {
         Self { inner: handler }
     }
 }

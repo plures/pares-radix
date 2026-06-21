@@ -2,7 +2,7 @@
 
 use super::{CerebellumConfig, Route};
 use crate::delegation::broker::SubTask;
-use crate::event::Event;
+use pares_radix_core::event::Event;
 
 /// Complexity signals extracted from an event.
 struct Signals {

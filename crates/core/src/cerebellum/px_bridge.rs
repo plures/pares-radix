@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use crate::px_adapter::{load_px_procedures, AsyncActionHandler, PxProcedureAdapter};
+use pares_radix_core::px_adapter::{load_px_procedures, AsyncActionHandler, PxProcedureAdapter};
 
 /// Holds loaded .px procedures for cerebellum logic, keyed by procedure name.
 pub struct PxBridge {
@@ -75,7 +75,7 @@ impl PxBridge {
 
     /// Load .px procedures from a directory (recursive).
     pub async fn load_from_directory(&self, dir: &std::path::Path) -> usize {
-        let adapters = crate::px_adapter::load_px_directory(dir, self.handler.clone());
+        let adapters = pares_radix_core::px_adapter::load_px_directory(dir, self.handler.clone());
         let count = adapters.len();
 
         let mut procs = self.procedures.write().await;
@@ -99,7 +99,7 @@ impl PxBridge {
     /// If called from within a tokio runtime, uses `try_write` with a spin loop
     /// to avoid the blocking_write panic. Safe in both sync and async contexts.
     pub fn load_from_directory_sync(&self, dir: &std::path::Path) -> usize {
-        let adapters = crate::px_adapter::load_px_directory(dir, self.handler.clone());
+        let adapters = pares_radix_core::px_adapter::load_px_directory(dir, self.handler.clone());
         let count = adapters.len();
 
         // If we're inside a tokio runtime, blocking_write() panics.

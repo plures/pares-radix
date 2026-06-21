@@ -1305,7 +1305,7 @@ mod tests {
             channel: channel.to_string(),
             session_id: "main".to_string(),
             timestamp: timestamp.to_string(),
-            messages: vec![crate::model::ChatMessage::system("test")],
+            messages: vec![pares_radix_core::model::ChatMessage::system("test")],
         }
     }
 

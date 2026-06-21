@@ -405,7 +405,7 @@ fn extract_single_result(mut results: Vec<SubTaskResult>) -> Result<String, Stri
 mod tests {
     use super::*;
     use crate::delegation::registry::{AgentDefinition, AgentRegistry};
-    use crate::model::{
+    use pares_radix_core::model::{
         ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher,
     };
     use async_trait::async_trait;

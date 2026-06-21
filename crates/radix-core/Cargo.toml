@@ -1,31 +1,25 @@
 [package]
-name = "pares-agens-core"
-description = "Core event loop and procedure executor for Pares Agens"
+name = "pares-radix-core"
+description = "Platform runtime (event loop, procedure executor, state, plugins) for Pares Radix"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "pares_radix_core"
 
 [features]
 ## Enable the spine integration test suite.
 spine = []
 
 ## Enable the `VaultSecretStore` backed by plures-vault encrypted storage.
-##
-## When this feature is active, a `vault-core` dependency is pulled from the
-## plures-vault git repository.  The default build omits this dependency so
-## that `cargo check --workspace` succeeds without requiring the vault crate's
-## transitive dependency tree.
 vault = ["dep:vault-core"]
 
 ## Enable native fastembed embeddings via PluresDB.
-## When active, `PluresDbStore::open_with_embeddings()` is available.
-## Requires the `embeddings` feature on the `pluresdb` dependency.
 embeddings = []
 
 ## Enable OpenTelemetry OTLP trace export.
-## Adds gRPC span exporter that integrates with the tracing subscriber.
-## Configure via OTEL_EXPORTER_OTLP_ENDPOINT and OTEL_SERVICE_NAME env vars.
 otel = [
     "dep:opentelemetry",
     "dep:opentelemetry_sdk",
@@ -52,7 +46,6 @@ base64 = "0.22"
 sha2 = "0.10"
 subtle = "2"
 pares-agens-privacy = { path = "../privacy" }
-pares-radix-core = { path = "../radix-core" }
 walkdir.workspace = true
 pares-radix-praxis = { path = "../praxis" }
 pluresdb = { git = "https://github.com/plures/pluresdb", rev = "111dc919c8c2f1d4da7a1b4a1bac0d5a73adf7a3", features = ["embeddings"] }

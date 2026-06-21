@@ -12,11 +12,11 @@ use tokio::sync::watch;
 use tokio::time::{self, Duration};
 use tracing::{debug, info, warn};
 
-use crate::event_spine::EventSpineHandle;
-use crate::spine::pipeline::PipelineEmitter;
-use crate::state::StateStore;
-use crate::task_executor::TaskDispatcher;
-use crate::task_manager::TaskManager;
+use pares_radix_core::event_spine::EventSpineHandle;
+use pares_radix_core::spine::pipeline::PipelineEmitter;
+use pares_radix_core::state::StateStore;
+use pares_radix_core::task_executor::TaskDispatcher;
+use pares_radix_core::task_manager::TaskManager;
 
 /// Heartbeat configuration stored in PluresDB state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -435,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn heartbeat_runner_loads_default_config() {
-        let state = Arc::new(crate::InMemoryStateStore::new());
+        let state = Arc::new(pares_radix_core::InMemoryStateStore::new());
         let mut runner = HeartbeatRunner::new(state);
         runner.load_config().await;
         assert_eq!(runner.config().interval_secs, 30);
@@ -443,7 +443,7 @@ mod tests {
 
     #[tokio::test]
     async fn heartbeat_runner_loads_custom_config() {
-        let state = Arc::new(crate::InMemoryStateStore::new());
+        let state = Arc::new(pares_radix_core::InMemoryStateStore::new());
         let custom = HeartbeatConfig {
             enabled: false,
             interval_secs: 15,

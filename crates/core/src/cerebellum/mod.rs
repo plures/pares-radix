@@ -33,14 +33,14 @@ pub mod pipeline;
 pub mod px_bridge;
 pub mod router;
 
-use crate::pluresdb_bridge::PluresDbBridge;
+use pares_radix_core::pluresdb_bridge::PluresDbBridge;
 use crate::cerebellum::px_bridge::PxBridge;
 use crate::delegation::broker::SubTask;
-use crate::event::Event;
+use pares_radix_core::event::Event;
 use crate::memory::entry::MemoryCategory;
 use crate::memory::PluresLm;
-use crate::praxis::constraints::AuthorizationGate;
-use crate::procedure::{Procedure, ProcedureRegistry};
+use pares_radix_core::praxis::constraints::AuthorizationGate;
+use pares_radix_core::procedure::{Procedure, ProcedureRegistry};
 
 use async_trait::async_trait;
 use pares_radix_praxis::rule::{Rule, RuleContext, RuleResult};
@@ -180,7 +180,7 @@ pub struct Cerebellum {
     /// Relevance scorer with learned weights.
     relevance_scorer: Mutex<context_manager::RelevanceScorer>,
     /// Optional conversation store for fallback context when autorecall has no hits.
-    conversation_store: Option<Arc<dyn crate::spine::conversation::ConversationStore>>,
+    conversation_store: Option<Arc<dyn pares_radix_core::spine::conversation::ConversationStore>>,
     /// Optional .px bridge for calling .px procedures instead of hardcoded Rust logic.
     /// When loaded, classification and routing go through .px first, falling back to Rust.
     px_bridge: Option<Arc<PxBridge>>,
@@ -223,7 +223,7 @@ impl Cerebellum {
     /// Attach a conversation store for fallback context when autorecall returns no hits.
     pub fn with_conversation_store(
         mut self,
-        store: Arc<dyn crate::spine::conversation::ConversationStore>,
+        store: Arc<dyn pares_radix_core::spine::conversation::ConversationStore>,
     ) -> Self {
         self.conversation_store = Some(store);
         self
@@ -548,7 +548,7 @@ impl Cerebellum {
         sender: &str,
         content: &str,
         message_id: Option<&str>,
-        history: Option<&[crate::model::ChatMessage]>,
+        history: Option<&[pares_radix_core::model::ChatMessage]>,
     ) -> Option<dataflow_bridge::DeliveryResult> {
         let df_bridge = self.dataflow_bridge.as_ref()?;
         if !df_bridge.is_active() {
