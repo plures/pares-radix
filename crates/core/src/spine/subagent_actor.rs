@@ -1,9 +1,11 @@
 //! Subagent spawn actor for dev-lifecycle orchestration.
 //!
-//! Bridges between the reactive .px procedure system and the delegation broker.
-//! When `spawn_subagent` is called by a .px procedure, this actor:
+//! Bridges between the reactive .px procedure system and the platform
+//! sub-agent spawn seam. When `spawn_subagent` is called by a .px procedure,
+//! this actor:
 //!
-//! 1. Creates a SubTask via SubAgentManager
+//! 1. Spawns a session via a [`SubAgentSpawner`] (implemented by cognition's
+//!    delegation `SubAgentManager`)
 //! 2. Returns immediately with `{spawned: true, session_id: "..."}`
 //! 3. On completion, writes to PluresDB key `stage_complete:{task_id}:{stage_name}`
 //! 4. That PluresDB write triggers `evaluate_gate` via the reactive registry
@@ -12,6 +14,9 @@
 //! ```text
 //! plan_task → spawn_subagent → (agent executes) → stage_complete write → evaluate_gate → spawn_subagent → ...
 //! ```
+//!
+//! The actor depends only on platform types ([`crate::subagent_spawn`]); it has
+//! no dependency on cognition's `delegation` module.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,16 +25,16 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tracing::{debug, error, info, warn};
 
-use crate::delegation::{SpawnOptions, SubAgentManager};
 use crate::px_adapter::AsyncActionHandler;
 use crate::spine::reactive::ReactiveRegistry;
+use crate::subagent_spawn::{SessionStatus, SpawnOptions, SubAgentSpawner};
 use pares_radix_praxis::px::executor::ExecutionError;
 
 /// Actor that spawns subagent sessions and wires their completion back
 /// into the reactive registry via PluresDB writes.
 pub struct SubagentActor {
-    /// Sub-agent manager for spawning and tracking sessions.
-    manager: Arc<SubAgentManager>,
+    /// Sub-agent spawner for spawning and tracking sessions (platform seam).
+    manager: Arc<dyn SubAgentSpawner>,
     /// Reactive registry for triggering `evaluate_gate` on stage completion.
     registry: Arc<ReactiveRegistry>,
 }
@@ -38,9 +43,9 @@ impl SubagentActor {
     /// Create a new subagent actor.
     ///
     /// # Arguments
-    /// * `manager` — The sub-agent manager that handles spawning
+    /// * `manager` — The sub-agent spawner that handles spawning
     /// * `registry` — The reactive registry for writing stage_complete events
-    pub fn new(manager: Arc<SubAgentManager>, registry: Arc<ReactiveRegistry>) -> Self {
+    pub fn new(manager: Arc<dyn SubAgentSpawner>, registry: Arc<ReactiveRegistry>) -> Self {
         Self { manager, registry }
     }
 
@@ -137,7 +142,7 @@ impl SubagentActor {
                 tokio::time::sleep(Duration::from_secs(2)).await;
                 if let Some(info) = mgr.get(&sid).await {
                     match &info.status {
-                        crate::delegation::SessionStatus::Completed => {
+                        SessionStatus::Completed => {
                             let output = info.output.unwrap_or_default();
                             info!(
                                 task_id = %tid,
@@ -156,7 +161,7 @@ impl SubagentActor {
                             registry.on_write(&key, &value).await;
                             break;
                         }
-                        crate::delegation::SessionStatus::Failed(err) => {
+                        SessionStatus::Failed(err) => {
                             warn!(
                                 task_id = %tid,
                                 stage = %sname,
@@ -174,7 +179,7 @@ impl SubagentActor {
                             registry.on_write(&key, &value).await;
                             break;
                         }
-                        crate::delegation::SessionStatus::TimedOut => {
+                        SessionStatus::TimedOut => {
                             warn!(
                                 task_id = %tid,
                                 stage = %sname,
@@ -191,7 +196,7 @@ impl SubagentActor {
                             registry.on_write(&key, &value).await;
                             break;
                         }
-                        crate::delegation::SessionStatus::Killed => {
+                        SessionStatus::Killed => {
                             warn!(
                                 task_id = %tid,
                                 stage = %sname,
@@ -208,7 +213,7 @@ impl SubagentActor {
                             registry.on_write(&key, &value).await;
                             break;
                         }
-                        crate::delegation::SessionStatus::Running => {
+                        SessionStatus::Running => {
                             // Still running, continue polling
                             continue;
                         }
@@ -265,70 +270,35 @@ impl AsyncActionHandler for SubagentActor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::delegation::broker::DelegationBroker;
-    use crate::delegation::registry::{AgentDefinition, AgentRegistry};
-    use crate::delegation::CompletionEvent;
-    use crate::model::{ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolDefinition, ToolDispatcher};
+    use crate::subagent_spawn::{SessionStatus, SpawnedInfo};
 
-    struct EchoModel;
+    /// Minimal in-file spawner used to exercise the actor without any
+    /// cognition (`delegation`) scaffolding.
+    struct MockSpawner;
 
     #[async_trait]
-    impl ModelClient for EchoModel {
-        async fn complete(
-            &self,
-            messages: &[ChatMessage],
-            _tools: &[ToolDefinition],
-            _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
-            let last = messages
-                .iter()
-                .rev()
-                .find(|m| m.role == "user")
-                .map(|m| m.content.clone())
-                .unwrap_or_default();
-            Ok(ModelCompletion {
-                content: Some(format!("Result: PASS\n{last}")),
-                tool_calls: vec![],
-                logprobs: None,
-                model: None,
+    impl SubAgentSpawner for MockSpawner {
+        async fn spawn(&self, _agent: &str, _prompt: &str, _options: SpawnOptions) -> String {
+            "mock-session-1".to_string()
+        }
+
+        async fn get(&self, _session_id: &str) -> Option<SpawnedInfo> {
+            Some(SpawnedInfo {
+                status: SessionStatus::Completed,
+                output: Some("Result: PASS".into()),
             })
         }
     }
 
-    struct NoopDispatcher;
-
-    #[async_trait]
-    impl ToolDispatcher for NoopDispatcher {
-        async fn available_tools(&self) -> Vec<ToolDefinition> {
-            vec![]
-        }
-        async fn call_tool(&self, _name: &str, _args: Value) -> String {
-            String::new()
-        }
-    }
-
-    fn make_actor() -> (SubagentActor, tokio::sync::mpsc::UnboundedReceiver<CompletionEvent>) {
-        let mut reg = AgentRegistry::new();
-        reg.register(AgentDefinition::new("coder", "codes", "You code."));
-        reg.register(AgentDefinition::new("analyst", "analyzes", "You analyze."));
-        reg.register(AgentDefinition::new("researcher", "researches", "You research."));
-
-        let broker = Arc::new(DelegationBroker::new(
-            Arc::new(reg),
-            Arc::new(EchoModel),
-            Arc::new(NoopDispatcher),
-        ));
-
-        let (manager, rx) = SubAgentManager::new(broker);
-        let manager = Arc::new(manager);
+    fn make_actor() -> SubagentActor {
+        let manager: Arc<dyn SubAgentSpawner> = Arc::new(MockSpawner);
         let registry = Arc::new(ReactiveRegistry::new());
-
-        (SubagentActor::new(manager, registry), rx)
+        SubagentActor::new(manager, registry)
     }
 
     #[tokio::test]
     async fn spawn_subagent_returns_immediately() {
-        let (actor, _rx) = make_actor();
+        let actor = make_actor();
         let params = json!({
             "task_id": "TASK-001",
             "stage_name": "fix",
@@ -346,7 +316,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_subagent_missing_task_id_errors() {
-        let (actor, _rx) = make_actor();
+        let actor = make_actor();
         let params = json!({
             "stage_name": "fix",
             "prompt": "Fix the bug"
@@ -358,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_action_errors() {
-        let (actor, _rx) = make_actor();
+        let actor = make_actor();
         let result = actor.call("unknown_action", &json!({})).await;
         assert!(result.is_err());
     }

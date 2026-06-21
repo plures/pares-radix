@@ -35,6 +35,8 @@ pub mod builtin;
 pub mod context;
 pub mod manager;
 pub mod registry;
+/// Cognition→platform bridge: `impl SubAgentSpawner for SubAgentManager`.
+mod spawner_impl;
 pub mod steering;
 
 pub use aggregator::{AggregatedResult, ResultAggregator};

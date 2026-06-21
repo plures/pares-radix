@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::cerebellum::bridge::PluresDbBridge;
+use crate::pluresdb_bridge::PluresDbBridge;
 use crate::executor::PraxisGate;
 use pares_radix_praxis::db::{
     procedures::on_action,

@@ -33,7 +33,7 @@ pub mod pipeline;
 pub mod px_bridge;
 pub mod router;
 
-use crate::cerebellum::bridge::PluresDbBridge;
+use crate::pluresdb_bridge::PluresDbBridge;
 use crate::cerebellum::px_bridge::PxBridge;
 use crate::delegation::broker::SubTask;
 use crate::event::Event;

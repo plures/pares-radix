@@ -1,16 +1,19 @@
-//! Bridge between pares-radix cerebellum and PluresDB procedure engine.
+//! Cognition-side adapter onto the PluresDB procedure engine.
 //!
-//! The bridge exposes two execution paths:
+//! The platform execution half of the bridge now lives in
+//! [`crate::pluresdb_bridge`] (procedure / constraint execution against a
+//! [`CrdtStore`]). This module keeps the **cognition seam**:
 //!
-//! - [`PluresDbBridge::run_steps`] — execute a raw pipeline of [`Step`]s.
-//! - [`PluresDbBridge::run_procedure`] — execute a named procedure by looking
-//!   up its DSL string in the in-process procedure registry.
+//! - [`StoreAdapter`] populates an in-process [`CrdtStore`] from a pares-radix
+//!   [`MemoryStore`], making the full corpus of memory entries available to the
+//!   PluresDB procedure engine without any network hop.
+//! - Cognition-side convenience constructors on [`PluresDbBridge`]
+//!   ([`PluresDbBridge::new`] / [`PluresDbBridge::reload`]) that snapshot a
+//!   `MemoryStore` first, then delegate to the platform bridge.
 //!
-//! # Store adapter
-//!
-//! [`StoreAdapter`] populates an in-process [`CrdtStore`] from a pares-radix
-//! [`MemoryStore`], making the full corpus of memory entries available to the
-//! PluresDB procedure engine without any network hop.
+//! [`PluresDbBridge`] and [`BridgeError`] are re-exported from
+//! [`crate::pluresdb_bridge`] so existing cognition callers continue to use
+//! `crate::cerebellum::bridge::{PluresDbBridge, BridgeError}` unchanged.
 //!
 //! # Example
 //!
@@ -32,37 +35,18 @@
 //! # }
 //! ```
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use pluresdb::CrdtStore;
-use pluresdb_procedures::{
-    engine::ProcedureEngine,
-    ir::{ProcedureResult, Step},
-};
 
 use crate::memory::store::MemoryStore;
 
-// ---------------------------------------------------------------------------
-// BridgeError
-// ---------------------------------------------------------------------------
-
-/// Errors that can occur when using the PluresDB bridge.
-#[derive(Debug, thiserror::Error)]
-pub enum BridgeError {
-    /// A named procedure was requested but could not be found in the registry.
-    #[error("procedure not found: {0}")]
-    NotFound(String),
-    /// The procedure engine reported an execution failure.
-    #[error("execution failed: {0}")]
-    Execution(String),
-    /// The underlying memory store returned an error.
-    #[error("store error: {0}")]
-    Store(String),
-}
+// Re-export the platform bridge types so existing cognition callers that use
+// `crate::cerebellum::bridge::{PluresDbBridge, BridgeError}` keep working.
+pub use crate::pluresdb_bridge::{BridgeError, PluresDbBridge};
 
 // ---------------------------------------------------------------------------
-// StoreAdapter
+// StoreAdapter (cognition seam: MemoryStore -> CrdtStore)
 // ---------------------------------------------------------------------------
 
 /// Populates a [`CrdtStore`] with entries from a pares-radix [`MemoryStore`].
@@ -129,132 +113,48 @@ impl StoreAdapter {
 }
 
 // ---------------------------------------------------------------------------
-// PluresDbBridge
+// Cognition-side convenience constructors on the platform bridge.
+//
+// Inherent impls may live in any module of the defining crate, so these
+// `MemoryStore`-aware helpers extend the platform `PluresDbBridge` without
+// adding a `crate::memory` dependency to the platform module itself.
 // ---------------------------------------------------------------------------
-
-/// Bridge between the pares-radix cerebellum and the PluresDB procedure engine.
-///
-/// The bridge maintains:
-/// - An in-process [`CrdtStore`] snapshot of the pares-radix memory store.
-/// - A named-procedure registry (mapping procedure names to DSL strings).
-/// - A reference to the pares-radix [`MemoryStore`] for reloading on demand.
-pub struct PluresDbBridge {
-    crdt: CrdtStore,
-    store: Arc<dyn MemoryStore>,
-    /// Named procedure registry: maps a procedure name to its DSL string.
-    procedures: HashMap<String, String>,
-}
 
 impl PluresDbBridge {
     /// Create a bridge connected to the given pares-radix memory store.
     ///
-    /// All existing memory entries are loaded into the internal [`CrdtStore`]
-    /// immediately so they are available to procedure pipelines.
+    /// All existing memory entries are snapshotted into the internal
+    /// [`CrdtStore`] immediately so they are available to procedure pipelines.
+    /// Delegates to [`PluresDbBridge::from_crdt`] after snapshotting.
     ///
     /// # Errors
     ///
     /// Returns [`BridgeError::Store`] if the initial load fails.
     pub async fn new(store: Arc<dyn MemoryStore>) -> Result<Self, BridgeError> {
-        let adapter = StoreAdapter::new(Arc::clone(&store));
+        let adapter = StoreAdapter::new(store);
         let crdt = adapter.load().await?;
-        Ok(Self {
-            crdt,
-            store,
-            procedures: HashMap::new(),
-        })
+        Ok(Self::from_crdt(crdt))
     }
 
-    /// Register a named procedure DSL string.
-    ///
-    /// Replaces any existing registration for `name`.
-    pub fn register_procedure(&mut self, name: impl Into<String>, dsl: impl Into<String>) {
-        self.procedures.insert(name.into(), dsl.into());
-    }
-
-    /// Reload the internal [`CrdtStore`] snapshot from the pares-radix store.
+    /// Reload the internal [`CrdtStore`] snapshot from a pares-radix store.
     ///
     /// Call this when the pares-radix store has been updated and you want the
-    /// bridge to reflect the latest entries.
+    /// bridge to reflect the latest entries. Registered procedures are
+    /// preserved. Delegates to [`PluresDbBridge::reload_from`].
     ///
     /// # Errors
     ///
     /// Returns [`BridgeError::Store`] if the reload fails.
-    pub async fn reload(&mut self) -> Result<(), BridgeError> {
-        let adapter = StoreAdapter::new(Arc::clone(&self.store));
-        self.crdt = adapter.load().await?;
+    pub async fn reload(&mut self, store: Arc<dyn MemoryStore>) -> Result<(), BridgeError> {
+        let adapter = StoreAdapter::new(store);
+        let crdt = adapter.load().await?;
+        self.reload_from(crdt);
         Ok(())
-    }
-
-    /// Run a named procedure pipeline.
-    ///
-    /// Looks up `name` in the registered procedure DSL table and executes the
-    /// corresponding DSL string against the current [`CrdtStore`] snapshot.
-    ///
-    /// # Errors
-    ///
-    /// - [`BridgeError::NotFound`] if `name` is not registered.
-    /// - [`BridgeError::Execution`] if the DSL parse or execution fails.
-    pub async fn run_procedure(&self, name: &str) -> Result<ProcedureResult, BridgeError> {
-        let dsl = self
-            .procedures
-            .get(name)
-            .ok_or_else(|| BridgeError::NotFound(name.to_string()))?;
-
-        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
-        engine
-            .exec_dsl(dsl)
-            .map_err(|e| BridgeError::Execution(e.to_string()))
-    }
-
-    /// Run a raw pipeline of [`Step`]s against the current [`CrdtStore`] snapshot.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`BridgeError::Execution`] if the pipeline fails.
-    pub async fn run_steps(&self, steps: Vec<Step>) -> Result<ProcedureResult, BridgeError> {
-        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
-        engine
-            .exec(&steps)
-            .map_err(|e| BridgeError::Execution(e.to_string()))
-    }
-
-    /// Load praxis constraints stored in PluresDB.
-    ///
-    /// Queries for nodes with type `praxis:constraint` and deserializes them
-    /// into [`Constraint`] records.  Returns an empty vec if no constraints
-    /// are stored (the caller should merge with seed constraints).
-    pub fn load_constraints(
-        &self,
-    ) -> Result<Vec<pares_radix_praxis::db::schema::Constraint>, BridgeError> {
-        use pluresdb_procedures::ir::{Predicate, Step};
-
-        let steps = vec![Step::Filter {
-            predicate: Predicate::eq("type", "praxis:constraint"),
-        }];
-
-        let engine = ProcedureEngine::new(&self.crdt, "pares-radix");
-        let result = engine
-            .exec(&steps)
-            .map_err(|e| BridgeError::Execution(e.to_string()))?;
-
-        let mut constraints = Vec::new();
-        for node in &result.nodes {
-            // Each node is a serde_json::Value; try to deserialize the constraint data
-            match serde_json::from_value::<pares_radix_praxis::db::schema::Constraint>(node.clone())
-            {
-                Ok(c) => constraints.push(c),
-                Err(e) => {
-                    tracing::warn!("failed to deserialize praxis constraint from node: {e}");
-                }
-            }
-        }
-
-        Ok(constraints)
     }
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Tests (cognition: StoreAdapter + MemoryStore-driven)
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -262,7 +162,6 @@ mod tests {
     use super::*;
     use crate::memory::entry::{MemoryCategory, MemoryEntry};
     use crate::memory::store::InMemoryStore;
-    use pluresdb_procedures::ir::{Predicate, SortDir, Step};
 
     /// Build a [`MemoryEntry`] suitable for testing.
     fn make_entry(id: &str, content: &str, category: MemoryCategory) -> MemoryEntry {
@@ -277,7 +176,7 @@ mod tests {
         }
     }
 
-    async fn bridge_with_entries() -> PluresDbBridge {
+    async fn store_with_entries() -> Arc<InMemoryStore> {
         let store = Arc::new(InMemoryStore::new());
         store
             .insert(make_entry(
@@ -303,7 +202,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        PluresDbBridge::new(store).await.unwrap()
+        store
     }
 
     // ── StoreAdapter ─────────────────────────────────────────────────────────
@@ -348,78 +247,19 @@ mod tests {
         assert_eq!(records[0].data["category"], "preference");
     }
 
-    // ── PluresDbBridge::run_steps ─────────────────────────────────────────────
+    // ── PluresDbBridge::new (cognition constructor over StoreAdapter) ─────────
 
     #[tokio::test]
-    async fn run_steps_filter_by_category() {
-        let bridge = bridge_with_entries().await;
-        let steps = vec![Step::Filter {
-            predicate: Predicate::eq("category", "decision"),
-        }];
-        let result = bridge.run_steps(steps).await.unwrap();
-        assert_eq!(result.nodes.len(), 2, "expected 2 decision entries");
-    }
-
-    #[tokio::test]
-    async fn run_steps_filter_sort_limit() {
-        let bridge = bridge_with_entries().await;
-        let steps = vec![
-            Step::Filter {
-                predicate: Predicate::eq("category", "decision"),
-            },
-            Step::Sort {
-                by: "score".to_string(),
-                dir: SortDir::Desc,
-                after: None,
-            },
-            Step::Limit { n: 1 },
-        ];
-        let result = bridge.run_steps(steps).await.unwrap();
-        assert_eq!(result.nodes.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn run_steps_empty_pipeline_returns_all() {
-        let bridge = bridge_with_entries().await;
+    async fn new_snapshots_memory_store() {
+        let store = store_with_entries().await;
+        let bridge = PluresDbBridge::new(store as Arc<dyn MemoryStore>)
+            .await
+            .unwrap();
         let result = bridge.run_steps(vec![]).await.unwrap();
         assert_eq!(result.nodes.len(), 3);
     }
 
-    // ── PluresDbBridge::run_procedure ─────────────────────────────────────────
-
-    #[tokio::test]
-    async fn run_procedure_not_found_returns_error() {
-        let bridge = bridge_with_entries().await;
-        let err = bridge.run_procedure("unknown-proc").await.unwrap_err();
-        assert!(
-            matches!(err, BridgeError::NotFound(_)),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[tokio::test]
-    async fn run_procedure_registered_dsl_executes() {
-        let mut bridge = bridge_with_entries().await;
-        bridge.register_procedure(
-            "recall-decisions",
-            r#"filter(category == "decision") |> limit(10)"#,
-        );
-        let result = bridge.run_procedure("recall-decisions").await.unwrap();
-        assert_eq!(result.nodes.len(), 2);
-    }
-
-    #[tokio::test]
-    async fn run_procedure_invalid_dsl_returns_execution_error() {
-        let mut bridge = bridge_with_entries().await;
-        bridge.register_procedure("bad", "this is not valid DSL !!!");
-        let err = bridge.run_procedure("bad").await.unwrap_err();
-        assert!(
-            matches!(err, BridgeError::Execution(_)),
-            "unexpected error: {err}"
-        );
-    }
-
-    // ── PluresDbBridge::reload ────────────────────────────────────────────────
+    // ── PluresDbBridge::reload (cognition reload over StoreAdapter) ───────────
 
     #[tokio::test]
     async fn reload_reflects_new_entries() {
@@ -447,7 +287,10 @@ mod tests {
             .unwrap();
 
         // After reload, both entries are visible.
-        bridge.reload().await.unwrap();
+        bridge
+            .reload(Arc::clone(&store) as Arc<dyn MemoryStore>)
+            .await
+            .unwrap();
         let after = bridge.run_steps(vec![]).await.unwrap();
         assert_eq!(after.nodes.len(), 2);
     }

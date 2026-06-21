@@ -70,6 +70,8 @@ pub mod otel;
 pub mod otel_metrics;
 /// Praxis decision ledger and approval gate procedures.
 pub mod praxis;
+/// Platform bridge to the PluresDB procedure engine (procedure/constraint execution).
+pub mod pluresdb_bridge;
 /// Procedure registry and priority-based event dispatch.
 pub mod procedure;
 /// Shipped default PluresLM procedure bundles (JSON library).
@@ -131,5 +133,7 @@ pub mod pii_guard;
 pub mod px_adapter;
 pub mod shell_executor;
 pub mod spine;
+/// Platform-owned sub-agent spawn seam (trait + DTOs implemented by cognition).
+pub mod subagent_spawn;
 /// Thread engine — multi-topic conversation threading.
 pub mod threading;
