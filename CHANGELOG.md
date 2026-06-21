@@ -1,3 +1,15 @@
+## [1.47.4] — 2026-06-21
+
+- chore(lockfile): sync Cargo.lock to v1.47.3 after rebase onto main (53515bd)
+- refactor(core): break praxis<->cerebellum cycle + seam spine->delegation (Stage S1) (a61a4fd)
+- refactor(cli): remove orphaned px_config module after agent carve (1f22689)
+- refactor(cli): trim agent-only imports after Stage 4c carve (5da453e)
+- refactor(cli): remove 5 agent commands from host (Stage 4c carve) (3122975)
+- refactor(cli): extract host runtime into pares-radix-cli-runtime lib (D.0) (733c7cd)
+- refactor(cli): extract main() body into reusable run_with_providers(registry) seam (stage 2 S1) (8233f6d)
+- refactor(cli): extract CommandProvider trait into pares-radix-cli-api crate (stage 2 S0) (306fc73)
+- feat(cli): add CommandProvider trait for plugin command surface (stage 1) (20484ad)
+
 ## [1.47.3] — 2026-06-18
 
 - chore(release): v1.47.3 [skip ci] (121d3f1)
