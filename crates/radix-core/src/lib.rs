@@ -31,6 +31,8 @@ pub mod license;
 /// LLM model client and tool dispatcher abstractions.
 pub mod model;
 /// Handler-facing memory interface (trait + DTOs; impl lives in cognition).
+pub mod memory;
+
 pub mod memory_client;
 
 pub mod model_pool;

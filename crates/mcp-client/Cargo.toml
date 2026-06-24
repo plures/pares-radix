@@ -14,7 +14,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-pares-agens-core = { path = "../core" }
+pares-radix-core = { path = "../radix-core" }
 
 [dev-dependencies]
 chrono = { version = "0.4", features = ["serde"] }

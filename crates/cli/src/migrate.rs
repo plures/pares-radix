@@ -4,7 +4,7 @@
 //! # Output layout
 //! ```text
 //! <output>/
-//!   memories.json     — [`pares_agens_core::memory::entry::MemoryEntry`] array
+//!   memories.json     — [`pares_radix_core::memory::entry::MemoryEntry`] array
 //!   channels.json     — channel configuration (Telegram token, etc.)
 //!   state.json        — PluresDB state entries (personality files)
 //!   procedures.json   — timer procedures converted from cron jobs
@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-use pares_agens_core::memory::entry::{MemoryCategory, MemoryEntry};
+use pares_radix_core::memory::entry::{MemoryCategory, MemoryEntry};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

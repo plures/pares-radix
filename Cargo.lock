@@ -5008,7 +5008,7 @@ name = "pares-radix-cli"
 version = "1.49.1"
 dependencies = [
  "chrono",
- "pares-agens-core",
+ "pares-radix-core",
  "serde",
  "serde_json",
  "tempfile",
@@ -5119,7 +5119,7 @@ version = "1.49.1"
 dependencies = [
  "async-trait",
  "chrono",
- "pares-agens-core",
+ "pares-radix-core",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
