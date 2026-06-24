@@ -23,6 +23,7 @@ pub use platform_capabilities::{is_platform_capability, PLATFORM_CAPABILITIES};
 pub use runtime::PluginRuntime;
 
 pub use capability::{
-    load_cid_from_toml, load_cid_from_toml_path, resolve_capabilities, CapabilityBinding,
+    load_cid_from_toml, load_cid_from_toml_path, resolve_and_validate_capabilities,
+    resolve_capabilities, validate_provider_surface, CapabilityBinding,
     CapabilityInterfaceDescriptor, CidNode, CidOperation,
 };

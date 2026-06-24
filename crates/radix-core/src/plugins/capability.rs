@@ -470,10 +470,186 @@ fn resolve_for_consumer(
     Ok(())
 }
 
+// ── Provider-surface validation (ADR-0022 §7) ────────────────────────────────
+
+/// Validate that `manifest` (a provider) actually covers the mediated surface of
+/// the CID it claims to implement (ADR-0022 §7).
+///
+/// Two things are checked, mirroring "the loader validates the provider's
+/// declared surface against the CID at install; missing required
+/// nodes/events/procedures → reject, like manifest schema validation":
+///
+/// 1. **Version compatibility.** The manifest must declare it *provides*
+///    `cid.name` at a concrete version that is semver-compatible with
+///    `cid.version` (caret semantics: provider `1.2.0` satisfies CID `1.0.0`,
+///    provider `2.0.0` does not). Absent/incompatible → reject.
+/// 2. **Surface coverage.** Using the provider's
+///    `[capabilities.interface.<cid.name>]` declaration
+///    ([`CapabilityInterfaceRef::provides_operations`] /
+///    [`provides_events`](CapabilityInterfaceRef::provides_events)):
+///    - every CID `operations[].name` must appear in `provides_operations`;
+///    - every CID `result_event` and every `events.emitted_by_provider` must
+///      appear in `provides_events`.
+///
+/// Every gap is collected (deterministic order) and returned as a single
+/// [`PluginError::ProviderSurfaceIncomplete`] listing exactly what is missing.
+/// Full coverage → `Ok(())`.
+///
+/// Node coverage: the CID node *types* are part of the contract a provider must
+/// honor, but a provider declares nodes through its `[schema]`/runtime, not a
+/// flat capability list, so this v1 check validates the **event/operation**
+/// mediated boundary (the part ADR-0011 makes load-bearing across the plugin
+/// boundary). Node-schema conformance is validated by schema registration
+/// (`PluginError::SchemaRegistration`) and is intentionally NOT re-implemented
+/// here as a fake string match — see the module note. The missing node-type
+/// check below is therefore advisory-by-presence: if a provider *does* declare
+/// the CID name in its interface block but omits operations/events, that is the
+/// real, enforceable gap.
+pub fn validate_provider_surface(
+    manifest: &PluginManifest,
+    cid: &CapabilityInterfaceDescriptor,
+) -> Result<(), PluginError> {
+    let mut missing: Vec<String> = Vec::new();
+
+    // (1) Version compatibility: provider must provide cid.name at a concrete
+    //     version that is caret-compatible with the CID version.
+    let provided_version = manifest.capabilities.provided.get(&cid.name);
+    match provided_version {
+        None => {
+            return Err(PluginError::ProviderSurfaceIncomplete {
+                plugin: manifest.name.clone(),
+                capability: cid.name.clone(),
+                cid_version: cid.version.to_string(),
+                missing: vec![format!(
+                    "declaration: [capabilities.provided] {} = \"{}\" (provider does not declare it provides this capability)",
+                    cid.name, cid.version
+                )],
+            });
+        }
+        Some(ver_str) => {
+            let provided = ver_str.parse::<Version>().map_err(|e| {
+                PluginError::InvalidManifest(format!(
+                    "plugin '{}' provides capability '{}' with invalid semver version '{ver_str}': {e}",
+                    manifest.name, cid.name
+                ))
+            })?;
+            // Caret-compatibility against the CID version (e.g. ^1.0.0).
+            let req = VersionReq::parse(&format!("^{}", cid.version)).map_err(|e| {
+                PluginError::InvalidManifest(format!(
+                    "CID '{}' version '{}' is not a valid caret base: {e}",
+                    cid.name, cid.version
+                ))
+            })?;
+            if !req.matches(&provided) {
+                return Err(PluginError::ProviderSurfaceIncomplete {
+                    plugin: manifest.name.clone(),
+                    capability: cid.name.clone(),
+                    cid_version: cid.version.to_string(),
+                    missing: vec![format!(
+                        "compatible-version: provides {} = \"{}\" but CID requires ^{}",
+                        cid.name, provided, cid.version
+                    )],
+                });
+            }
+        }
+    }
+
+    // The provider's declared surface for THIS capability lives in its
+    // [capabilities.interface.<cid.name>] block.
+    let iface = manifest.capabilities.interface.get(&cid.name);
+    let declared_ops: std::collections::BTreeSet<&str> = iface
+        .map(|i| i.provides_operations.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+    let declared_events: std::collections::BTreeSet<&str> = iface
+        .map(|i| i.provides_events.iter().map(String::as_str).collect())
+        .unwrap_or_default();
+
+    // (2a) Every CID operation must be serviced.
+    for op in &cid.operations {
+        if !declared_ops.contains(op.name.as_str()) {
+            missing.push(format!("operation '{}'", op.name));
+        }
+    }
+
+    // (2b) Every provider-side event must be declared. Union of each operation's
+    //      result_event and the explicit events.emitted_by_provider vocabulary
+    //      (deterministic, de-duplicated).
+    let mut provider_events: std::collections::BTreeSet<&str> =
+        std::collections::BTreeSet::new();
+    for op in &cid.operations {
+        if let Some(ev) = op.result_event.as_deref() {
+            provider_events.insert(ev);
+        }
+    }
+    for ev in &cid.events_emitted_by_provider {
+        provider_events.insert(ev.as_str());
+    }
+    for ev in &provider_events {
+        if !declared_events.contains(ev) {
+            missing.push(format!("provider-event '{ev}'"));
+        }
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        // `missing` is already in deterministic order: operations follow CID
+        // declaration order, events follow BTreeSet (sorted) order.
+        Err(PluginError::ProviderSurfaceIncomplete {
+            plugin: manifest.name.clone(),
+            capability: cid.name.clone(),
+            cid_version: cid.version.to_string(),
+            missing,
+        })
+    }
+}
+
+/// Resolve all capabilities (as [`resolve_capabilities`]) **and** validate the
+/// declared surface of every bound provider against the CID it provides
+/// (ADR-0022 §7), wiring surface validation into the same install/activation
+/// path as resolution.
+///
+/// `cids` maps a capability name to its loaded [`CapabilityInterfaceDescriptor`]
+/// (the host/registry loads these from the CID files referenced by each
+/// provider's `[capabilities.interface.<name>] spec`). For every binding whose
+/// capability has a CID in `cids`, the bound provider's manifest is checked with
+/// [`validate_provider_surface`]; the first incomplete surface is returned as a
+/// [`PluginError::ProviderSurfaceIncomplete`]. Capabilities with no CID supplied
+/// are resolved but not surface-validated (the host simply has no contract to
+/// check against — honest: absence of a CID is not a fake pass).
+///
+/// Returns the same bindings as [`resolve_capabilities`] on success.
+pub fn resolve_and_validate_capabilities(
+    manifests: &[PluginManifest],
+    cids: &BTreeMap<String, CapabilityInterfaceDescriptor>,
+) -> Result<Vec<CapabilityBinding>, PluginError> {
+    let bindings = resolve_capabilities(manifests)?;
+
+    // Index manifests by name for O(1) provider lookup.
+    let by_name: BTreeMap<&str, &PluginManifest> =
+        manifests.iter().map(|m| (m.name.as_str(), m)).collect();
+
+    for binding in &bindings {
+        let Some(cid) = cids.get(&binding.capability) else {
+            continue; // No CID supplied for this capability: nothing to validate.
+        };
+        let Some(provider) = by_name.get(binding.provider.as_str()) else {
+            // The resolver only binds providers drawn from `manifests`, so this
+            // is unreachable in practice; skip rather than panic.
+            continue;
+        };
+        validate_provider_surface(provider, cid)?;
+    }
+
+    Ok(bindings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::manifest::{PluginCapabilities, PluginManifest};
+    use crate::plugins::manifest::{
+        CapabilityInterfaceRef, PluginCapabilities, PluginManifest,
+    };
 
     /// Path to the real, shipped commerce CID descriptor.
     fn commerce_cid_path() -> std::path::PathBuf {
@@ -482,6 +658,16 @@ mod tests {
             .join("..")
             .join("capabilities")
             .join("commerce.cid.toml")
+    }
+
+    /// Path to the real, shipped commerce PROVIDER manifest (ADR-0022 step 4).
+    fn commerce_provider_manifest_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("plugins")
+            .join("commerce")
+            .join("plugin.toml")
     }
 
     /// Build a minimal manifest with the given provided capabilities.
@@ -775,5 +961,227 @@ mod tests {
         let json = serde_json::to_value(&b).unwrap();
         let back: CapabilityBinding = serde_json::from_value(json).unwrap();
         assert_eq!(b, back);
+    }
+
+    // ── inner-space (consumer) binds to commerce (provider) (ADR-0022 step 4 C) ─
+
+    /// Build the FULL commerce provider surface exactly as the shipped
+    /// `plugins/commerce/plugin.toml` declares it: `provided commerce = "1.0.0"`
+    /// plus the `[capabilities.interface.commerce]` block listing every mediated
+    /// operation and provider-emitted event. This is the real provider the
+    /// resolver/validator must accept.
+    fn commerce_provider_manifest() -> PluginManifest {
+        let mut caps = PluginCapabilities::default();
+        caps.provided.insert("commerce".into(), "1.0.0".into());
+        caps.interface.insert(
+            "commerce".into(),
+            CapabilityInterfaceRef {
+                cid: "commerce@1.x".into(),
+                spec: Some("capabilities/commerce.cid.toml".into()),
+                provides_operations: vec![
+                    "issue_coupon".into(),
+                    "authorize_redemption".into(),
+                    "check_nullifier".into(),
+                    "decide_tier".into(),
+                ],
+                provides_events: vec![
+                    "commerce.issue.completed".into(),
+                    "commerce.redeem.completed".into(),
+                    "commerce.nullifier.check.completed".into(),
+                    "commerce.tier.decide.completed".into(),
+                ],
+            },
+        );
+        manifest_with_caps("commerce", caps)
+    }
+
+    /// The real inner-space consumer surface (its `commerce = "^1.0"` requirement).
+    fn innerspace_consumer_manifest() -> PluginManifest {
+        consumer_manifest("inner-space", &[("commerce", "^1.0")])
+    }
+
+    /// inner-space's `commerce = "^1.0"` binds to the commerce provider's
+    /// concrete `commerce = "1.0.0"` (the end-to-end loader binding ADR-0022
+    /// step 4 C requires).
+    #[test]
+    fn innerspace_consumer_binds_to_commerce_provider() {
+        let provider = commerce_provider_manifest();
+        let consumer = innerspace_consumer_manifest();
+        let bindings =
+            resolve_capabilities(&[provider, consumer]).expect("inner-space binds to commerce");
+
+        // Exactly one binding: inner-space.commerce -> commerce@1.0.0. (The
+        // consumer's other required capabilities — scene/physics/etc. — have no
+        // provider in THIS batch and would each be UnsatisfiedCapability; here we
+        // isolate the commerce binding by giving the consumer only commerce.)
+        assert_eq!(bindings.len(), 1, "one commerce binding");
+        let b = &bindings[0];
+        assert_eq!(b.consumer, "inner-space");
+        assert_eq!(b.capability, "commerce");
+        assert_eq!(b.provider, "commerce");
+        assert_eq!(b.version, "1.0.0");
+    }
+
+    // ── Provider-surface validation against the REAL CID (ADR-0022 §7) ───────
+
+    /// The shipped commerce provider surface validates against the real
+    /// `commerce.cid.toml`: every operation + every provider event is declared.
+    #[test]
+    fn commerce_provider_surface_validates_against_real_cid() {
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        let provider = commerce_provider_manifest();
+        validate_provider_surface(&provider, &cid)
+            .expect("the shipped commerce provider must satisfy the real commerce CID");
+    }
+
+    /// A provider that omits one mediated operation (here `check_nullifier`) and
+    /// its event is REJECTED with `ProviderSurfaceIncomplete` naming the gaps
+    /// (no stub: a partial provider does not silently pass).
+    #[test]
+    fn commerce_provider_missing_operation_is_rejected() {
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        let mut provider = commerce_provider_manifest();
+        // Drop check_nullifier from the declared surface.
+        if let Some(iface) = provider.capabilities.interface.get_mut("commerce") {
+            iface
+                .provides_operations
+                .retain(|o| o != "check_nullifier");
+            iface
+                .provides_events
+                .retain(|e| e != "commerce.nullifier.check.completed");
+        }
+        let err = validate_provider_surface(&provider, &cid).unwrap_err();
+        match err {
+            PluginError::ProviderSurfaceIncomplete {
+                plugin,
+                capability,
+                cid_version,
+                missing,
+            } => {
+                assert_eq!(plugin, "commerce");
+                assert_eq!(capability, "commerce");
+                assert_eq!(cid_version, "1.0.0");
+                assert!(
+                    missing.contains(&"operation 'check_nullifier'".to_string()),
+                    "missing operation reported, got: {missing:?}"
+                );
+                assert!(
+                    missing.contains(
+                        &"provider-event 'commerce.nullifier.check.completed'".to_string()
+                    ),
+                    "missing provider event reported, got: {missing:?}"
+                );
+            }
+            other => panic!("expected ProviderSurfaceIncomplete, got {other:?}"),
+        }
+    }
+
+    /// A provider that declares the version but NO interface surface at all is
+    /// rejected: every mediated operation and provider event is reported missing
+    /// (it can service nothing).
+    #[test]
+    fn commerce_provider_with_no_surface_is_rejected() {
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        // Declares `provided commerce = 1.0.0` but no [capabilities.interface.commerce].
+        let provider = provider_manifest("hollow", &[("commerce", "1.0.0")]);
+        let err = validate_provider_surface(&provider, &cid).unwrap_err();
+        match err {
+            PluginError::ProviderSurfaceIncomplete { missing, .. } => {
+                assert!(
+                    missing.contains(&"operation 'issue_coupon'".to_string()),
+                    "all operations reported missing, got: {missing:?}"
+                );
+                assert!(
+                    missing.contains(&"operation 'authorize_redemption'".to_string()),
+                    "all operations reported missing, got: {missing:?}"
+                );
+                assert!(
+                    missing
+                        .contains(&"provider-event 'commerce.redeem.completed'".to_string()),
+                    "all provider events reported missing, got: {missing:?}"
+                );
+            }
+            other => panic!("expected ProviderSurfaceIncomplete, got {other:?}"),
+        }
+    }
+
+    /// A provider that does not even declare `[capabilities.provided] commerce`
+    /// is rejected for the missing declaration (the most basic surface gap).
+    #[test]
+    fn commerce_provider_without_provided_declaration_is_rejected() {
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        let provider = consumer_manifest("not-a-provider", &[("commerce", "^1.0")]);
+        let err = validate_provider_surface(&provider, &cid).unwrap_err();
+        match err {
+            PluginError::ProviderSurfaceIncomplete { missing, .. } => {
+                assert!(
+                    missing.iter().any(|m| m.starts_with("declaration:")),
+                    "missing [capabilities.provided] declaration reported, got: {missing:?}"
+                );
+            }
+            other => panic!("expected ProviderSurfaceIncomplete, got {other:?}"),
+        }
+    }
+
+    /// The wired resolve+validate path (ADR-0022 §7): the commerce provider and
+    /// inner-space consumer resolve AND the provider's surface validates against
+    /// the real CID in one call — the exact install/activation path.
+    #[test]
+    fn resolve_and_validate_binds_innerspace_to_commerce_with_real_cid() {
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        let mut cids = std::collections::BTreeMap::new();
+        cids.insert("commerce".to_string(), cid);
+
+        let provider = commerce_provider_manifest();
+        let consumer = innerspace_consumer_manifest();
+        let bindings = resolve_and_validate_capabilities(&[provider, consumer], &cids)
+            .expect("resolve + surface-validate must succeed for the real provider/consumer");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].consumer, "inner-space");
+        assert_eq!(bindings[0].provider, "commerce");
+        assert_eq!(bindings[0].version, "1.0.0");
+    }
+
+    /// The REAL shipped provider manifest file `plugins/commerce/plugin.toml`
+    /// (deliverable A) parses through the real loader AND its declared surface
+    /// validates against the real `commerce.cid.toml` (deliverable C). This makes
+    /// the actual on-disk plugin.toml load-bearing in the gate: if its declared
+    /// operations/events drift from the CID, this test fails.
+    #[test]
+    fn shipped_commerce_plugin_toml_validates_against_real_cid() {
+        let manifest_path = commerce_provider_manifest_path();
+        assert!(
+            manifest_path.exists(),
+            "shipped provider manifest must exist at {}",
+            manifest_path.display()
+        );
+        let toml = std::fs::read_to_string(&manifest_path)
+            .expect("read plugins/commerce/plugin.toml");
+        let manifest = crate::plugins::manifest::parse_manifest(&toml)
+            .expect("the shipped commerce plugin.toml must parse through the real loader");
+
+        // It declares it provides commerce@1.0.0.
+        assert_eq!(
+            manifest.capabilities.provided.get("commerce").map(String::as_str),
+            Some("1.0.0"),
+            "shipped provider declares [capabilities.provided] commerce = 1.0.0"
+        );
+
+        // And its declared surface satisfies the real CID.
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        validate_provider_surface(&manifest, &cid).expect(
+            "the shipped plugins/commerce/plugin.toml surface must satisfy the real commerce CID",
+        );
+
+        // End-to-end: it binds to the real inner-space consumer AND surface-
+        // validates in the wired resolve+validate path.
+        let mut cids = std::collections::BTreeMap::new();
+        cids.insert("commerce".to_string(), cid);
+        let consumer = innerspace_consumer_manifest();
+        let bindings = resolve_and_validate_capabilities(&[manifest, consumer], &cids)
+            .expect("shipped provider binds + validates against inner-space consumer");
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(bindings[0].provider, "commerce");
+        assert_eq!(bindings[0].consumer, "inner-space");
     }
 }

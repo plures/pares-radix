@@ -1,0 +1,139 @@
+# commerce-mediation.px — the mediated operation surface for the commerce provider
+#
+# ADR-0011 + ADR-0022 §2. Cross-plugin interaction is MEDIATED: a consumer emits
+# a `commerce.<op>.requested` event (or writes the request node); THIS provider's
+# reactive procedures react, invoke the real OASIS logic at the IO boundary
+# (adapter/commerce-provider.ts — RedemptionProtocol / CouponService /
+# PluresDbNullifierStore), then emit the `commerce.<op>.completed` event (and
+# write result nodes) the consumer reads. NO direct function references cross the
+# plugin boundary.
+#
+# This `.px` file PINS the mediation contract (request → actor → result) as the
+# source-of-truth statement; the TypeScript twin in adapter/ is what runs the IO.
+# The pure tier rule is pinned separately in redemption-tier.px (twin of the
+# OASIS decideTier). The crypto + nullifier double-spend logic is the REAL OASIS
+# code path, never reimplemented here (C-NOSTUB-001).
+#
+# ═══════════════════════════════════════════════════════════════════════
+# Facts (documentation only — the mediated event vocabulary, from the CID)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# [parser-skip] fact MediatedOperation:
+# [parser-skip]   name: enum(issue_coupon, authorize_redemption, check_nullifier, decide_tier)
+# [parser-skip]   request_event: string   # emitted_by_consumer
+# [parser-skip]   result_event: string    # emitted_by_provider
+#
+# [parser-skip] fact CommerceEvents:
+# [parser-skip]   requested: [commerce.issue.requested, commerce.redeem.requested,
+# [parser-skip]               commerce.nullifier.check.requested, commerce.tier.decide.requested]
+# [parser-skip]   completed: [commerce.issue.completed, commerce.redeem.completed,
+# [parser-skip]               commerce.nullifier.check.completed, commerce.tier.decide.completed]
+
+# ═══════════════════════════════════════════════════════════════════════
+# issue_coupon — commit a coupon (Flow 3 step 3)
+#   Actor: RedemptionProtocol.issueCoupon (real CouponService; no new crypto)
+# ═══════════════════════════════════════════════════════════════════════
+procedure on_issue_requested:
+  given: "React to commerce.issue.requested; commit a coupon via the real OASIS CouponService and return it"
+
+  # IO boundary: the real OASIS actor issues (commits) the coupon.
+  invoke_actor {
+    actor: "RedemptionProtocol.issueCoupon",
+    campaign_id: $request.campaign_id,
+    value: $request.value
+  } -> $coupon
+
+  # Persist the issued coupon node and notify the consumer.
+  write_node {type: "commerce:coupon", value: $coupon}
+  emit {event: "commerce.issue.completed", coupon: $coupon}
+
+  return {coupon: $coupon}
+
+# ═══════════════════════════════════════════════════════════════════════
+# authorize_redemption — prove → verify → nullify → authorize (Flow 3 steps 3–6)
+#   Actor: RedemptionProtocol.authorizeRedemption (real verify + nullifier gate)
+#   Double-spend: a replayed coupon derives the SAME nullifier; if it is already
+#   in commerce:nullifier_set the actor returns error E004 (no second redemption).
+# ═══════════════════════════════════════════════════════════════════════
+procedure on_redeem_requested:
+  given: "React to commerce.redeem.requested; authorize via the real OASIS protocol; reject double-spend with E004"
+
+  # IO boundary: the real OASIS actor verifies the proof (E003 on bad proof),
+  # atomically claims the one-time nullifier in the grow-only PluresDB set
+  # (E004 on replay), then decides the confirmation tier and assembles the result.
+  invoke_actor {
+    actor: "RedemptionProtocol.authorizeRedemption",
+    coupon_data: $request.coupon_data,
+    merchant_id: $request.merchant_id,
+    proof: $request.proof,
+    timestamp: $request.timestamp
+  } -> $result
+
+  # Record the redemption + grow the nullifier set (grow-only union; never delete).
+  write_node {type: "commerce:redemption_record", value: $result.record}
+  write_node {type: "commerce:nullifier_set", mode: "grow_only", value: $result.nullifier}
+  emit {
+    event: "commerce.redeem.completed",
+    success: $result.success,
+    proof: $result.proof,
+    discount_amount: $result.discount_amount,
+    error: $result.error
+  }
+
+  return {success: $result.success, error: $result.error}
+
+# ═══════════════════════════════════════════════════════════════════════
+# check_nullifier — membership in the grow-only spent set
+#   Actor: checkRedemptionNullifier / createNullifierRegistry.isSpent
+#   (reads the PluresDbNullifierStore — the C-PLURES-003 source of truth)
+# ═══════════════════════════════════════════════════════════════════════
+procedure on_nullifier_check_requested:
+  given: "React to commerce.nullifier.check.requested; report whether a nullifier is already spent"
+
+  invoke_actor {
+    actor: "checkRedemptionNullifier",
+    nullifier: $request.nullifier
+  } -> $check
+
+  emit {
+    event: "commerce.nullifier.check.completed",
+    is_spent: $check.is_spent,
+    checked_at: $check.checked_at
+  }
+
+  return {is_spent: $check.is_spent}
+
+# ═══════════════════════════════════════════════════════════════════════
+# decide_tier — PURE tier decision (twin of redemption-tier.px / OASIS decideTier)
+#   No IO. instant iff amount <= policy.largeThreshold (default 0).
+# ═══════════════════════════════════════════════════════════════════════
+procedure on_tier_decide_requested:
+  given: "React to commerce.tier.decide.requested; classify the amount as instant/delayed (pure)"
+
+  # Pure: delegates to the pinned decide_tier rule (redemption-tier.px).
+  classify_tier {
+    amount: $request.amount,
+    largeThreshold: $request.policy.largeThreshold
+  } -> $tier
+
+  emit {event: "commerce.tier.decide.completed", tier: $tier}
+
+  return {tier: $tier}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Expectations (the invariants from the CID [invariants], enforced by the
+# real OASIS property tests; restated here as the provider's contract obligations)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# [parser-skip] expect double_spend_prevented:
+# [parser-skip]   given: "a nullifier already present in commerce:nullifier_set"
+# [parser-skip]   require: "authorize_redemption returns error E004 (no second redemption)"
+#
+# [parser-skip] expect nullifier_set_grow_only:
+# [parser-skip]   given: "any sequence of authorize_redemption calls"
+# [parser-skip]   require: "commerce:nullifier_set is append-only; entries are never removed"
+#
+# [parser-skip] expect mediated_no_direct_refs:
+# [parser-skip]   given: "a consumer invoking any commerce operation"
+# [parser-skip]   require: "interaction is via request/result events only; no direct function reference crosses the plugin boundary"
+#   because: "ADR-0011 — capabilities are mediated contracts, not shared code"

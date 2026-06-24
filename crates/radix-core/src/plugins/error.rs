@@ -55,4 +55,22 @@ pub enum PluginError {
         capability: String,
         candidates: Vec<String>,
     },
+
+    /// A provider plugin's declared surface does not cover the Capability
+    /// Interface Descriptor (CID) it claims to implement (ADR-0022 §7): a
+    /// required node-type, mediated operation, or provider-emitted event named
+    /// by the CID is missing from what the provider declares. The loader rejects
+    /// such a provider at install, exactly like manifest schema validation.
+    ///
+    /// `missing` lists every gap (deterministic order) so the message is
+    /// actionable: each entry is prefixed with its kind (e.g.
+    /// `operation 'issue_coupon'`, `provider-event 'commerce.issue.completed'`,
+    /// `node 'commerce:coupon'`).
+    #[error("plugin '{plugin}' does not satisfy CID '{capability}@{cid_version}': missing {}", missing.join(", "))]
+    ProviderSurfaceIncomplete {
+        plugin: String,
+        capability: String,
+        cid_version: String,
+        missing: Vec<String>,
+    },
 }

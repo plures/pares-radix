@@ -1,0 +1,65 @@
+# redemption-tier.px — the PURE tiered-confirmation rule for the commerce provider
+#
+# Pinned twin of the REAL OASIS `decideTier`
+# (oasis/packages/crypto-verification/src/redemption/redemption-tier.px and its
+# TypeScript twin in protocol.ts). This is the `.px`-first source-of-truth
+# statement of the Flow-3 step-6 tier rule that the provider's
+# `on_tier_decide_requested` procedure services. The executing code at the IO
+# boundary is the faithful TypeScript twin `decideTier`, invoked through the
+# mediated adapter — no praxis runtime is wired into this pure path; this file
+# PINS and DOCUMENTS the rule for the logic engine.
+#
+# ─────────────────────────────────────────────────────────────────────────
+# THE RULE:
+#   instant  ⇐  amount <= policy.largeThreshold     (boundary inclusive of micro)
+#   delayed  ⇐  amount  > policy.largeThreshold
+#
+# The boundary is DEPLOYMENT POLICY (TierPolicy.largeThreshold), NOT a fabricated
+# constant. DEFAULT policy = { largeThreshold: 0 } → only a zero-value redemption
+# is instant; any positive amount is delayed until a deployment opts into instant
+# micro-payments. NOT a business number.
+# ─────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+# Facts (documentation only)
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] fact TierPolicy:
+# [parser-skip]   largeThreshold: bigint   # amounts strictly greater than this are 'delayed'
+
+# [parser-skip] fact ConfirmationTier:
+# [parser-skip]   value: enum(instant, delayed)
+
+# ═══════════════════════════════════════════════════════════════════════
+# Pure decision procedure — twin of TS `decideTier(amount, policy)`
+# ═══════════════════════════════════════════════════════════════════════
+
+# Decide the confirmation tier for a redemption amount under a policy boundary.
+# Pure: no IO, no side effects.
+procedure decide_tier:
+  given: "Classify a redemption amount as instant (micro) or delayed (large) per the policy boundary"
+
+  classify_tier {
+    amount: $amount,
+    largeThreshold: $policy.largeThreshold
+  } -> $tier
+
+  return {tier: $tier}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Expectations (the rule's invariants — what the OASIS property test proves)
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] expect tier_boundary_inclusive:
+# [parser-skip]   given: "amount == policy.largeThreshold"
+# [parser-skip]   require: "decide_tier == instant"
+# [parser-skip]   because: "the boundary is inclusive of the micro tier"
+
+# [parser-skip] expect tier_large_is_delayed:
+# [parser-skip]   given: "amount > policy.largeThreshold"
+# [parser-skip]   require: "decide_tier == delayed"
+
+# [parser-skip] expect tier_total:
+# [parser-skip]   given: "any non-negative amount and any threshold"
+# [parser-skip]   require: "decide_tier in {instant, delayed}"
+# [parser-skip]   because: "the decision is total — every amount classifies"

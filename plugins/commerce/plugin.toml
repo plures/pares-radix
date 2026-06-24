@@ -1,0 +1,179 @@
+# commerce — provider plugin (ADR-0022 step 4)
+#
+# Ports the REAL OASIS ZK-commerce logic
+# (oasis/packages/crypto-verification) behind the host-owned `commerce@1.x`
+# Capability Interface Descriptor (capabilities/commerce.cid.toml). This plugin
+# is the PROVIDER half of ADR-0022: a consumer (e.g. inner-space, which declares
+# `commerce = "^1.0"`) interacts ONLY through the mediated request/result events
+# below — no direct function references cross the plugin boundary (ADR-0011).
+#
+# The crypto + nullifier double-spend logic is NOT reimplemented here. The
+# side-effecting actor that services every operation is the real OASIS
+# TypeScript (RedemptionProtocol / CouponService / PluresDbNullifierStore),
+# invoked at the IO boundary by the mediated adapter in `adapter/commerce-provider.ts`.
+# The `.px` procedures in `praxis/` PIN the pure decision rules (the twins of the
+# OASIS `.px` files); the engine logic lives there, the TS twin runs the IO.
+
+[plugin]
+name = "commerce"
+version = "1.0.0"
+description = "Anonymous verifiable commerce (ZK coupons + redemption) — OASIS ZK-commerce ported behind the commerce@1.x CID"
+author = "plures"
+
+# ── Capabilities (ADR-0022 §6) ───────────────────────────────────────────────
+# Provider axis: this plugin IMPLEMENTS the `commerce` capability at the concrete
+# CID version 1.0.0 (satisfies a consumer's `^1.0` range). The interface block
+# names the CID it implements AND declares the mediated surface it services, so
+# the loader can validate this provider against capabilities/commerce.cid.toml at
+# install (ADR-0022 §7 — see crates/radix-core validate_provider_surface).
+
+[capabilities.provided]
+commerce = "1.0.0"
+
+[capabilities.interface.commerce]
+cid = "commerce@1.x"
+spec = "capabilities/commerce.cid.toml"
+# The 4 mediated operations this provider services (must cover every CID
+# [[operations]].name).
+provides_operations = [
+  "issue_coupon",
+  "authorize_redemption",
+  "check_nullifier",
+  "decide_tier",
+]
+# The result/notification events this provider emits (must cover every CID
+# result_event and every events.emitted_by_provider).
+provides_events = [
+  "commerce.issue.completed",
+  "commerce.redeem.completed",
+  "commerce.nullifier.check.completed",
+  "commerce.tier.decide.completed",
+]
+
+# Platform capabilities (the permission axis, ADR-0011). This provider does real
+# PluresDB IO (the grow-only nullifier set is the C-PLURES-003 source of truth),
+# so it requires the host `storage` capability. It needs no network/ui/llm.
+[capabilities.required]
+storage = "^1.0"
+
+# ── Resources ────────────────────────────────────────────────────────────────
+# All provider state is namespaced under the consumer's pluresdb_namespace at
+# runtime; the OASIS nullifier set persists at `oasis:nullifier:set:{scope}`
+# (PluresDbNullifierStore), the C-PLURES-003 authority.
+[resources]
+pluresdb_namespace = "commerce"
+
+[praxis]
+procedures = "praxis/"   # .px files pinning the pure decision rules
+
+[schema]
+definitions = "schema/"  # PluresDB node-type schemas (the 5 CID node types)
+
+# ── Schema: the 5 CID node types (capabilities/commerce.cid.toml [[nodes]]) ────
+# Field types mirror the real OASIS interfaces; cryptographic payloads are opaque
+# bytes at the contract boundary.
+
+[[schema.entities]]
+name = "campaign"
+description = "CouponCampaign — an issuing campaign (commerce:campaign)"
+fields = [
+  { name = "id", type = "string" },
+  { name = "issuer_id", type = "bytes", description = "PublicKey" },
+  { name = "name", type = "string" },
+  { name = "description", type = "string" },
+  { name = "total_budget", type = "number" },
+  { name = "issued_count", type = "number" },
+  { name = "redeemed_count", type = "number" },
+  { name = "status", type = "string", description = "draft|active|paused|completed|cancelled" },
+  { name = "created", type = "datetime" },
+  { name = "updated", type = "datetime" },
+]
+
+[[schema.entities]]
+name = "coupon"
+description = "CryptoCoupon — an issued coupon (commerce:coupon)"
+fields = [
+  { name = "id", type = "string" },
+  { name = "campaign_id", type = "string" },
+  { name = "coupon_data", type = "bytes", description = "opaque core cryptographic payload" },
+  { name = "status", type = "string", description = "active|redeemed|expired|revoked" },
+  { name = "created", type = "datetime" },
+  { name = "expires", type = "datetime" },
+]
+
+[[schema.entities]]
+name = "redemption_record"
+description = "RedemptionRecord — a recorded redemption (commerce:redemption_record)"
+fields = [
+  { name = "commitment", type = "bytes", description = "PedersenCommitment" },
+  { name = "nullifier", type = "bytes", description = "Blake2Hash (hex at the set boundary)" },
+  { name = "timestamp", type = "datetime" },
+  { name = "merkle_proof", type = "bytes", description = "SparseMerkleProof" },
+]
+
+[[schema.entities]]
+name = "nullifier_set"
+description = "DoubleSpendDB / NullifierStore — the grow-only spent-nullifier set (commerce:nullifier_set)"
+fields = [
+  { name = "nullifiers", type = "string[]", description = "hex-encoded Blake2 hashes (grow-only set)" },
+  { name = "merkle_root", type = "bytes" },
+]
+
+[[schema.entities]]
+name = "redemption_proof"
+description = "RedemptionProof — a redemption proof record (commerce:redemption_proof)"
+fields = [
+  { name = "id", type = "string" },
+  { name = "coupon_id", type = "string" },
+  { name = "proof", type = "bytes", description = "ZKProof" },
+  { name = "merchant_id", type = "bytes", description = "PublicKey" },
+  { name = "anonymous", type = "boolean" },
+  { name = "timestamp", type = "datetime" },
+]
+
+# ── Logic: the 4 mediated operations (ADR-0011 / ADR-0022 §2) ─────────────────
+# Each procedure REACTS to a `commerce.<op>.requested` event, invokes the real
+# OASIS logic at the IO boundary (adapter/commerce-provider.ts), and emits the
+# `commerce.<op>.completed` event the consumer reads. NO direct function
+# references cross the boundary — the consumer only writes a request node / emits
+# a request event and reads the result node / completed event.
+[logic]
+
+[[logic.procedures]]
+name = "on_issue_requested"
+description = "Service issue_coupon: commit a coupon via the real CouponService.issueCoupon, write commerce:coupon, emit commerce.issue.completed."
+trigger = "commerce.issue.requested"
+steps = [
+  { call = "oasis.RedemptionProtocol.issueCoupon", input = ["campaign_id", "value"], boundary = "io" },
+  { write_node = "commerce:coupon" },
+  { emit = "commerce.issue.completed", output = ["coupon"] },
+]
+
+[[logic.procedures]]
+name = "on_redeem_requested"
+description = "Service authorize_redemption: prove→verify→nullify→authorize via the real RedemptionProtocol.authorizeRedemption; a replayed coupon's nullifier is already in commerce:nullifier_set → E004 (double_spend_prevented)."
+trigger = "commerce.redeem.requested"
+steps = [
+  { call = "oasis.RedemptionProtocol.authorizeRedemption", input = ["coupon_data", "merchant_id", "proof", "timestamp"], boundary = "io" },
+  { write_node = "commerce:redemption_record" },
+  { write_node = "commerce:nullifier_set", mode = "grow_only" },
+  { emit = "commerce.redeem.completed", output = ["success", "proof", "discount_amount", "error"] },
+]
+
+[[logic.procedures]]
+name = "on_nullifier_check_requested"
+description = "Service check_nullifier: read membership in the grow-only commerce:nullifier_set via the real PluresDbNullifierStore (createNullifierRegistry.isSpent)."
+trigger = "commerce.nullifier.check.requested"
+steps = [
+  { call = "oasis.checkRedemptionNullifier", input = ["nullifier"], boundary = "io" },
+  { emit = "commerce.nullifier.check.completed", output = ["is_spent", "checked_at"] },
+]
+
+[[logic.procedures]]
+name = "on_tier_decide_requested"
+description = "Service decide_tier: the PURE tier rule (twin of redemption-tier.px decide_tier / OASIS decideTier). instant iff amount <= policy.largeThreshold (default 0)."
+trigger = "commerce.tier.decide.requested"
+steps = [
+  { call = "oasis.decideTier", input = ["amount", "policy.largeThreshold"], boundary = "pure" },
+  { emit = "commerce.tier.decide.completed", output = ["tier"] },
+]

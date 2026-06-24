@@ -242,6 +242,12 @@ pub struct PluginCapabilities {
 /// [capabilities.interface.commerce]
 /// cid = "commerce@1.x"
 /// spec = "capabilities/commerce.cid.toml"
+/// # Provider-only: the mediated surface this plugin implements (ADR-0022 §7).
+/// provides_operations = ["issue_coupon", "authorize_redemption", "check_nullifier", "decide_tier"]
+/// provides_events = [
+///   "commerce.issue.completed", "commerce.redeem.completed",
+///   "commerce.nullifier.check.completed", "commerce.tier.decide.completed",
+/// ]
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CapabilityInterfaceRef {
@@ -250,6 +256,24 @@ pub struct CapabilityInterfaceRef {
     /// Optional path to the CID descriptor file (TOML-declared in v1).
     #[serde(default)]
     pub spec: Option<String>,
+
+    /// **Provider-declared** mediated operations this plugin services
+    /// (ADR-0022 §7). A consumer never sets this; a provider lists the CID
+    /// `[[operations]]` names it implements so the loader can validate the
+    /// declared surface against the CID at install. Empty on a pure consumer.
+    ///
+    /// This is the honest place a provider states *what it actually services*:
+    /// the `[capabilities.provided] <name> = "<version>"` map only carries the
+    /// CID version, not the surface, so without this field there is nothing to
+    /// validate the operation/event coverage against (ADR-0022 §7 gap).
+    #[serde(default)]
+    pub provides_operations: Vec<String>,
+
+    /// **Provider-declared** result/notification events this plugin emits
+    /// (ADR-0022 §7). Must cover every CID `result_event` and every
+    /// `events.emitted_by_provider`. Empty on a pure consumer.
+    #[serde(default)]
+    pub provides_events: Vec<String>,
 }
 
 /// A capability version validation failure (ADR-0022): a declared range or
@@ -767,7 +791,33 @@ fn parse_toml_interface_map(
         .filter_map(|(name, block)| {
             let cid = block.get("cid")?.as_str()?.to_string();
             let spec = block.get("spec").and_then(|v| v.as_str()).map(String::from);
-            Some((name.clone(), CapabilityInterfaceRef { cid, spec }))
+            let provides_operations = block
+                .get("provides_operations")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let provides_events = block
+                .get("provides_events")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Some((
+                name.clone(),
+                CapabilityInterfaceRef {
+                    cid,
+                    spec,
+                    provides_operations,
+                    provides_events,
+                },
+            ))
         })
         .collect()
 }
