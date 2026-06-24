@@ -1,3 +1,7 @@
+## [1.48.0] — 2026-06-24
+
+- feat(plugins): capability host contract — CID loader + resolver (ADR-0022 steps 1-3) (38f53f3)
+
 ## [1.47.6] — 2026-06-24
 
 - chore(release): v1.47.6 [skip ci] (eb0923d)
