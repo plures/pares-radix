@@ -54,7 +54,7 @@ tar.extractall(os.environ['out'] + '/lib')
           allowBuiltinFetchGit = true;
         };
 
-        cargoBuildFlags = [ "-p" "pares-radix-cli" ];
+        cargoBuildFlags = [ "-p" "pares-radix-cli-runtime" ];
 
         # Skip tests - 2 cerebellum noise-drop tests are flaky (Route::Conscious vs Route::Drop)
         # TODO: fix the tests properly and re-enable
