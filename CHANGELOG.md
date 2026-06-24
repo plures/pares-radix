@@ -1,3 +1,8 @@
+## [1.47.6] — 2026-06-24
+
+- chore(release): v1.47.6 [skip ci] (eb0923d)
+- fix(flake): build CLI pkg from pares-radix-cli-runtime (owns bin/pares-radix) (aef24f1)
+
 ## [1.47.5] — 2026-06-21
 
 - chore(release): v1.47.5 [skip ci] (af15a2d)
