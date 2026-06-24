@@ -1,3 +1,8 @@
+## [1.49.1] — 2026-06-24
+
+- chore(release): v1.49.1 [skip ci] (2573e98)
+- test(plugins): inner-space binds to real commerce provider through resolver (ADR-0022 step 5) (ccee72a)
+
 ## [1.49.0] — 2026-06-24
 
 - chore(release): v1.49.0 [skip ci] (d0a33d2)
