@@ -346,7 +346,7 @@ pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
             workdir,
             brave_api_key,
         } => {
-            use pares_agens_core::shell_executor::ShellExecutor;
+            use pares_radix_core::shell_executor::ShellExecutor;
             use pares_radix_mcp_server::{McpServer, RadixToolHandler};
 
             let shell = Arc::new(ShellExecutor::new());
@@ -358,8 +358,8 @@ pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
                 .join(".pares-radix")
                 .join("mcp-state");
             std::fs::create_dir_all(&state_dir).ok();
-            let state_store: Arc<dyn pares_agens_core::StateStore> = {
-                use pares_agens_core::state::PluresDbStateStore;
+            let state_store: Arc<dyn pares_radix_core::StateStore> = {
+                use pares_radix_core::state::PluresDbStateStore;
                 match PluresDbStateStore::open(&state_dir) {
                     Ok(store) => {
                         tracing::info!("MCP state store opened at {}", state_dir.display());
@@ -367,7 +367,7 @@ pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
                     }
                     Err(e) => {
                         tracing::warn!("Failed to open MCP state store: {e}, using in-memory");
-                        Arc::new(pares_agens_core::state::InMemoryStateStore::new())
+                        Arc::new(pares_radix_core::state::InMemoryStateStore::new())
                     }
                 }
             };
@@ -378,38 +378,37 @@ pub async fn run_with_providers(registry: command_provider::ProviderRegistry) {
                 handler = handler.with_brave_api_key(key);
             }
 
-            // Set up PluresLm memory for memory_search/memory_store
-            let memory_crdt_store = {
-                use pares_agens_core::memory::{
-                    embed::MockEmbedder, store::PluresDbStore, PluresLm,
-                };
-                let memory_dir = std::path::PathBuf::from(&home)
-                    .join(".pares-radix")
-                    .join("mcp-memory");
-                std::fs::create_dir_all(&memory_dir).ok();
-                let store = match PluresDbStore::open(&memory_dir) {
-                    Ok(s) => {
-                        tracing::info!("MCP memory store opened at {}", memory_dir.display());
-                        Arc::new(s)
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to open memory store: {e}, using in-memory");
-                        Arc::new(PluresDbStore::in_memory())
-                    }
-                };
-                let crdt = store.crdt_store_arc();
-                let mem_store: Arc<dyn pares_agens_core::memory::store::MemoryStore> = store;
-                let embedder: Box<dyn pares_agens_core::memory::embed::EmbeddingProvider> =
-                    Box::new(MockEmbedder);
-                let plures_lm = Arc::new(PluresLm::new(mem_store, embedder, 128_000));
-                handler = handler.with_memory(plures_lm);
-                crdt
-            };
+            // Memory (memory_search/memory_store) is a COGNITION concern: it is
+            // backed by `PluresLm`, which lives in the cognition crate
+            // (`pares-agens-core`) and is relocating out of this platform crate
+            // (ADR-0022 cognition relocation). The platform host therefore does
+            // NOT construct memory here — the cognition composition (the
+            // `pares-agens` plugin binary / the relocated mcp-server in a later
+            // stage) attaches an `Arc<dyn pares_radix_core::memory_client::MemoryClient>`
+            // implementation. When no memory is attached, the MCP handler reports
+            // `memory: not_configured` and `memory_*` tools return a real,
+            // caller-handled "memory not configured" error (no stub, no fake).
 
-            // Set up Chronos timeline (shares CrdtStore with memory)
+            // Set up Chronos timeline with its own dedicated PluresDB CrdtStore.
             {
-                use pares_agens_core::chronos::ChronosTimeline;
-                let chronos = ChronosTimeline::new(memory_crdt_store);
+                use pares_radix_core::chronos::ChronosTimeline;
+                use pares_radix_core::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
+                let chronos_dir = std::path::PathBuf::from(&home)
+                    .join(".pares-radix")
+                    .join("mcp-chronos");
+                std::fs::create_dir_all(&chronos_dir).ok();
+                let storage: Arc<dyn StorageEngine> = match SledStorage::open(&chronos_dir) {
+                    Ok(s) => Arc::new(s),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to open Chronos store at {}: {e}, using in-memory",
+                            chronos_dir.display()
+                        );
+                        Arc::new(MemoryStorage::default())
+                    }
+                };
+                let crdt = Arc::new(CrdtStore::default().with_persistence(storage));
+                let chronos = ChronosTimeline::new(crdt);
                 handler = handler.with_chronos(Arc::new(chronos));
                 tracing::info!("MCP Chronos timeline enabled");
             }

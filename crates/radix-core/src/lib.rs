@@ -14,6 +14,8 @@
 pub mod auth;
 /// Chronos version timeline — causal audit trail for every data mutation.
 pub mod chronos;
+/// Message classifier contract (trait + DTOs; backends implemented by cognition).
+pub mod classifier;
 /// Shared slash command registry for all channel adapters.
 pub mod commands;
 /// Content-addressed deduplicating blob storage.
@@ -60,8 +62,13 @@ pub mod telemetry;
 pub use event::Event;
 pub use state::{InMemoryStateStore, PluresDbStateStore, StateStore};
 
+/// Re-export the classifier contract types for ergonomic access.
+pub use classifier::{
+    ClassifierBackend, MessageClassification, MessageIntent, CLASSIFIER_SYSTEM_PROMPT,
+};
+
 /// Re-export PluresDB primitives for consumers that need the shared CrdtStore.
-pub use pluresdb::{CrdtStore, SledStorage, StorageEngine};
+pub use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
 /// Channel capability contracts for output rendering.
 pub mod channel_contract;
 /// Event spine — bridges pares-radix to PluresDB's AgensRuntime.

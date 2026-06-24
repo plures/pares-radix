@@ -4,9 +4,7 @@
 //! Each classification is a single-token generation (~20ms on modern CPUs).
 
 use pares_agens_bitnet::BitNetRunner;
-use pares_agens_core::cerebellum::classifier::{
-    ClassifierBackend, MessageClassification, MessageIntent,
-};
+use pares_radix_core::classifier::{ClassifierBackend, MessageClassification, MessageIntent};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
