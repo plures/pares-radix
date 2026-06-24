@@ -1,3 +1,10 @@
+## [1.49.0] — 2026-06-24
+
+- chore(release): v1.49.0 [skip ci] (d0a33d2)
+- feat(plugins): commerce@1.x provider plugin + CID surface validation (ADR-0022 step 4) (27f8a99)
+- chore(release): v1.48.0 [skip ci] (6b26a63)
+- feat(plugins): capability host contract — CID loader + resolver (ADR-0022 steps 1-3) (38f53f3)
+
 ## [1.47.6] — 2026-06-24
 
 - chore(release): v1.47.6 [skip ci] (eb0923d)
