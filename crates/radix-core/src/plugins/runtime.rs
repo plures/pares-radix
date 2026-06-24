@@ -4,9 +4,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use serde::Deserialize;
-
 use crate::model::ToolDefinition;
+use crate::plugins::capability::resolve_capabilities;
 use crate::plugins::crud;
 use crate::plugins::error::PluginError;
 use crate::plugins::manifest::*;
@@ -63,16 +62,59 @@ impl PluginRuntime {
     }
 
     /// Install multiple plugins in dependency order (topological sort).
+    ///
+    /// The ordering now includes capability-provider edges (ADR-0022 §3): a
+    /// consumer is installed after every provider that satisfies one of its
+    /// required capabilities. A required capability with no satisfying provider
+    /// (or an ambiguous one) is surfaced as a real
+    /// [`PluginError::UnsatisfiedCapability`] / [`PluginError::AmbiguousCapability`]
+    /// from [`topological_sort`] — installation does not proceed.
     pub async fn install_batch(
         &self,
         manifests: Vec<PluginManifest>,
     ) -> Result<Vec<String>, PluginError> {
+        let (installed, _bindings) = self.install_batch_resolving(manifests).await?;
+        Ok(installed)
+    }
+
+    /// Like [`Self::install_batch`], but also returns the resolved capability
+    /// bindings (ADR-0022 §4) computed from the same manifest set used for
+    /// ordering. The bindings are an in-memory, rebuildable index; persist them
+    /// to PluresDB (the source of truth, C-PLURES-003) via
+    /// [`Self::install_batch_persisting`].
+    pub async fn install_batch_resolving(
+        &self,
+        manifests: Vec<PluginManifest>,
+    ) -> Result<(Vec<String>, Vec<crate::plugins::capability::CapabilityBinding>), PluginError> {
         let ordered = topological_sort(&manifests)?;
+        // Resolve bindings from the full batch (same policy the topo-sort used).
+        let bindings = resolve_capabilities(&manifests)?;
         let mut installed = Vec::new();
         for manifest in ordered {
             let name = manifest.name.clone();
             self.install(manifest).await?;
             installed.push(name);
+        }
+        Ok((installed, bindings))
+    }
+
+    /// Install a batch (in capability order) and persist every resolved binding
+    /// to PluresDB via the given executor (ADR-0022 §4, C-PLURES-003).
+    ///
+    /// This is the real resolve+persist path requirement D wires. It is kept
+    /// separate from [`Self::install_batch`] because [`PluginRuntime`] is a pure
+    /// in-memory registry with no store handle of its own; the caller owns the
+    /// [`PluginCrudExecutor`] (and therefore the PluresDB store) and threads it
+    /// in. The production boot call site that constructs both is a separate
+    /// step (not wired here).
+    pub async fn install_batch_persisting(
+        &self,
+        manifests: Vec<PluginManifest>,
+        executor: &crate::plugins::executor::PluginCrudExecutor,
+    ) -> Result<Vec<String>, PluginError> {
+        let (installed, bindings) = self.install_batch_resolving(manifests).await?;
+        for binding in &bindings {
+            executor.persist_binding(binding)?;
         }
         Ok(installed)
     }
@@ -204,6 +246,48 @@ fn topological_sort(manifests: &[PluginManifest]) -> Result<Vec<PluginManifest>,
         }
     }
 
+    // Capability-provider edges (ADR-0022 §3): a consumer's REQUIRED capability
+    // must activate AFTER its resolved provider, so add a provider → consumer
+    // edge for every resolved binding. `resolve_capabilities` applies the §4
+    // binding-selection policy and returns a real `UnsatisfiedCapability` /
+    // `AmbiguousCapability` error if a required capability cannot be bound
+    // deterministically — propagated here, never silently skipped.
+    //
+    // We only add an edge when BOTH provider and consumer are in this batch
+    // (an out-of-batch provider is assumed already installed, exactly like an
+    // out-of-batch dependency above), and we de-duplicate against any identical
+    // dependency edge already recorded, so the in-degree is not double-counted
+    // when a plugin is both a declared dependency AND a capability provider.
+    let bindings = resolve_capabilities(manifests)?;
+    for binding in &bindings {
+        let provider = binding.provider.as_str();
+        let consumer = binding.consumer.as_str();
+        if provider == consumer {
+            continue;
+        }
+        // Map the binding's owned names back to the `&str` keys that borrow from
+        // `manifests` (these outlive the local `bindings`). If the provider is
+        // not in this batch, it is assumed already installed (same treatment as
+        // an out-of-batch dependency above).
+        let (Some(&provider_name), Some(&consumer_name)) = (
+            name_map.get_key_value(provider).map(|(k, _v)| k),
+            name_map.get_key_value(consumer).map(|(k, _v)| k),
+        ) else {
+            continue;
+        };
+        let edge_exists = dependents
+            .get(provider_name)
+            .is_some_and(|deps| deps.contains(&consumer_name));
+        if edge_exists {
+            continue;
+        }
+        *in_degree.entry(consumer_name).or_insert(0) += 1;
+        dependents
+            .entry(provider_name)
+            .or_default()
+            .push(consumer_name);
+    }
+
     let mut queue: VecDeque<&str> = in_degree
         .iter()
         .filter(|(_, &deg)| deg == 0)
@@ -247,98 +331,18 @@ impl Default for PluginRuntime {
 
 // ── TOML parsing ─────────────────────────────────────────────────────────────
 
-/// Intermediate TOML structure — the `[plugin]` table lives at the root.
-#[derive(Deserialize)]
-struct TomlRoot {
-    plugin: TomlPlugin,
-    #[serde(default)]
-    schema: TomlSchema,
-    #[serde(default)]
-    logic: TomlLogic,
-    #[serde(default)]
-    permissions: TomlPermissions,
-}
-
-#[derive(Deserialize)]
-struct TomlPlugin {
-    name: String,
-    version: String,
-    description: String,
-    author: Option<String>,
-}
-
-#[derive(Default, Deserialize)]
-struct TomlSchema {
-    #[serde(default)]
-    entities: Vec<TomlEntity>,
-    #[serde(default)]
-    relationships: Vec<RelationshipDefinition>,
-}
-
-#[derive(Deserialize)]
-struct TomlEntity {
-    name: String,
-    display_name: String,
-    icon: Option<String>,
-    #[serde(default)]
-    fields: Vec<FieldDefinition>,
-}
-
-#[derive(Default, Deserialize)]
-struct TomlLogic {
-    #[serde(default)]
-    rules: Vec<PluginRule>,
-    #[serde(default)]
-    constraints: Vec<PluginConstraint>,
-}
-
-#[derive(Default, Deserialize)]
-struct TomlPermissions {
-    #[serde(default)]
-    pluresdb_scopes: Vec<String>,
-    #[serde(default)]
-    tool_access: Vec<String>,
-    #[serde(default)]
-    network: bool,
-}
-
+/// Parse a native TOML plugin manifest.
+///
+/// **C-DRIFT-001 fix (ADR-0022 step 1):** this previously held a *second*,
+/// independent serde-based TOML deserializer that disagreed with
+/// [`manifest::parse_manifest`] — most notably both silently dropped
+/// `[dependencies]`, and a divergent second parser would also have dropped the
+/// new `[capabilities.*]` tables. The two parsers are now collapsed into a
+/// single source of truth: this delegates to [`parse_manifest`] (the unified
+/// TOML-first, JSON-legacy-fallback parser). There is exactly one place that
+/// turns manifest source text into a [`PluginManifest`].
 fn parse_toml_manifest(toml_str: &str) -> Result<PluginManifest, PluginError> {
-    let root: TomlRoot =
-        toml::from_str(toml_str).map_err(|e| PluginError::TomlParse(e.to_string()))?;
-    Ok(PluginManifest {
-        name: root.plugin.name,
-        version: root.plugin.version,
-        description: root.plugin.description,
-        author: root.plugin.author,
-        schema: PluginSchema {
-            entities: root
-                .schema
-                .entities
-                .into_iter()
-                .map(|e| EntityDefinition {
-                    name: e.name,
-                    display_name: e.display_name,
-                    icon: e.icon,
-                    fields: e.fields,
-                })
-                .collect(),
-            relationships: root.schema.relationships,
-        },
-        logic: PluginLogic {
-            rules: root.logic.rules,
-            constraints: root.logic.constraints,
-            procedures: Vec::new(),
-        },
-        tools: Vec::new(),
-        ui: None,
-        permissions: PluginPermissions {
-            pluresdb_scopes: root.permissions.pluresdb_scopes,
-            tool_access: root.permissions.tool_access,
-            network: root.permissions.network,
-        },
-        hooks: Vec::new(),
-        dependencies: Vec::new(),
-    })
+    parse_manifest(toml_str).map_err(|e| PluginError::TomlParse(e.to_string()))
 }
 
 #[cfg(test)]
@@ -360,6 +364,7 @@ mod tests {
             permissions: PluginPermissions::default(),
             hooks: Vec::new(),
             dependencies: Vec::new(),
+            capabilities: PluginCapabilities::default(),
         };
         rt.install(manifest).await.unwrap();
         assert_eq!(rt.list().await.len(), 1);
@@ -380,6 +385,7 @@ mod tests {
             permissions: PluginPermissions::default(),
             hooks: Vec::new(),
             dependencies: Vec::new(),
+            capabilities: PluginCapabilities::default(),
         };
         rt.install(manifest.clone()).await.unwrap();
         assert!(rt.install(manifest).await.is_err());
@@ -400,6 +406,7 @@ mod tests {
             permissions: PluginPermissions::default(),
             hooks: Vec::new(),
             dependencies: Vec::new(),
+            capabilities: PluginCapabilities::default(),
         };
         rt.install(manifest).await.unwrap();
         rt.uninstall("removable", false).await.unwrap();
@@ -435,6 +442,7 @@ mod tests {
             permissions: PluginPermissions::default(),
             hooks: Vec::new(),
             dependencies: Vec::new(),
+            capabilities: PluginCapabilities::default(),
         };
         rt.install(manifest).await.unwrap();
         let ctx = rt.schema_context().await;
@@ -471,6 +479,76 @@ network = false
         assert_eq!(plugins[0].schema.entities[0].name, "thing");
     }
 
+    /// C-DRIFT-001 regression: the `install_from_toml` path (formerly a second,
+    /// divergent TOML parser) now delegates to `manifest::parse_manifest`, so it
+    /// must carry BOTH `[dependencies].plugins` AND `[capabilities.*]` through to
+    /// the installed manifest — neither was parsed on this path before.
+    #[tokio::test]
+    async fn install_from_toml_carries_dependencies_and_capabilities() {
+        let provider_toml = r#"
+[plugin]
+name = "commerce-provider"
+version = "1.2.0"
+description = "provides commerce"
+
+[capabilities.provided]
+commerce = "1.2.0"
+"#;
+        let consumer_toml = r#"
+[plugin]
+name = "shop-app"
+version = "0.1.0"
+description = "consumes commerce"
+
+[dependencies]
+plugins = ["commerce-provider"]
+
+[capabilities.required]
+commerce = "^1.0"
+
+[capabilities.optional]
+notify = "^1.0"
+"#;
+        let rt = PluginRuntime::new();
+        // Provider must exist first (install() validates declared deps).
+        rt.install_from_toml(provider_toml).await.unwrap();
+        rt.install_from_toml(consumer_toml).await.unwrap();
+
+        let provider = rt.get("commerce-provider").await.unwrap();
+        assert_eq!(
+            provider
+                .capabilities
+                .provided
+                .get("commerce")
+                .map(String::as_str),
+            Some("1.2.0"),
+            "provided capability must survive the install_from_toml path"
+        );
+
+        let consumer = rt.get("shop-app").await.unwrap();
+        assert_eq!(
+            consumer.dependencies,
+            vec!["commerce-provider".to_string()],
+            "dependencies must survive the install_from_toml path (C-DRIFT-001)"
+        );
+        assert_eq!(
+            consumer
+                .capabilities
+                .required
+                .get("commerce")
+                .map(String::as_str),
+            Some("^1.0")
+        );
+        assert_eq!(
+            consumer
+                .capabilities
+                .optional
+                .get("notify")
+                .map(String::as_str),
+            Some("^1.0")
+        );
+    }
+
     fn make_manifest(name: &str, deps: &[&str]) -> PluginManifest {
         PluginManifest {
             name: name.into(),
@@ -484,6 +562,7 @@ network = false
             permissions: PluginPermissions::default(),
             hooks: Vec::new(),
             dependencies: deps.iter().map(|s| s.to_string()).collect(),
+            capabilities: PluginCapabilities::default(),
         }
     }
 
@@ -523,5 +602,99 @@ network = false
         let plugins = vec![make_manifest("x", &["y"]), make_manifest("y", &["x"])];
         let err = rt.install_batch(plugins).await.unwrap_err();
         assert!(err.to_string().contains("circular"));
+    }
+
+    // ── ADR-0022 Step 2: capability-provider ordering + binding persistence ──
+
+    /// A manifest that PROVIDES a capability at a concrete version.
+    fn make_provider(name: &str, capability: &str, version: &str) -> PluginManifest {
+        let mut m = make_manifest(name, &[]);
+        m.capabilities
+            .provided
+            .insert(capability.to_string(), version.to_string());
+        m
+    }
+
+    /// A manifest that REQUIRES a capability at a semver range.
+    fn make_consumer(name: &str, capability: &str, range: &str) -> PluginManifest {
+        let mut m = make_manifest(name, &[]);
+        m.capabilities
+            .required
+            .insert(capability.to_string(), range.to_string());
+        m
+    }
+
+    fn test_executor() -> crate::plugins::executor::PluginCrudExecutor {
+        use pluresdb::{CrdtStore, MemoryStorage, StorageEngine};
+        let storage: Arc<dyn StorageEngine> = Arc::new(MemoryStorage::default());
+        let store = Arc::new(CrdtStore::default().with_persistence(storage));
+        crate::plugins::executor::PluginCrudExecutor::new(store)
+    }
+
+    /// Provider must be ordered BEFORE the consumer that requires its capability,
+    /// even though there is no explicit `[dependencies]` edge between them.
+    #[tokio::test]
+    async fn capability_provider_orders_before_consumer() {
+        let rt = PluginRuntime::new();
+        // Input order deliberately puts the consumer first.
+        let plugins = vec![
+            make_consumer("shop", "commerce", "^1.0"),
+            make_provider("oasis-commerce", "commerce", "1.2.0"),
+        ];
+        let order = rt.install_batch(plugins).await.unwrap();
+        let provider_idx = order.iter().position(|n| n == "oasis-commerce").unwrap();
+        let consumer_idx = order.iter().position(|n| n == "shop").unwrap();
+        assert!(
+            provider_idx < consumer_idx,
+            "provider must activate before consumer, got order {order:?}"
+        );
+    }
+
+    /// A required capability with no provider in the batch blocks installation
+    /// with a real UnsatisfiedCapability error.
+    #[tokio::test]
+    async fn install_batch_unsatisfied_required_capability_errors() {
+        let rt = PluginRuntime::new();
+        let plugins = vec![make_consumer("shop", "commerce", "^1.0")];
+        let err = rt.install_batch(plugins).await.unwrap_err();
+        match err {
+            PluginError::UnsatisfiedCapability {
+                plugin,
+                capability,
+                range,
+            } => {
+                assert_eq!(plugin, "shop");
+                assert_eq!(capability, "commerce");
+                assert_eq!(range, "^1.0");
+            }
+            other => panic!("expected UnsatisfiedCapability, got {other:?}"),
+        }
+        // Nothing should have been installed.
+        assert_eq!(rt.list().await.len(), 0);
+    }
+
+    /// install_batch_persisting resolves the binding AND writes it to PluresDB;
+    /// load_bindings returns it (round-trips through the store).
+    #[tokio::test]
+    async fn install_batch_persists_binding_to_pluresdb() {
+        let rt = PluginRuntime::new();
+        let executor = test_executor();
+        let plugins = vec![
+            make_consumer("shop", "commerce", "^1.0"),
+            make_provider("oasis-commerce", "commerce", "1.2.0"),
+        ];
+        let order = rt
+            .install_batch_persisting(plugins, &executor)
+            .await
+            .unwrap();
+        assert_eq!(order.len(), 2);
+
+        let bindings = executor.load_bindings().unwrap();
+        assert_eq!(bindings.len(), 1, "exactly one capability binding persisted");
+        let b = &bindings[0];
+        assert_eq!(b.consumer, "shop");
+        assert_eq!(b.capability, "commerce");
+        assert_eq!(b.provider, "oasis-commerce");
+        assert_eq!(b.version, "1.2.0");
     }
 }

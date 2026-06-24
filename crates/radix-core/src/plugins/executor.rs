@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use tracing::warn;
 use uuid::Uuid;
 
+use super::capability::CapabilityBinding;
 use super::error::PluginError;
 use crate::chronos::{ChronosAction, ChronosTimeline};
 use crate::praxis::write_gate::PraxisWriteGate;
@@ -23,6 +24,13 @@ const REGISTRY_PREFIX: &str = "plugin:_registry:";
 
 /// Prefix for installed plugin manifest nodes.
 const INSTALLED_PREFIX: &str = "plugin:_installed:";
+
+/// Prefix for persisted resolved capability bindings (ADR-0022 §4, C-PLURES-003).
+///
+/// PluresDB nodes under this prefix are the **source of truth** for which
+/// provider satisfies each consumer's capability. The in-memory resolution
+/// result (`Vec<CapabilityBinding>`) is a rebuildable index of these nodes.
+const BINDINGS_PREFIX: &str = "radix:capability:bindings:";
 
 /// Executes CRUD operations for plugin entities against PluresDB.
 pub struct PluginCrudExecutor {
@@ -352,6 +360,40 @@ impl PluginCrudExecutor {
             .collect()
     }
 
+    /// Persist a resolved capability binding to PluresDB (ADR-0022 §4,
+    /// C-PLURES-003). Mirrors [`Self::persist_manifest`] exactly: same
+    /// [`Self::gate_put`] write path (write-gate evaluation + Chronos record).
+    ///
+    /// The node key is `radix:capability:bindings:{consumer}:{capability}` so a
+    /// consumer's binding for a given capability is a single addressable node
+    /// (re-resolving overwrites it deterministically rather than accumulating).
+    pub fn persist_binding(&self, binding: &CapabilityBinding) -> Result<(), PluginError> {
+        let key = format!("{BINDINGS_PREFIX}{}:{}", binding.consumer, binding.capability);
+        let data = serde_json::to_value(binding)
+            .map_err(|e| PluginError::Storage(format!("serialize binding: {e}")))?;
+        self.gate_put(&key, ACTOR, data)?;
+        Ok(())
+    }
+
+    /// Load all persisted capability bindings from PluresDB. Mirrors
+    /// [`Self::load_persisted_manifests`]: filters by the bindings prefix and
+    /// deserializes each node back into a [`CapabilityBinding`].
+    ///
+    /// A node under the prefix that fails to deserialize is a real data-corruption
+    /// signal, surfaced as [`PluginError::Storage`] rather than silently dropped.
+    pub fn load_bindings(&self) -> Result<Vec<CapabilityBinding>, PluginError> {
+        self.store
+            .list()
+            .into_iter()
+            .filter(|r| r.id.starts_with(BINDINGS_PREFIX))
+            .map(|r| {
+                serde_json::from_value::<CapabilityBinding>(r.data).map_err(|e| {
+                    PluginError::Storage(format!("corrupt capability binding '{}': {e}", r.id))
+                })
+            })
+            .collect()
+    }
+
     /// Count entities for a given plugin and entity type.
     pub fn count(&self, plugin_name: &str, entity_type: &str) -> usize {
         self.registry_get(plugin_name, entity_type).len()
@@ -571,6 +613,35 @@ mod tests {
         let loaded = executor.load_persisted_manifests();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].get("name").unwrap(), "inventory");
+    }
+
+    #[test]
+    fn persist_and_load_capability_bindings_roundtrip() {
+        use crate::plugins::capability::CapabilityBinding;
+        let store = test_store();
+        let executor = PluginCrudExecutor::new(store);
+
+        let binding = CapabilityBinding {
+            consumer: "shop".into(),
+            capability: "commerce".into(),
+            provider: "oasis-commerce".into(),
+            version: "1.2.0".into(),
+        };
+        executor.persist_binding(&binding).unwrap();
+
+        let loaded = executor.load_bindings().unwrap();
+        assert_eq!(loaded.len(), 1, "binding round-trips through PluresDB");
+        assert_eq!(loaded[0], binding);
+
+        // Re-persisting the same (consumer, capability) overwrites, not appends.
+        let updated = CapabilityBinding {
+            version: "1.5.0".into(),
+            ..binding.clone()
+        };
+        executor.persist_binding(&updated).unwrap();
+        let loaded = executor.load_bindings().unwrap();
+        assert_eq!(loaded.len(), 1, "same key overwrites the binding node");
+        assert_eq!(loaded[0].version, "1.5.0");
     }
 
     #[test]

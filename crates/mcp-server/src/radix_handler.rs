@@ -3416,6 +3416,9 @@ impl RadixToolHandler {
             permissions: Default::default(),
             hooks: Vec::new(),
             dependencies: capabilities,
+            // ADR-0022: capability contracts (required/optional/provided). This
+            // MCP registration path does not yet surface them; default = none.
+            capabilities: Default::default(),
         };
         match runtime.install(manifest).await {
             Ok(()) => {

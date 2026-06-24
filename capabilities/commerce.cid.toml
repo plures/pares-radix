@@ -1,0 +1,197 @@
+# Capability Interface Descriptor (CID): commerce@1.x
+#
+# ADR-0022 (Capability Host Contract). This is a host/registry-owned org-level
+# contract. v1 format is TOML (the .px grammar at pluresdb-px rev 195c67b has no
+# `capability` construct — verified against crates/pluresdb-px/src/px/grammar.pest;
+# the .px-native CID form is deferred to a real upstream grammar construct, NOT stubbed).
+#
+# This descriptor is grounded ENTIRELY in the real OASIS G2 commerce surface
+# (oasis/packages/crypto-verification + oasis/packages/core/src/types/
+# cryptographic-verification.ts). Nothing here is invented; every node/operation/
+# enum below maps to shipped OASIS types/functions. The eventual provider plugin
+# (ADR-0022 step 4) is the OASIS ZK-commerce logic ported behind this contract.
+#
+# A provider plugin declaring `[capabilities.provided] commerce = "1.x"` MUST
+# implement this surface; the loader validates the provider's declared surface
+# against this CID at install (ADR-0022 §7). A consumer (e.g. inner-space, which
+# declares `commerce = "^1.0"`) interacts ONLY through the mediated nodes/events
+# below — no direct function references cross the plugin boundary (ADR-0011).
+
+[cid]
+name = "commerce"
+version = "1.0.0"
+title = "Anonymous verifiable commerce (ZK coupons + redemption)"
+summary = """
+Privacy-preserving commerce: issue cryptographic coupons against a campaign,
+authorize/redeem them with zero-knowledge proofs, and prevent double-spend via a
+grow-only nullifier set. Tiered confirmation (instant micro / delayed large) is a
+deployment policy, not a fixed number.
+"""
+# Source of truth this contract was extracted from (for audit / drift tracking):
+source_repo = "oasis"
+source_paths = [
+  "packages/core/src/types/cryptographic-verification.ts",
+  "packages/crypto-verification/src/coupons/index.ts",
+  "packages/crypto-verification/src/redemption/protocol.ts",
+  "packages/crypto-verification/src/redemption/nullifier.ts",
+  "packages/crypto-verification/src/redemption/redemption-tier.px",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE TYPES — PluresDB node schemas the capability reads/writes. Namespaced by
+# the consumer's pluresdb_namespace at runtime (e.g. innerspace:commerce:*).
+# Field types mirror the real OASIS interfaces; cryptographic payloads are opaque
+# bytes at the contract boundary.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[nodes]]
+type = "commerce:campaign"
+maps_to = "CouponCampaign"
+key = "commerce:campaign:{id}"
+fields = [
+  "id: string",
+  "issuer_id: bytes",          # PublicKey
+  "name: string",
+  "description: string",
+  "total_budget: u64",
+  "issued_count: u64",
+  "redeemed_count: u64",
+  "status: enum(draft,active,paused,completed,cancelled)",
+  "constraints: CouponConstraints",
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "commerce:coupon"
+maps_to = "CryptoCoupon"
+key = "commerce:coupon:{id}"
+fields = [
+  "id: string",
+  "campaign_id: string",
+  "coupon_data: bytes",        # opaque core cryptographic payload
+  "status: enum(active,redeemed,expired,revoked)",
+  "constraints: CouponConstraints",
+  "created: timestamp",
+  "expires: timestamp",
+]
+
+[[nodes]]
+type = "commerce:redemption_record"
+maps_to = "RedemptionRecord"
+key = "commerce:redemption:{nullifier}"
+fields = [
+  "commitment: bytes",         # PedersenCommitment
+  "nullifier: bytes",          # Blake2Hash (hex at the set boundary)
+  "timestamp: timestamp",
+  "merkle_proof: bytes",       # SparseMerkleProof
+]
+
+[[nodes]]
+type = "commerce:nullifier_set"
+maps_to = "DoubleSpendDB / NullifierStore"
+key = "commerce:nullifier_set"
+grow_only = true               # G2: a nullifier set must never remove (CRDT grow-only)
+fields = [
+  "nullifiers: set<string>",   # hex-encoded Blake2 hashes
+  "merkle_root: bytes",
+]
+
+[[nodes]]
+type = "commerce:redemption_proof"
+maps_to = "RedemptionProof"
+key = "commerce:proof:{id}"
+fields = [
+  "id: string",
+  "coupon_id: string",
+  "proof: bytes",              # ZKProof
+  "merchant_id: bytes",        # PublicKey
+  "anonymous: bool",
+  "timestamp: timestamp",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPERATIONS — the entry points a consumer triggers. Per ADR-0011 these are
+# MEDIATED: a consumer emits the `request` event / writes the request node; the
+# provider's reactive procedures service it; the provider emits the `result`
+# event the consumer reads. No direct calls. Each operation maps to a real OASIS
+# function (the TS twin that runs at the IO boundary).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[operations]]
+name = "issue_coupon"
+maps_to = "RedemptionProtocol.issueCoupon / CouponService"
+request_event = "commerce.issue.requested"
+result_event = "commerce.issue.completed"
+input = ["campaign_id: string", "value: u64"]
+output = ["coupon: commerce:coupon"]               # IssuedCoupon
+errors = ["E003"]                                  # constraint/issue violation
+
+[[operations]]
+name = "authorize_redemption"
+maps_to = "RedemptionProtocol.authorizeRedemption / verifyAndRedeem"
+request_event = "commerce.redeem.requested"
+result_event = "commerce.redeem.completed"
+input = [
+  "coupon_data: bytes",
+  "merchant_id: bytes",
+  "proof: bytes",
+  "timestamp: timestamp",
+]
+output = [
+  "success: bool",
+  "proof?: commerce:redemption_proof",
+  "discount_amount?: u64",
+  "error?: string",
+]                                                  # RedemptionResult / AuthorizationResult
+errors = ["E004"]                                  # replay / double-spend (nullifier already in set)
+
+[[operations]]
+name = "check_nullifier"
+maps_to = "checkRedemptionNullifier / createNullifierRegistry"
+request_event = "commerce.nullifier.check.requested"
+result_event = "commerce.nullifier.check.completed"
+input = ["nullifier: bytes"]
+output = ["is_spent: bool", "checked_at: timestamp"]   # DoubleSpendCheck
+
+[[operations]]
+name = "decide_tier"
+maps_to = "decideTier (twin of redemption-tier.px procedure decide_tier)"
+request_event = "commerce.tier.decide.requested"
+result_event = "commerce.tier.decide.completed"
+input = ["amount: u64", "policy.largeThreshold: u64"]
+output = ["tier: enum(instant,delayed)"]
+# Boundary is deployment policy (TierPolicy.largeThreshold), inclusive of micro:
+#   instant ⇐ amount <= largeThreshold ; delayed ⇐ amount > largeThreshold
+# DEFAULT policy largeThreshold = 0 (only zero-value is instant). NOT a business number.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EVENTS — the full mediated event vocabulary (request/result pairs above), listed
+# for the loader's provider-surface validation.
+# ─────────────────────────────────────────────────────────────────────────────
+[events]
+emitted_by_consumer = [
+  "commerce.issue.requested",
+  "commerce.redeem.requested",
+  "commerce.nullifier.check.requested",
+  "commerce.tier.decide.requested",
+]
+emitted_by_provider = [
+  "commerce.issue.completed",
+  "commerce.redeem.completed",
+  "commerce.nullifier.check.completed",
+  "commerce.tier.decide.completed",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INVARIANTS — contract guarantees a conforming provider must uphold. These are
+# the real OASIS G2 property-test guarantees, restated as contract obligations.
+# ─────────────────────────────────────────────────────────────────────────────
+[invariants]
+rules = [
+  "double_spend_prevented: a nullifier present in commerce:nullifier_set causes authorize_redemption to fail with E004 (no second redemption of the same coupon).",
+  "nullifier_set_grow_only: the nullifier set is append-only; entries are never removed.",
+  "tier_boundary_inclusive: decide_tier returns instant iff amount <= policy.largeThreshold.",
+  "anonymous_redemption: a RedemptionProof with anonymous=true reveals no user identity in any persisted node.",
+  "status_monotonic: a coupon's status only advances active -> {redeemed|expired|revoked}; it never returns to active.",
+]

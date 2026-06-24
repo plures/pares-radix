@@ -27,4 +27,32 @@ pub enum PluginError {
 
     #[error("circular dependency detected involving: {0}")]
     CircularDependency(String),
+
+    /// A required provider capability (ADR-0022 §1/§3) has no installed provider
+    /// whose `[capabilities.provided]` version satisfies the requested range.
+    /// Required (vs. optional) capabilities block activation.
+    ///
+    /// Constructed by the Step 2 capability resolver (not yet wired in this
+    /// manifest/schema-layer change); kept here as a real variant per ADR-0022
+    /// so the schema and error surface land together.
+    #[allow(dead_code)] // Constructed by the ADR-0022 Step 2 capability resolver.
+    #[error("plugin '{plugin}' requires capability '{capability}' ({range}) which no installed provider satisfies")]
+    UnsatisfiedCapability {
+        plugin: String,
+        capability: String,
+        range: String,
+    },
+
+    /// More than one installed provider satisfies a required capability range and
+    /// the binding-selection policy (ADR-0022 §4) could not pick one
+    /// deterministically (no pin, tie on version/trust).
+    ///
+    /// Constructed by the Step 2 capability resolver (not yet wired in this
+    /// manifest/schema-layer change).
+    #[allow(dead_code)] // Constructed by the ADR-0022 Step 2 capability resolver.
+    #[error("capability '{capability}' is ambiguous: multiple providers satisfy it ({})", candidates.join(", "))]
+    AmbiguousCapability {
+        capability: String,
+        candidates: Vec<String>,
+    },
 }

@@ -1,6 +1,7 @@
 //! Plugin manifest types — the declaration of what a plugin provides.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// A plugin manifest — the full declaration of a plugin's capabilities.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +39,13 @@ pub struct PluginManifest {
     /// Plugin dependencies (other plugin names that must be installed first).
     #[serde(default)]
     pub dependencies: Vec<String>,
+
+    /// Capability contracts this plugin requires, optionally requires, and/or
+    /// provides (ADR-0022). Distinct from [`PluginPermissions`]: permissions are
+    /// the allow/deny I/O axis (ADR-0011); capabilities are versioned interface
+    /// contracts resolved against providers by the loader (Step 2).
+    #[serde(default)]
+    pub capabilities: PluginCapabilities,
 }
 
 // ── Schema ───────────────────────────────────────────────────────────────────
@@ -186,6 +194,149 @@ pub struct PluginPermissions {
     pub network: bool,
 }
 
+// ── Capabilities (ADR-0022) ──────────────────────────────────────────────────
+
+/// Capability contracts declared by a plugin (ADR-0022 §1, §6).
+///
+/// Three orthogonal maps:
+/// - `required` / `optional`: capabilities this plugin **consumes**. The map
+///   value is a **semver range** (e.g. `commerce = "^1.0"`) matched against a
+///   provider's concrete version at resolution time (Step 2).
+/// - `provided`: capabilities this plugin **implements**. The map value is the
+///   **concrete version** of the Capability Interface Descriptor (CID) it
+///   satisfies (e.g. `commerce = "1.2.0"`).
+///
+/// `interface` carries the optional `[capabilities.interface.<name>]` blocks
+/// pointing a provided capability at the CID it implements.
+///
+/// `BTreeMap` is used (not `HashMap`) for deterministic ordering / stable
+/// serialization, consistent with the C-PLURES-003 "no ad-hoc maps for state"
+/// spirit.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PluginCapabilities {
+    /// Capabilities required to activate. Value = semver range. Unsatisfied
+    /// required capabilities block activation (enforced by the Step 2 resolver).
+    #[serde(default)]
+    pub required: BTreeMap<String, String>,
+
+    /// Capabilities used if a provider is present, feature-detected if absent.
+    /// Value = semver range. Unsatisfied optional capabilities do NOT block.
+    #[serde(default)]
+    pub optional: BTreeMap<String, String>,
+
+    /// Capabilities this plugin implements. Value = concrete CID version.
+    #[serde(default)]
+    pub provided: BTreeMap<String, String>,
+
+    /// Optional `[capabilities.interface.<name>]` references binding a provided
+    /// (or required) capability name to the CID it targets.
+    #[serde(default)]
+    pub interface: BTreeMap<String, CapabilityInterfaceRef>,
+}
+
+/// A reference to a Capability Interface Descriptor (CID) from a
+/// `[capabilities.interface.<name>]` block (ADR-0022 §6, §7).
+///
+/// Example TOML:
+/// ```toml
+/// [capabilities.interface.commerce]
+/// cid = "commerce@1.x"
+/// spec = "capabilities/commerce.cid.toml"
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CapabilityInterfaceRef {
+    /// CID identity, e.g. `commerce@1.x` (`name@semver-range`).
+    pub cid: String,
+    /// Optional path to the CID descriptor file (TOML-declared in v1).
+    #[serde(default)]
+    pub spec: Option<String>,
+}
+
+/// A capability version validation failure (ADR-0022): a declared range or
+/// concrete version was not valid semver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapabilityVersionError {
+    /// The capability name whose version/range was malformed.
+    pub capability: String,
+    /// The offending version/range string.
+    pub value: String,
+    /// Whether this came from a `required`/`optional` range or a `provided`
+    /// concrete version.
+    pub kind: CapabilityVersionKind,
+    /// The underlying semver parse error message.
+    pub reason: String,
+}
+
+/// Which capability map a [`CapabilityVersionError`] originated from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityVersionKind {
+    /// A `required`/`optional` semver **range** (`VersionReq`).
+    Range,
+    /// A `provided` **concrete version** (`Version`).
+    Version,
+}
+
+impl std::fmt::Display for CapabilityVersionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match self.kind {
+            CapabilityVersionKind::Range => "range",
+            CapabilityVersionKind::Version => "version",
+        };
+        write!(
+            f,
+            "capability '{}' has invalid semver {kind} '{}': {}",
+            self.capability, self.value, self.reason
+        )
+    }
+}
+
+impl std::error::Error for CapabilityVersionError {}
+
+impl PluginCapabilities {
+    /// Validate every declared capability version using the `semver` crate
+    /// (ADR-0022 step 1 item E — no hand-rolled version parsing):
+    ///
+    /// - `required` / `optional` values must parse as a [`semver::VersionReq`]
+    ///   (a range like `^1.0`).
+    /// - `provided` values must parse as a concrete [`semver::Version`]
+    ///   (e.g. `1.2.0`).
+    ///
+    /// Returns all offending entries (deterministic order, since the maps are
+    /// `BTreeMap`). An empty `Vec` means every declared version is well-formed.
+    /// This does not perform provider *resolution* (that is the Step 2 loader);
+    /// it only checks that the manifest's declared versions are syntactically
+    /// valid semver.
+    pub fn validate_versions(&self) -> Vec<CapabilityVersionError> {
+        let mut errors = Vec::new();
+        for (map, kind) in [
+            (&self.required, CapabilityVersionKind::Range),
+            (&self.optional, CapabilityVersionKind::Range),
+        ] {
+            for (cap, range) in map {
+                if let Err(e) = range.parse::<semver::VersionReq>() {
+                    errors.push(CapabilityVersionError {
+                        capability: cap.clone(),
+                        value: range.clone(),
+                        kind,
+                        reason: e.to_string(),
+                    });
+                }
+            }
+        }
+        for (cap, version) in &self.provided {
+            if let Err(e) = version.parse::<semver::Version>() {
+                errors.push(CapabilityVersionError {
+                    capability: cap.clone(),
+                    value: version.clone(),
+                    kind: CapabilityVersionKind::Version,
+                    reason: e.to_string(),
+                });
+            }
+        }
+        errors
+    }
+}
+
 // ── Unified manifest parsing ─────────────────────────────────────────────────
 
 /// Error type for manifest parsing.
@@ -271,6 +422,12 @@ fn parse_toml_manifest_unified(toml_str: &str) -> Result<PluginManifest, Manifes
     // Permissions
     let permissions = parse_toml_permissions(&value);
 
+    // Dependencies ([dependencies].plugins) — previously dropped (C-DRIFT-001).
+    let dependencies = parse_toml_dependencies(&value);
+
+    // Capabilities ([capabilities.required/optional/provided] + interface.*).
+    let capabilities = parse_toml_capabilities(&value);
+
     Ok(PluginManifest {
         name,
         version,
@@ -289,7 +446,8 @@ fn parse_toml_manifest_unified(toml_str: &str) -> Result<PluginManifest, Manifes
         ui: None,
         permissions,
         hooks: Vec::new(),
-        dependencies: Vec::new(),
+        dependencies,
+        capabilities,
     })
 }
 
@@ -339,6 +497,8 @@ fn parse_json_manifest(json: &str) -> Result<PluginManifest, ManifestError> {
         },
         hooks: vec![],
         dependencies: vec![],
+        // Legacy JSON modulus manifests predate the capability model (ADR-0022).
+        capabilities: PluginCapabilities::default(),
     })
 }
 
@@ -542,6 +702,76 @@ fn parse_toml_permissions(value: &toml::Value) -> PluginPermissions {
     }
 }
 
+/// Parse `[dependencies].plugins` into the flat `Vec<String>` of plugin names
+/// that `PluginManifest::dependencies` expects.
+///
+/// Previously this table was silently dropped on the TOML path (C-DRIFT-001),
+/// so TOML plugins could not declare dependencies at all. The canonical TOML
+/// shape is:
+/// ```toml
+/// [dependencies]
+/// plugins = ["base-plugin", "another-plugin"]
+/// ```
+fn parse_toml_dependencies(value: &toml::Value) -> Vec<String> {
+    let Some(deps) = value.get("dependencies") else {
+        return vec![];
+    };
+    deps.get("plugins")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse the `[capabilities.*]` tables (ADR-0022 §6) into [`PluginCapabilities`].
+///
+/// Handles three string→string maps (`required`, `optional`, `provided`) and the
+/// nested `[capabilities.interface.<name>]` blocks. Unknown / missing tables
+/// yield empty maps (the field is `#[serde(default)]`).
+fn parse_toml_capabilities(value: &toml::Value) -> PluginCapabilities {
+    let Some(caps) = value.get("capabilities") else {
+        return PluginCapabilities::default();
+    };
+    PluginCapabilities {
+        required: parse_toml_string_map(caps.get("required")),
+        optional: parse_toml_string_map(caps.get("optional")),
+        provided: parse_toml_string_map(caps.get("provided")),
+        interface: parse_toml_interface_map(caps.get("interface")),
+    }
+}
+
+/// Parse a TOML table of `key = "value"` string pairs into a `BTreeMap`.
+/// Non-string values are skipped (the loader validates semver later).
+fn parse_toml_string_map(table: Option<&toml::Value>) -> BTreeMap<String, String> {
+    let Some(tbl) = table.and_then(|v| v.as_table()) else {
+        return BTreeMap::new();
+    };
+    tbl.iter()
+        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+        .collect()
+}
+
+/// Parse the `[capabilities.interface.<name>]` sub-tables into a map of
+/// capability name → [`CapabilityInterfaceRef`]. Entries missing the required
+/// `cid` key are skipped.
+fn parse_toml_interface_map(
+    table: Option<&toml::Value>,
+) -> BTreeMap<String, CapabilityInterfaceRef> {
+    let Some(tbl) = table.and_then(|v| v.as_table()) else {
+        return BTreeMap::new();
+    };
+    tbl.iter()
+        .filter_map(|(name, block)| {
+            let cid = block.get("cid")?.as_str()?.to_string();
+            let spec = block.get("spec").and_then(|v| v.as_str()).map(String::from);
+            Some((name.clone(), CapabilityInterfaceRef { cid, spec }))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,5 +931,180 @@ network = false
         assert_eq!(json_m.name, "test-json");
         assert_eq!(toml_m.version, "0.1.0");
         assert_eq!(json_m.version, "0.1.0");
+    }
+
+    // ── Capability + dependency parsing (ADR-0022 step 1) ──────────────────
+
+    /// Full consumer manifest modeled on inner-space's real `plugin.toml`:
+    /// `[dependencies]` + all three capability tables + an
+    /// `[capabilities.interface.commerce]` block. Asserts dependencies are NO
+    /// LONGER dropped (C-DRIFT-001) and that capabilities are fully populated.
+    #[test]
+    fn parse_manifest_toml_with_dependencies_and_capabilities() {
+        let toml = r#"
+[plugin]
+name = "inner-space"
+version = "0.1.0"
+description = "Micro-scale combat and colony game in your real surroundings"
+author = "plures"
+
+[dependencies]
+plugins = ["commerce-provider", "scene-provider"]
+
+[capabilities.required]
+scanning = "^1.0"
+scene = "^1.0"
+physics = "^1.0"
+audio = "^1.0"
+input = "^1.0"
+location = "^1.0"
+commerce = "^1.0"
+network = "^1.0"
+
+[capabilities.optional]
+ar = "^1.0"
+notify = "^1.0"
+media = "^1.0"
+
+[capabilities.interface.commerce]
+cid = "commerce@1.x"
+spec = "capabilities/commerce.cid.toml"
+"#;
+        let m = parse_manifest(toml).expect("should parse consumer TOML");
+
+        // Dependencies are no longer silently dropped (C-DRIFT-001 fix).
+        assert_eq!(
+            m.dependencies,
+            vec![
+                "commerce-provider".to_string(),
+                "scene-provider".to_string()
+            ],
+            "[dependencies].plugins must be parsed, not dropped"
+        );
+
+        // Required capabilities (semver ranges) — mirrors inner-space.
+        assert_eq!(m.capabilities.required.len(), 8);
+        assert_eq!(
+            m.capabilities.required.get("commerce").map(String::as_str),
+            Some("^1.0")
+        );
+        assert_eq!(
+            m.capabilities.required.get("scanning").map(String::as_str),
+            Some("^1.0")
+        );
+        assert_eq!(
+            m.capabilities.required.get("network").map(String::as_str),
+            Some("^1.0")
+        );
+
+        // Optional capabilities.
+        assert_eq!(m.capabilities.optional.len(), 3);
+        assert_eq!(
+            m.capabilities.optional.get("ar").map(String::as_str),
+            Some("^1.0")
+        );
+
+        // Consumer provides nothing.
+        assert!(m.capabilities.provided.is_empty());
+
+        // Interface reference resolved.
+        let iface = m
+            .capabilities
+            .interface
+            .get("commerce")
+            .expect("commerce interface ref present");
+        assert_eq!(iface.cid, "commerce@1.x");
+        assert_eq!(iface.spec.as_deref(), Some("capabilities/commerce.cid.toml"));
+
+        // Declared ranges are valid semver (uses the `semver` crate, no
+        // hand-rolled parsing).
+        assert!(
+            m.capabilities.validate_versions().is_empty(),
+            "all declared capability ranges should be valid semver"
+        );
+    }
+
+    /// A provider manifest declaring `[capabilities.provided] commerce = "1.2.0"`
+    /// must round-trip: parse from TOML, then serialize+deserialize unchanged.
+    #[test]
+    fn parse_manifest_provider_capability_roundtrips() {
+        let toml = r#"
+[plugin]
+name = "oasis-commerce"
+version = "1.2.0"
+description = "ZK commerce capability provider (ported from OASIS)"
+author = "plures"
+
+[capabilities.provided]
+commerce = "1.2.0"
+
+[capabilities.interface.commerce]
+cid = "commerce@1.x"
+spec = "capabilities/commerce.cid.toml"
+"#;
+        let m = parse_manifest(toml).expect("should parse provider TOML");
+
+        assert_eq!(
+            m.capabilities.provided.get("commerce").map(String::as_str),
+            Some("1.2.0")
+        );
+        assert!(m.capabilities.required.is_empty());
+        assert!(m.capabilities.optional.is_empty());
+
+        // Provided concrete version is valid semver.
+        assert!(m.capabilities.validate_versions().is_empty());
+
+        // JSON round-trip preserves the capability block exactly (serde).
+        let json = serde_json::to_string(&m).expect("serialize");
+        let back: PluginManifest = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.capabilities, m.capabilities);
+        assert_eq!(
+            back.capabilities.provided.get("commerce").map(String::as_str),
+            Some("1.2.0")
+        );
+    }
+
+    /// A manifest with no `[capabilities]` table yields an empty (default)
+    /// `PluginCapabilities` — absence is honest, not an error.
+    #[test]
+    fn parse_manifest_without_capabilities_is_empty_default() {
+        let toml = r#"
+[plugin]
+name = "plain"
+version = "0.1.0"
+description = "no capabilities"
+"#;
+        let m = parse_manifest(toml).unwrap();
+        assert_eq!(m.capabilities, PluginCapabilities::default());
+        assert!(m.capabilities.required.is_empty());
+        assert!(m.capabilities.validate_versions().is_empty());
+    }
+
+    /// `validate_versions` actually exercises the `semver` crate: a malformed
+    /// range and a malformed concrete version are both reported.
+    #[test]
+    fn validate_versions_flags_bad_semver() {
+        let toml = r#"
+[plugin]
+name = "bad-versions"
+version = "0.1.0"
+description = "intentionally malformed capability versions"
+
+[capabilities.required]
+commerce = "not-a-range"
+
+[capabilities.provided]
+scene = "also-bad"
+"#;
+        let m = parse_manifest(toml).unwrap();
+        // Parsing still succeeds (schema layer accepts the strings); validation
+        // is a separate, explicit step.
+        let errors = m.capabilities.validate_versions();
+        assert_eq!(errors.len(), 2, "both malformed versions should be flagged");
+
+        let by_cap: std::collections::BTreeMap<_, _> =
+            errors.iter().map(|e| (e.capability.as_str(), e.kind)).collect();
+        assert_eq!(by_cap.get("commerce"), Some(&CapabilityVersionKind::Range));
+        assert_eq!(by_cap.get("scene"), Some(&CapabilityVersionKind::Version));
     }
 }
