@@ -4,6 +4,13 @@
 
 ## Date: 2026-06-23
 
+> **Implementation status (updated 2026-06-23): ALL 6 STEPS IMPLEMENTED & PUSHED.** This
+> design is fully realized in code; the loader, CID type, first CID, the real provider
+> plugin, the inner-space binding proof, and the modulus CI gate are all landed and gate-green
+> (re-verified from scratch by the architect, not subagent self-report). Commit map is in the
+> Implementation outline below. Remaining honest follow-ups are noted per step (none block the
+> contract).
+
 ## Context
 
 The whole purpose of pares-radix is to be an **app framework that hosts plures-org
@@ -227,6 +234,34 @@ in the foundation repo.
 
 The lifecycle (analyze → fix/build → test → deploy → verify) drives each of these as
 staged subagents; this ADR is the design (Pillar 1) only.
+
+**Implementation map (all landed 2026-06-23, gates re-verified by architect):**
+- Steps 1–3 — pares-radix `38f53f3` (manifest/schema + single parse path / C-DRIFT-001 fix; CID
+  type + loader + resolver into the Kahn topo-sort + bindings persisted to PluresDB;
+  `commerce@1.x` CID authored). Loader/resolver tests green.
+- Step 4 — pares-radix `27f8a99` (provider plugin `plugins/commerce/` + `validate_provider_surface`)
+  + OASIS `6906661` (real IO actor wrapping RedemptionProtocol/nullifier store + mediated e2e).
+  Gate: 20 capability tests + 6 mediated e2e (issue→authorize→E004 double-spend, tier boundary,
+  nullifier membership). A real `check_nullifier` scope bug (global vs campaignId) was caught & fixed.
+- Step 5 — pares-radix `ccee72a` (inner-space's exact 8-cap required map binds to the REAL on-disk
+  `plugins/commerce/plugin.toml` via real `parse_manifest`, validates against the real CID; negative
+  `^2.0`-does-not-bind gate; provider drift guard). Gate: `plugins::capability` 24 passed.
+- Step 6 — pares-modulus `fae3f8f` (`gates/validate-cid-surface.ts` blocking CI gate + vendored
+  dependency-free TOML reader + PASS/FAIL fixtures, wired into `plugin-gate.yml`). Gate: PASS exit 0,
+  FAIL exit 1 naming missing op/event, non-provider skip exit 0, build-registry green.
+
+**Honest follow-ups left ABSENT (none block the contract):**
+- Step 5: the consumer side is reconstructed from inner-space's required map for portability (no
+  absolute cross-repo path read); provider side IS drift-guarded but the consumer fixture is not
+  bound to inner-space's actual `plugin.toml`. Closing it needs a vendored manifest copy or a
+  two-repo CI checkout. The 6 non-commerce required caps bind to trivial host stand-ins only so
+  resolution completes (no CIDs exist for them yet) — only `commerce` is a real provider binding.
+- Step 6: bonus `registry/schema.json` capability fields intentionally NOT added (avoid risk to
+  existing manifests); the vendored TOML subset excludes inline tables/dates/multi-line basic
+  strings (throws rather than mis-parses).
+- @oasis/crypto-verification is NOT yet a pares-radix workspace dep, so the commerce IO actor +
+  mediated e2e live in the OASIS repo; the radix plugin holds the declaration + a pointer. Wiring
+  the dep so the e2e can live under `plugins/commerce/` is real follow-up.
 
 1. **Manifest/schema**: add `[capabilities.required/optional/provided]` +
    `[capabilities.interface.*]` to the manifest parser; add the closed
