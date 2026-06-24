@@ -1184,4 +1184,262 @@ mod tests {
         assert_eq!(bindings[0].provider, "commerce");
         assert_eq!(bindings[0].consumer, "inner-space");
     }
+
+    // ── inner-space's FULL required map binds to the REAL commerce provider ──
+    //    (ADR-0022 step 5: the real consumer ↔ real provider proof, end-to-end
+    //    through the resolver, with NO stubs on either contract end.)
+    //
+    // Faithfulness upgrade over step 4: step 4's inner-space fixture carried
+    // ONLY `commerce = "^1.0"`. Here the consumer mirrors inner-space's EXACT
+    // shipped `[capabilities.required]` map (C:\Projects\inner-space\plugin.toml):
+    //   scanning, scene, physics, audio, input, location, commerce, network
+    // — all at "^1.0". inner-space is a separate repo, so we do NOT read its
+    // absolute path (non-portable / CI-fragile); we reproduce its required map
+    // verbatim via the existing `consumer_manifest` helper. The PROVIDER end is
+    // NOT reproduced: it is the actual committed `plugins/commerce/plugin.toml`,
+    // loaded through the real `parse_manifest` loader, so the binding is against
+    // the real provider declaration and cannot silently drift from it.
+
+    /// inner-space's exact shipped required-capability map (the 8 hard
+    /// requirements). `network` is a platform capability (permission axis,
+    /// ADR-0011) and is skipped by the resolver; the other 7 are
+    /// provider-resolved. Optional caps (ar/notify/media) are not load-bearing
+    /// for the commerce binding proof and are intentionally omitted.
+    const INNERSPACE_REQUIRED: &[(&str, &str)] = &[
+        ("scanning", "^1.0"),
+        ("scene", "^1.0"),
+        ("physics", "^1.0"),
+        ("audio", "^1.0"),
+        ("input", "^1.0"),
+        ("location", "^1.0"),
+        ("commerce", "^1.0"),
+        ("network", "^1.0"),
+    ];
+
+    /// The inner-space consumer carrying its FULL faithful required map.
+    fn innerspace_full_consumer_manifest() -> PluginManifest {
+        consumer_manifest("inner-space", INNERSPACE_REQUIRED)
+    }
+
+    /// Load the REAL shipped `plugins/commerce/plugin.toml` as the provider
+    /// manifest, through the real `parse_manifest` loader (NOT a hand-faked
+    /// provider). This is the actual committed provider declaration the resolver
+    /// must bind against.
+    fn load_real_commerce_provider() -> PluginManifest {
+        let path = commerce_provider_manifest_path();
+        assert!(
+            path.exists(),
+            "real shipped provider manifest must exist at {}",
+            path.display()
+        );
+        let toml = std::fs::read_to_string(&path)
+            .expect("read plugins/commerce/plugin.toml");
+        crate::plugins::manifest::parse_manifest(&toml)
+            .expect("the shipped commerce plugin.toml must parse through the real loader")
+    }
+
+    /// Trivial provider stand-ins for inner-space's OTHER required capabilities
+    /// (scanning/scene/physics/audio/input/location), provided at "1.0.0" so the
+    /// `^1.0` requirements resolve and `resolve_capabilities` can COMPLETE.
+    /// `network` is a platform capability and needs no provider. These exist
+    /// ONLY to let resolution finish so the commerce binding can be asserted in
+    /// the presence of the full required map; the commerce binding itself is
+    /// against the REAL provider, never a stand-in.
+    fn innerspace_other_cap_providers() -> Vec<PluginManifest> {
+        [
+            "scanning", "scene", "physics", "audio", "input", "location",
+        ]
+        .iter()
+        .map(|cap| provider_manifest(&format!("host-{cap}"), &[(cap, "1.0.0")]))
+        .collect()
+    }
+
+    /// END-TO-END BINDING PROOF (ADR-0022 step 5).
+    ///
+    /// With inner-space's FULL required map present, resolving the consumer
+    /// against the REAL committed `plugins/commerce/plugin.toml` (loaded via the
+    /// real loader) yields a `commerce ^1.0 → commerce@1.0.0` binding to the real
+    /// provider; the other required caps resolve to host stand-ins so resolution
+    /// completes. The bound provider's surface then validates against the real
+    /// `commerce.cid.toml`. No part of the commerce contract is stubbed.
+    #[test]
+    fn innerspace_full_required_binds_to_real_commerce_provider_and_validates() {
+        let provider = load_real_commerce_provider();
+        let consumer = innerspace_full_consumer_manifest();
+
+        let mut manifests = vec![provider.clone(), consumer];
+        manifests.extend(innerspace_other_cap_providers());
+
+        let bindings =
+            resolve_capabilities(&manifests).expect("full inner-space map resolves");
+
+        // The commerce binding: inner-space.commerce → the REAL commerce
+        // provider at concrete 1.0.0. (We assert specifically on the commerce
+        // binding among all of inner-space's bindings — the other caps bind to
+        // host stand-ins and are not the subject of this proof.)
+        let commerce = bindings
+            .iter()
+            .find(|b| b.consumer == "inner-space" && b.capability == "commerce")
+            .expect("inner-space.commerce must bind");
+        assert_eq!(
+            commerce.provider, "commerce",
+            "inner-space.commerce binds to the real commerce provider plugin"
+        );
+        assert_eq!(
+            commerce.version, "1.0.0",
+            "bound to the real provider's concrete provided version 1.0.0"
+        );
+
+        // Sanity: every non-platform required cap of inner-space bound (commerce
+        // + the 6 stand-ins = 7); `network` (platform) is correctly NOT bound.
+        let innerspace_bindings: Vec<&CapabilityBinding> = bindings
+            .iter()
+            .filter(|b| b.consumer == "inner-space")
+            .collect();
+        assert_eq!(
+            innerspace_bindings.len(),
+            7,
+            "7 provider-resolved required caps bind (network is platform-skipped); got: {:?}",
+            innerspace_bindings
+                .iter()
+                .map(|b| (b.capability.as_str(), b.version.as_str()))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !innerspace_bindings.iter().any(|b| b.capability == "network"),
+            "network is a platform capability and must not be provider-bound"
+        );
+
+        // The bound provider actually satisfies the CID it claims (ADR-0022 §7):
+        // the REAL provider surface validates against the REAL commerce CID.
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        validate_provider_surface(&provider, &cid).expect(
+            "the bound REAL commerce provider must satisfy the real commerce CID",
+        );
+    }
+
+    /// Same as above but through the WIRED resolve+validate path
+    /// (`resolve_and_validate_capabilities`) with the real CID supplied — the
+    /// exact install/activation path: the REAL provider binds to inner-space's
+    /// full required map AND its surface is validated against the real CID in one
+    /// call. This is the closest in-crate analogue to loading both real plugins.
+    #[test]
+    fn innerspace_full_required_resolve_and_validate_with_real_provider_and_cid() {
+        let provider = load_real_commerce_provider();
+        let consumer = innerspace_full_consumer_manifest();
+
+        let mut manifests = vec![provider, consumer];
+        manifests.extend(innerspace_other_cap_providers());
+
+        let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
+        let mut cids = std::collections::BTreeMap::new();
+        cids.insert("commerce".to_string(), cid);
+
+        let bindings = resolve_and_validate_capabilities(&manifests, &cids).expect(
+            "real commerce provider binds + surface-validates against inner-space's full map",
+        );
+
+        let commerce = bindings
+            .iter()
+            .find(|b| b.consumer == "inner-space" && b.capability == "commerce")
+            .expect("inner-space.commerce must bind in the wired path");
+        assert_eq!(commerce.provider, "commerce");
+        assert_eq!(commerce.version, "1.0.0");
+    }
+
+    /// NEGATIVE (the version gate is REAL): an inner-space-shaped consumer that
+    /// requires `commerce = "^2.0"` does NOT bind to the real 1.0.0 provider —
+    /// resolution fails with `UnsatisfiedCapability` for commerce. (We keep the
+    /// rest of inner-space's required map satisfiable via stand-ins so the ONLY
+    /// failure is the commerce major-version mismatch, proving it is the gate.)
+    #[test]
+    fn innerspace_requiring_commerce_v2_does_not_bind_to_v1_provider() {
+        let provider = load_real_commerce_provider(); // provides commerce = 1.0.0
+
+        // inner-space's required map, but with commerce bumped to ^2.0.
+        let required: Vec<(&str, &str)> = INNERSPACE_REQUIRED
+            .iter()
+            .map(|(cap, range)| {
+                if *cap == "commerce" {
+                    (*cap, "^2.0")
+                } else {
+                    (*cap, *range)
+                }
+            })
+            .collect();
+        let consumer = consumer_manifest("inner-space", &required);
+
+        let mut manifests = vec![provider, consumer];
+        manifests.extend(innerspace_other_cap_providers());
+
+        let err = resolve_capabilities(&manifests)
+            .expect_err("commerce ^2.0 must not bind to the 1.0.0 provider");
+        match err {
+            PluginError::UnsatisfiedCapability {
+                plugin,
+                capability,
+                range,
+            } => {
+                assert_eq!(plugin, "inner-space");
+                assert_eq!(
+                    capability, "commerce",
+                    "the commerce major-version mismatch is the sole gate failure"
+                );
+                assert_eq!(range, "^2.0");
+            }
+            other => panic!("expected UnsatisfiedCapability for commerce, got {other:?}"),
+        }
+    }
+
+    /// FIXTURE-DRIFT GUARD (deliverable 3): loading the REAL shipped
+    /// `plugins/commerce/plugin.toml` through the real loader yields
+    /// `provided commerce = 1.0.0` AND the exact `provides_operations` /
+    /// `provides_events` arrays the binding proof relies on. If the committed
+    /// provider declaration ever drifts (an operation/event added or removed),
+    /// this fails — so the binding fixtures above cannot silently diverge from
+    /// the on-disk provider.
+    #[test]
+    fn real_commerce_plugin_toml_provider_surface_matches_committed_declaration() {
+        let manifest = load_real_commerce_provider();
+
+        // Provided capability + concrete version.
+        assert_eq!(
+            manifest.capabilities.provided.get("commerce").map(String::as_str),
+            Some("1.0.0"),
+            "shipped provider declares [capabilities.provided] commerce = 1.0.0"
+        );
+
+        // The interface block names the CID it implements.
+        let iface = manifest
+            .capabilities
+            .interface
+            .get("commerce")
+            .expect("shipped provider declares [capabilities.interface.commerce]");
+        assert_eq!(iface.cid, "commerce@1.x");
+        assert_eq!(iface.spec.as_deref(), Some("capabilities/commerce.cid.toml"));
+
+        // The 4 mediated operations (verbatim from the committed plugin.toml).
+        assert_eq!(
+            iface.provides_operations,
+            vec![
+                "issue_coupon".to_string(),
+                "authorize_redemption".to_string(),
+                "check_nullifier".to_string(),
+                "decide_tier".to_string(),
+            ],
+            "provides_operations must match the committed provider declaration"
+        );
+
+        // The 4 provider-emitted result events (verbatim).
+        assert_eq!(
+            iface.provides_events,
+            vec![
+                "commerce.issue.completed".to_string(),
+                "commerce.redeem.completed".to_string(),
+                "commerce.nullifier.check.completed".to_string(),
+                "commerce.tier.decide.completed".to_string(),
+            ],
+            "provides_events must match the committed provider declaration"
+        );
+    }
 }
