@@ -1,4 +1,4 @@
-//! `pares-agens-agenda` — Issue and pull-request workflow management for Pares Radix.
+//! `pares-radix-agenda` - Issue and pull-request workflow management for Pares Radix.
 //!
 //! Provides an in-process issue tracker and lightweight pull-request model so
 //! that Pares agents can manage their own work items without requiring an
@@ -6,9 +6,9 @@
 //!
 //! # Modules
 //!
-//! - [`issue`] — [`Issue`](issue::Issue) work-item model and lifecycle.
-//! - [`manager`] — [`AgendaManager`](manager::AgendaManager): CRUD for issues and PRs.
-//! - [`scheduler`] — tokio-based scheduler with cron/interval tasks and optional
+//! - [`issue`] - [`Issue`](issue::Issue) work-item model and lifecycle.
+//! - [`manager`] - [`AgendaManager`](manager::AgendaManager): CRUD for issues and PRs.
+//! - [`scheduler`] - tokio-based scheduler with cron/interval tasks and optional
 //!   PluresDB persistence.
 
 #![warn(missing_docs)]

@@ -7,7 +7,7 @@
 //! # Example
 //!
 //! ```rust
-//! use pares_agens_audit::{event::{AuditEvent, EventKind}, export::{export_json, export_csv}};
+//! use pares_radix_audit::{event::{AuditEvent, EventKind}, export::{export_json, export_csv}};
 //!
 //! let events = vec![
 //!     AuditEvent::new(EventKind::ModelCall, "agent-1", "gpt-4o", "tokens: 42", false),

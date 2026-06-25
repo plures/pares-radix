@@ -118,7 +118,7 @@ impl AuditStore for InMemoryAuditStore {
 // ---------------------------------------------------------------------------
 
 /// The PluresDB actor ID used for all write operations.
-const AUDIT_ACTOR: &str = "pares-agens-audit";
+const AUDIT_ACTOR: &str = "pares-radix-audit";
 
 /// A [`AuditStore`] backed by a PluresDB [`CrdtStore`].
 ///
@@ -133,7 +133,7 @@ const AUDIT_ACTOR: &str = "pares-agens-audit";
 /// # Persistence
 ///
 /// ```rust,no_run
-/// # use pares_agens_audit::{
+/// # use pares_radix_audit::{
 /// #     event::{AuditEvent, EventKind},
 /// #     store::{AuditStore, PluresDbAuditStore},
 /// # };

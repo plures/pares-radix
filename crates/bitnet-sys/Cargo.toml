@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-bitnet-sys"
+name = "pares-radix-bitnet-sys"
 description = "Raw C FFI bindings for bitnet.cpp — unsafe, auto-generated layer"
 version.workspace = true
 edition.workspace = true

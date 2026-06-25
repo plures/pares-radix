@@ -43,7 +43,7 @@ pub enum IssuePriority {
 /// # Example
 ///
 /// ```
-/// use pares_agens_agenda::issue::{Issue, IssuePriority};
+/// use pares_radix_agenda::issue::{Issue, IssuePriority};
 ///
 /// let issue = Issue::new("Fix login bug", "Users cannot log in with SSO.").unwrap();
 /// assert_eq!(issue.title(), "Fix login bug");

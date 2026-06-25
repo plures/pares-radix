@@ -42,7 +42,7 @@ Trigger manually via workflow_dispatch with optional `target_file` and `package`
 | core-chronos | pares-agens-core | crates/core/src/chronos.rs |
 | core-procedure | pares-agens-core | crates/core/src/procedure.rs |
 | core-memory | pares-agens-core | crates/core/src/memory/store.rs |
-| privacy | pares-agens-privacy | crates/privacy/src/lib.rs |
+| privacy | pares-radix-privacy | crates/privacy/src/lib.rs |
 | core-ledger | pares-agens-core | crates/core/src/praxis/ledger.rs |
 | core-cerebellum | pares-agens-core | crates/core/src/cerebellum/pipeline.rs |
 | core-forgetting | pares-agens-core | crates/core/src/memory/forgetting/engine.rs |

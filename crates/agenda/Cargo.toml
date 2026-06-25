@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-agenda"
+name = "pares-radix-agenda"
 description = "Issue and pull-request workflow management for Pares Agens"
 version.workspace = true
 edition.workspace = true

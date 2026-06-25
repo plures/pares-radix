@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```rust
-//! use pares_agens_audit::{query::AuditQuery, event::EventKind};
+//! use pares_radix_audit::{query::AuditQuery, event::EventKind};
 //!
 //! let q = AuditQuery::new()
 //!     .with_kind(EventKind::ModelCall)

@@ -1,4 +1,4 @@
-//! Build script for `pares-agens-bitnet-sys`.
+//! Build script for `pares-radix-bitnet-sys`.
 //!
 //! When the `native` Cargo feature is enabled this script compiles
 //! the bitnet.cpp submodule (which includes llama.cpp) via CMake,

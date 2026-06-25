@@ -1,4 +1,4 @@
-//! `pares-agens-privacy` — Privacy filter and PII protection for Pares Radix.
+//! `pares-radix-privacy` - Privacy filter and PII protection for Pares Radix.
 //!
 //! Provides PII detection and scrubbing for training data, differential
 //! privacy noise injection for adapter weights, red-team testing, and
@@ -7,7 +7,7 @@
 //! # Quick start
 //!
 //! ```rust
-//! use pares_agens_privacy::detect;
+//! use pares_radix_privacy::detect;
 //!
 //! let spans = detect("Call me at 800-555-1234 or email bob@example.com");
 //! assert!(!spans.is_empty());
@@ -19,7 +19,7 @@
 //! or inject extra patterns:
 //!
 //! ```rust
-//! use pares_agens_privacy::{PrivacyConfig, CategoryConfig, PrivacyFilter, PIIType};
+//! use pares_radix_privacy::{PrivacyConfig, CategoryConfig, PrivacyFilter, PIIType};
 //!
 //! let mut cfg = PrivacyConfig::default();
 //! cfg.name.enabled = false;           // skip name detection
@@ -140,7 +140,7 @@ pub enum PIIType {
     Phone,
     /// US Social Security Number (e.g. `123-45-6789`).
     SSN,
-    /// Payment card number (13–16 digits; covers Visa, Mastercard, AmEx, Discover).
+    /// Payment card number (13-16 digits; covers Visa, Mastercard, AmEx, Discover).
     CreditCard,
     /// Person's name (heuristic: two or more capitalised words).
     Name,
@@ -535,7 +535,7 @@ fn detect_phones(text: &str, out: &mut Vec<PIIMatch>) {
             }
         }
 
-        // Valid phone numbers have 10–15 digits.
+        // Valid phone numbers have 10-15 digits.
         if (10..=15).contains(&digits) {
             let end_byte = if j < n { indexed[j].1 } else { text.len() };
             out.push(PIIMatch {
@@ -580,7 +580,7 @@ fn detect_ssns(text: &str, out: &mut Vec<PIIMatch>) {
     }
 }
 
-/// Detect common payment card numbers (13–16 digits, with optional spaces / dashes).
+/// Detect common payment card numbers (13-16 digits, with optional spaces / dashes).
 ///
 /// Covers Visa (13 or 16 digits), Mastercard (16), American Express (15),
 /// Discover (16), and Diners Club (14).
@@ -961,7 +961,7 @@ pub struct RedactionAuditEntry {
 
 /// Summary of all PII redacted in a single [`PrivacyFilter::redact`] call.
 ///
-/// Intended for audit logging — records *what* was found (by type and count)
+/// Intended for audit logging - records *what* was found (by type and count)
 /// but never the actual PII content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RedactionAudit {
@@ -979,7 +979,7 @@ impl PrivacyFilter {
     /// the round-trip through [`RedactionMap::restore`] is lossless:
     ///
     /// ```rust
-    /// use pares_agens_privacy::PrivacyFilter;
+    /// use pares_radix_privacy::PrivacyFilter;
     ///
     /// let filter = PrivacyFilter::new();
     /// let (redacted, map, audit) =
@@ -1054,7 +1054,7 @@ impl PrivacyFilter {
         // Build the per-type audit counts from the redaction map entries.
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         for (placeholder, _) in &map.entries {
-            // Placeholder format: `[TAG_N]` — extract the TAG portion before
+            // Placeholder format: `[TAG_N]` - extract the TAG portion before
             // the final underscore+number.
             if let Some(tag) = tag_from_placeholder(placeholder) {
                 *type_counts.entry(tag.to_string()).or_insert(0) += 1;

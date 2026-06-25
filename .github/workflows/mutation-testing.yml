@@ -45,7 +45,7 @@ jobs:
             package: pares-agens-core
             file: crates/core/src/memory/store.rs
           - name: privacy
-            package: pares-agens-privacy
+            package: pares-radix-privacy
             file: crates/privacy/src/lib.rs
           - name: core-ledger
             package: pares-agens-core

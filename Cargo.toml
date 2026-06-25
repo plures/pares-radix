@@ -1,28 +1,19 @@
 [workspace]
 resolver = "2"
 members = [
-    "src-tauri",
-    "crates/core",
     "crates/radix-core",
-    "crates/channels",
-    "crates/models",
     "crates/mcp-client",
     "crates/cli",
     "crates/cli-api",
-    "crates/cli-runtime",
     "crates/privacy",
     "crates/marketplace",
     "crates/agenda",
     "crates/praxis",
     "crates/sync",
     "crates/audit",
-    "crates/tauri-app",
-    "crates/tui",
     "crates/bitnet-sys",
-    "crates/bitnet",
     "crates/rector",
     "crates/omniscient",
-    "crates/mcp-server",
 ]
 
 [workspace.package]

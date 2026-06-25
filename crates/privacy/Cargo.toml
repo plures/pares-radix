@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-privacy"
+name = "pares-radix-privacy"
 description = "Privacy filter and PII protection for Pares Agens training data"
 version.workspace = true
 edition.workspace = true

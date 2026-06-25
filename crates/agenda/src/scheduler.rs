@@ -5,7 +5,7 @@
 //!
 //! # Example
 //! ```rust,ignore
-//! use pares_agens_agenda::scheduler::{Scheduler, Task, Schedule};
+//! use pares_radix_agenda::scheduler::{Scheduler, Task, Schedule};
 //! let scheduler = Scheduler::new();
 //! // scheduler.add(task).await;
 //! // scheduler.start().await;

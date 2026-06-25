@@ -8,7 +8,7 @@
 //!
 //! ```rust
 //! # use std::sync::Arc;
-//! # use pares_agens_audit::{
+//! # use pares_radix_audit::{
 //! #     event::{AuditEvent, EventKind},
 //! #     store::InMemoryAuditStore,
 //! #     retention::{RetentionConfig, apply_retention},

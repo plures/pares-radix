@@ -1,22 +1,22 @@
 #![warn(missing_docs)]
-//! `pares-agens-audit` — Comprehensive audit log for Pares Radix.
+//! `pares-radix-audit` - Comprehensive audit log for Pares Radix.
 //!
 //! Provides a full audit trail of what data went where: every model call,
 //! every memory write, every external action.
 //!
 //! # Modules
 //!
-//! - [`event`] — [`EventKind`], [`AuditEvent`]: structured event definitions.
-//! - [`store`] — [`AuditStore`] trait, [`InMemoryAuditStore`], and [`PluresDbAuditStore`].
-//! - [`query`] — [`AuditQuery`]: filter by date, action type, and destination.
-//! - [`export`] — [`export_json`] / [`export_csv`]: compliance export helpers.
-//! - [`retention`] — [`RetentionConfig`] and [`apply_retention`]: log rotation.
+//! - [`event`] - [`EventKind`], [`AuditEvent`]: structured event definitions.
+//! - [`store`] - [`AuditStore`] trait, [`InMemoryAuditStore`], and [`PluresDbAuditStore`].
+//! - [`query`] - [`AuditQuery`]: filter by date, action type, and destination.
+//! - [`export`] - [`export_json`] / [`export_csv`]: compliance export helpers.
+//! - [`retention`] - [`RetentionConfig`] and [`apply_retention`]: log rotation.
 //!
-//! # Quick start — in-memory (tests / single-process)
+//! # Quick start - in-memory (tests / single-process)
 //!
 //! ```rust
 //! # use std::sync::Arc;
-//! # use pares_agens_audit::{
+//! # use pares_radix_audit::{
 //! #     event::{AuditEvent, EventKind},
 //! #     store::{AuditStore, InMemoryAuditStore},
 //! #     query::AuditQuery,
@@ -43,7 +43,7 @@
 //!
 //! ```rust,no_run
 //! # use std::sync::Arc;
-//! # use pares_agens_audit::{
+//! # use pares_radix_audit::{
 //! #     event::{AuditEvent, EventKind},
 //! #     store::{AuditStore, PluresDbAuditStore},
 //! #     retention::{RetentionConfig, apply_retention},

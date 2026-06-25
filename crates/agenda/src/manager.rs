@@ -114,7 +114,7 @@ impl PullRequest {
 /// # Example
 ///
 /// ```
-/// use pares_agens_agenda::manager::AgendaManager;
+/// use pares_radix_agenda::manager::AgendaManager;
 ///
 /// let mut mgr = AgendaManager::new();
 /// let id = mgr.create_issue("Implement Arca", "Local storage MVP").unwrap();

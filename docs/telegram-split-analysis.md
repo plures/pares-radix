@@ -560,7 +560,7 @@ trait GovernanceActionHandler: AsyncActionHandler {
 | `pares_agens_core::tool_governance::ToolGovernor` | core | /tools command |
 | `pares_agens_core::praxis::write_gate::*` | core | /praxis command |
 | `pares_agens_core::task::*` | core | Task types for /tasks display |
-| `pares_agens_agenda::scheduler::Scheduler` | agenda | /cron command |
+| `pares_radix_agenda::scheduler::Scheduler` | agenda | /cron command |
 | `pares_radix_marketplace::*` | marketplace | /marketplace, /install |
 | `pares_rector::*` | rector | /cluster command |
 | `crate::adapter::{ChannelAdapter, ChannelError}` | channels | Trait implementation |

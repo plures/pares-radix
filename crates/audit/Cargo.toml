@@ -1,5 +1,5 @@
 [package]
-name = "pares-agens-audit"
+name = "pares-radix-audit"
 description = "Comprehensive audit log for Pares Agens — structured event trail with query, export, and retention"
 version.workspace = true
 edition.workspace = true
