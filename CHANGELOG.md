@@ -1,3 +1,12 @@
+## [1.49.2] — 2026-06-25
+
+- chore(release): v1.49.2 [skip ci] (7e3b963)
+- refactor(radix)!: B1 R4+R5 — carve host runtime to agens; radix is platform-only (f8eada7)
+- refactor(radix-core)!: B1 S-E — relocate memory DTOs to platform; de-cognition cli/mcp-client (446027f)
+- feat(state): expose PluresDbStateStore::crdt_store() shared handle (22f3ca4)
+- refactor(radix-core)!: B1 S-B — platform classifier+memory seams; de-cognition cli-runtime/cli-api (3172cfa)
+- docs(adr-0022): mark all 6 steps Implemented + commit map + honest follow-ups (f4fac34)
+
 ## [1.49.1] — 2026-06-24
 
 - chore(release): v1.49.1 [skip ci] (2573e98)
