@@ -1,0 +1,416 @@
+# Capability Interface Descriptor (CID): git-repo@1.x
+#
+# ADR-0025 (Hyperswarm-Backed Git Forge) + ADR-0022 (Capability Host Contract).
+# This is a host/registry-owned org-level contract. v1 format is TOML (the .px
+# grammar at pluresdb-px rev 195c67b has no `capability` construct — verified
+# against crates/pluresdb-px/src/px/grammar.pest; the .px-native CID form is
+# deferred to a real upstream grammar construct, NOT stubbed).
+#
+# This descriptor is grounded ENTIRELY in real git semantics. Every node /
+# operation / event below maps to an actual git protocol or forge concept:
+#   - objects/packs are content-addressed (git object model; SHA-1/SHA-256 oids)
+#   - refs are CAS-updated pointers (git's expected-old-value ref-update command,
+#     non-fast-forward rejection)
+#   - the wire ops mirror smart-HTTP git-upload-pack (fetch/clone) and
+#     git-receive-pack (push)
+#   - PR / issue / review / release / webhook are standard forge concepts
+# Nothing here invents a field with no git meaning. Object/pack BYTES live in
+# plures-object (content-addressed P2P chunks, ADR-0025 §1); the nodes below are
+# the index/metadata entries that reference that content by oid.
+#
+# A provider plugin declaring `[capabilities.provided] git-repo = "1.x"` MUST
+# implement the non-deferred surface; the loader validates the provider's declared
+# surface against this CID at install (ADR-0022 §7). A consumer interacts ONLY
+# through the mediated nodes/events below — no direct function references cross the
+# plugin boundary (ADR-0011). Items marked `deferred = true` are post-v1
+# (C-NOSTUB-001: deferred, not stubbed) and are NOT required of a v1 provider.
+
+[cid]
+name = "git-repo"
+version = "1.0.0"
+title = "Hyperswarm-backed git forge (repos, refs, push/fetch, PRs, issues, reviews)"
+summary = """
+A git forge whose object store IS plures-object (content-addressed chunks,
+Hyperswarm P2P replication) and whose refs/forge-metadata ARE PluresDB nodes
+(CRDT-replicated). Git objects are immutable + content-addressed (no conflict
+policy needed); refs are single-writer pointers updated by compare-and-swap
+through a per-repo authoritative writer (Hyperswarm topic = repo); social
+metadata (issue/PR comments, reviews) merges freely via CRDT. Any standard git
+client works unmodified over smart-HTTP (git-upload-pack / git-receive-pack);
+git:// and SSH are deferred. HA/DR is inherent (P2P object replication + read
+scale-out from any replica), not bolted on.
+"""
+# Source of truth this contract is grounded in (for audit / drift tracking):
+source = "git protocol (pack-protocol, http-protocol, ref-update) + ADR-0025"
+foundation_reuse = [
+  "plures-object: content-addressed object/pack BYTES (P2P chunk store)",
+  "pluresdb: ref + forge-metadata NODES (CRDT) + built-in Hyperswarm sync (HA/DR)",
+  "pares-arca: edge cache for read-heavy fetch/clone",
+  "secrets@1.x (vault): deploy keys / push tokens / SSH host keys",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE TYPES — PluresDB node schemas the capability reads/writes. Namespaced by
+# the consumer's pluresdb_namespace at runtime (e.g. forge:git-repo:*). Object and
+# pack BYTES are NOT stored in these nodes — the nodes hold the oid + a
+# content-address handle into plures-object (ADR-0025 §1). Field types mirror real
+# git structures; binary payloads are opaque bytes / content-addressed handles at
+# the contract boundary.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[nodes]]
+type = "git-repo:repo"
+maps_to = "Repository"
+key = "git-repo:repo:{id}"
+fields = [
+  "id: string",
+  "name: string",                 # path/slug, e.g. "plures/pares-radix"
+  "owner_id: bytes",              # PublicKey of the owning identity
+  "default_branch: string",       # e.g. refs/heads/main
+  "hash_algo: enum(sha1,sha256)", # git object hash algorithm for this repo
+  "visibility: enum(public,private,internal)",
+  "swarm_topic: bytes",           # Hyperswarm topic for this repo (= writer-election + replication scope)
+  "writer_id: bytes",             # PublicKey of the current authoritative ref writer (ADR-0025 §3); absent => read-only
+  "status: enum(active,archived,deleting)",
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:ref"
+maps_to = "git ref (refs/heads/*, refs/tags/*)"
+key = "git-repo:ref:{repo_id}:{name}"
+fields = [
+  "repo_id: string",
+  "name: string",                 # fully-qualified, e.g. refs/heads/main
+  "target_oid: string",           # the object id this ref points at (hex)
+  "peeled_oid?: string",          # for annotated tags: the peeled commit oid
+  "generation: u64",              # monotonic CAS counter (ADR-0025 §3 ref_update_cas)
+  "symbolic?: string",            # set iff this is a symref (e.g. HEAD -> refs/heads/main)
+  "updated_by: bytes",            # PublicKey of the pusher who last advanced it
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:git_object"
+maps_to = "git loose object (blob|tree|commit|tag)"
+key = "git-repo:object:{repo_id}:{oid}"
+content_in = "plures-object"      # BYTES live in plures-object; this node is the index entry
+immutable = true                  # content-addressed: an object is never mutated (ADR-0025 object_immutable)
+fields = [
+  "repo_id: string",
+  "oid: string",                  # content address (hex SHA-1/SHA-256)
+  "kind: enum(blob,tree,commit,tag)",
+  "size: u64",                    # uncompressed object size
+  "content_handle: bytes",        # plures-object content-address handle for the bytes
+]
+
+[[nodes]]
+type = "git-repo:pack"
+maps_to = "git packfile (+ .idx)"
+key = "git-repo:pack:{repo_id}:{pack_oid}"
+content_in = "plures-object"      # packfile + index BYTES live in plures-object
+immutable = true
+fields = [
+  "repo_id: string",
+  "pack_oid: string",             # checksum (trailer) identifying the pack
+  "object_count: u64",            # number of objects in the pack (integrity check)
+  "pack_handle: bytes",           # plures-object handle for the .pack bytes
+  "index_handle: bytes",          # plures-object handle for the .idx bytes
+  "created: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:pull_request"
+maps_to = "PullRequest"
+key = "git-repo:pr:{repo_id}:{number}"
+fields = [
+  "repo_id: string",
+  "number: u64",
+  "title: string",
+  "body: string",
+  "author_id: bytes",             # PublicKey
+  "source_ref: string",           # head ref (the branch being merged)
+  "target_ref: string",           # base ref (the branch merged into)
+  "source_oid: string",           # head commit oid at open/last-update
+  "target_oid: string",           # base commit oid at open/last-update
+  "state: enum(open,merged,closed)",
+  "merge_oid?: string",           # the merge commit oid once merged
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:issue"
+maps_to = "Issue"
+key = "git-repo:issue:{repo_id}:{number}"
+fields = [
+  "repo_id: string",
+  "number: u64",
+  "title: string",
+  "body: string",
+  "author_id: bytes",             # PublicKey
+  "state: enum(open,closed)",
+  "labels: set<string>",          # CRDT set — multi-writer labels merge cleanly
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:review"
+maps_to = "Review (on a pull_request)"
+key = "git-repo:review:{repo_id}:{pr_number}:{id}"
+fields = [
+  "repo_id: string",
+  "pr_number: u64",
+  "id: string",
+  "reviewer_id: bytes",           # PublicKey
+  "verdict: enum(approve,request_changes,comment)",
+  "body: string",
+  "reviewed_oid: string",         # the PR head oid this review applies to
+  "created: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:release"
+maps_to = "Release (off an annotated tag)"
+key = "git-repo:release:{repo_id}:{tag}"
+deferred = true                   # post-v1 (ADR-0025 §4); present, not stubbed
+fields = [
+  "repo_id: string",
+  "tag: string",                  # the refs/tags/* this release is cut from
+  "tag_oid: string",              # the tag/commit oid
+  "name: string",
+  "notes: string",
+  "prerelease: bool",
+  "created: timestamp",
+]
+
+[[nodes]]
+type = "git-repo:webhook"
+maps_to = "Webhook subscription"
+key = "git-repo:webhook:{repo_id}:{id}"
+deferred = true                   # post-v1 (ADR-0025 §4); present, not stubbed
+fields = [
+  "repo_id: string",
+  "id: string",
+  "url: string",                  # delivery target
+  "events: set<string>",          # which forge events trigger delivery (e.g. ref.updated, pr.opened)
+  "secret_ref: string",           # reference into secrets@1.x (vault); NOT the secret itself
+  "active: bool",
+  "created: timestamp",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPERATIONS — the entry points a consumer triggers. Per ADR-0011 these are
+# MEDIATED: a consumer emits the `request` event / writes the request node; the
+# provider's reactive procedures service it; the provider emits the `result`
+# event the consumer reads. No direct calls. The wire-protocol ops (push_received,
+# fetch) carry a streaming packfile at the IO boundary — see [transport] below;
+# the streaming-transport host capability is a REAL gap (ADR-0025 §2, Task 3).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[operations]]
+name = "push_received"
+maps_to = "git-receive-pack (smart-HTTP)"
+request_event = "git-repo.push.requested"
+result_event = "git-repo.push.completed"
+# Each ref command carries git's expected old oid -> CAS (ADR-0025 §3). A pack of
+# new objects is ingested into plures-object; integrity is verified on ingest.
+input = [
+  "repo_id: string",
+  "ref_commands: list<{ name: string, old_oid: string, new_oid: string }>",
+  "pack_handle: bytes",           # plures-object handle for the streamed-in pack
+  "pusher_id: bytes",             # PublicKey (authorized via secrets@1.x)
+]
+output = [
+  "results: list<{ name: string, ok: bool, reason?: string }>",  # per-ref accept/reject
+  "ingested_objects: u64",
+]
+errors = [
+  "E_NON_FAST_FORWARD",           # old_oid != stored target_oid (ref_update_cas failed)
+  "E_PACK_INTEGRITY",             # object_count/checksum mismatch on ingest
+  "E_UNAUTHORIZED",               # pusher lacks push rights
+  "E_READ_ONLY",                  # no authoritative writer for repo (ADR-0025 §3 degradation)
+]
+
+[[operations]]
+name = "fetch"
+maps_to = "git-upload-pack (smart-HTTP fetch/clone)"
+request_event = "git-repo.fetch.requested"
+result_event = "git-repo.fetch.completed"
+# Ref advertisement + want/have negotiation happen in the adapter; the result is a
+# generated pack streamed from plures-object (cached at the edge via pares-arca).
+input = [
+  "repo_id: string",
+  "wants: list<string>",          # oids the client wants
+  "haves: list<string>",          # oids the client already has
+  "depth?: u64",                  # shallow clone depth (0 = full)
+]
+output = [
+  "pack_handle: bytes",           # plures-object handle for the generated pack
+  "refs: list<{ name: string, target_oid: string }>",  # ref advertisement
+]
+errors = ["E_UNKNOWN_OBJECT", "E_UNAUTHORIZED"]
+
+[[operations]]
+name = "open_pr"
+maps_to = "create PullRequest"
+request_event = "git-repo.pr.open.requested"
+result_event = "git-repo.pr.open.completed"
+input = [
+  "repo_id: string",
+  "title: string",
+  "body: string",
+  "source_ref: string",
+  "target_ref: string",
+  "author_id: bytes",
+]
+output = ["pr: git-repo:pull_request"]
+errors = ["E_UNKNOWN_REF"]
+
+[[operations]]
+name = "merge_pr"
+maps_to = "merge PullRequest (advances target_ref via CAS)"
+request_event = "git-repo.pr.merge.requested"
+result_event = "git-repo.pr.merge.completed"
+# A merge advances the target ref -> goes through the SAME ref_update_cas path as
+# a push (ADR-0025 §3). A stale target_oid yields E_NON_FAST_FORWARD.
+input = [
+  "repo_id: string",
+  "number: u64",
+  "strategy: enum(merge,squash,rebase)",
+  "expected_target_oid: string",  # CAS guard for the base ref
+  "merger_id: bytes",
+]
+output = ["merge_oid: string", "state: enum(merged)"]
+errors = ["E_NON_FAST_FORWARD", "E_PR_NOT_OPEN", "E_UNAUTHORIZED"]
+
+[[operations]]
+name = "open_issue"
+maps_to = "create Issue"
+request_event = "git-repo.issue.open.requested"
+result_event = "git-repo.issue.open.completed"
+input = [
+  "repo_id: string",
+  "title: string",
+  "body: string",
+  "author_id: bytes",
+]
+output = ["issue: git-repo:issue"]
+errors = []
+
+[[operations]]
+name = "create_review"
+maps_to = "submit Review on a PR"
+request_event = "git-repo.review.create.requested"
+result_event = "git-repo.review.create.completed"
+input = [
+  "repo_id: string",
+  "pr_number: u64",
+  "verdict: enum(approve,request_changes,comment)",
+  "body: string",
+  "reviewed_oid: string",
+  "reviewer_id: bytes",
+]
+output = ["review: git-repo:review"]
+errors = ["E_PR_NOT_OPEN"]
+
+[[operations]]
+name = "create_release"
+maps_to = "cut a Release from a tag"
+deferred = true                   # post-v1 (ADR-0025 §4)
+request_event = "git-repo.release.create.requested"
+result_event = "git-repo.release.create.completed"
+input = [
+  "repo_id: string",
+  "tag: string",
+  "name: string",
+  "notes: string",
+  "prerelease: bool",
+]
+output = ["release: git-repo:release"]
+errors = ["E_UNKNOWN_REF"]
+
+[[operations]]
+name = "register_webhook"
+maps_to = "register a Webhook subscription"
+deferred = true                   # post-v1 (ADR-0025 §4)
+request_event = "git-repo.webhook.register.requested"
+result_event = "git-repo.webhook.register.completed"
+input = [
+  "repo_id: string",
+  "url: string",
+  "events: list<string>",
+  "secret_ref: string",           # reference into secrets@1.x; never the raw secret
+]
+output = ["webhook: git-repo:webhook"]
+errors = []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EVENTS — the full mediated event vocabulary. Request/result pairs above, PLUS
+# provider-emitted NOTIFICATION events (ref.updated, pr.opened, ...) that webhooks
+# and CI hooks (ADR-0023) subscribe to. Listed for the loader's provider-surface
+# validation. Deferred ops' events are listed but a v1 provider is not required to
+# emit them (C-NOSTUB-001).
+# ─────────────────────────────────────────────────────────────────────────────
+[events]
+emitted_by_consumer = [
+  "git-repo.push.requested",
+  "git-repo.fetch.requested",
+  "git-repo.pr.open.requested",
+  "git-repo.pr.merge.requested",
+  "git-repo.issue.open.requested",
+  "git-repo.review.create.requested",
+  "git-repo.release.create.requested",      # deferred
+  "git-repo.webhook.register.requested",    # deferred
+]
+emitted_by_provider = [
+  # result events (paired with the requests above)
+  "git-repo.push.completed",
+  "git-repo.fetch.completed",
+  "git-repo.pr.open.completed",
+  "git-repo.pr.merge.completed",
+  "git-repo.issue.open.completed",
+  "git-repo.review.create.completed",
+  "git-repo.release.create.completed",      # deferred
+  "git-repo.webhook.register.completed",    # deferred
+  # notification events (the forge activity stream; webhooks + CI hooks subscribe)
+  "git-repo.ref.updated",                   # a ref advanced via CAS (carries name, old_oid, new_oid)
+  "git-repo.pr.opened",
+  "git-repo.pr.merged",
+  "git-repo.issue.opened",
+  "git-repo.review.created",
+  "git-repo.release.published",             # deferred
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRANSPORT — the wire-protocol surface this CID exposes (ADR-0025 §2). Declared
+# so a provider/consumer agree on which transports exist and so the streaming gap
+# is explicit. push_received/fetch carry STREAMING packfiles; radix's current
+# IO-actor model is request/response, so production transport DEPENDS ON a general
+# streaming-transport host capability that does not exist yet (Task 3, real gap —
+# NOT stubbed here).
+# ─────────────────────────────────────────────────────────────────────────────
+[transport]
+v1 = ["smart-http"]                     # git-upload-pack / git-receive-pack
+deferred = ["git-daemon", "ssh"]        # post-v1 (ADR-0025 §4)
+streaming = true                        # packfiles stream; long-lived/duplex IO
+requires_host_capability = "streaming-transport"   # ABSENT today; Task 3 §3.B foundation work
+v1_limitation = "buffered/chunked request-response approximation until streaming-transport lands"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INVARIANTS — contract guarantees a conforming provider MUST uphold. Grounded in
+# real git correctness properties (fast-forward, content-addressing, pack
+# integrity) restated as contract obligations.
+# ─────────────────────────────────────────────────────────────────────────────
+[invariants]
+rules = [
+  "ref_update_cas: a ref advances iff the supplied old_oid equals the stored target_oid (or the ref is absent on create); otherwise the update is rejected with E_NON_FAST_FORWARD. Ref updates are linearizable per ref (serialized through the repo's authoritative writer). Generation increases monotonically on each successful update.",
+  "object_immutable: a git_object is content-addressed by its oid and is never mutated; writing the same oid twice is idempotent (identical content) and any oid/content mismatch is rejected.",
+  "pack_integrity: an ingested pack's actual object count and checksum trailer MUST match the declared object_count/pack_oid; a mismatch fails with E_PACK_INTEGRITY and the pack is not admitted.",
+  "single_writer_refs: at most one authoritative ref writer exists per repo at a time (Hyperswarm topic = repo); with no writer the repo is read-only (fetch/clone still served from replicas) and never accepts divergent ref updates.",
+  "objects_replicate_conflict_free: object/pack content replicates P2P with no conflict policy (immutable + content-addressed); only refs require CAS, and social metadata (issue/PR comments, reviews, labels) merges via CRDT.",
+  "merge_advances_base_via_cas: merging a PR advances the target ref through the same ref_update_cas path as a push; a stale base yields E_NON_FAST_FORWARD (no silent overwrite).",
+  "secrets_never_in_nodes: deploy keys / push tokens / webhook secrets are referenced by handle into secrets@1.x (vault) only; raw secret material is never persisted in any git-repo node.",
+]

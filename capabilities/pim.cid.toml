@@ -1,0 +1,314 @@
+# Capability Interface Descriptor (CID): pim@1.x
+#
+# ADR-0026 (Self-Shaping Personal Information Manager) + ADR-0022 (Capability Host
+# Contract) + ADR-0024 (Canonical Plugin Format). This is a host/registry-owned
+# org-level contract. v1 format is TOML (the .px grammar at pluresdb-px v3.0.1 /
+# rev 195c67b has no `capability` construct — verified against
+# crates/pluresdb-px/src/px/grammar.pest; the .px-native CID form is deferred to a
+# real upstream grammar construct, NOT stubbed).
+#
+# The `pim` plugin (a self-shaping Personal Information Manager) PROVIDES this
+# capability and also CONSUMES storage@^1 / llm@^1 / ui@^1 / secrets@^1 (optional).
+# The CORE IDEA: the PIM database is NOT fixed-schema. It RESHAPES itself to the
+# user's needs via AI (proactively or just-in-time). `unum` renders CRUD from the
+# CURRENT shape (entity_def/field_def/view_def) for manual ops; `agens` (the llm
+# capability) drives automated ops/reporting/analysis/integrity. The schema is
+# itself PluresDB data the user/AI edit (C-PLURES-003/004).
+#
+# A provider plugin declaring `[capabilities.provided] pim = "1.x"` MUST implement
+# this surface; the loader validates the provider's declared surface against this
+# CID at install (ADR-0022 §7). A consumer (another plugin/agent that drives the
+# PIM) interacts ONLY through the mediated nodes/events below — no direct function
+# references cross the plugin boundary (ADR-0011).
+#
+# HONEST DEFERRAL (C-NOSTUB-001): the CRDT schema-evolution + record-migration
+# primitive (ADR-0026 §2.6) belongs in PluresDB (foundation), not this plugin.
+# Until it lands, a conforming provider implements the ADDITIVE / rename-as-metadata
+# / non-destructive evolution path (which needs no new primitive) and reports
+# lossy/destructive migration as NOT-YET-BUILT rather than faking it. The
+# destructive-needs-confirmation and migrate-able-or-quarantine invariants below
+# still hold (they are guarantees, not stubs).
+
+[cid]
+name = "pim"
+version = "1.0.0"
+title = "Self-shaping Personal Information Manager (meta-schema + AI shape evolution)"
+summary = """
+A PIM whose schema is data, not code. entity_def/field_def/view_def/relation nodes
+describe the CURRENT shape; record nodes conform to it via migrate-on-read. agens
+proposes shape changes (proactive or just-in-time); .px constraints gate them; the
+user confirms; PluresDB applies + migrates. unum renders CRUD from the current
+shape for manual ops. PluresDB embeddings power semantic lookup; agens drives
+reports/analysis and integrity/maintenance. No silent destructive schema edits;
+every shape change is ledgered; records always migrate-able to the current shape or
+quarantined. Goal: outperform frozen-schema PIMs because the model evolves.
+"""
+# Source of truth this contract is grounded in (for audit / drift tracking):
+source_repo = "pares-radix"
+source_paths = [
+  ".praxis/decisions/ADR-0026-self-shaping-pim.md",
+  ".praxis/decisions/ADR-0024-canonical-plugin-format.md",
+  ".praxis/decisions/ADR-0022-capability-host-contract.md",
+]
+# Foundation primitives this capability COMPOSES (NOT reinvents — C-PLURES-001/004):
+#   unum (@plures/unum)      — CRUD UI from the current shape (ui capability)
+#   agens (pares-agens, PRIV)— shape proposals / completion / reports / analysis (llm capability)
+#   PluresDB                 — CRDT store + reactive procedures + embeddings + graph (storage)
+#   secrets@1.x (vault)      — sensitive fields (optional)
+# Foundation DEPENDENCY this capability surfaces (ADR-0026 §2.6, routes to pluresdb):
+#   a general CRDT schema-evolution + record-migration primitive (versioned node-types,
+#   mergeable migration-op log, migrate-on-read, lossless residue). ABSENT until built;
+#   provider uses the additive/non-destructive path until then (C-NOSTUB-001).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NODE TYPES — PluresDB node schemas the capability reads/writes. Namespaced by
+# the consumer's pluresdb_namespace at runtime (e.g. pim:entity_def:*). The
+# meta-schema nodes (entity_def/field_def/view_def/relation) ARE the schema, stored
+# as data; record nodes conform to the current entity_def via migrate-on-read.
+# Field types are the contract-boundary shape; cryptographic/sensitive payloads are
+# opaque bytes routed through the secrets capability.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[nodes]]
+type = "pim:entity_def"
+maps_to = "EntityDef (the schema-as-data: a user-facing kind of thing)"
+key = "pim:entity_def:{slug}"
+fields = [
+  "slug: string",              # stable user-facing identifier (Contact, Project, Habit…)
+  "title: string",
+  "description: string",
+  "version: u64",              # monotonic schema version (ADR-0026 §2.1)
+  "migrations: list<ShapeChangeOp>", # append-only, causally-ordered op log (CRDT grow-only)
+  "embedding_indexed: bool",   # whether records of this entity participate in semantic lookup
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "pim:field_def"
+maps_to = "FieldDef (a field on an entity_def)"
+key = "pim:field_def:{entity_slug}:{field_slug}"
+fields = [
+  "field_id: string",          # STABLE uuid — rename ≠ delete+add (ADR-0026 §2.2)
+  "entity_slug: string",
+  "slug: string",              # display slug (rename mutates this only; zero records change)
+  "label: string",
+  "type: enum(text,number,bool,date,timestamp,enum,relation,embedding,sensitive,json)",
+  "required: bool",
+  "sensitive: bool",           # if true, value stored via secrets@1.x, never plaintext
+  "embedding_indexed: bool",   # field participates in semantic lookup
+  "default: json",             # value applied to existing records on add_field migration
+  "enum_values: list<string>", # when type=enum
+  "relation_slug: string",     # when type=relation -> the pim:relation it uses
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "pim:view_def"
+maps_to = "ViewDef (a saved view/layout over an entity_def)"
+key = "pim:view_def:{slug}"
+fields = [
+  "slug: string",
+  "entity_slug: string",
+  "title: string",
+  "kind: enum(table,board,list,detail,gallery)",
+  "columns: list<string>",     # field slugs in display order
+  "filters: json",
+  "sort: json",
+  "group_by: string",
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "pim:relation"
+maps_to = "RelationDef (a typed edge type between two entity_defs)"
+key = "pim:relation:{slug}"
+fields = [
+  "slug: string",
+  "from_entity: string",       # entity_def slug
+  "to_entity: string",         # entity_def slug
+  "label: string",             # e.g. works_at
+  "inverse_label: string",     # e.g. employs
+  "cardinality: enum(one_to_one,one_to_many,many_to_many)",
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "pim:record"
+maps_to = "Record (an actual user datum conforming to the current shape)"
+key = "pim:record:{entity_slug}:{id}"
+fields = [
+  "id: string",
+  "entity_slug: string",       # which entity_def this record claims to be
+  "schema_version: u64",       # entity_def version this record was last written/migrated under
+  "properties: map<field_id, json>",  # keyed by STABLE field_id, not slug
+  "migration_residue: map<field_id, json>", # lossless overflow from lossy/removed fields (§2.3)
+  "quarantined: bool",         # true if it cannot migrate cleanly to current shape (§4 invariant)
+  "created: timestamp",
+  "updated: timestamp",
+]
+
+[[nodes]]
+type = "pim:shape_change_proposal"
+maps_to = "ShapeChangeProposal (the propose→confirm→apply ledger entry — ADR-0026 §4)"
+key = "pim:shape_change_proposal:{id}"
+fields = [
+  "id: string",
+  "origin: enum(agens,user)",  # who proposed it (agens proposals are gated; user edits too)
+  "trigger: enum(proactive,just_in_time,maintenance)",
+  "ops: list<ShapeChangeOp>",  # add_field/remove_field/rename_field/retype_field/add_relation/…
+  "destructive: bool",         # computed: requires confirmation if true (§2.4)
+  "rationale: string",         # agens explanation surfaced to the user
+  "status: enum(proposed,awaiting_confirmation,applied,rejected,superseded)",
+  "decided_by: enum(auto,user)",
+  "created: timestamp",
+  "decided: timestamp",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPERATIONS — the entry points a consumer triggers. Per ADR-0011 these are
+# MEDIATED: a consumer emits the `request` event / writes the request node; the
+# provider's reactive .px procedures service it; the provider emits the `result`
+# event the consumer reads. No direct calls. agens NEVER writes entity_def/field_def
+# directly — it can only propose; the apply authority lives in .px the agens layer
+# cannot bypass (ADR-0026 §4).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[operations]]
+name = "propose_shape_change"
+maps_to = "agens shape-inference -> PROPOSE-GATE .px procedure"
+request_event = "pim.shape.change.requested"
+result_event = "pim.shape.change.proposed"
+input = [
+  "origin: enum(agens,user)",
+  "trigger: enum(proactive,just_in_time,maintenance)",
+  "ops: list<ShapeChangeOp>",
+  "rationale: string",
+]
+output = [
+  "proposal: pim:shape_change_proposal",
+  "destructive: bool",
+  "auto_applied: bool",        # true if non-destructive + auto-apply policy allowed it
+]
+errors = ["E-PIM-001"]         # malformed proposal / would break shape consistency (gate reject)
+
+[[operations]]
+name = "apply_shape_change"
+maps_to = "APPLY-GATE .px procedure (after confirmation, or auto for non-destructive)"
+request_event = "pim.shape.change.confirm.requested"   # user confirm/reject is mediated
+result_event = "pim.shape.change.applied"
+input = [
+  "proposal_id: string",
+  "decision: enum(confirm,reject)",
+]
+output = [
+  "applied: bool",
+  "new_version?: u64",          # entity_def version after apply
+  "migrated_count?: u64",       # records migrated-on-apply (lazy ones migrate on read)
+  "quarantined_count?: u64",    # records that could not migrate cleanly (flagged, not dropped)
+  "error?: string",
+]
+errors = ["E-PIM-002", "E-PIM-003"]  # E-PIM-002: destructive without confirmation;
+                                     # E-PIM-003: migration not-yet-built for a lossy op (deferred, §2.6)
+
+[[operations]]
+name = "lookup"
+maps_to = "PluresDB embeddings semantic lookup over records of an entity_def"
+request_event = "pim.lookup.requested"
+result_event = "pim.lookup.completed"
+input = [
+  "entity_slug?: string",      # optional scope; omit = across all embedding-indexed entities
+  "query: string",
+  "limit: u32",
+]
+output = ["matches: list<pim:record>", "scores: list<f32>"]
+
+[[operations]]
+name = "complete_record"
+maps_to = "agens record-completion (infer/suggest field values) -> mediated"
+request_event = "pim.record.complete.requested"
+result_event = "pim.record.completed"
+input = [
+  "entity_slug: string",
+  "partial: map<field_id, json>",
+  "id?: string",               # existing record to complete, or omit to draft a new one
+]
+output = [
+  "record: pim:record",
+  "suggested: map<field_id, json>", # agens suggestions the user can accept/edit (not auto-committed)
+]
+errors = ["E-PIM-004"]         # entity_slug unknown / does not conform to current shape
+
+[[operations]]
+name = "generate_report"
+maps_to = "agens report/rollup generation over the current shape -> mediated"
+request_event = "pim.report.requested"
+result_event = "pim.report.generated"
+input = [
+  "spec: json",                # e.g. {entity:'Contact', filter:'no_contact_90d'} — natural or structured
+]
+output = ["report_node_key: string", "summary: string"]  # output persisted as a PluresDB node the UI renders
+
+[[operations]]
+name = "run_integrity_check"
+maps_to = "agens-driven integrity/maintenance sweep -> mediated; fixes route back through propose_shape_change"
+request_event = "pim.integrity.check.requested"
+result_event = "pim.integrity.check.completed"
+input = ["scope?: string"]     # optional entity_slug; omit = whole store
+output = [
+  "issues_found: u32",
+  "quarantined: u32",          # records failing current field_defs / unresolved residue
+  "dangling_relations: u32",
+  "duplicate_candidates: u32",
+  "proposed_fixes: list<string>",  # proposal_ids — NEVER auto-applied to user data (§4)
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EVENTS — the full mediated event vocabulary (request/result pairs above, plus
+# the asynchronous notifications consumers subscribe to), listed for the loader's
+# provider-surface validation.
+# ─────────────────────────────────────────────────────────────────────────────
+[events]
+emitted_by_consumer = [
+  "pim.shape.change.requested",
+  "pim.shape.change.confirm.requested",
+  "pim.lookup.requested",
+  "pim.record.complete.requested",
+  "pim.report.requested",
+  "pim.integrity.check.requested",
+]
+emitted_by_provider = [
+  "pim.shape.change.proposed",
+  "pim.shape.change.awaiting_confirmation",  # gated destructive op surfaced to the user
+  "pim.shape.change.applied",
+  "pim.shape.change.rejected",
+  "pim.lookup.completed",
+  "pim.record.completed",
+  "pim.report.generated",
+  "pim.integrity.check.completed",
+  "pim.integrity.alert",                     # async: a record/relation needs attention
+  "pim.record.quarantined",                  # async: a record could not migrate cleanly
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INVARIANTS — contract guarantees a conforming provider MUST uphold. These are
+# the ADR-0026 guardrails restated as contract obligations. They are guarantees,
+# not stubs (C-NOSTUB-001): where the underlying CRDT migration primitive is not
+# yet built (§2.6), the provider refuses lossy ops with E-PIM-003 rather than
+# performing an unsafe or faked migration.
+# ─────────────────────────────────────────────────────────────────────────────
+[invariants]
+rules = [
+  "no_destructive_without_confirmation: a destructive shape change (remove_field, lossy retype_field, delete entity_def with extant records, remove relation with extant edges) NEVER applies from an agens proposal without an explicit user confirmation event; attempting it yields E-PIM-002.",
+  "records_migrate_or_quarantine: every record is migrate-able to the current shape via migrate-on-read, OR it is quarantined (flagged) with its original data preserved in migration_residue; a record is NEVER silently dropped or mangled.",
+  "every_shape_change_is_ledgered: every proposal, confirmation, rejection, application, and supersession is recorded as a pim:shape_change_proposal transition + event in PluresDB — a complete, replayable audit trail of how the shape evolved and who/what drove it.",
+  "schema_changes_are_crdt_merge_safe: concurrent shape edits merge by operation commutativity + a deterministic total order over the grow-only migrations log; conflicting ops on the same field_id resolve deterministically (causal order, then Lamport ts, then actor id), all peers converge to the same shape, and the losing op is preserved in the ledger — never silently dropped.",
+  "rename_is_metadata_only: renaming a field mutates the field_def slug only (records key by stable field_id); zero records are rewritten and no data is at risk.",
+  "agens_proposes_only: agens (the llm seam) cannot write entity_def/field_def/view_def/relation directly; it can only emit proposals — the authority to apply lives in .px procedures it cannot bypass (mediated boundary, ADR-0011).",
+  "sensitive_fields_via_secrets: a field with sensitive=true is stored through the secrets@1.x capability, never as plaintext in a record property; if no secrets provider is bound, sensitive fields cannot be written (graceful degrade).",
+  "status_monotonic: a shape_change_proposal status only advances proposed -> {awaiting_confirmation -> {applied|rejected}} | superseded; it never returns to proposed.",
+  "lossy_migration_deferral_is_honest: where the foundation CRDT schema-evolution/migration primitive (ADR-0026 §2.6) is not yet available, lossy/destructive migration operations are refused with E-PIM-003 (not-yet-built) rather than faked — the additive/rename/non-destructive path remains fully functional (C-NOSTUB-001).",
+]
