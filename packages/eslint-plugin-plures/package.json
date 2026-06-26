@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-plures",
-  "version": "1.49.2",
+  "version": "1.49.3",
   "description": "ESLint rules enforcing plures platform constraints: design-dojo only, unum for state, pluresdb for data",
   "type": "module",
   "main": "src/index.js",

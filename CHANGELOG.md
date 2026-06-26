@@ -1,3 +1,9 @@
+## [1.49.3] — 2026-06-26
+
+- chore(release): v1.49.3 [skip ci] (bc28338)
+- docs(adr): canonical plugin format + capability deps (0024), hyperswarm-git forge (0025), self-shaping PIM (0026) + git-repo/pim CIDs (2e8e0aa)
+- docs(adr): ADR-0023 procedure observability event contract (plures.proc.event.v1) (70cd00f)
+
 ## [1.49.2] — 2026-06-25
 
 - chore(release): v1.49.2 [skip ci] (7e3b963)
