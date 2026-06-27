@@ -1,3 +1,9 @@
+## [1.49.4] — 2026-06-27
+
+- chore(release): v1.49.4 [skip ci] (374ac11)
+- design(capabilities): add secrets@1.x CID grounded in plures-vault surface (e3ce06f)
+- feat(platform): implement ctx.data.collection() host bridge + activate plugins (9db4051)
+
 ## [1.49.3] — 2026-06-26
 
 - chore(release): v1.49.3 [skip ci] (bc28338)
