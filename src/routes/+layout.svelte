@@ -11,6 +11,8 @@
 		setSharedGraph,
 		setSharedAdapter,
 	} from '$lib/stores/plures-db-adapter.js';
+	import { activateAll } from '$lib/platform/plugin-loader.js';
+	import { createPluginContext } from '$lib/platform/plugin-context.js';
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
@@ -47,6 +49,14 @@
 			}),
 		);
 		initPraxisFacts();
+
+		// Activate all registered plugins now that the PluresDB adapter is wired.
+		// Each plugin's onActivate(ctx) receives a pluginId-scoped PluginContext so
+		// ctx.data.collection(name) persists under pluresdb:plugin:{pluginId}/...
+		// (createPluginContext bridges the adapter; goto is injected for navigation).
+		// Fire-and-forget: activation is async but must not block first paint;
+		// per-plugin failures are isolated and logged inside activateAll.
+		void activateAll((pluginId) => createPluginContext(pluginId, { goto }));
 
 		// Initialize the design mode schema registry from all loaded praxis modules
 		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule);

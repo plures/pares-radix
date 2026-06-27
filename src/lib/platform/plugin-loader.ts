@@ -46,16 +46,27 @@ export function registerPlugin(plugin: RadixPlugin): void {
 
 /**
  * Activate all registered plugins in dependency order.
+ *
+ * Each plugin's `onActivate` receives a context. Pass either:
+ *   - a context factory `(pluginId) => PluginContext` (preferred — gives every
+ *     plugin a `pluginId`-scoped context so data is namespace-isolated), or
+ *   - a single shared `PluginContext` (legacy; same ctx for all plugins).
  */
-export async function activateAll(ctx: PluginContext): Promise<void> {
+export async function activateAll(
+  ctxOrFactory: PluginContext | ((pluginId: string) => PluginContext),
+): Promise<void> {
   const order = topologicalSort(plugins);
+  const makeCtx =
+    typeof ctxOrFactory === 'function'
+      ? ctxOrFactory
+      : (_pluginId: string) => ctxOrFactory;
 
   for (const id of order) {
     const entry = plugins.get(id);
     if (!entry || entry.active) continue;
 
     try {
-      await entry.plugin.onActivate?.(ctx);
+      await entry.plugin.onActivate?.(makeCtx(id));
       entry.active = true;
       // eslint-disable-next-line plures/no-manual-logging
       console.log(`[radix] ✓ Activated plugin: ${entry.plugin.name}`);

@@ -66,6 +66,8 @@ export interface PluresDBAdapter {
 	getPluginData(pluginId: string, subpath: string): unknown;
 	/** Query all plugin-scoped data stored under a plugin's namespace */
 	queryPluginData(pluginId: string): Array<{ subpath: string; value: unknown }>;
+	/** Delete a single plugin-scoped record (key: pluresdb:plugin:{pluginId}/{subpath}) */
+	deletePluginData(pluginId: string, subpath: string): void;
 }
 
 // ─── Key Prefixes ─────────────────────────────────────────────────────────────
@@ -145,6 +147,10 @@ export function createPluresDBAdapter({ db, registry }: PluresDBAdapterOptions):
 				subpath: key.slice(prefix.length),
 				value: db.get(key),
 			}));
+		},
+
+		deletePluginData(pluginId: string, subpath: string): void {
+			db.delete(`${PLUGIN_DATA_PREFIX}${pluginId}/${subpath}`);
 		},
 	};
 }

@@ -27,6 +27,12 @@ export {
 } from './platform/inference-engine.js';
 export { createLLMAPI, resetTokenBudget, getTokensUsed } from './platform/llm.js';
 export {
+  createPluginContext,
+  setNotifySink,
+  resetNotifySink,
+} from './platform/plugin-context.js';
+export type { NotifyLevel, NotifySink, PluginContextOptions } from './platform/plugin-context.js';
+export {
   builtinUxExpectations,
   checkDataRequirements,
   validateUxExpectations,
