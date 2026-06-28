@@ -11,10 +11,13 @@
 publishPlatformInstallers = true
 
 # Platform targets to build when on an EVEN (stable) line.
-# Desktop targets are live now. android/ios are intentionally DEFERRED until the build-caching
-# layer is proven (cold mobile builds historically time out) AND Apple signing creds exist —
-# they will be appended here once ADR-0029 Stage 4 gates are met.
-platformTargets = ["windows", "macos", "linux-flatpak", "nixos"]
+# Live now (verified to emit artifacts): windows (nsis+msi), macos (dmg), linux (deb+appimage),
+# nixos (flake packages.desktop). flatpak is DEFERRED until a real, Linux-tested
+# src-tauri/flatpak/ai.plures.radix.yml manifest exists — declaring "linux-flatpak" before
+# then would silently emit no .flatpak (a soft stub). android/ios are DEFERRED until the
+# build-caching layer is proven (cold mobile builds historically time out) AND Apple signing
+# creds exist. Append "linux-flatpak"/"android"/"ios" here once each gate is met.
+platformTargets = ["windows", "macos", "linux", "nixos"]
 
 # Build-metric tracking: caching is only "done" when it measurably + persistently speeds builds.
 trackBuildMetrics = true
