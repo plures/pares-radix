@@ -50,7 +50,7 @@ practice ui_layout_direction_responsive:
 practice ui_layout_stack_below_md:
   kind: resolve
   appliesTo: container
-  when: context.node.childCount > 1 && context.node.hasResponsiveDirection === false
+  when: context.node.childCount > 1 && context.node.hasResponsiveDirection == false
   set: direction
   default: column-below-md
   rationale: A multi-child container with no explicit direction stacks to a column below md and becomes a row at md and up so it stays readable on small screens; set an explicit responsive.direction to override.

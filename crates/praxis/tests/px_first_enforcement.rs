@@ -47,10 +47,10 @@ const FORBIDDEN_STATE_PATTERNS: &[&str] = &[
 
 /// Crates that are ALLOWED to have in-memory state (side-effect boundaries).
 const STATE_ALLOWLIST: &[&str] = &[
-    "crates/core/src/shell_executor.rs", // process session management (IO boundary)
-    "crates/core/src/spine/pipeline.rs", // event bus (infrastructure)
-    "crates/core/src/spine/procedures/tool_executor.rs", // per-chat loop counter (runtime safety)
-    "crates/core/src/delegation/manager.rs", // runtime task handles (JoinHandle is IO)
+    "crates/radix-core/src/shell_executor.rs", // process session management (IO boundary)
+    "crates/radix-core/src/spine/pipeline.rs", // event bus (infrastructure)
+    "crates/radix-core/src/spine/procedures/tool_executor.rs", // per-chat loop counter (runtime safety)
+    "crates/radix-core/src/delegation/manager.rs", // runtime task handles (JoinHandle is IO)
     "crates/tui/",                       // TUI state is ephemeral UI, not business logic
     "crates/tauri-app/",                 // GUI state
     "crates/mcp-server/",                // connection state (IO boundary)
@@ -59,14 +59,22 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/praxis/src/px/async_executor.rs", // runtime execution state
     "crates/praxis/src/px/watcher.rs",   // filesystem watcher (IO boundary)
     "crates/sync/src/lan.rs",            // network peer discovery (IO boundary)
-    "crates/core/src/plugins/runtime.rs", // plugin lifecycle (IO boundary)
+    "crates/radix-core/src/plugins/runtime.rs", // plugin lifecycle (IO boundary)
     "crates/cli/src/main.rs",            // ToolTraceStore is ephemeral debug tracing
     "crates/agenda/src/scheduler.rs", // runtime task working set (persistence via TaskStore, HashMap is hot cache)
-    "crates/core/src/secrets.rs", // InMemorySecretStore is test/dev utility only (not used in production)
-    "crates/core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
-    "crates/core/src/spine/conversation.rs", // MemoryConversationStore is test utility (PluresConversationStore is production)
-    "crates/core/src/agent.rs", // conversation_history is hot cache; persistence via turn_store (PluresDB)
-    "crates/core/src/cerebellum/actions.rs", // state store hot cache (transitional; migrating to PluresDB)
+    "crates/radix-core/src/secrets.rs", // InMemorySecretStore is test/dev utility only (not used in production)
+    "crates/radix-core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
+    "crates/radix-core/src/spine/conversation.rs", // MemoryConversationStore is test utility (PluresConversationStore is production)
+    "crates/radix-core/src/agent.rs", // conversation_history is hot cache; persistence via turn_store (PluresDB)
+    "crates/radix-core/src/cerebellum/actions.rs", // state store hot cache (transitional; migrating to PluresDB)
+    // Live oneshot senders for in-flight reactive-chain result waiters are process-local
+    // handles that cannot be serialized/persisted to PluresDB. Transient runtime coordination
+    // (same class as plugins/runtime, shell_executor).
+    "crates/radix-core/src/spine/reactive.rs",
+    // MemoryThreadStore is the documented TEST-ONLY in-memory thread store (production store is
+    // PluresDB-backed). It is `pub` (used by cross-crate integration tests) and lives in a
+    // non-#[cfg(test)] path, so the scanner catches it; allowlist rather than cfg-gate it.
+    "crates/radix-core/src/threading/store.rs",
 ];
 
 /// Check that no crate introduces persistent in-memory state outside the allowlist.

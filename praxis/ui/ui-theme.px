@@ -70,7 +70,7 @@
 practice ui_theme_text_color:
   kind: resolve
   appliesTo: text
-  when: context.node.hasThemeToken === true && context.node.hasExplicitColor === false
+  when: context.node.hasThemeToken == true && context.node.hasExplicitColor == false
   set: color
   default: theme-token-color
   rationale: Text color is derived from your semantic theme token so it stays legible and consistent in light/dark; an explicit color prop overrides this.

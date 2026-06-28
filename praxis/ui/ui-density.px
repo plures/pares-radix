@@ -48,7 +48,7 @@
 practice ui_density_padding_scale:
   kind: resolve
   appliesTo: container
-  when: context.node.hasResponsivePadding === false
+  when: context.node.hasResponsivePadding == false
   set: padding
   default: scale-by-density
   rationale: Padding scales with the active display density so inner spacing stays consistent across compact/comfortable/spacious; set an explicit responsive.padding to override.
@@ -58,7 +58,7 @@ practice ui_density_padding_scale:
 practice ui_density_gap_scale:
   kind: resolve
   appliesTo: container
-  when: context.node.hasResponsiveGap === false
+  when: context.node.hasResponsiveGap == false
   set: gap
   default: scale-by-density
   rationale: Gap scales with the active display density so spacing stays consistent across compact/comfortable/spacious; set an explicit responsive.gap to override.

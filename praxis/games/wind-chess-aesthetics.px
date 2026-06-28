@@ -323,7 +323,7 @@ procedure generate_event_audio(drift: list[DriftEvent] from "drift_events", capt
   define $sounds = []
 
   # Drift captures get BIG sounds (the payoff)
-  loop over captures as cap:
+  loop over $captures as cap:
     # Scale impact sound with piece value
     classify_capture_impact {attacker: cap.attacker_kind, victim: cap.victim_kind} -> $impact_type
 

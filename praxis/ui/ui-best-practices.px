@@ -10,7 +10,7 @@
 #     extractor emits. No rule may depend on a fact that does not exist —
 #     that would be a rule that silently never fires (a lie).
 #   - The evaluator surface is FLAT boolean logic only:
-#       context.<path>  ===/!==/==/!=  literal
+#       context.<path>  ==/!=  literal
 #       >  <  >=  <=     numeric comparisons
 #       &&  ||  !        composition
 #     No .includes(), no function calls, no tree walking. The extractor does
@@ -33,31 +33,31 @@
 # ═══════════════════════════════════════════════════════════════════════
 
 constraint ui_inputs_have_labels:
+  phase: ui
   when: context.ui.inputCount > 0
-  require: context.ui.allInputsLabeled === true
+  require: context.ui.allInputsLabeled == true
   severity: error
-  phases: ["ui"]
   message: "Every form input (Input/TextArea/Select) must have a label. Unlabeled inputs are invisible to screen readers and ambiguous to everyone. Add a `label` prop (or bind one)."
 
 constraint ui_buttons_have_accessible_name:
+  phase: ui
   when: context.ui.buttonCount > 0
-  require: context.ui.allButtonsLabeled === true
+  require: context.ui.allButtonsLabeled == true
   severity: error
-  phases: ["ui"]
   message: "Every Button must have a non-empty `label` (its accessible name). A button with no name cannot be announced, found by voice control, or understood."
 
 constraint ui_images_have_alt:
+  phase: ui
   when: context.ui.imageCount > 0
-  require: context.ui.allImagesHaveAlt === true
+  require: context.ui.allImagesHaveAlt == true
   severity: error
-  phases: ["ui"]
   message: "Every image must have an `alt` text alternative (empty alt='' only for purely decorative images). Missing alt text fails WCAG 1.1.1."
 
 constraint ui_external_links_have_text:
+  phase: ui
   when: context.ui.externalLinkCount > 0
-  require: context.ui.externalLinksMissingText === 0
+  require: context.ui.externalLinksMissingText == 0
   severity: error
-  phases: ["ui"]
   message: "External links must contain visible link text. An empty link has no accessible name and no click affordance."
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -66,24 +66,24 @@ constraint ui_external_links_have_text:
 # ═══════════════════════════════════════════════════════════════════════
 
 constraint ui_has_top_level_heading:
+  phase: ui
   when: context.ui.headingCount > 0
-  require: context.ui.hasTopLevelHeading === true
+  require: context.ui.hasTopLevelHeading == true
   severity: warning
-  phases: ["ui"]
   message: "A view with headings should have a top-level heading (level 1 or 2) so screen-reader users can orient. Don't start the hierarchy at h3+."
 
 constraint ui_no_skipped_heading_levels:
+  phase: ui
   when: context.ui.headingCount > 1
-  require: context.ui.headingsSkipLevel === false
+  require: context.ui.headingsSkipLevel == false
   severity: warning
-  phases: ["ui"]
   message: "Heading levels must not skip (e.g. h2 → h4). Skipped levels break the document outline that assistive tech relies on. Demote/promote so levels step by one."
 
 constraint ui_single_h1:
+  phase: ui
   when: context.ui.headingCount > 0
   require: context.ui.h1Count <= 1
   severity: warning
-  phases: ["ui"]
   message: "Prefer a single level-1 heading per view (the page's one title). Multiple h1s dilute the document outline."
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -92,17 +92,17 @@ constraint ui_single_h1:
 # ═══════════════════════════════════════════════════════════════════════
 
 constraint ui_destructive_actions_need_confirmation:
+  phase: ui
   when: context.ui.dangerButtonCount > 0
-  require: context.ui.dangerButtonsWithoutConfirm === 0
+  require: context.ui.dangerButtonsWithoutConfirm == 0
   severity: warning
-  phases: ["ui"]
   message: "Destructive (variant='danger') actions should be paired with a confirmation Dialog. Irreversible actions one click away cause data loss. Add a Dialog to the view."
 
 constraint ui_dialogs_are_actionable:
+  phase: ui
   when: context.ui.dialogCount > 0
-  require: context.ui.dialogsMissingHandlers === 0
+  require: context.ui.dialogsMissingHandlers == 0
   severity: error
-  phases: ["ui"]
   message: "Every Dialog must wire both onConfirm and onCancel. A modal with no actions traps the user (no way to proceed or escape) — a dead-end and a focus trap."
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -111,10 +111,10 @@ constraint ui_dialogs_are_actionable:
 # ═══════════════════════════════════════════════════════════════════════
 
 constraint ui_no_unknown_components:
+  phase: ui
   when: context.ui.registrySize > 0
-  require: context.ui.unknownComponentCount === 0
+  require: context.ui.unknownComponentCount == 0
   severity: error
-  phases: ["ui"]
   message: "Every node `type` must resolve to a registered component. An unknown type renders nothing (silent blank). Register the component or fix the type name."
 
 # ════════════════════════════════════════════════════════════════════════
@@ -125,13 +125,13 @@ constraint ui_no_unknown_components:
 # HONESTY: this constraint reads ONLY facts the extractor emits — contrastChecked
 # and lowContrastTextCount (ui-facts.ts). A contrast ratio needs a background;
 # the only one we may assume is the declared THEME_SURFACE for the ACTIVE mode.
-# The `when` guard (contrastChecked === true) means the rule is INERT until a
+# The `when` guard (contrastChecked == true) means the rule is INERT until a
 # caller supplies a theme mode to extractUiFacts — the honest "surface unknown"
 # state, not a silent pass.
 
 constraint ui_text_contrast_aa:
-  when: context.ui.contrastChecked === true
-  require: context.ui.lowContrastTextCount === 0
+  phase: ui
+  when: context.ui.contrastChecked == true
+  require: context.ui.lowContrastTextCount == 0
   severity: error
-  phases: ["ui"]
   message: "Text must meet WCAG AA contrast (>= 4.5:1) against the theme surface. context.ui.lowContrastTextCount text node(s) fall below it. Use a darker/lighter colour or a theme token that clears AA for the active mode."
