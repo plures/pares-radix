@@ -1,3 +1,14 @@
+## [1.53.0] — 2026-06-28
+
+- chore(release): v1.53.0 [skip ci] (3eb014a)
+- feat(canvas): drive responsive engine on the real /canvas surface (1ef03ed)
+- feat(canvas-runtime): WCAG-AA contrast linter (validate-mode) (edfce8f)
+- chore(release): v1.52.0 [skip ci] (f83c70a)
+- feat(capabilities): scene@1.x CID (RSV render-state read-model + signed-Intent write-model) (d2f0e88)
+- docs(adr): ADR-0028 constraint-engine canonicalization (pluresdb-px canonical, already NAPI-bridged; @plures/praxis stays framework) (2a79cce)
+- docs(adr): ADR-0027 dev-lifecycle spine wiring (collapse .mjs driver into .px/actor/PluresDB loop) (561701c)
+- docs(ui): mark theme/density/contrast + renderer integration as built (212a3dd)
+
 ## [1.51.0] — 2026-06-28
 
 - chore(release): v1.51.0 [skip ci] (21091ff)
