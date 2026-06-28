@@ -29,6 +29,35 @@ concern is box-model + position). Nothing special-cased.
 This is the CSS property model, but **declarative, typed, stored in PluresDB, and
 reactive** — instead of imperative stylesheets evaluated in the browser.
 
+## 1a. Strategic objective — WHY this exists (kbristol, 2026-06-27)
+
+The point is **good UI that conforms to best practices, while avoiding costly mistakes** —
+and to achieve it by writing the practice **once** and adding the control **once**, so that
+per-UI authoring code is **minimal**. Minimal author code → minimal surface for error. The
+primary defense is therefore **structural, not a linter**:
+
+- **(A) Default-correct by construction.** The resolve engine + a one-time set of
+  **Design Dojo authoring controls** mean the *correct* layout / spacing / theme / contrast
+  is simply what you get by default. Because almost no per-UI code is written, almost no
+  per-UI mistakes are possible. **This is the main win.** Authoring-time *enforcement/nagging
+  becomes largely unnecessary* precisely because the default is already correct.
+
+- **(B) Overrides are first-class, and guidance fires ON override.** "Best practice" ≠
+  "always." A developer must be able to override a resolved default. **When (and only when)
+  they override, surface the rule's rationale at authoring time** — an inline hint for a human
+  in Dojo, structured feedback for the AI composer. This is *guidance on deviation*, NOT a
+  blanket validate-everything error wall. The validate half is the **mechanism**; the
+  **trigger is an explicit override**; the **delivery is authoring-time guidance**.
+
+- **(C) Library-for-other-products: DROPPED.** No case for shipping canvas-runtime as a
+  general library to a third product. Do not build toward it.
+
+Consequences for the build: A needs the **Dojo authoring controls** (the "add controls once"
+half) finished and the default-correct path to truly need minimal author code. B needs the
+existing validate/contrast constraints **re-pointed**: fire on override-detected, carry a
+human-readable rationale, deliver to two presenters (human inline hint + AI structured note)
+from one rule+rationale source.
+
 ## 2. Why this fits the foundation (C-PLURES-004)
 
 - The rule **logic** is pure: `(facts, attributes) → violations | resolvedAttributes`.
