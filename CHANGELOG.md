@@ -1,3 +1,7 @@
+## [1.55.6] — 2026-06-28
+
+- fix(lint): resolve clippy violations failing CI rust gate (useless-format, derivable-impls, unnecessary-map-or, len-zero) (b9ddeba)
+
 ## [1.55.5] — 2026-06-28
 
 - fix(release): catch up Cargo.lock to 1.55.3 (in-flight release raced the org pipeline fix) (8753b83)
