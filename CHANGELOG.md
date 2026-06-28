@@ -1,3 +1,8 @@
+## [1.51.0] — 2026-06-28
+
+- chore(release): v1.51.0 [skip ci] (21091ff)
+- feat(canvas-runtime): theme/density resolve practices + responsive renderer (0ddb410)
+
 ## [1.50.0] — 2026-06-28
 
 - chore(release): v1.50.0 [skip ci] (a940876)
