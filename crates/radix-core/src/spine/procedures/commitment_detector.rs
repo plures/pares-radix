@@ -100,7 +100,7 @@ fn detect_commitments(text: &str) -> Vec<String> {
         if trimmed
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_digit())
+            .is_some_and(|c| c.is_ascii_digit())
         {
             if let Some(text_after) = trimmed.split_once('.').map(|(_, t)| t.trim()) {
                 let lower = text_after.to_lowercase();

@@ -101,7 +101,6 @@ struct CopilotLimits {
 #[derive(Debug, Deserialize)]
 struct CopilotSupports {
     vision: Option<bool>,
-    tool_calls: Option<bool>,
     #[serde(default)]
     reasoning_effort: Option<Vec<String>>,
 }
@@ -390,16 +389,6 @@ struct OllamaTagsResponse {
 #[derive(Debug, Deserialize)]
 struct OllamaModel {
     name: String,
-    #[serde(default)]
-    size: u64,
-    #[serde(default)]
-    details: Option<OllamaDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OllamaDetails {
-    #[serde(default)]
-    parameter_size: Option<String>,
 }
 
 async fn discover_ollama(provider: &ProviderConfig) -> Result<Vec<DiscoveredModel>, String> {

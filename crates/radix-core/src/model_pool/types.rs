@@ -42,7 +42,7 @@ pub enum ProviderAuth {
 }
 
 /// Health status of a provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderStatus {
     /// Provider is responding normally.
@@ -52,6 +52,7 @@ pub enum ProviderStatus {
     /// Provider is not reachable.
     Offline,
     /// Provider hasn't been checked yet.
+    #[default]
     Unknown,
 }
 
@@ -71,12 +72,6 @@ pub struct ProviderConfig {
     pub last_checked: Option<SystemTime>,
     #[serde(default)]
     pub last_discovery: Option<SystemTime>,
-}
-
-impl Default for ProviderStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 // ── Model ────────────────────────────────────────────────────────────────────

@@ -320,7 +320,7 @@ mod tests {
     fn list_available_models_returns_array() {
         let handler = ModelSelectionActionHandler::new();
         let result = handler.list_available_models(&json!({})).unwrap();
-        assert!(result["models"].as_array().unwrap().len() > 0);
+        assert!(!result["models"].as_array().unwrap().is_empty());
     }
 
     #[test]

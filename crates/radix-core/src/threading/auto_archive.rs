@@ -208,7 +208,7 @@ mod tests {
         let store = Arc::new(MemoryThreadStore::new());
         let t1 = store.create_thread("chat-1", "topic-a").await;
         let t2 = store.create_thread("chat-1", "topic-b").await;
-        let t3 = store.create_thread("chat-1", "topic-c").await;
+        let _t3 = store.create_thread("chat-1", "topic-c").await;
 
         // Make t1 the oldest, t2 second oldest, t3 most recent
         {

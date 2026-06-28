@@ -101,7 +101,7 @@ impl ToolDispatcher for SpineProcedureDispatcher {
                     tool = name,
                     "spine dispatcher: task tool called but no task registry attached"
                 );
-                return format!("Error: task registry not configured");
+                return "Error: task registry not configured".to_string();
             }
         }
 

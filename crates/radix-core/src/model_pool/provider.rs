@@ -93,16 +93,6 @@ struct ConfigFile {
 struct PoolSection {
     #[serde(default)]
     selection_weights: Option<WeightsEntry>,
-    #[serde(default)]
-    discovery: Option<DiscoverySection>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DiscoverySection {
-    #[serde(default)]
-    refresh_interval: Option<u64>,
-    #[serde(default)]
-    refresh_on_startup: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]

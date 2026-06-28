@@ -194,7 +194,7 @@ mod tests {
     /// without touching the cognition memory layer.
     fn crdt_with_entries() -> CrdtStore {
         let crdt = CrdtStore::default();
-        let mk = |id: &str, content: &str, category: &str| {
+        let mk = |_id: &str, content: &str, category: &str| {
             serde_json::json!({
                 "category": category,
                 "content": content,

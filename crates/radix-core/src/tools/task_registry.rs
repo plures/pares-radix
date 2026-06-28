@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::model::ToolDefinition;
-use crate::task::{CompletionCondition, ConditionType, TaskStatus};
+use crate::task::{CompletionCondition, ConditionType};
 use crate::task_manager::TaskManager;
 
 /// Built-in tool names exposed to the model.

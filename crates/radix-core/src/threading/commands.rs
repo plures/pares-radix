@@ -12,7 +12,6 @@
 
 use std::sync::Arc;
 
-use crate::model::ChatMessage;
 use crate::threading::store::ThreadStore;
 use crate::threading::types::{Thread, ThreadState};
 
@@ -386,6 +385,7 @@ impl ThreadCommandResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ChatMessage;
     use crate::threading::store::MemoryThreadStore;
 
     // ── Parse tests ──────────────────────────────────────────────────────
@@ -706,7 +706,7 @@ mod tests {
     #[tokio::test]
     async fn execute_close_active_thread() {
         let store = Arc::new(MemoryThreadStore::new());
-        let t1 = store.create_thread("chat-1", "topic-a").await;
+        let _t1 = store.create_thread("chat-1", "topic-a").await;
         let t2 = store.create_thread("chat-1", "topic-b").await;
 
         // t2 is active
