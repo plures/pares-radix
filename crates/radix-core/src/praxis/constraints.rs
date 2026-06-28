@@ -76,7 +76,7 @@ use serde_json::json;
 /// # Example
 ///
 /// ```rust
-/// use pares_agens_core::praxis::constraints::AuthorizationGate;
+/// use pares_radix_core::praxis::constraints::AuthorizationGate;
 /// use pares_radix_praxis::rule::{Rule, RuleContext, RuleResult};
 /// use serde_json::json;
 ///
@@ -212,7 +212,7 @@ impl TaskSizeViolation {
 /// # Example — direct check
 ///
 /// ```rust
-/// use pares_agens_core::praxis::constraints::{TaskSizeConstraint, MAX_DESCRIPTION_WORD_COUNT};
+/// use pares_radix_core::praxis::constraints::{TaskSizeConstraint, MAX_DESCRIPTION_WORD_COUNT};
 ///
 /// let description = "word ".repeat(201);
 /// let violation = TaskSizeConstraint::check(&description, None, None);
@@ -225,7 +225,7 @@ impl TaskSizeViolation {
 ///
 /// ```rust
 /// use pares_radix_praxis::db::store::PraxisStore;
-/// use pares_agens_core::praxis::constraints::TaskSizeConstraint;
+/// use pares_radix_core::praxis::constraints::TaskSizeConstraint;
 ///
 /// let mut store = PraxisStore::new();
 /// TaskSizeConstraint::register(&mut store);

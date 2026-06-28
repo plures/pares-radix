@@ -18,8 +18,8 @@
 //! ```no_run
 //! # #[cfg(feature = "otel")]
 //! # {
-//! use pares_agens_core::otel::OtelConfig;
-//! use pares_agens_core::otel_metrics::init_metrics;
+//! use pares_radix_core::otel::OtelConfig;
+//! use pares_radix_core::otel_metrics::init_metrics;
 //!
 //! let config = OtelConfig::from_env();
 //! let meter_provider = init_metrics(&config).expect("metrics init failed");

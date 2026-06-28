@@ -24,7 +24,7 @@ use crate::{
 ///
 /// ```rust,no_run
 /// use std::sync::Arc;
-/// use pares_agens_core::{
+/// use pares_radix_core::{
 ///     handlers::auto_recall::AutoRecall,
 ///     memory::MemoryCategory,
 /// };

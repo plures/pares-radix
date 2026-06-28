@@ -15,7 +15,7 @@
 //! ```no_run
 //! # #[cfg(feature = "otel")]
 //! # {
-//! use pares_agens_core::otel::{init_otel_layer, OtelConfig};
+//! use pares_radix_core::otel::{init_otel_layer, OtelConfig};
 //! use tracing_subscriber::prelude::*;
 //!
 //! let config = OtelConfig::from_env();

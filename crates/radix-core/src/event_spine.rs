@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use pares_agens_core::event_spine::EventSpine;
+//! use pares_radix_core::event_spine::EventSpine;
 //!
 //! let spine = EventSpine::new(store.crdt_store(), "pares-radix");
 //! spine.seed_contracts();            // write channel contracts to PluresDB

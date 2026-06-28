@@ -303,7 +303,7 @@ pub fn plugin_template_generator(plugin_name: &str, event_type: &str) -> String 
     let definition = ProcedureDefinition::new(sanitized_name, sanitized_event);
     format!(
         r#"use async_trait::async_trait;
-use pares_agens_core::{{event::Event, procedure::{{Procedure, ProcedureDefinition}}}};
+use pares_radix_core::{{event::Event, procedure::{{Procedure, ProcedureDefinition}}}};
 
 pub struct {struct_name};
 

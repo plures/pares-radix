@@ -24,7 +24,7 @@ use crate::{
 ///
 /// ```rust,no_run
 /// use std::sync::Arc;
-/// use pares_agens_core::handlers::auto_capture::AutoCapture;
+/// use pares_radix_core::handlers::auto_capture::AutoCapture;
 /// // let store: Arc<dyn MemoryStore> = Arc::new(MyStore);
 /// // let procedure = AutoCapture::new(store);
 /// ```

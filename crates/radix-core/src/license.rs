@@ -11,7 +11,7 @@
 //!
 //! ```rust,no_run
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! use pares_agens_core::license::{Feature, FixedKeyValidator, License, LicenseValidator};
+//! use pares_radix_core::license::{Feature, FixedKeyValidator, License, LicenseValidator};
 //!
 //! // Free tier — always available
 //! let free = License::free();
@@ -293,7 +293,7 @@ impl LicenseValidator for FixedKeyValidator {
 /// constructing the validator:
 ///
 /// ```rust,no_run
-/// use pares_agens_core::license::PolarValidator;
+/// use pares_radix_core::license::PolarValidator;
 ///
 /// let validator = PolarValidator::new("00000000-0000-0000-0000-000000000000");
 /// ```

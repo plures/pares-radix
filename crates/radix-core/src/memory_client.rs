@@ -5,7 +5,7 @@
 //! They are deliberately minimal — just `role`/`content`/`id` — and carry no
 //! cognition logic. The concrete implementation (PluresLM) lives in the
 //! cognition crate (`pares-agens-core`), which re-exports these types from
-//! `pares_agens_core::memory` for backward compatibility.
+//! `pares_radix_core::memory` for backward compatibility.
 //!
 //! This mirrors the `subagent_spawn::SubAgentSpawner` seam established in
 //! Stage S1: platform owns the trait + DTOs, cognition owns the impl.

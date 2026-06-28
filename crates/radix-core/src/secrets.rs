@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```rust
-//! use pares_agens_core::secrets::{InMemorySecretStore, SecretStore};
+//! use pares_radix_core::secrets::{InMemorySecretStore, SecretStore};
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -315,7 +315,7 @@ pub async fn migrate_from_env(store: &dyn SecretStore) -> Result<Vec<String>, Se
 /// key separator.  Plain names (the common case) are used as-is.
 ///
 /// ```
-/// use pares_agens_core::secrets::provider_api_key;
+/// use pares_radix_core::secrets::provider_api_key;
 /// assert_eq!(provider_api_key("openai"), "provider:openai:api_key");
 /// assert_eq!(provider_api_key("azure:openai"), "provider:hex:617a7572653a6f70656e6169:api_key");
 /// ```
@@ -327,7 +327,7 @@ pub fn provider_api_key(provider_name: &str) -> String {
 /// Derive the canonical vault key for a channel adapter token.
 ///
 /// ```
-/// use pares_agens_core::secrets::channel_token;
+/// use pares_radix_core::secrets::channel_token;
 /// assert_eq!(channel_token("telegram"), "channel:telegram:bot_token");
 /// ```
 pub fn channel_token(channel_kind: &str) -> String {

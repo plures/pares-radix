@@ -19,8 +19,8 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! # use pares_agens_core::pluresdb_bridge::{PluresDbBridge, BridgeError};
-//! # use pares_agens_core::CrdtStore;
+//! # use pares_radix_core::pluresdb_bridge::{PluresDbBridge, BridgeError};
+//! # use pares_radix_core::CrdtStore;
 //! # fn main() -> Result<(), BridgeError> {
 //! let crdt = CrdtStore::default();
 //! let bridge = PluresDbBridge::from_crdt(crdt);

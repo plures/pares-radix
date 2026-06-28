@@ -151,7 +151,7 @@ impl ActionHandler for BlockingHandlerWrapper {
 /// # Usage
 ///
 /// ```ignore
-/// use pares_agens_core::px_adapter::{PxProcedureAdapter, AsyncActionHandler};
+/// use pares_radix_core::px_adapter::{PxProcedureAdapter, AsyncActionHandler};
 /// use pares_radix_praxis::px::{parse, compiler::compile};
 ///
 /// let source = r#"procedure on_message:
@@ -519,8 +519,8 @@ fn parse_emitted_events(value: &Value) -> Option<Vec<Event>> {
 /// # Usage
 ///
 /// ```ignore
-/// use pares_agens_core::px_adapter::ToolDispatchActionHandler;
-/// use pares_agens_core::model::ToolDispatcher;
+/// use pares_radix_core::px_adapter::ToolDispatchActionHandler;
+/// use pares_radix_core::model::ToolDispatcher;
 ///
 /// // Phase 1: create lazy handler, load procedures
 /// let handler = Arc::new(ToolDispatchActionHandler::new_lazy());
