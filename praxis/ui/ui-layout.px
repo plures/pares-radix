@@ -1,0 +1,90 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# UI LAYOUT — RESOLVE PRACTICES
+#
+# These are RESOLVE-mode best practices: instead of flagging a violation (that is
+# the `validate` half, in ui-best-practices.px), they COMPUTE a concrete attribute
+# value from the active trigger fact and write it back to the resolved tree. The
+# resolver collapses `responsive.<attr>` maps and applies type-based defaults so
+# the tree that reaches Unum/Svelte is already sized & positioned.
+#
+# ── THE RESOLVE GRAMMAR ──────────────────────────────────────────────────────
+#   practice <name>:
+#     kind: resolve
+#     appliesTo: <schemaKind>        # container | text | control | ...
+#     when: <flat boolean>           # over facts + node attributes; default true
+#     set: <attribute>               # one RESPONSIVE_ATTRS attribute
+#     from: responsive               # source: the node's responsive[<attribute>] map
+#     # OR a default expression when the node declares no responsive map:
+#     default: <value>               # applied only when `when` holds AND the node
+#                                    # has no explicit responsive.<attribute>
+#
+# ── THE CONTRACT (same spirit as the validators) ─────────────────────────────
+# 1. HONESTY: `set` may only name an attribute in RESPONSIVE_ATTRS (ui-schema.ts),
+#    and that attribute must map to a real prop on the appliesTo kind. No rule may
+#    target an attribute no component exposes.
+# 2. FLAT SURFACE: `when` is flat boolean over context (facts + node). The value
+#    chosen for `set` comes from a pre-flattened breakpoint pick (pickResponsive),
+#    never an author-space function or tree walk.
+# 3. DERIVED-ONLY: resolve practices write to canvas:tree:resolved, NEVER to the
+#    authored canvas:tree. Authored intent is pristine and re-resolved from clean
+#    source on every trigger.
+# 4. DRIFT-GUARDED: this file is mirrored in ui-practices.ts (UI_PRACTICES) and a
+#    sync test asserts parity (C-DRIFT-001).
+#
+# ── TRIGGER ──────────────────────────────────────────────────────────────────
+# All layout practices key on ui:viewport → { width, height, breakpoint }.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Honor an explicit responsive `direction` map (e.g. {base:column, md:row}).
+# When present it always wins; the resolver picks the value for the active bp.
+practice ui_layout_direction_responsive:
+  kind: resolve
+  appliesTo: container
+  set: direction
+  from: responsive
+
+# Default mobile-first stacking: a container with multiple children that did NOT
+# declare an explicit responsive.direction stacks to a column below md, and is a
+# row at md and up. This is the "works automatically with zero intent" default.
+practice ui_layout_stack_below_md:
+  kind: resolve
+  appliesTo: container
+  when: context.node.childCount > 1 && context.node.hasResponsiveDirection === false
+  set: direction
+  default: column-below-md
+
+# Honor an explicit responsive `gap` map.
+practice ui_layout_gap_responsive:
+  kind: resolve
+  appliesTo: container
+  set: gap
+  from: responsive
+
+# Honor an explicit responsive `padding` map.
+practice ui_layout_padding_responsive:
+  kind: resolve
+  appliesTo: container
+  set: padding
+  from: responsive
+
+# Honor an explicit responsive `columns` map (DashboardGrid reflow by breakpoint).
+practice ui_layout_columns_responsive:
+  kind: resolve
+  appliesTo: container
+  set: columns
+  from: responsive
+
+# Honor an explicit responsive `hidden` map: show/hide a node by breakpoint
+# (e.g. {base:true, lg:false} = hidden on mobile, visible on large screens).
+practice ui_layout_hidden_responsive:
+  kind: resolve
+  appliesTo: container
+  set: hidden
+  from: responsive
+
+# Honor an explicit responsive `size` map on text (fluid type by breakpoint).
+practice ui_text_size_responsive:
+  kind: resolve
+  appliesTo: text
+  set: size
+  from: responsive

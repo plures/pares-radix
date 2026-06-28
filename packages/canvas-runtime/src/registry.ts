@@ -27,6 +27,13 @@ export interface ComponentMeta {
   hasChildren: boolean;
   /** Description for AI context */
   description: string;
+  /**
+   * Optional explicit UI-schema kind. When omitted, the kind is inferred from
+   * `category` (see ui-schema.ts `kindForComponent`). Set this only to override
+   * the category-based default (e.g. a 'display' component that should behave as
+   * a 'container' for layout rules).
+   */
+  schemaKind?: import('./ui-schema.js').SchemaKind;
 }
 
 export interface PropSchema {

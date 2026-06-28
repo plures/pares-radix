@@ -1,0 +1,118 @@
+# ui-best-practices.px — Enforceable Web UI Best Practices
+#
+# A library of common UI/UX/accessibility best practices, encoded as Praxis
+# constraints that the constraint evaluator can actually RUN — not [parser-skip]
+# documentation. Each constraint reads a flat `context.ui.*` fact produced by
+# the canvas fact extractor (packages/canvas-runtime/src/ui-facts.ts).
+#
+# THE CONTRACT (keep this honest):
+#   - Every `require`/`when` here references a `context.ui.<fact>` that the
+#     extractor emits. No rule may depend on a fact that does not exist —
+#     that would be a rule that silently never fires (a lie).
+#   - The evaluator surface is FLAT boolean logic only:
+#       context.<path>  ===/!==/==/!=  literal
+#       >  <  >=  <=     numeric comparisons
+#       &&  ||  !        composition
+#     No .includes(), no function calls, no tree walking. The extractor does
+#     all aggregation up front so these expressions stay simple.
+#
+# SEVERITY TIERS:
+#   error   — accessibility / correctness violations (WCAG-aligned, dead UI).
+#             These should block. A UI that ships these is broken for someone.
+#   warning — strong UX best practices. Not broken, but below the bar.
+#
+# PHASE: all UI constraints run in the "ui" phase. Pass phase:"ui" to
+# praxis.evaluate (or canvas.validate runs them automatically).
+#
+# Sources distilled: WCAG 2.2 (Perceivable/Operable/Understandable),
+# Nielsen's 10 Usability Heuristics, Fitts's Law, WAI-ARIA Authoring Practices.
+
+# ═══════════════════════════════════════════════════════════════════════
+# PERCEIVABLE — every meaningful element has a text alternative / name
+# (WCAG 1.1.1, 4.1.2 — Name, Role, Value)
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint ui_inputs_have_labels:
+  when: context.ui.inputCount > 0
+  require: context.ui.allInputsLabeled === true
+  severity: error
+  phases: ["ui"]
+  message: "Every form input (Input/TextArea/Select) must have a label. Unlabeled inputs are invisible to screen readers and ambiguous to everyone. Add a `label` prop (or bind one)."
+
+constraint ui_buttons_have_accessible_name:
+  when: context.ui.buttonCount > 0
+  require: context.ui.allButtonsLabeled === true
+  severity: error
+  phases: ["ui"]
+  message: "Every Button must have a non-empty `label` (its accessible name). A button with no name cannot be announced, found by voice control, or understood."
+
+constraint ui_images_have_alt:
+  when: context.ui.imageCount > 0
+  require: context.ui.allImagesHaveAlt === true
+  severity: error
+  phases: ["ui"]
+  message: "Every image must have an `alt` text alternative (empty alt='' only for purely decorative images). Missing alt text fails WCAG 1.1.1."
+
+constraint ui_external_links_have_text:
+  when: context.ui.externalLinkCount > 0
+  require: context.ui.externalLinksMissingText === 0
+  severity: error
+  phases: ["ui"]
+  message: "External links must contain visible link text. An empty link has no accessible name and no click affordance."
+
+# ═══════════════════════════════════════════════════════════════════════
+# OPERABLE — structure is navigable; hierarchy is meaningful
+# (WCAG 1.3.1 Info & Relationships, 2.4.6 Headings & Labels)
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint ui_has_top_level_heading:
+  when: context.ui.headingCount > 0
+  require: context.ui.hasTopLevelHeading === true
+  severity: warning
+  phases: ["ui"]
+  message: "A view with headings should have a top-level heading (level 1 or 2) so screen-reader users can orient. Don't start the hierarchy at h3+."
+
+constraint ui_no_skipped_heading_levels:
+  when: context.ui.headingCount > 1
+  require: context.ui.headingsSkipLevel === false
+  severity: warning
+  phases: ["ui"]
+  message: "Heading levels must not skip (e.g. h2 → h4). Skipped levels break the document outline that assistive tech relies on. Demote/promote so levels step by one."
+
+constraint ui_single_h1:
+  when: context.ui.headingCount > 0
+  require: context.ui.h1Count <= 1
+  severity: warning
+  phases: ["ui"]
+  message: "Prefer a single level-1 heading per view (the page's one title). Multiple h1s dilute the document outline."
+
+# ═══════════════════════════════════════════════════════════════════════
+# UNDERSTANDABLE — destructive actions are guarded; feedback exists
+# (Nielsen #5 Error Prevention, #3 User Control & Freedom)
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint ui_destructive_actions_need_confirmation:
+  when: context.ui.dangerButtonCount > 0
+  require: context.ui.dangerButtonsWithoutConfirm === 0
+  severity: warning
+  phases: ["ui"]
+  message: "Destructive (variant='danger') actions should be paired with a confirmation Dialog. Irreversible actions one click away cause data loss. Add a Dialog to the view."
+
+constraint ui_dialogs_are_actionable:
+  when: context.ui.dialogCount > 0
+  require: context.ui.dialogsMissingHandlers === 0
+  severity: error
+  phases: ["ui"]
+  message: "Every Dialog must wire both onConfirm and onCancel. A modal with no actions traps the user (no way to proceed or escape) — a dead-end and a focus trap."
+
+# ═══════════════════════════════════════════════════════════════════════
+# ROBUST — only render components the runtime can resolve
+# (WCAG 4.1.1 Parsing — the canvas analogue: no unknown component types)
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint ui_no_unknown_components:
+  when: context.ui.registrySize > 0
+  require: context.ui.unknownComponentCount === 0
+  severity: error
+  phases: ["ui"]
+  message: "Every node `type` must resolve to a registered component. An unknown type renders nothing (silent blank). Register the component or fix the type name."

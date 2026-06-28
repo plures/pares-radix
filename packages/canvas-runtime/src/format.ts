@@ -21,6 +21,8 @@
 
 // ── Core Types ────────────────────────────────────────────────────────────────
 
+import { validateUi, formatUiViolations } from './ui-constraints.js';
+
 /**
  * A node in the component tree.
  * This is what gets rendered — recursively, reactively.
@@ -36,6 +38,15 @@ export interface CanvasNode {
   bindings?: Record<string, CanvasBinding>;
   /** Child nodes (for layout components) */
   children?: CanvasNode[];
+  /**
+   * Responsive intent. Maps an attribute name (see RESPONSIVE_ATTRS in
+   * ui-schema.ts) to a breakpoint-keyed value map, e.g.
+   *   { direction: { base: 'column', md: 'row' }, gap: { base: '8px', md: '16px' } }.
+   * The reactive resolver collapses these against the active `ui:viewport`
+   * breakpoint and writes the concrete value into `props[attr]` on the DERIVED
+   * tree (canvas:tree:resolved). Authored intent here stays pristine.
+   */
+  responsive?: Record<string, Record<string, unknown>>;
   /** Visibility condition — PluresDB key that must be truthy */
   visible?: string | CanvasCondition;
   /** CSS class override (design-dojo utility classes only) */
@@ -326,6 +337,16 @@ export function validateCanvas(doc: CanvasDocument): string[] {
     if (!proc.steps || proc.steps.length === 0) {
       issues.push(`Procedure ${proc.id} has no steps`);
     }
+  }
+
+  // ── UI best-practice enforcement ──────────────────────────────────────────
+  // Run the encoded web-UI best practices (accessibility, hierarchy, feedback,
+  // destructive-action guarding) against the tree. These come from
+  // praxis/ui/ui-best-practices.px, mirrored in ui-constraints.ts. Good UI is
+  // enforced here automatically — authors don't have to remember the rules.
+  if (doc.tree) {
+    const ui = validateUi(doc.tree);
+    for (const issue of formatUiViolations(ui.violations)) issues.push(issue);
   }
 
   return issues;
