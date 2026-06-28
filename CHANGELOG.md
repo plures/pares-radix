@@ -1,3 +1,7 @@
+## [1.55.4] — 2026-06-28
+
+- fix(release): platformTargets reflect what actually emits artifacts (no soft stubs) (178c2dc)
+
 ## [1.55.3] — 2026-06-28
 
 - fix(release): catch up Cargo.lock to 1.55.2 (heal release-bump lock drift) (a4e908a)
