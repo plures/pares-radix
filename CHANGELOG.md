@@ -1,3 +1,7 @@
+## [1.55.7] — 2026-06-28
+
+- fix(px): conform .px corpus to pluresdb-px foundation grammar + repair STATE_ALLOWLIST crate-rename regressions (px-first enforcement tests green) (baf99f0)
+
 ## [1.55.6] — 2026-06-28
 
 - fix(lint): resolve clippy violations failing CI rust gate (useless-format, derivable-impls, unnecessary-map-or, len-zero) (b9ddeba)
