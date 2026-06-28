@@ -1,3 +1,8 @@
+## [1.55.9] — 2026-06-28
+
+- fix(ci): repair tech-doc-writer.yml YAML parse break (unindented template-literal lines terminated the script: block scalar) (73abda8)
+- docs(adr-0028): mark Accepted - FIX stage landed (praxis@b431611, PluresDbConstraintAdapter + 10/10 tests) (fd08ca3)
+
 ## [1.55.8] — 2026-06-28
 
 - fix(radix-core): repair stale pares_agens_core doctest imports left by core->radix-core rename (cargo test --doc green) (3abc3e9)
