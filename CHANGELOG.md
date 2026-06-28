@@ -1,3 +1,9 @@
+## [1.50.0] — 2026-06-28
+
+- chore(release): v1.50.0 [skip ci] (a940876)
+- feat(canvas-runtime): UI schema + reactive best-practice engine (c8931ac)
+- ci: lifecycle cron */30 -> 0 */2 (cut scheduled Actions spend; events still real-time) (9b41dbd)
+
 ## [1.49.4] — 2026-06-27
 
 - chore(release): v1.49.4 [skip ci] (374ac11)
