@@ -1,3 +1,7 @@
+## [1.55.2] — 2026-06-28
+
+- feat(desktop): wire Tauri updater (real signing pubkey, desktop-gated plugin, createUpdaterArtifacts) (607a632)
+
 ## [1.55.1] — 2026-06-28
 
 - feat(desktop): restore Tauri 2 app shell scaffold (src-tauri) on 1.55.0 dev line (bb66f7b)
