@@ -256,19 +256,40 @@ const resolved = resolveUiTree(authoredTree, { viewport: { width: 1280 } });
 `responsive.direction` stacks to `column` below `md`, `row` at `md`+ — so layouts are
 sensible even when the author declares nothing. Explicit `responsive.*` always wins.
 
-## 10. The one integration handoff (separate surface)
+## 10. Integration — DONE (renderer-side)
 
-Unum/the Tauri renderer must read **`canvas:tree:resolved`** instead of `canvas:tree`.
-That is the only change outside this package; everything above is self-contained and
-tested. Until that switch is made, the resolved tree is computed and stored but not yet
-rendered — authored `canvas:tree` keeps working exactly as before (fully backward
-compatible).
+**Shipped (commit c47c8f9 / pushed in 0ddb410):** `CanvasRenderer.svelte` resolves
+`document.tree` against `ui:viewport` internally and re-renders on resize, and honors the
+resolved `hidden` attribute. Every existing consumer (`CanvasView.svelte`,
+`routes/canvas/+page.svelte`) is now responsive with **zero caller changes** — this turned
+out cleaner than the originally-planned "Unum reads `canvas:tree:resolved`" key-swap,
+because the renderer already owns `dbGet`/`dbSubscribe` and the design is "renderer reacts
+to data." The standalone `wireResolvedTree` + `canvas:tree:resolved` path (§6/§9) still
+exists for callers that prefer graph-level resolution; the renderer path is the
+zero-config default.
 
-## 11. Follow-on (engine ready, practices not yet written — honestly absent)
+> Honest follow-on: a true DOM-mount test (mount the component, write `ui:viewport`,
+> assert the DOM reflows + omits a hidden-at-breakpoint node) needs a jsdom/svelte test
+> harness this package doesn't have yet. Renderer *contract* logic is covered at the
+> function level in `tests/canvas-renderer-responsive.test.ts`.
 
-- **theme / contrast** resolve practices (trigger `ui:theme`): the resolver + facts plumb
-  `theme` through already; no `.px` practices authored yet.
-- **density** resolve practices (trigger `ui:density`): same — plumbed, not authored.
-- **`maxLines` truncation**: reserved in `RESPONSIVE_ATTRS`; no resolver default branch
-  yet (responsive-map pass-through works, but there is no type-based default).
-- These are *absent, not stubbed* (C-NOSTUB-001): no fake providers, no dead rules.
+## 11. Follow-on status
+
+- **density** resolve practices — ✅ BUILT (`ui-density.px` + `UI_DENSITY_PRACTICES`):
+  `compact|comfortable|spacious` scales container padding/gap, triggered by `ui:density`.
+  Explicit `responsive.padding/gap` wins.
+- **theme** resolve practices — ✅ BUILT (`ui-theme.px` + `UI_THEME_PRACTICES`): token →
+  concrete color per light/dark mode on text, triggered by `ui:theme`. Explicit literal
+  `color` wins.
+- **contrast math** — ✅ BUILT (`ui-contrast.ts`): WCAG relative-luminance + ratio +
+  `meetsContrast` (AA/AAA), fully unit-tested.
+- **`hidden`** — ✅ BUILT: responsive show/hide, honored by the renderer.
+- **Still honestly absent (C-NOSTUB-001):**
+  - *Container `background` theming* — no registered container exposes a `background`
+    prop (verified vs `registry.ts`); theme resolve is limited to text `color`. Background
+    is allow-listed for the existing `class`/style path as a future slice, not faked.
+  - *Validate-mode contrast constraint* — the math helper is real + exported, but wiring
+    it into a `validate`-half WCAG-AA constraint (flag low-contrast pairs) is the next
+    slice; absent, not stubbed.
+  - *`maxLines` truncation default* — reserved in `RESPONSIVE_ATTRS`; responsive-map
+    pass-through works, but there is no type-based default branch yet.
