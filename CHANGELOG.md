@@ -1,3 +1,9 @@
+## [1.55.1] — 2026-06-28
+
+- feat(desktop): restore Tauri 2 app shell scaffold (src-tauri) on 1.55.0 dev line (bb66f7b)
+- chore(release): adopt org parity pipeline; retire bespoke auto-version.yml; add .plures/release.toml + ADR-0029 + UI tasks (a5762c9)
+- docs(ui): record guidance-on-override layer (Stage 1+2 shipped) + human-presenter surface gap (S12) (d0a7450)
+
 ## [1.55.0] — 2026-06-28
 
 - chore(release): v1.55.0 [skip ci] (cdcc1e9)
