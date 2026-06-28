@@ -1,3 +1,7 @@
+## [1.55.8] — 2026-06-28
+
+- fix(radix-core): repair stale pares_agens_core doctest imports left by core->radix-core rename (cargo test --doc green) (3abc3e9)
+
 ## [1.55.7] — 2026-06-28
 
 - fix(px): conform .px corpus to pluresdb-px foundation grammar + repair STATE_ALLOWLIST crate-rename regressions (px-first enforcement tests green) (baf99f0)
