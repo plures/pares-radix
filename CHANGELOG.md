@@ -1,3 +1,11 @@
+## [1.55.0] — 2026-06-28
+
+- chore(release): v1.55.0 [skip ci] (cdcc1e9)
+- feat(mcp-dev-server): return override guidance from canvas authoring handlers (AI composer) (aabb487)
+- chore(release): v1.54.0 [skip ci] (2ce0841)
+- feat(canvas-runtime): override provenance + per-practice rationale (guidance-on-override foundation) (c796ec7)
+- docs(ui): capture sharpened strategic objective (A default-correct + B guidance-on-override; C dropped) (125d8ba)
+
 ## [1.53.0] — 2026-06-28
 
 - chore(release): v1.53.0 [skip ci] (3eb014a)
