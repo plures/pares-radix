@@ -14,6 +14,7 @@ members = [
     "crates/bitnet-sys",
     "crates/rector",
     "crates/omniscient",
+    "src-tauri",
 ]
 
 [workspace.package]
@@ -42,3 +43,14 @@ tauri-plugin-shell = "2"
 walkdir = "2"
 toml = "0.8"
 libc = "0.2"
+
+# Size-optimized release profile (applies to the whole graph). Per
+# development-guide/design/TAURI-BEST-PRACTICES.md §2 — the single biggest lever
+# on installer size. Slows release builds, which is why CI caches target/ hard.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+incremental = false

@@ -1,0 +1,23 @@
+[package]
+name = "pares-radix-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pares Radix — Tauri 2 desktop shell (events-not-commands bridge to the SvelteKit frontend)"
+
+# Mobile-ready crate types per Tauri convention. The cdylib/staticlib targets are
+# required for the eventual `tauri android/ios` builds; rlib keeps it usable as a
+# normal library crate for tests.
+[lib]
+name = "pares_radix_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+tauri-plugin-shell = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

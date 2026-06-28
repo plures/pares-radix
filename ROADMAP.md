@@ -4,7 +4,7 @@
 Pares Radix is the end‑user desktop shell for OASIS. It hosts domain plugins, enforces UX contracts, and provides the shared intelligence/data plumbing so every OASIS workflow feels coherent across platforms.
 
 ## Current State
-- Tauri 2 desktop shell port completed.
+- Tauri 2 desktop shell scaffolded (`src-tauri/`) — implements the frontend bridge contract (navigate / get_window_state / set_tray_menu / save_window_state + app-booted / window-state-changed / user-navigated events, tray-icon, persisted window geometry); Windows installer (NSIS + MSI) building locally, desktop bundle wiring into CI.
 - PluresDB persistence adapter and schema‑driven UI generation merged.
 - CI regressions currently open (multiple post‑merge failures).
 

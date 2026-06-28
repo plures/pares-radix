@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "pares-radix main window — least-privilege ACL for the events-not-commands bridge",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:tray:default",
+    "core:menu:default",
+    "shell:default"
+  ]
+}
