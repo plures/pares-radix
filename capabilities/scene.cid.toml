@@ -1,0 +1,272 @@
+# Capability Interface Descriptor (CID): scene@1.x
+#
+# ADR-0022 (Capability Host Contract) + ADR-0024 (Canonical Plugin Format) +
+# ADR-0011 (Mediated Plugin Boundary). Host/registry-owned org-level contract.
+# v1 format is TOML (the pluresdb-px grammar has no `capability` construct, verified
+# against crates/pluresdb-px/src/px/grammar.pest the same way commerce/secrets/
+# git-repo/pim CIDs were; the .px-native CID form is deferred to a real upstream
+# grammar construct, NOT stubbed).
+#
+# Grounded ENTIRELY in the real inner-space render-state surface. Every node/
+# operation/event/invariant maps to a SHIPPED inner-space symbol (cited inline as
+# file:symbol). Full grounding map: pares-radix/.praxis/tasks/TASK-2026-06-27-scene-cid.md
+# companion + workspace scene-cid-grounding.md. Grounding sources (read, not guessed):
+#   - docs/RENDER-STATE-CONTRACT.md (RSV read-model, Intent write-model, honest-fog,
+#       RendererCapabilityProfile: tiers lite/standard/premium/ambient; spatial
+#       2d/3d/mesh/text; wantsStaleness; maxEntities; canScan)
+#   - src/projection/rsv-projection.js (CONTRACT_VERSION='1.0.0', CONFIDENCE_HORIZON_S=5,
+#       confidenceFromStaleness(s,h=5)=max(0,1-s/5), deriveConvergence, projectNode,
+#       buildRenderStateView, latestHlc)
+#   - schema/render-state-view.schema.json (rsvEntity/transform/vitals/presentation/
+#       convergence/rsvZone)
+#   - schema/intent.schema.json (Intent: Move/Action/Trade/Claim/Attest/ScanContribution)
+#   - praxis/render-convergence.px ; tests/render-contract.px (the MUST-rules)
+#   - schema/{player,ship,colony,arena,physics-zone}.schema.json (the nodes RSV projects FROM)
+#
+# CARDINAL RULE: the Render State View is DERIVED, never authored. convergence.*
+# (staleness/confidence) and signature.* are network OBSERVATIONS computed from CRDT
+# merge gaps (HLC); a renderer/consumer may NEVER write them. The ONLY renderer write
+# path is a signed, ownership-bounded Intent, validated at the commit boundary.
+#
+# A provider declaring `[capabilities.provided] scene = "1.x"` MUST implement the
+# non-deferred surface; the capability-deps gate (pares-modulus gates/
+# validate-dependencies.ts) validates the provider's surface and resolves a
+# consumer's `capabilities.requires.scene` against it (ADR-0022 §7). A consumer
+# (inner-space declares `scene = "^1.0"`) interacts ONLY through the mediated nodes/
+# events below (ADR-0011). `deferred = true` items are post-v1 (C-NOSTUB-001:
+# deferred, not stubbed) and cite the real owner/absent symbol.
+
+[cid]
+name = "scene"
+version = "1.0.0"
+title = "Render-agnostic 3D scene state (Render State View read-model + Intent write-model)"
+summary = """
+A scene/rendering capability: project converged PluresDB game state into a
+render-agnostic Render State View (RSV) that any renderer tier (lite 2D -> premium
+ARKit) consumes, and accept renderer writes ONLY as signed, ownership-bounded
+Intents. The RSV is DERIVED from CRDT merge gaps (HLC), never authored: every entity
+carries an honest-fog convergence seam (staleness + confidence) so stale state is
+rendered ghosted/aged, never as confident truth. The single write path is the Intent
+channel (Move/Action/Trade/Claim/Attest/ScanContribution); intents are authority-
+signed and ownership-bounded, and ScanContribution is premium-tier only (fidelity
+contribution, not authority over others). Scene PROJECTS active physics-zone
+overrides for rendering but does not SIMULATE them (that is the `physics` capability).
+"""
+source_repo = "inner-space"
+source_paths = [
+  "docs/RENDER-STATE-CONTRACT.md",
+  "src/projection/rsv-projection.js",
+  "schema/render-state-view.schema.json",
+  "schema/intent.schema.json",
+  "praxis/render-convergence.px",
+  "tests/render-contract.px",
+]
+foundation_reuse = [
+  "pluresdb: CrdtStore - game-state nodes the RSV projects FROM; HLC merge gaps ARE the honest-fog signal (no separate freshness store)",
+  "rsv-projection.js: buildRenderStateView/deriveConvergence - the derivation runtime; the provider drives it, not re-implements it",
+  "intent.schema.json commit-side .px (physics/economy/territory/hazards/witness/scan) - per-type game-rule validation at commit; the provider enforces SCENE-CONTRACT invariants, the game .px enforces game rules",
+]
+
+# ── NODE TYPES (namespaced by consumer pluresdb_namespace, e.g. innerspace:scene:*).
+# RSV nodes are a DERIVED read projection (never authored by a consumer); scene:intent
+# is the single write-model. Field types mirror the real inner-space schemas. ──
+
+[[nodes]]
+type = "scene:render_state_view"
+maps_to = "render-state-view.schema.json:RSV root / rsv-projection.js buildRenderStateView output"
+key = "scene:rsv:{player_id}"
+derived = true
+fields = [
+  "contract_version: string",   # RSV.contractVersion (semver) -> CONTRACT_VERSION
+  "tier: enum(lite,standard,premium,ambient)", # RSV.tier
+  "as_of_hlc: string",          # RSV.asOfHlc (HLC frontier) -> latestHlc
+  "entities: list<scene:rsv_entity>", # RSV.entities
+  "zones: list<scene:rsv_zone>", # RSV.zones (optional)
+]
+
+[[nodes]]
+type = "scene:rsv_entity"
+maps_to = "render-state-view.schema.json:#/definitions/rsvEntity / rsv-projection.js projectNode"
+key = "scene:rsv_entity:{entity_id}"
+derived = true
+# rsvEntity required=[entityId,kind,ownerId,transform,convergence]. convergence is
+# derived by deriveConvergence (NOT authored). transform.position is MUST.
+fields = [
+  "entity_id: string",          # rsvEntity.entityId (^(player|ship|zone|fauna|structure|item):[a-z0-9-]+$)
+  "kind: enum(player,ship,zone,fauna,structure,item)", # rsvEntity.kind
+  "owner_id: string",           # rsvEntity.ownerId ("" = unowned/world)
+  "transform: { position: list<float>, orientation?: list<float>, velocity?: list<float>, surface_normal?: list<float> }", # transform (position MUST)
+  "convergence: { staleness: float, confidence?: float }", # convergence (staleness MUST >=0; confidence [0,1])
+  "vitals?: { health?: float, health_max?: float, energy?: float, charge?: float, wetness?: float }", # vitals (wetness [0,1])
+  "presentation?: { archetype: string }", # presentation (asset-binding archetype)
+  "signature?: { verified: bool }", # rsvEntity.signature (derived from key check)
+]
+
+[[nodes]]
+type = "scene:rsv_zone"
+maps_to = "render-state-view.schema.json:#/definitions/rsvZone (backed by physics-zone.physicsOverrides)"
+key = "scene:rsv_zone:{zone_id}"
+derived = true
+# SCENE only PROJECTS zone overrides for rendering; zone SIMULATION is the `physics`
+# capability (see [deferred]).
+fields = [
+  "zone_id: string",            # rsvZone.zoneId (^zone:[a-z0-9-]+$)
+  "physics: { wind?: object, water?: object, static_field?: object, chemical?: object, thermal?: object }", # rsvZone.physics
+]
+
+[[nodes]]
+type = "scene:intent"
+maps_to = "intent.schema.json:Intent root - the renderer WRITE model"
+key = "scene:intent:{hlc}:{entity_id}"
+# Intent required=[contractVersion,intentType,ownerId,entityId,hlc,signature,payload].
+# The ONLY renderer write path; cross-owner/unsigned intents are rejected at commit.
+fields = [
+  "contract_version: string",   # Intent.contractVersion
+  "intent_type: enum(MoveIntent,ActionIntent,TradeIntent,ClaimIntent,AttestIntent,ScanContributionIntent)", # Intent.intentType
+  "owner_id: string",           # Intent.ownerId (^player:[a-z0-9-]+$)
+  "entity_id: string",          # Intent.entityId (submitter MUST own)
+  "hlc: string",                # Intent.hlc (CRDT ordering)
+  "signature: string",          # Intent.signature (authority sig over body)
+  "payload: bytes",             # Intent.payload (opaque; per-type shape in [intent_payloads])
+]
+
+# ── OPERATIONS (mediated request/result per ADR-0011: consumer emits *.requested,
+# provider services it and emits *.completed; no direct calls). READ-model ops
+# project the RSV; submit_intent is the single signed write channel; announce_profile
+# negotiates tier. Each maps to a real rsv-projection.js export or schema/.px symbol. ──
+
+[[operations]]
+name = "project"
+maps_to = "rsv-projection.js buildRenderStateView"
+request_event = "scene.project.requested"
+result_event = "scene.project.completed"
+input = ["tier: enum(lite,standard,premium,ambient)", "observer_now: timestamp", "observer_id: string"]
+output = ["view: scene:render_state_view"]
+errors = ["E_UNKNOWN_TIER"]
+
+[[operations]]
+name = "project_entity"
+maps_to = "rsv-projection.js projectNode"
+request_event = "scene.project_entity.requested"
+result_event = "scene.project_entity.completed"
+input = ["node_id: string", "tier: enum(lite,standard,premium,ambient)", "observer_now: timestamp"]
+output = ["entity: scene:rsv_entity"]
+errors = ["E_NOT_FOUND"]
+
+[[operations]]
+name = "derive_convergence"
+maps_to = "rsv-projection.js deriveConvergence + confidenceFromStaleness"
+request_event = "scene.derive_convergence.requested"
+result_event = "scene.derive_convergence.completed"
+# confidence = max(0, 1 - staleness/CONFIDENCE_HORIZON_S), horizon = 5. The honest-fog computation.
+input = ["node_id: string", "observer_now: timestamp"]
+output = ["staleness: float", "confidence: float"]
+errors = ["E_NOT_FOUND"]
+
+[[operations]]
+name = "frontier"
+maps_to = "rsv-projection.js latestHlc"
+request_event = "scene.frontier.requested"
+result_event = "scene.frontier.completed"
+# Renderers treat anything newer than this frontier as not-yet-known (absence != hidden truth).
+input = []
+output = ["as_of_hlc: string"]
+errors = []
+
+[[operations]]
+name = "submit_intent"
+maps_to = "intent.schema.json Intent + commit-side validating .px (per-type validatedBy)"
+request_event = "scene.submit_intent.requested"
+result_event = "scene.submit_intent.completed"
+# The single renderer WRITE path. The provider enforces the SCENE-CONTRACT invariants
+# (signed, ownership-bounded, scan-tier, convergence-not-authored) before the intent
+# reaches the game's per-type commit .px.
+input = ["intent: scene:intent", "from_tier: enum(lite,standard,premium,ambient)"]
+output = ["accepted: bool", "entity?: scene:rsv_entity", "error?: string"]
+errors = [
+  "E_UNSIGNED",                 # render-contract.px:intent_must_be_signed
+  "E_NOT_OWNER",                # render-contract.px:intent_ownership_bounded (cross-owner write)
+  "E_SCAN_NOT_PREMIUM",         # render-contract.px:scan_contribution_premium_only
+  "E_INTENT_CARRIES_OBSERVATION", # render-convergence.px:intent_never_carries_convergence/signature
+  "E_UNKNOWN_INTENT",           # intentType not in the contract enum
+]
+
+[[operations]]
+name = "announce_profile"
+maps_to = "RENDER-STATE-CONTRACT.md RendererCapabilityProfile + render-contract.px renderer_profile"
+request_event = "scene.announce_profile.requested"
+result_event = "scene.announce_profile.completed"
+input = ["tier: enum(lite,standard,premium,ambient)", "spatial: enum(2d,3d,mesh,text)", "wants_staleness: bool", "max_entities: int", "can_scan: bool"]
+output = ["accepted: bool", "error?: string"]
+errors = ["E_PROFILE_INVALID"] # render-contract.px:profile_visual_wants_staleness OR non_premium_cannot_scan
+
+# ── INTENT PAYLOADS (per-intentType payload shapes; schema intent.schema.json allOf).
+# payload on scene:intent is opaque bytes at the boundary; these are the concrete
+# shapes a provider validates per type. ──
+[intent_payloads]
+MoveIntent = "{ thrust?: list<float>[2..3], steer?: float, jump?: bool, climb?: bool }"
+ActionIntent = "{ action: enum(fire,scan,harvest,discharge,deployRelay), target?: list<float>[2..3] }"
+TradeIntent = "{ offer: enum(offer,accept), itemId?: string(^item:...), counterpartyId?: string(^player:...) }"
+ClaimIntent = "{ colonyId: string(^colony:...), marker?: list<float>[2..3] }"
+AttestIntent = "{ eventRef: string, saw?: bool }"
+ScanContributionIntent = "{ mesh: string, anchors?: list<list<float>[3]> }"  # PREMIUM only
+
+# ── EVENTS (full mediated vocabulary + provider notifications). ──
+[events]
+emitted_by_consumer = [
+  "scene.project.requested",
+  "scene.project_entity.requested",
+  "scene.derive_convergence.requested",
+  "scene.frontier.requested",
+  "scene.submit_intent.requested",
+  "scene.announce_profile.requested",
+]
+emitted_by_provider = [
+  "scene.project.completed",
+  "scene.project_entity.completed",
+  "scene.derive_convergence.completed",
+  "scene.frontier.completed",
+  "scene.submit_intent.completed",
+  "scene.announce_profile.completed",
+  "scene.intent.accepted",      # an intent passed validation and committed
+  "scene.intent.rejected",      # an intent failed validation
+  "scene.frontier.advanced",    # the convergence frontier (latestHlc) moved
+]
+
+# ── TRANSPORT: request/response (RSV projection + intent submission) + CRDT node
+# replication, both already supported by radix's IO-actor model + PluresDB sync. ──
+[transport]
+v1 = ["mediated-events"]
+replication = "pluresdb-crdt"
+
+# ── INVARIANTS (real inner-space render-contract / render-convergence MUST-rules,
+# restated as provider obligations; each cites its source constraint). ──
+[invariants]
+rules = [
+  "rsv_position_required: every visible RSV entity carries transform.position. (render-contract.px:rsv_position_required; schema transform.required=[position].)",
+  "rsv_staleness_required: every RSV entity carries convergence.staleness (the honest-fog field is mandatory). (render-contract.px:rsv_staleness_required; schema convergence.required=[staleness].)",
+  "staleness_non_negative: convergence.staleness >= 0. (render-convergence.px:staleness_non_negative; schema minimum 0.)",
+  "confidence_in_unit_range: convergence.confidence in [0,1]. (render-convergence.px:confidence_in_unit_range.)",
+  "honest_fog: staleness 0 => confidence 1.0; staleness past the horizon (>=5) => confidence < 1 (never full). (render-convergence.px:fresh_write_is_confident + stale_write_loses_confidence; runtime confidenceFromStaleness = max(0,1-s/5).)",
+  "visual_tier_must_render_staleness: a visual tier (lite/standard/premium) MUST make staleness legible (fade/ghost); stale state never renders as confident truth. (render-contract.px:visual_tier_must_render_staleness.)",
+  "profile_visual_wants_staleness: any non-ambient tier MUST declare wants_staleness=true. (render-contract.px:profile_visual_wants_staleness.)",
+  "convergence_is_observed_not_authored: convergence.* and signature.* are network observations; an Intent (write path) may NEVER carry them. (render-convergence.px:intent_never_carries_convergence + intent_never_carries_signature; contract 3.3.)",
+  "intent_must_be_signed: an Intent MUST carry a valid authority signature; unsigned intents cannot converge. (render-contract.px:intent_must_be_signed; render-convergence.px:intent_is_ownership_bounded.)",
+  "intent_ownership_bounded: an Intent owner MUST hold the target entity's signing key; cross-owner writes are rejected and cannot converge. (render-contract.px:intent_ownership_bounded.)",
+  "scan_contribution_premium_only: ScanContributionIntent may ONLY be emitted by the premium tier (fidelity contribution, not authority). (render-contract.px:scan_contribution_premium_only; schema allOf ScanContributionIntent.)",
+  "non_premium_cannot_scan: only the premium tier may advertise can_scan; other tiers consume terrain as a projection. (render-contract.px:non_premium_cannot_scan.)",
+  "mediated_boundary_only: a consumer never holds a direct fn reference into the provider; all interaction is the request/result events + nodes above (ADR-0011). The provider is the sole writer of scene:* nodes.",
+  "absence_is_not_hidden_truth: RSV is convergence-bounded; an absent entity means 'not converged here', never 'hidden truth'. (RSV schema entities.description; RENDER-STATE-CONTRACT.md honest-fog.)",
+]
+
+# ── DEFERRED SURFACE (C-NOSTUB-001: honest, never faked). ──
+# - scene:rsv_zone physics SIMULATION: scene PROJECTS active zone overrides for
+#   rendering (real: rsvZone schema), but zone authoring/simulation belongs to the
+#   separate `physics` capability (inner-space declares physics = "^1.0"). Deferred
+#   to the physics CID, not stubbed here.
+# - .px-native CID form: deferred to a real upstream pluresdb-px `capability`
+#   grammar construct (absent today; same note as secrets.cid.toml).
+# - deep per-intent-type game-rule validation: the provider enforces the SCENE-
+#   CONTRACT invariants it can (signed/ownership/scan-tier/observation); the per-type
+#   commit .px (physics/economy/territory/hazards/witness-quorum/scan-validation)
+#   enforces game rules at the commit boundary - referenced, not re-implemented.
