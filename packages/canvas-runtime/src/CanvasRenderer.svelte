@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { resolveComponent } from './registry.js';
+  import { resolveUiTree } from './ui-resolve.js';
   import type { CanvasNode, CanvasDocument, CanvasBinding, CanvasCondition, CanvasProcedure, CanvasStep } from './format.js';
 
   // Props
@@ -40,6 +41,37 @@
   let subscribedValues = $state<Record<string, unknown>>({});
   let subscriptions: Array<() => void> = [];
   let renderVersion = $state(0); // bump to force re-render
+
+  // ── Responsive viewport (Thread 2) ────────────────────────────────────────
+  // The renderer renders the RESOLVED tree and re-renders when the viewport
+  // changes, so every caller becomes responsive with ZERO caller changes.
+  //
+  // ui:viewport is a RAW key — it is NOT under the canvas: prefix. We subscribe
+  // to it directly (bypassing `prefix`), in its own dedicated $effect, and do
+  // NOT route it through collectBindingKeys (those are prefixed canvas bindings).
+  let viewport = $state<{ width: number } | undefined>();
+
+  $effect(() => {
+    if (!dbSubscribe) return;
+    // Seed from the current value so first render is already responsive.
+    const seed = dbGet('ui:viewport');
+    if (seed && typeof seed === 'object' && 'width' in (seed as Record<string, unknown>)) {
+      viewport = seed as { width: number };
+    }
+    const unsub = dbSubscribe('ui:viewport', (value) => {
+      viewport = (value && typeof value === 'object' && 'width' in (value as Record<string, unknown>))
+        ? (value as { width: number })
+        : undefined;
+    });
+    return unsub;
+  });
+
+  // The DERIVED tree: authored intent (document.tree) collapsed against the
+  // active viewport breakpoint. resolveUiTree CLONES — document is never mutated.
+  // With no viewport yet → identity clone → behavior is unchanged.
+  const rendered = $derived(
+    resolveUiTree(document.tree, viewport ? { viewport } : {}),
+  );
 
   // Collect all binding keys from the document tree
   function collectBindingKeys(node: CanvasNode): string[] {
@@ -72,7 +104,9 @@
 
     if (!dbSubscribe) return;
 
-    const keys = [...new Set(collectBindingKeys(document.tree))];
+    // Collect binding keys from the RESOLVED tree (props may differ post-resolve,
+    // but bindings/visible keys are structural and survive the clone).
+    const keys = [...new Set(collectBindingKeys(rendered))];
     for (const key of keys) {
       const unsub = dbSubscribe(key, (value) => {
         subscribedValues = { ...subscribedValues, [key]: value };
@@ -246,6 +280,9 @@
   }
 
   function isVisible(node: CanvasNode): boolean {
+    // Honor the resolved `hidden` attribute: after resolveUiTree, a node hidden
+    // at the active breakpoint carries a concrete props.hidden === true.
+    if (node.props?.hidden === true) return false;
     if (node.visible === undefined) return true;
     return evaluateCondition(node.visible);
   }
@@ -271,4 +308,4 @@
   {/if}
 {/snippet}
 
-{@render renderNode(document.tree)}
+{@render renderNode(rendered)}

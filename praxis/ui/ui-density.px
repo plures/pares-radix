@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# UI DENSITY — RESOLVE PRACTICES
+#
+# RESOLVE-mode best practices keyed on the ui:density trigger fact. Density is the
+# global "how tight is the spacing" knob: a single fact { level } scales the
+# box-model spacing attributes (padding, gap) on every container so an app can go
+# compact (data-dense), comfortable (default), or spacious (touch / presentation)
+# without touching authored intent.
+#
+# ── THE RESOLVE GRAMMAR (same as ui-layout.px) ───────────────────────────────
+#   practice <name>:
+#     kind: resolve
+#     appliesTo: <schemaKind>        # container for spacing
+#     when: <flat boolean>           # over context; default true
+#     set: <attribute>               # padding | gap (a RESPONSIVE_ATTRS attribute)
+#     default: <value>               # a NAMED default behavior, resolver-interpreted
+#
+# ── THE CONTRACT ─────────────────────────────────────────────────────────────
+# 1. HONESTY: `set` names padding/gap, both real Box props (registry.ts) and both
+#    in RESPONSIVE_ATTRS. No invented attribute.
+# 2. FLAT SURFACE: `when` is flat boolean over context; the concrete value comes
+#    from a pre-flattened density→value table in the resolver (scale-by-density),
+#    never an author-space function.
+# 3. PRECEDENCE: density is a DEFAULT only. An explicit responsive.padding /
+#    responsive.gap (resolved by ui-layout.px) WINS — density fills the value in
+#    only when the node declared no explicit responsive map for that attribute.
+#    This mirrors the stack-below-md precedence (explicit responsive beats default).
+# 4. DERIVED-ONLY: writes to canvas:tree:resolved, never to authored canvas:tree.
+# 5. DRIFT-GUARDED: mirrored in ui-practices.ts (UI_DENSITY_PRACTICES); the sync
+#    test tests/ui-density.sync.test.ts asserts parity (C-DRIFT-001).
+#
+# ── TRIGGER ──────────────────────────────────────────────────────────────────
+# ui:density → { level: compact | comfortable | spacious }
+#
+# ── THE DENSITY → SPACING TABLE (concrete, documented) ───────────────────────
+# The 'scale-by-density' behavior resolves these concrete CSS values by level:
+#   level         padding   gap
+#   compact       4px       4px
+#   comfortable   8px       8px
+#   spacious      16px      12px
+# comfortable is the baseline; compact tightens; spacious loosens. Values are
+# deliberately small, even multiples so they compose predictably with the
+# breakpoint ladder.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Scale container padding by the active density level when the node declares no
+# explicit responsive.padding. Comfortable is the default level.
+practice ui_density_padding_scale:
+  kind: resolve
+  appliesTo: container
+  when: context.node.hasResponsivePadding === false
+  set: padding
+  default: scale-by-density
+
+# Scale container gap by the active density level when the node declares no
+# explicit responsive.gap.
+practice ui_density_gap_scale:
+  kind: resolve
+  appliesTo: container
+  when: context.node.hasResponsiveGap === false
+  set: gap
+  default: scale-by-density

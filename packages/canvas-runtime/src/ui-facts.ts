@@ -30,6 +30,12 @@ export interface CanvasNodeLike {
   bindings?: Record<string, unknown>;
   /** Responsive intent map (attribute → breakpoint → value). See format.ts CanvasNode. */
   responsive?: Record<string, Record<string, unknown>>;
+  /**
+   * Semantic colour token (e.g. 'fg', 'muted', 'accent'). When set, the theme
+   * resolve practices (ui-theme.px) map it to a concrete `color` for the active
+   * theme mode. Authored intent; never written by the resolver.
+   */
+  themeToken?: string;
   children?: CanvasNodeLike[];
   /** Not read by the extractor; widened to accept any CanvasNode `visible` shape. */
   visible?: unknown;

@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# UI THEME — RESOLVE PRACTICES
+#
+# RESOLVE-mode best practices keyed on the ui:theme trigger fact. Theme is the
+# light/dark (+ optional token overrides) knob. The v1 resolve job is narrow and
+# HONEST: map a semantic color TOKEN on a text node to the concrete hex color for
+# the active theme mode, and write it to the real `color` prop.
+#
+# ── THE RESOLVE GRAMMAR ──────────────────────────────────────────────────────
+#   practice <name>:
+#     kind: resolve
+#     appliesTo: text                # color lives on Text (registry.ts)
+#     when: <flat boolean>           # over context; default true
+#     set: color                     # a real Text prop (themeable attribute)
+#     default: theme-token-color     # NAMED behavior: token → concrete color
+#
+# ── THE CONTRACT ─────────────────────────────────────────────────────────────
+# 1. HONESTY: `set` names `color`, a real Text prop (registry.ts). It is NOT a
+#    RESPONSIVE_ATTRS attribute (color does not vary by breakpoint) — it is a
+#    THEMEABLE attribute, varied by theme mode instead. The resolver enforces the
+#    themeable-attribute allow-list at runtime, same spirit as the responsive one.
+#    NOTE: there is intentionally NO container `background` practice here. No
+#    registered container component exposes a `background` prop, so theming a
+#    background honestly cannot be expressed as a prop write today. Background
+#    theming is left ABSENT (a documented follow-on via the class/style path),
+#    NOT faked (C-NOSTUB-001).
+# 2. FLAT SURFACE: `when` is flat boolean over context; the concrete color comes
+#    from a pre-flattened token→mode→color lookup (built-in palette merged with
+#    the optional facts.theme.tokens override), never an author-space function.
+# 3. PRECEDENCE: theme is a DEFAULT only. An explicit literal props.color authored
+#    on the node WINS — theme fills color in only when the node declared a
+#    `themeToken` (semantic intent) and no explicit literal color. Mirrors the
+#    explicit-beats-default precedence pattern.
+# 4. DERIVED-ONLY: writes to canvas:tree:resolved, never to authored canvas:tree.
+# 5. DRIFT-GUARDED: mirrored in ui-practices.ts (UI_THEME_PRACTICES); the sync
+#    test tests/ui-theme.sync.test.ts asserts parity (C-DRIFT-001).
+#
+# ── TRIGGER ──────────────────────────────────────────────────────────────────
+# ui:theme → { mode: light | dark, tokens?: { <name>: { light, dark } } }
+#
+# ── THE BUILT-IN TOKEN PALETTE (concrete, documented) ────────────────────────
+# The 'theme-token-color' behavior resolves these tokens by mode. facts.theme
+# .tokens entries override/extend this table per token name.
+#   token        light      dark
+#   fg           #111111    #f5f5f5
+#   muted        #555555    #a0a0a0
+#   accent       #1d4ed8    #60a5fa
+#   danger       #b91c1c    #f87171
+# These pairs are chosen to clear WCAG AA body-text contrast against the
+# corresponding mode surface (light surface ~#ffffff, dark surface ~#0a0a0a);
+# the contrast helper (ui-contrast.ts) makes that checkable in the validate half.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Map a node's semantic color token to the concrete color for the active theme
+# mode and write it to `color`, unless the node already has an explicit literal
+# props.color (author override wins).
+practice ui_theme_text_color:
+  kind: resolve
+  appliesTo: text
+  when: context.node.hasThemeToken === true && context.node.hasExplicitColor === false
+  set: color
+  default: theme-token-color

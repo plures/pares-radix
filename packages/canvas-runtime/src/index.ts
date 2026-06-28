@@ -81,6 +81,34 @@ export type { WireResolvedTreeOptions } from './ui-reactive.js';
 export { attachViewportBridge, readViewport } from './ui-viewport-bridge.js';
 export type { WindowLike, ViewportBridgeOptions } from './ui-viewport-bridge.js';
 
+// ── UI Theme/Density/Contrast (Thread 1) ─────────────────────────────────────
+// Resolve-mode practice sets keyed on ui:density and ui:theme, plus pure WCAG
+// contrast math. ADD-ONLY block (do not reformat lines above) to minimize merge
+// conflicts with Thread 2.
+export {
+  UI_DENSITY_PRACTICES,
+  UI_THEME_PRACTICES,
+  DENSITY_SCALE,
+  DEFAULT_DENSITY_LEVEL,
+  THEME_TOKENS,
+  DEFAULT_THEME_MODE,
+  THEMEABLE_ATTRS,
+  THEMEABLE_ATTR_SET,
+} from './ui-practices.js';
+export type { DensityLevel, ThemeMode, ThemeTokenColors } from './ui-practices.js';
+export type { DensityFact, ThemeFact } from './ui-resolve.js';
+export {
+  parseHexColor,
+  relativeLuminance,
+  contrastRatio,
+  contrastRatioFromLuminance,
+  meetsContrast,
+  WCAG_AA_NORMAL,
+  WCAG_AA_LARGE,
+  WCAG_AAA_NORMAL,
+} from './ui-contrast.js';
+export type { Rgb } from './ui-contrast.js';
+
 // Reactive Graph Bridge
 export { createReactiveGraph, putWithActor } from './reactive-graph.js';
 export type { ReactiveGraph, WriteOptions } from './reactive-graph.js';

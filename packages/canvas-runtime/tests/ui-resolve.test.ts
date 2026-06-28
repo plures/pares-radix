@@ -144,3 +144,188 @@ describe('resolveUiTree — nesting & unknown nodes', () => {
     expect(out.props?.direction).toBeUndefined(); // no kind → no resolution
   });
 });
+
+describe('resolveUiTree — density (ui:density) scales container spacing', () => {
+  it('compact tightens padding + gap on a container', () => {
+    const tree = box({});
+    const out = resolveUiTree(tree, { density: { level: 'compact' } });
+    expect(out.props?.padding).toBe('4px');
+    expect(out.props?.gap).toBe('4px');
+  });
+
+  it('comfortable is the baseline spacing', () => {
+    const out = resolveUiTree(box({}), { density: { level: 'comfortable' } });
+    expect(out.props?.padding).toBe('8px');
+    expect(out.props?.gap).toBe('8px');
+  });
+
+  it('spacious loosens padding + gap', () => {
+    const out = resolveUiTree(box({}), { density: { level: 'spacious' } });
+    expect(out.props?.padding).toBe('16px');
+    expect(out.props?.gap).toBe('12px');
+  });
+
+  it('does nothing when no ui:density fact is present', () => {
+    const out = resolveUiTree(box({}), {});
+    expect(out.props?.padding).toBeUndefined();
+    expect(out.props?.gap).toBeUndefined();
+  });
+
+  it('an unknown/missing level falls back to comfortable', () => {
+    const out = resolveUiTree(box({}), { density: { level: 'cozy' as unknown as 'compact' } });
+    expect(out.props?.padding).toBe('8px');
+    expect(out.props?.gap).toBe('8px');
+  });
+
+  it('does NOT scale text nodes (density is a container concern)', () => {
+    const tree: CanvasNodeLike = { id: 't', type: 'Text', props: {} };
+    const out = resolveUiTree(tree, { density: { level: 'compact' } });
+    expect(out.props?.padding).toBeUndefined();
+    expect(out.props?.gap).toBeUndefined();
+  });
+
+  it('applies density to nested containers recursively', () => {
+    const tree = box({}, [box({ id: 'inner' }, [{ id: 'c', type: 'Button', props: { label: 'A' } }])]);
+    const out = resolveUiTree(tree, { density: { level: 'spacious' } });
+    expect(out.props?.padding).toBe('16px');
+    expect(out.children?.[0].props?.padding).toBe('16px');
+  });
+});
+
+describe('resolveUiTree — density precedence vs explicit responsive', () => {
+  it('explicit responsive.padding WINS over the density default', () => {
+    const tree = box({ responsive: { padding: { base: '2px', md: '20px' } } });
+    // density would say 16px (spacious); explicit responsive says 20px at md → responsive wins
+    const out = resolveUiTree(tree, {
+      density: { level: 'spacious' },
+      viewport: { width: 900 }, // md
+    });
+    expect(out.props?.padding).toBe('20px');
+  });
+
+  it('explicit responsive.gap WINS but density still fills padding', () => {
+    const tree = box({ responsive: { gap: { base: '30px' } } });
+    const out = resolveUiTree(tree, {
+      density: { level: 'compact' },
+      viewport: { width: 500 },
+    });
+    expect(out.props?.gap).toBe('30px'); // explicit responsive gap wins
+    expect(out.props?.padding).toBe('4px'); // density still supplies padding
+  });
+
+  it('density default applies when responsive declares a DIFFERENT attribute', () => {
+    // responsive.direction present, but no responsive.padding/gap → density fills both
+    const tree = box({ responsive: { direction: { base: 'column', md: 'row' } } }, [
+      { id: 'c1', type: 'Button', props: { label: 'A' } },
+      { id: 'c2', type: 'Button', props: { label: 'B' } },
+    ]);
+    const out = resolveUiTree(tree, { density: { level: 'compact' }, viewport: { width: 900 } });
+    expect(out.props?.direction).toBe('row'); // explicit responsive direction
+    expect(out.props?.padding).toBe('4px'); // density default
+    expect(out.props?.gap).toBe('4px');
+  });
+});
+
+describe('resolveUiTree — theme (ui:theme) maps token → color on text', () => {
+  const text = (extra: Partial<CanvasNodeLike> = {}): CanvasNodeLike => ({
+    id: 't', type: 'Text', props: {}, ...extra,
+  });
+
+  it('resolves a built-in token to the light-mode color', () => {
+    const out = resolveUiTree(text({ themeToken: 'fg' }), { theme: { mode: 'light' } });
+    expect(out.props?.color).toBe('#111111');
+  });
+
+  it('resolves the same token to the dark-mode color', () => {
+    const out = resolveUiTree(text({ themeToken: 'fg' }), { theme: { mode: 'dark' } });
+    expect(out.props?.color).toBe('#f5f5f5');
+  });
+
+  it('resolves the accent token per mode', () => {
+    expect(resolveUiTree(text({ themeToken: 'accent' }), { theme: { mode: 'light' } }).props?.color).toBe('#1d4ed8');
+    expect(resolveUiTree(text({ themeToken: 'accent' }), { theme: { mode: 'dark' } }).props?.color).toBe('#60a5fa');
+  });
+
+  it('does nothing when the node has no themeToken', () => {
+    const out = resolveUiTree(text({}), { theme: { mode: 'light' } });
+    expect(out.props?.color).toBeUndefined();
+  });
+
+  it('does nothing when no ui:theme fact is present', () => {
+    const out = resolveUiTree(text({ themeToken: 'fg' }), {});
+    expect(out.props?.color).toBeUndefined();
+  });
+
+  it('leaves an unknown token honestly absent (no fake color)', () => {
+    const out = resolveUiTree(text({ themeToken: 'no-such-token' }), { theme: { mode: 'light' } });
+    expect(out.props?.color).toBeUndefined();
+  });
+
+  it('an unknown mode falls back to light', () => {
+    const out = resolveUiTree(text({ themeToken: 'fg' }), {
+      theme: { mode: 'sepia' as unknown as 'light' },
+    });
+    expect(out.props?.color).toBe('#111111');
+  });
+
+  it('facts.theme.tokens override a built-in token for the active mode', () => {
+    const out = resolveUiTree(text({ themeToken: 'accent' }), {
+      theme: { mode: 'light', tokens: { accent: { light: '#abcdef' } } },
+    });
+    expect(out.props?.color).toBe('#abcdef');
+  });
+
+  it('facts.theme.tokens can define a brand-new token', () => {
+    const out = resolveUiTree(text({ themeToken: 'brand' }), {
+      theme: { mode: 'dark', tokens: { brand: { light: '#000000', dark: '#00ffaa' } } },
+    });
+    expect(out.props?.color).toBe('#00ffaa');
+  });
+
+  it('does NOT theme container nodes (color is a text concern here)', () => {
+    const out = resolveUiTree(box({ themeToken: 'fg' } as Partial<CanvasNodeLike>), { theme: { mode: 'light' } });
+    expect(out.props?.color).toBeUndefined();
+  });
+});
+
+describe('resolveUiTree — theme precedence vs explicit color', () => {
+  it('an explicit literal props.color WINS over the theme token', () => {
+    const tree: CanvasNodeLike = {
+      id: 't', type: 'Text', props: { color: '#123456' }, themeToken: 'fg',
+    };
+    const out = resolveUiTree(tree, { theme: { mode: 'light' } });
+    expect(out.props?.color).toBe('#123456'); // author override wins
+  });
+});
+
+describe('resolveUiTree — density + theme + viewport compose', () => {
+  it('all three facts resolve independently on the right kinds', () => {
+    const tree = box(
+      { responsive: { direction: { base: 'column', md: 'row' } } },
+      [
+        { id: 'h', type: 'Text', props: {}, themeToken: 'fg' },
+        { id: 'c2', type: 'Button', props: { label: 'B' } },
+      ],
+    );
+    const out = resolveUiTree(tree, {
+      viewport: { width: 900 }, // md
+      density: { level: 'compact' },
+      theme: { mode: 'dark' },
+    });
+    // container: explicit responsive direction + density-filled spacing
+    expect(out.props?.direction).toBe('row');
+    expect(out.props?.padding).toBe('4px');
+    expect(out.props?.gap).toBe('4px');
+    // text child: theme color
+    expect(out.children?.[0].props?.color).toBe('#f5f5f5');
+  });
+
+  it('NEVER mutates the authored tree when density+theme facts are present', () => {
+    const tree = box({ themeToken: 'fg' } as Partial<CanvasNodeLike>, [
+      { id: 't', type: 'Text', props: {}, themeToken: 'accent' },
+    ]);
+    const snapshot = JSON.parse(JSON.stringify(tree));
+    resolveUiTree(tree, { density: { level: 'spacious' }, theme: { mode: 'dark' } });
+    expect(tree).toEqual(snapshot); // authored intent pristine
+  });
+});
