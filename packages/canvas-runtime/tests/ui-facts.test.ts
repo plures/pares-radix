@@ -8,6 +8,10 @@ import type { CanvasNodeLike } from '../src/ui-facts.js';
 // .svelte files, which the plain node test loader cannot parse. The extractor
 // only needs the registry to know whether a type is registered, not the actual
 // Svelte component — so a null component with the right id is sufficient.
+//
+// schemaKind matters for the contrast check (it targets 'text'-kind nodes), so
+// we register with the REAL category: Text/Heading are 'display' (→ text), Box
+// is 'layout' (→ container). That mirrors the real registry (registry.ts).
 beforeAll(() => {
   const meta = {
     component: null as unknown as never,
@@ -17,9 +21,12 @@ beforeAll(() => {
     hasChildren: true,
     description: 'test stub',
   };
-  for (const id of ['Box', 'Input', 'TextArea', 'Select', 'Button', 'Link', 'Heading', 'Dialog', 'Image']) {
+  for (const id of ['Input', 'TextArea', 'Select', 'Button', 'Link', 'Heading', 'Dialog', 'Image', 'Text']) {
     registerComponent(id, { ...meta, name: id });
   }
+  // Box is a layout container (schemaKind 'container'), not text — register it as
+  // such so it is NOT contrast-checked.
+  registerComponent('Box', { ...meta, name: 'Box', category: 'layout' });
 });
 
 function box(children: CanvasNodeLike[]): CanvasNodeLike {
@@ -157,5 +164,89 @@ describe('extractUiFacts — dialogs, images, unknown', () => {
       ]),
     );
     expect(f.unknownComponentCount).toBe(1);
+  });
+});
+
+describe('extractUiFacts — colour contrast (WCAG AA)', () => {
+  it('no themeMode → contrast check is inert (honest: surface unknown)', () => {
+    // Even with an obviously-bad colour, with no mode we cannot know the surface,
+    // so contrastChecked is false and the count is 0 (NOT a silent pass).
+    const tree = box([{ id: 't', type: 'Text', props: { color: '#cccccc' } }]);
+    const f = extractUiFacts(tree);
+    expect(f.contrastChecked).toBe(false);
+    expect(f.lowContrastTextCount).toBe(0);
+  });
+
+  it('bad explicit hex colour on light surface → counted, checked true', () => {
+    // #cccccc on #ffffff ≈ 1.6 — well below AA 4.5.
+    const f = extractUiFacts(box([{ id: 't', type: 'Text', props: { color: '#cccccc' } }]), {
+      themeMode: 'light',
+    });
+    expect(f.contrastChecked).toBe(true);
+    expect(f.lowContrastTextCount).toBeGreaterThanOrEqual(1);
+  });
+
+  it('good built-in token (fg) on its mode surface → not counted', () => {
+    const f = extractUiFacts(box([{ id: 't', type: 'Text', themeToken: 'fg' }]), {
+      themeMode: 'light',
+    });
+    expect(f.contrastChecked).toBe(true);
+    expect(f.lowContrastTextCount).toBe(0);
+  });
+
+  it('a bad token on light is fine on dark (mode-aware surface)', () => {
+    // muted dark (#a0a0a0) on the dark surface (#0b0b0b) passes; the SAME colour
+    // would fail on a light surface. Confirms we use the active mode's surface.
+    const f = extractUiFacts(box([{ id: 't', type: 'Text', themeToken: 'muted' }]), {
+      themeMode: 'dark',
+    });
+    expect(f.lowContrastTextCount).toBe(0);
+  });
+
+  it('explicit hex colour WINS over themeToken (precedence)', () => {
+    // Good token fg, but an explicit bad literal colour — the literal is what
+    // ships, so it is what we check, and it fails.
+    const f = extractUiFacts(
+      box([{ id: 't', type: 'Text', themeToken: 'fg', props: { color: '#cccccc' } }]),
+      { themeMode: 'light' },
+    );
+    expect(f.lowContrastTextCount).toBe(1);
+  });
+
+  it('unknown colour (no token, non-hex color) is NOT counted, not guessed', () => {
+    // 'red' is not a hex string and there is no themeToken → not checkable. We do
+    // not invent a value; it simply does not contribute to the count.
+    const f = extractUiFacts(
+      box([
+        { id: 'a', type: 'Text', props: { color: 'red' } }, // non-hex → skipped
+        { id: 'b', type: 'Text', props: {} }, // no colour at all → skipped
+        { id: 'c', type: 'Text', themeToken: 'not-a-real-token' }, // unknown token → skipped
+      ]),
+      { themeMode: 'light' },
+    );
+    expect(f.contrastChecked).toBe(true);
+    expect(f.lowContrastTextCount).toBe(0);
+  });
+
+  it('a layout container (Box) is never contrast-checked', () => {
+    // Box is schemaKind 'container'; even with a bad color prop it is not a text
+    // node, so it does not count.
+    const f = extractUiFacts(
+      { id: 'root', type: 'Box', props: { color: '#cccccc' }, children: [] },
+      { themeMode: 'light' },
+    );
+    expect(f.lowContrastTextCount).toBe(0);
+  });
+
+  it('counts multiple failing text nodes', () => {
+    const f = extractUiFacts(
+      box([
+        { id: 'a', type: 'Text', props: { color: '#cccccc' } }, // fail
+        { id: 'b', type: 'Heading', props: { level: 2, color: '#dddddd' } }, // fail (Heading is text-kind)
+        { id: 'c', type: 'Text', themeToken: 'fg' }, // pass
+      ]),
+      { themeMode: 'light' },
+    );
+    expect(f.lowContrastTextCount).toBe(2);
   });
 });

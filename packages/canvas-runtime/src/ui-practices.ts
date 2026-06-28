@@ -211,6 +211,26 @@ export const THEME_TOKENS: Readonly<Record<string, ThemeTokenColors>> = {
 } as const;
 
 /**
+ * THEME_SURFACE — the canonical base background (surface) colour per theme mode.
+ *
+ * WHY THIS IS HONEST (not a faked prop): every theme defines a base surface the
+ * content sits on; it is a real, declared theme constant, mirrored in
+ * ui-theme.px. It is NOT an invented per-node `background` prop and NOT guessed
+ * per node. The validate-half contrast linter (ui-facts.ts) checks each USED
+ * text token's colour against the ACTIVE mode's surface here — the only
+ * background it may honestly assume.
+ *
+ * The built-in THEME_TOKENS all clear WCAG AA (>=4.5) against these surfaces in
+ * BOTH modes; tests/ui-contrast.test.ts asserts that (the "palette obeys its own
+ * linter" guard). Mirror: praxis/ui/ui-theme.px SURFACE table
+ * (tests/ui-theme.sync.test.ts).
+ */
+export const THEME_SURFACE: Readonly<Record<ThemeMode, { background: string }>> = {
+  light: { background: '#ffffff' },
+  dark: { background: '#0b0b0b' },
+} as const;
+
+/**
  * Attributes a THEME practice may write. Parallel to RESPONSIVE_ATTR_SET: the
  * resolver enforces this allow-list at runtime so a theme practice can only ever
  * set a real, theme-varying prop. `color` is the only one today (Text.color).

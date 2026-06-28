@@ -116,3 +116,22 @@ constraint ui_no_unknown_components:
   severity: error
   phases: ["ui"]
   message: "Every node `type` must resolve to a registered component. An unknown type renders nothing (silent blank). Register the component or fix the type name."
+
+# ════════════════════════════════════════════════════════════════════════
+# PERCEIVABLE — text has sufficient colour contrast against the surface
+# (WCAG 1.4.3 Contrast (Minimum) — AA, normal body text >= 4.5:1)
+# ════════════════════════════════════════════════════════════════════════
+#
+# HONESTY: this constraint reads ONLY facts the extractor emits — contrastChecked
+# and lowContrastTextCount (ui-facts.ts). A contrast ratio needs a background;
+# the only one we may assume is the declared THEME_SURFACE for the ACTIVE mode.
+# The `when` guard (contrastChecked === true) means the rule is INERT until a
+# caller supplies a theme mode to extractUiFacts — the honest "surface unknown"
+# state, not a silent pass.
+
+constraint ui_text_contrast_aa:
+  when: context.ui.contrastChecked === true
+  require: context.ui.lowContrastTextCount === 0
+  severity: error
+  phases: ["ui"]
+  message: "Text must meet WCAG AA contrast (>= 4.5:1) against the theme surface. context.ui.lowContrastTextCount text node(s) fall below it. Use a darker/lighter colour or a theme token that clears AA for the active mode."

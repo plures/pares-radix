@@ -49,6 +49,19 @@
 # These pairs are chosen to clear WCAG AA body-text contrast against the
 # corresponding mode surface (light surface ~#ffffff, dark surface ~#0a0a0a);
 # the contrast helper (ui-contrast.ts) makes that checkable in the validate half.
+#
+# ── THE BASE SURFACE (background) PER MODE (concrete, documented) ─────────────
+# The canonical base surface colour content sits on, per theme mode. This is a
+# REAL declared theme constant (every theme defines its base surface) — NOT an
+# invented per-node `background` prop. The validate-half contrast linter checks
+# each USED text token's colour against the ACTIVE mode's surface below; it is
+# the only background it may honestly assume. Mirrored in ui-practices.ts as
+# THEME_SURFACE (drift-guarded by tests/ui-theme.sync.test.ts). The built-in
+# token palette above clears WCAG AA (>=4.5) against these surfaces in BOTH
+# modes (asserted in tests/ui-contrast.test.ts).
+#   surface      background
+#   light        #ffffff
+#   dark         #0b0b0b
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Map a node's semantic color token to the concrete color for the active theme

@@ -13,6 +13,7 @@ import {
   WCAG_AA_NORMAL,
   WCAG_AA_LARGE,
 } from '../src/ui-contrast.js';
+import { THEME_TOKENS, THEME_SURFACE, type ThemeMode } from '../src/ui-practices.js';
 
 describe('parseHexColor', () => {
   it('parses #rrggbb', () => {
@@ -98,4 +99,27 @@ describe('meetsContrast', () => {
   it('fails closed on unparseable input (unknown colour does not "pass")', () => {
     expect(meetsContrast('bogus', '#ffffff')).toBe(false);
   });
+});
+
+describe('built-in palette obeys its own linter (THEME_TOKENS vs THEME_SURFACE)', () => {
+  // The palette guard: every built-in semantic token must clear WCAG AA
+  // (>= 4.5) against the declared surface for BOTH modes. If this fails, the
+  // theme palette violates the very contrast rule the validate half enforces —
+  // a real bug, not a test nuisance. Fix the token colour, never the threshold.
+  const modes: ThemeMode[] = ['light', 'dark'];
+  for (const mode of modes) {
+    for (const [token, colors] of Object.entries(THEME_TOKENS)) {
+      it(`${token} (${mode}) meets AA vs surface`, () => {
+        const fg = colors[mode];
+        const bg = THEME_SURFACE[mode].background;
+        const ratio = contrastRatio(fg, bg);
+        expect(ratio, `${token} ${mode} ${fg} vs ${bg} unparseable`).not.toBeNull();
+        expect(
+          ratio!,
+          `${token} ${mode} ${fg} vs ${bg} = ${ratio?.toFixed(2)}`,
+        ).toBeGreaterThanOrEqual(WCAG_AA_NORMAL);
+        expect(meetsContrast(fg, bg, WCAG_AA_NORMAL)).toBe(true);
+      });
+    }
+  }
 });

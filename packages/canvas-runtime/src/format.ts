@@ -344,6 +344,14 @@ export function validateCanvas(doc: CanvasDocument): string[] {
   // destructive-action guarding) against the tree. These come from
   // praxis/ui/ui-best-practices.px, mirrored in ui-constraints.ts. Good UI is
   // enforced here automatically — authors don't have to remember the rules.
+  //
+  // NOTE (contrast): validateUi also hosts the WCAG-AA contrast constraint
+  // (ui_text_contrast_aa), but it needs the ACTIVE theme mode to know the
+  // surface to contrast against. A CanvasDocument carries no theme-mode field,
+  // so we honestly pass none here: the contrast constraint stays INERT in this
+  // string[] path (contrastChecked=false). It activates when a caller that knows
+  // the mode invokes validateUi(root, { themeMode }) directly. This is the
+  // honest "surface unknown" state, not a silent pass — do NOT fabricate a mode.
   if (doc.tree) {
     const ui = validateUi(doc.tree);
     for (const issue of formatUiViolations(ui.violations)) issues.push(issue);

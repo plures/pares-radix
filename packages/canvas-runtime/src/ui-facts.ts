@@ -20,6 +20,9 @@
  */
 
 import { resolveComponent, getRegistry } from './registry.js';
+import { kindForComponent } from './ui-schema.js';
+import { THEME_TOKENS, THEME_SURFACE, type ThemeMode } from './ui-practices.js';
+import { meetsContrast, parseHexColor, WCAG_AA_NORMAL } from './ui-contrast.js';
 
 // ── Canvas node shape (mirrors CanvasRenderer / canvas-plugin) ───────────────
 
@@ -97,6 +100,23 @@ export interface UiFacts {
   imagesMissingAlt: number;
   allImagesHaveAlt: boolean;
 
+  // ── Colour contrast (WCAG AA) ──
+  /**
+   * Whether the contrast check actually ran. It runs ONLY when a theme mode is
+   * supplied to extractUiFacts (so the active surface is known). When false the
+   * contrast constraint stays inert — the honest "we can't know the surface yet"
+   * state, NOT a silent pass. (extractUiFacts default: no mode → false.)
+   */
+  contrastChecked: boolean;
+  /**
+   * Number of CHECKABLE text nodes whose colour fails WCAG AA (< 4.5) against
+   * the active mode's THEME_SURFACE background. A text node is checkable only if
+   * it has a themeToken in THEME_TOKENS OR a hex `props.color`; unknown/absent
+   * colours are not guessed and not counted. Always 0 when contrastChecked is
+   * false.
+   */
+  lowContrastTextCount: number;
+
   // ── Unknown components (registry coverage) ──
   /** Nodes whose `type` is not in the component registry. */
   unknownComponentCount: number;
@@ -166,15 +186,57 @@ function treeHasDialog(root: CanvasNodeLike): boolean {
   return found;
 }
 
+/**
+ * Is this node a TEXT-kind node (typography / colour)? Resolved via the registry
+ * (category → schemaKind, e.g. Text/Heading → 'text'). Unregistered types are
+ * NOT assumed to be text — honest: we only contrast-check nodes we can classify.
+ */
+function isTextKind(node: CanvasNodeLike): boolean {
+  const meta = resolveComponent(node.type);
+  if (!meta) return false;
+  return kindForComponent(meta.schemaKind, meta.category) === 'text';
+}
+
+/**
+ * The concrete foreground colour to contrast-check for a text node, or null when
+ * the node is NOT checkable (so it is neither counted nor guessed).
+ *
+ * Checkable iff EITHER:
+ *   - props.color is a parseable hex string (explicit author colour), which WINS
+ *     (mirrors resolve precedence: an explicit literal colour beats a token); OR
+ *   - themeToken names a colour in THEME_TOKENS → THEME_TOKENS[token][mode].
+ * Anything else (no color/token, a non-hex colour like 'red' or a CSS var, an
+ * unknown token) → null (unknown → not checked).
+ */
+function checkableTextColor(node: CanvasNodeLike, mode: ThemeMode): string | null {
+  const explicit = node.props?.color;
+  if (typeof explicit === 'string' && parseHexColor(explicit)) return explicit;
+  const token = node.themeToken;
+  if (typeof token === 'string' && Object.prototype.hasOwnProperty.call(THEME_TOKENS, token)) {
+    return THEME_TOKENS[token][mode];
+  }
+  return null;
+}
+
 // ── Extractor ────────────────────────────────────────────────────────────────
 
 /**
  * Reduce a canvas tree to flat UI facts for Praxis evaluation.
  *
  * @param root The root canvas node (or the canvas document's `tree`).
+ * @param opts Optional inputs that change what can be checked. `themeMode`
+ *   supplies the ACTIVE theme mode so the contrast check knows which
+ *   THEME_SURFACE background to use. Omit it (the default) to keep every
+ *   existing `(root)`-only call site working: with no mode the contrast check is
+ *   skipped (contrastChecked=false, lowContrastTextCount=0) — honest, since the
+ *   surface is unknown.
  * @returns A `UiFacts` object suitable for `{ context: { ui: facts } }`.
  */
-export function extractUiFacts(root: CanvasNodeLike | null | undefined): UiFacts {
+export function extractUiFacts(
+  root: CanvasNodeLike | null | undefined,
+  opts: { themeMode?: ThemeMode } = {},
+): UiFacts {
+  const themeMode = opts.themeMode;
   const facts: UiFacts = {
     nodeCount: 0,
     inputCount: 0,
@@ -197,6 +259,8 @@ export function extractUiFacts(root: CanvasNodeLike | null | undefined): UiFacts
     imageCount: 0,
     imagesMissingAlt: 0,
     allImagesHaveAlt: true,
+    contrastChecked: themeMode !== undefined,
+    lowContrastTextCount: 0,
     unknownComponentCount: 0,
     registrySize: getRegistry().size,
   };
@@ -262,6 +326,18 @@ export function extractUiFacts(root: CanvasNodeLike | null | undefined): UiFacts
     if (node.type === 'Image' || node.type === 'Img') {
       facts.imageCount += 1;
       if (!propProvided(node, 'alt')) facts.imagesMissingAlt += 1;
+    }
+
+    // Colour contrast (only when a theme mode is known — else the surface is
+    // unknown and we honestly cannot check). Count CHECKABLE text nodes whose
+    // colour fails WCAG AA against the active mode's surface. Unknown colours
+    // (no token/hex) are skipped, never guessed.
+    if (themeMode !== undefined && isTextKind(node)) {
+      const fg = checkableTextColor(node, themeMode);
+      if (fg !== null) {
+        const bg = THEME_SURFACE[themeMode].background;
+        if (!meetsContrast(fg, bg, WCAG_AA_NORMAL)) facts.lowContrastTextCount += 1;
+      }
     }
   });
 

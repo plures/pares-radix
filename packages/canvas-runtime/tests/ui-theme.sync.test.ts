@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { UI_THEME_PRACTICES, THEMEABLE_ATTR_SET, type UiPractice } from '../src/ui-practices.js';
+import { UI_THEME_PRACTICES, THEMEABLE_ATTR_SET, THEME_SURFACE, type UiPractice } from '../src/ui-practices.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // tests/ -> packages/canvas-runtime -> packages -> repo root
@@ -67,6 +67,21 @@ function normalizeTs(p: UiPractice): Required<Omit<ParsedPractice, 'from' | 'def
   return { ...base, default: p.source.value };
 }
 
+/**
+ * Parse the documented SURFACE table out of the .px comment block. Lines look
+ * like `#   light        #ffffff` / `#   dark         #0b0b0b`. We anchor on the
+ * exact mode names so prose hex mentions elsewhere can't match.
+ */
+function parseSurfaceTable(src: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /^#\s+(light|dark)\s+(#[0-9a-fA-F]{3,8})\s*$/;
+  for (const raw of src.split(/\r?\n/)) {
+    const m = re.exec(raw.replace(/\s+$/, ''));
+    if (m) out[m[1]] = m[2].toLowerCase();
+  }
+  return out;
+}
+
 describe('ui-theme practices drift guard', () => {
   const parsed = parsePractices(readFileSync(PX_PATH, 'utf8'));
 
@@ -105,5 +120,16 @@ describe('ui-theme practices drift guard', () => {
     for (const p of UI_THEME_PRACTICES) {
       expect(THEMEABLE_ATTR_SET.has(p.set), `${p.name} sets non-themeable attr ${p.set}`).toBe(true);
     }
+  });
+
+  it('the .px SURFACE table matches THEME_SURFACE (drift guard)', () => {
+    // The base surface per mode is theme data: the .px documents it and
+    // ui-practices.ts mirrors it as THEME_SURFACE. They must agree, same as the
+    // token palette, so the contrast linter's background can never silently drift
+    // between source-of-truth and the executable mirror.
+    const surfaces = parseSurfaceTable(readFileSync(PX_PATH, 'utf8'));
+    expect(Object.keys(surfaces).sort()).toEqual(['dark', 'light']);
+    expect(surfaces.light).toBe(THEME_SURFACE.light.background.toLowerCase());
+    expect(surfaces.dark).toBe(THEME_SURFACE.dark.background.toLowerCase());
   });
 });

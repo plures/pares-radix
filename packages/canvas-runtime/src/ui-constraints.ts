@@ -18,6 +18,7 @@
  */
 
 import { extractUiFacts, type CanvasNodeLike, type UiFacts } from './ui-facts.js';
+import type { ThemeMode } from './ui-practices.js';
 
 export type Severity = 'error' | 'warning';
 
@@ -127,6 +128,18 @@ export const UI_CONSTRAINTS: readonly UiConstraint[] = [
     message:
       'Every node `type` must resolve to a registered component. An unknown type renders nothing (silent blank). Register the component or fix the type name.',
   },
+  {
+    // Mirror of praxis/ui/ui-best-practices.px `ui_text_contrast_aa`. Reads ONLY
+    // facts the extractor emits (contrastChecked, lowContrastTextCount). Inert
+    // (when: contrastChecked === true) until a caller threads a theme mode into
+    // extractUiFacts — honest "surface unknown" state, not a silent pass.
+    name: 'ui_text_contrast_aa',
+    when: 'context.ui.contrastChecked === true',
+    require: 'context.ui.lowContrastTextCount === 0',
+    severity: 'error',
+    message:
+      'Text must meet WCAG AA contrast (>= 4.5:1) against the theme surface. context.ui.lowContrastTextCount text node(s) fall below it. Use a darker/lighter colour or a theme token that clears AA for the active mode.',
+  },
 ] as const;
 
 // ── Flat-boolean evaluator (semantics match MCP server simpleEval) ───────────
@@ -207,10 +220,17 @@ export function evalExpr(expr: string, context: Record<string, unknown>): boolea
  * Validate a canvas tree against the UI best-practice constraints.
  *
  * @param root The canvas root node (or `doc.tree`).
+ * @param opts Optional inputs forwarded to extractUiFacts. `themeMode` enables
+ *   the WCAG-AA contrast constraint (ui_text_contrast_aa) by supplying the
+ *   active theme so the surface is known; without it that one constraint stays
+ *   inert (contrastChecked=false) — every other constraint is unaffected.
  * @returns facts + violations. `passed` is true when there are no violations.
  */
-export function validateUi(root: CanvasNodeLike | null | undefined): UiValidationResult {
-  const facts = extractUiFacts(root);
+export function validateUi(
+  root: CanvasNodeLike | null | undefined,
+  opts: { themeMode?: ThemeMode } = {},
+): UiValidationResult {
+  const facts = extractUiFacts(root, opts);
   const scope = { context: { ui: facts } } as Record<string, unknown>;
   const violations: UiViolation[] = [];
 

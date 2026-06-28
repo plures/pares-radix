@@ -4,6 +4,8 @@ import { validateUi, formatUiViolations, UI_CONSTRAINTS } from '../src/ui-constr
 import type { CanvasNodeLike } from '../src/ui-facts.js';
 
 // Register lightweight stand-ins (see ui-facts.test.ts for rationale).
+// schemaKind matters for the contrast constraint: Text/Heading are 'display'
+// (→ text-kind, contrast-checked), Box is 'layout' (→ container, not checked).
 beforeAll(() => {
   const meta = {
     component: null as unknown as never,
@@ -13,9 +15,10 @@ beforeAll(() => {
     hasChildren: true,
     description: 'test stub',
   };
-  for (const id of ['Box', 'Input', 'TextArea', 'Select', 'Button', 'Link', 'Heading', 'Dialog', 'Image']) {
+  for (const id of ['Input', 'TextArea', 'Select', 'Button', 'Link', 'Heading', 'Dialog', 'Image', 'Text']) {
     registerComponent(id, { ...meta, name: id });
   }
+  registerComponent('Box', { ...meta, name: 'Box', category: 'layout' });
 });
 
 function tree(children: CanvasNodeLike[]): CanvasNodeLike {
@@ -98,6 +101,31 @@ describe('validateUi — each violation class fires', () => {
       ]),
     );
     expect(names(r.violations)).toContain('ui_single_h1');
+  });
+});
+
+describe('validateUi — ui_text_contrast_aa (WCAG AA, theme-aware)', () => {
+  it('fires (error) on a low-contrast text node when a theme mode is supplied', () => {
+    const r = validateUi(tree([{ id: 't', type: 'Text', props: { color: '#cccccc' } }]), {
+      themeMode: 'light',
+    });
+    expect(names(r.violations)).toContain('ui_text_contrast_aa');
+    expect(r.violations.find((v) => v.constraint === 'ui_text_contrast_aa')?.severity).toBe('error');
+  });
+
+  it('passes on a good-contrast token when a theme mode is supplied', () => {
+    const r = validateUi(tree([{ id: 't', type: 'Text', themeToken: 'fg' }]), {
+      themeMode: 'light',
+    });
+    expect(names(r.violations)).not.toContain('ui_text_contrast_aa');
+  });
+
+  it('is INERT (absent) when no theme mode is supplied, even with bad colour', () => {
+    // contrastChecked === false → the when-guard is false → rule does not fire.
+    // Honest "surface unknown" state, not a silent pass.
+    const r = validateUi(tree([{ id: 't', type: 'Text', props: { color: '#cccccc' } }]));
+    expect(r.facts.contrastChecked).toBe(false);
+    expect(names(r.violations)).not.toContain('ui_text_contrast_aa');
   });
 });
 
