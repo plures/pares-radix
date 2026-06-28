@@ -1,8 +1,16 @@
 # CI: Real Integration Tests for pares-radix
-# Two tiers:
-#   1. local-tests: Build binary + run local tests (no Docker needed)
-#   2. integration-tests: Docker image + SSH + TUI automation (full E2E)
-# No mocks. Real binary, real SSH, real TUI automation.
+#
+# pares-radix is a svelte-Tauri app: GUI + Svelte-TUI (tui-css) + svelte-ratatui
+# (tui-native) + MCP. There is NO traditional CLI binary. This workflow tests the
+# REAL runnable surfaces only — no mocks, no stubs, no ghost `pares-radix --version`.
+#
+# Tiers:
+#   1. mcp        — the MCP dev server's native interface: vitest + stdio JSON-RPC smoke
+#   2. workspace  — Rust workspace builds (cargo build --release): app lib + crates compile
+#   3. frontend   — Svelte render-mode / tui-mappings + platform/store vitest suites
+#
+# See development-guide/design/PLURES-FOUNDATION.md (svelte-Tauri template) and
+# crates/cli/Cargo.toml (lib-only `pares_radix_migrate`, no bin → there is no CLI).
 
 name: Real Integration Tests
 
@@ -17,130 +25,47 @@ env:
   RUST_LOG: info
 
 jobs:
-  # ─── Tier 1: Local binary + Praxis constraint tests (fast, no Docker) ───
-  local-tests:
+  # ─── Tier 1: MCP server — native JSON-RPC over stdio (vitest + live smoke) ───
+  mcp:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+          version: 9
 
-      - name: Build release binary
-        run: cargo build --release -p pares-radix-cli
-
-      - name: Verify binary
-        run: ./target/release/pares-radix --version
-
-      - name: Install test dependencies
-        run: pip install pytest pytest-timeout pytest-cov pexpect paramiko hypothesis
-
-      - name: Run all local tests (no Docker)
-        env:
-          RADIX_BINARY: ./target/release/pares-radix
-        run: |
-          pytest testing/tests/ -v --tb=short -m "not docker" \
-            --timeout=30 --ignore=testing/tests/test_smoke.py \
-            --ignore=testing/tests/test_mcp_server.py \
-            --cov=testing/tests --cov-report=term-missing
-
-      - name: Upload coverage
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Install Node
+        uses: actions/setup-node@v4
         with:
-          name: coverage-report
-          path: .coverage
+          node-version: 20
+          cache: pnpm
 
-  # ─── Tier 2: Full E2E with Docker + SSH + TUI automation ────────────────
-  integration-tests:
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: MCP server vitest
+        run: pnpm -C packages/mcp-dev-server test
+
+      - name: MCP stdio JSON-RPC smoke
+        run: node packages/mcp-dev-server/smoke.mjs
+
+  # ─── Tier 2: Rust workspace build — app lib + crates compile (real binary) ───
+  workspace:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: local-tests
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Create test env file
-        run: |
-          cp testing/.env.example testing/.env
-          # CI uses default model URL, no real API key needed for smoke tests
-          echo "PARES_AUTOSTART=" >> testing/.env
-
-      - name: Build pares-radix image
-        working-directory: testing
-        run: docker compose build pares-radix
-
-      - name: Start service
-        working-directory: testing
-        run: docker compose up -d pares-radix
-
-      - name: Wait for healthy
-        working-directory: testing
-        run: |
-          for i in $(seq 1 30); do
-            if docker compose exec pares-radix pares-radix --version; then
-              echo "Service healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "Service failed to start"
-          docker compose logs pares-radix
-          exit 1
-
-      - name: Build test runner
-        working-directory: testing
-        run: docker compose --profile test build test-runner
-
-      - name: Run E2E tests
-        working-directory: testing
-        run: docker compose --profile test run --rm test-runner
-
-      - name: Collect logs on failure
-        if: failure()
-        working-directory: testing
-        run: |
-          docker compose logs pares-radix > /tmp/radix-logs.txt 2>&1
-          cat /tmp/radix-logs.txt
-
-      - name: Upload logs
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: radix-test-logs
-          path: /tmp/radix-logs.txt
-
-      - name: Teardown
-        if: always()
-        working-directory: testing
-        run: docker compose --profile test down -v --remove-orphans
-
-  # ─── Tier 3: Live inference with real API key (only when secret set) ─────
-  live-inference:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: local-tests
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Tauri system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -149,23 +74,31 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-v3-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build release binary
-        run: cargo build --release -p pares-radix-cli
+      - name: Build workspace (release)
+        run: cargo build --release --workspace
 
-      - name: Install test dependencies
-        run: pip install pytest pytest-timeout
+  # ─── Tier 3: Frontend render modes — gui / tui-css / tui-native + platform ───
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Run live inference tests
-        if: env.PARES_API_KEY != ''
-        env:
-          RADIX_BINARY: ./target/release/pares-radix
-          PARES_API_KEY: ${{ secrets.PARES_API_KEY }}
-          PARES_MODEL_URL: ${{ secrets.PARES_MODEL_URL || 'https://api.openai.com/v1' }}
-        run: |
-          pytest testing/tests/test_ask_subcommand.py::TestAskLive -v --timeout=90
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
 
-      - name: Skip notice
-        if: env.PARES_API_KEY == ''
-        run: echo "::notice::Live inference tests skipped — PARES_API_KEY secret not configured"
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Render-mode / platform tests
+        run: pnpm test
