@@ -36,6 +36,10 @@ export type {
 } from './format.js';
 export { createCanvas, exportCanvas, importCanvas, validateCanvas } from './format.js';
 
+// Demo Canvas — a real authored responsive canvas (single source of truth shared
+// by the /canvas app surface and tests/canvas-demo-resolve.test.ts).
+export { getDemoCanvas, DEMO_CANVAS_TREE } from './demo-canvas.js';
+
 // UI Best-Practice Enforcement
 export { extractUiFacts } from './ui-facts.js';
 export type { CanvasNodeLike, UiFacts } from './ui-facts.js';
