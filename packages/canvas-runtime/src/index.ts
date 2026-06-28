@@ -77,6 +77,10 @@ export type { UiPractice, PracticeSource } from './ui-practices.js';
 export { resolveUiTree } from './ui-resolve.js';
 export type { UiRuntimeFacts, ViewportFact } from './ui-resolve.js';
 
+// UI Override Provenance (pure: authored tree + facts → meaningful-override notices)
+export { detectOverrides } from './ui-overrides.js';
+export type { OverrideNotice } from './ui-overrides.js';
+
 // UI Reactive Wiring (facts + authored tree → derived resolved tree)
 export { wireResolvedTree } from './ui-reactive.js';
 export type { WireResolvedTreeOptions } from './ui-reactive.js';

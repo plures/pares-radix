@@ -49,6 +49,14 @@ export interface UiPractice {
   set: string;
   /** Source of the value. */
   source: PracticeSource;
+  /**
+   * One author-facing sentence explaining WHY this practice's default exists and
+   * that an explicit value overrides it. Lifted from the .px prose; surfaced at
+   * authoring time when an author overrides the resolved default (the
+   * guidance-on-override layer). Mirrored in the .px sources as a `rationale:`
+   * line and drift-guarded (C-DRIFT-001). REQUIRED for every practice.
+   */
+  rationale: string;
 }
 
 /**
@@ -64,6 +72,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'container',
     set: 'direction',
     source: { kind: 'responsive' },
+    rationale:
+      'Layout direction follows your explicit responsive.direction map so the container flows correctly at each breakpoint; this practice simply honours the value you authored.',
   },
   {
     name: 'ui_layout_stack_below_md',
@@ -72,6 +82,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     when: 'context.node.childCount > 1 && context.node.hasResponsiveDirection === false',
     set: 'direction',
     source: { kind: 'default', value: 'column-below-md' },
+    rationale:
+      'A multi-child container with no explicit direction stacks to a column below md and becomes a row at md and up so it stays readable on small screens; set an explicit responsive.direction to override.',
   },
   {
     name: 'ui_layout_gap_responsive',
@@ -79,6 +91,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'container',
     set: 'gap',
     source: { kind: 'responsive' },
+    rationale:
+      'Gap follows your explicit responsive.gap map so spacing between children is correct at each breakpoint; this practice simply honours the value you authored.',
   },
   {
     name: 'ui_layout_padding_responsive',
@@ -86,6 +100,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'container',
     set: 'padding',
     source: { kind: 'responsive' },
+    rationale:
+      'Padding follows your explicit responsive.padding map so inner spacing is correct at each breakpoint; this practice simply honours the value you authored.',
   },
   {
     name: 'ui_layout_columns_responsive',
@@ -93,6 +109,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'container',
     set: 'columns',
     source: { kind: 'responsive' },
+    rationale:
+      'Column count follows your explicit responsive.columns map so a grid reflows correctly across breakpoints; this practice simply honours the value you authored.',
   },
   {
     name: 'ui_layout_hidden_responsive',
@@ -100,6 +118,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'container',
     set: 'hidden',
     source: { kind: 'responsive' },
+    rationale:
+      'Visibility follows your explicit responsive.hidden map so a node shows or hides per breakpoint; this practice simply honours the value you authored.',
   },
   {
     name: 'ui_text_size_responsive',
@@ -107,6 +127,8 @@ export const UI_PRACTICES: readonly UiPractice[] = [
     appliesTo: 'text',
     set: 'size',
     source: { kind: 'responsive' },
+    rationale:
+      'Text size follows your explicit responsive.size map so type scales fluidly across breakpoints; this practice simply honours the value you authored.',
   },
 ] as const;
 
@@ -159,6 +181,8 @@ export const UI_DENSITY_PRACTICES: readonly UiPractice[] = [
     when: 'context.node.hasResponsivePadding === false',
     set: 'padding',
     source: { kind: 'default', value: 'scale-by-density' },
+    rationale:
+      'Padding scales with the active display density so inner spacing stays consistent across compact/comfortable/spacious; set an explicit responsive.padding to override.',
   },
   {
     name: 'ui_density_gap_scale',
@@ -167,6 +191,8 @@ export const UI_DENSITY_PRACTICES: readonly UiPractice[] = [
     when: 'context.node.hasResponsiveGap === false',
     set: 'gap',
     source: { kind: 'default', value: 'scale-by-density' },
+    rationale:
+      'Gap scales with the active display density so spacing stays consistent across compact/comfortable/spacious; set an explicit responsive.gap to override.',
   },
 ] as const;
 
@@ -249,5 +275,7 @@ export const UI_THEME_PRACTICES: readonly UiPractice[] = [
     when: 'context.node.hasThemeToken === true && context.node.hasExplicitColor === false',
     set: 'color',
     source: { kind: 'default', value: 'theme-token-color' },
+    rationale:
+      'Text color is derived from your semantic theme token so it stays legible and consistent in light/dark; an explicit color prop overrides this.',
   },
 ] as const;

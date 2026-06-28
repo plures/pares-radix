@@ -42,6 +42,7 @@ practice ui_layout_direction_responsive:
   appliesTo: container
   set: direction
   from: responsive
+  rationale: Layout direction follows your explicit responsive.direction map so the container flows correctly at each breakpoint; this practice simply honours the value you authored.
 
 # Default mobile-first stacking: a container with multiple children that did NOT
 # declare an explicit responsive.direction stacks to a column below md, and is a
@@ -52,6 +53,7 @@ practice ui_layout_stack_below_md:
   when: context.node.childCount > 1 && context.node.hasResponsiveDirection === false
   set: direction
   default: column-below-md
+  rationale: A multi-child container with no explicit direction stacks to a column below md and becomes a row at md and up so it stays readable on small screens; set an explicit responsive.direction to override.
 
 # Honor an explicit responsive `gap` map.
 practice ui_layout_gap_responsive:
@@ -59,6 +61,7 @@ practice ui_layout_gap_responsive:
   appliesTo: container
   set: gap
   from: responsive
+  rationale: Gap follows your explicit responsive.gap map so spacing between children is correct at each breakpoint; this practice simply honours the value you authored.
 
 # Honor an explicit responsive `padding` map.
 practice ui_layout_padding_responsive:
@@ -66,6 +69,7 @@ practice ui_layout_padding_responsive:
   appliesTo: container
   set: padding
   from: responsive
+  rationale: Padding follows your explicit responsive.padding map so inner spacing is correct at each breakpoint; this practice simply honours the value you authored.
 
 # Honor an explicit responsive `columns` map (DashboardGrid reflow by breakpoint).
 practice ui_layout_columns_responsive:
@@ -73,6 +77,7 @@ practice ui_layout_columns_responsive:
   appliesTo: container
   set: columns
   from: responsive
+  rationale: Column count follows your explicit responsive.columns map so a grid reflows correctly across breakpoints; this practice simply honours the value you authored.
 
 # Honor an explicit responsive `hidden` map: show/hide a node by breakpoint
 # (e.g. {base:true, lg:false} = hidden on mobile, visible on large screens).
@@ -81,6 +86,7 @@ practice ui_layout_hidden_responsive:
   appliesTo: container
   set: hidden
   from: responsive
+  rationale: Visibility follows your explicit responsive.hidden map so a node shows or hides per breakpoint; this practice simply honours the value you authored.
 
 # Honor an explicit responsive `size` map on text (fluid type by breakpoint).
 practice ui_text_size_responsive:
@@ -88,3 +94,4 @@ practice ui_text_size_responsive:
   appliesTo: text
   set: size
   from: responsive
+  rationale: Text size follows your explicit responsive.size map so type scales fluidly across breakpoints; this practice simply honours the value you authored.

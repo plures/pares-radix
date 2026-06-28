@@ -32,7 +32,6 @@
 import type { CanvasNodeLike } from './ui-facts.js';
 import { resolveComponent } from './registry.js';
 import {
-  breakpointFor,
   kindForComponent,
   pickResponsive,
   RESPONSIVE_ATTR_SET,
@@ -44,16 +43,21 @@ import {
   UI_DENSITY_PRACTICES,
   UI_THEME_PRACTICES,
   DEFAULT_BEHAVIORS,
-  DEFAULT_DENSITY_LEVEL,
-  DEFAULT_THEME_MODE,
-  DENSITY_SCALE,
-  THEME_TOKENS,
   THEMEABLE_ATTR_SET,
   type UiPractice,
   type DensityLevel,
   type ThemeMode,
   type ThemeTokenColors,
 } from './ui-practices.js';
+import {
+  activeBreakpoint,
+  defaultDirectionFor,
+  densityLevelOf,
+  densityValueFor,
+  nodeFlags,
+  themeColorFor,
+  themeModeOf,
+} from './ui-resolve-helpers.js';
 
 // ── Runtime facts ─────────────────────────────────────────────────────────────
 
@@ -156,40 +160,6 @@ function deepClone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
 }
 
-/** Normalize a possibly-missing density level to a known one. */
-function densityLevelOf(facts: UiRuntimeFacts): DensityLevel | null {
-  if (!facts.density) return null;
-  const level = facts.density.level;
-  return level in DENSITY_SCALE ? level : DEFAULT_DENSITY_LEVEL;
-}
-
-/** Normalize a possibly-missing theme mode to a known one. */
-function themeModeOf(facts: UiRuntimeFacts): ThemeMode | null {
-  if (!facts.theme) return null;
-  const mode = facts.theme.mode;
-  return mode === 'light' || mode === 'dark' ? mode : DEFAULT_THEME_MODE;
-}
-
-/**
- * Resolve a semantic token → concrete colour for the active mode, honouring the
- * optional facts.theme.tokens override (which may partially override one mode of
- * a built-in token, or define a wholly new token). Returns undefined for an
- * unknown token / missing colour (honest absence — no fake value written).
- */
-function themeColorFor(
-  token: string,
-  mode: ThemeMode,
-  overrides: Record<string, Partial<ThemeTokenColors>> | undefined,
-): string | undefined {
-  const builtin = THEME_TOKENS[token];
-  const override = overrides?.[token];
-  const fromOverride = override?.[mode];
-  if (typeof fromOverride === 'string' && fromOverride.length > 0) return fromOverride;
-  const fromBuiltin = builtin?.[mode];
-  if (typeof fromBuiltin === 'string' && fromBuiltin.length > 0) return fromBuiltin;
-  return undefined;
-}
-
 /**
  * Apply all matching practices to a single node (in place on the CLONE).
  * Returns nothing; mutates `node.props`.
@@ -203,22 +173,19 @@ function resolveNode(node: CanvasNodeLike, facts: UiRuntimeFacts): void {
   if (kind === null) return; // unregistered node — leave untouched
 
   const vp = facts.viewport;
-  const bp: Breakpoint | null = vp ? vp.breakpoint ?? breakpointFor(vp.width) : null;
+  const bp: Breakpoint | null = activeBreakpoint(vp);
 
   const responsive = node.responsive as Record<string, Record<string, unknown>> | undefined;
-  const hasResp = (attr: string): boolean =>
-    !!responsive && Object.prototype.hasOwnProperty.call(responsive, attr);
-
-  const explicitColor = (node.props as Record<string, unknown> | undefined)?.color;
+  const flags = nodeFlags(node);
 
   const ctx: NodeEvalContext = {
     node: {
-      childCount: Array.isArray(node.children) ? node.children.length : 0,
-      hasResponsiveDirection: hasResp('direction'),
-      hasResponsivePadding: hasResp('padding'),
-      hasResponsiveGap: hasResp('gap'),
-      hasThemeToken: typeof node.themeToken === 'string' && node.themeToken.length > 0,
-      hasExplicitColor: typeof explicitColor === 'string' && explicitColor.length > 0,
+      childCount: flags.childCount,
+      hasResponsiveDirection: flags.hasResponsiveDirection,
+      hasResponsivePadding: flags.hasResponsivePadding,
+      hasResponsiveGap: flags.hasResponsiveGap,
+      hasThemeToken: flags.hasThemeToken,
+      hasExplicitColor: flags.hasExplicitColor,
       schemaKind: kind,
     },
     viewport: vp && bp ? { width: vp.width, breakpoint: bp } : null,
@@ -279,18 +246,16 @@ function applyPractice(
     case DEFAULT_BEHAVIORS.COLUMN_BELOW_MD: {
       if (!RESPONSIVE_ATTR_SET.has(attr)) return;
       if (bp === null) return;
-      const belowMd = bp === 'base' || bp === 'sm';
-      props[attr] = belowMd ? 'column' : 'row';
+      props[attr] = defaultDirectionFor(bp);
       return;
     }
 
     case DEFAULT_BEHAVIORS.SCALE_BY_DENSITY: {
       // Honesty: density writes padding/gap, both real props in RESPONSIVE_ATTRS.
       if (!RESPONSIVE_ATTR_SET.has(attr)) return;
-      const level = densityLevelOf(facts);
+      const level = densityLevelOf(facts.density);
       if (level === null) return; // no ui:density → no-op
-      const scaled = DENSITY_SCALE[level];
-      const value = attr === 'padding' ? scaled.padding : attr === 'gap' ? scaled.gap : undefined;
+      const value = densityValueFor(attr, level);
       if (value !== undefined) props[attr] = value;
       return;
     }
@@ -298,7 +263,7 @@ function applyPractice(
     case DEFAULT_BEHAVIORS.THEME_TOKEN_COLOR: {
       // Honesty: theme writes `color`, a real Text prop on the THEMEABLE allow-list.
       if (!THEMEABLE_ATTR_SET.has(attr)) return;
-      const mode = themeModeOf(facts);
+      const mode = themeModeOf(facts.theme);
       if (mode === null) return; // no ui:theme → no-op
       const token = node.themeToken;
       if (typeof token !== 'string' || token.length === 0) return;

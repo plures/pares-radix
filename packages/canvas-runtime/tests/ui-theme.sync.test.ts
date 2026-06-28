@@ -25,6 +25,7 @@ interface ParsedPractice {
   set?: string;
   from?: string;
   default?: string;
+  rationale?: string;
 }
 
 function parsePractices(src: string): ParsedPractice[] {
@@ -32,7 +33,7 @@ function parsePractices(src: string): ParsedPractice[] {
   const out: ParsedPractice[] = [];
   let cur: ParsedPractice | null = null;
   const headRe = /^practice\s+([A-Za-z0-9_]+):\s*$/;
-  const fieldRe = /^\s+(kind|appliesTo|when|set|from|default):\s*(.*)$/;
+  const fieldRe = /^\s+(kind|appliesTo|when|set|from|default|rationale):\s*(.*)$/;
   for (const raw of lines) {
     const line = raw.replace(/\s+$/, '');
     if (line.trim().startsWith('#') || line.trim() === '') continue;
@@ -62,6 +63,7 @@ function normalizeTs(p: UiPractice): Required<Omit<ParsedPractice, 'from' | 'def
     appliesTo: p.appliesTo,
     when: p.when ?? '',
     set: p.set,
+    rationale: p.rationale,
   };
   if (p.source.kind === 'responsive') return { ...base, from: 'responsive' };
   return { ...base, default: p.source.value };
@@ -103,6 +105,9 @@ describe('ui-theme practices drift guard', () => {
       expect(px.set, `${ts.name}.set`).toBe(ts.set);
       // when: .px omits the field when there's no guard; TS normalizes to ''
       expect((px.when ?? '').trim(), `${ts.name}.when`).toBe(ts.when);
+      // rationale parity: the .px is the human source of truth; the TS mirror
+      // must carry the identical author-facing sentence (C-DRIFT-001).
+      expect(px.rationale, `${ts.name}.rationale`).toBe(ts.rationale);
       // source parity
       if (ts.from) {
         expect(px.from, `${ts.name}.from`).toBe(ts.from);
@@ -111,6 +116,14 @@ describe('ui-theme practices drift guard', () => {
         expect(px.default, `${ts.name}.default`).toBe(ts.default);
         expect(px.from, `${ts.name} should have no from`).toBeUndefined();
       }
+    }
+  });
+
+  it('every practice carries a non-empty author-facing rationale', () => {
+    for (let i = 0; i < UI_THEME_PRACTICES.length; i++) {
+      const px = parsed[i];
+      expect(px.rationale && px.rationale.trim().length, `${px.name} .px rationale`).toBeGreaterThan(0);
+      expect(UI_THEME_PRACTICES[i].rationale.trim().length, `${UI_THEME_PRACTICES[i].name} TS rationale`).toBeGreaterThan(0);
     }
   });
 
