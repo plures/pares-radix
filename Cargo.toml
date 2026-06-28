@@ -40,6 +40,7 @@ clap = { version = "4", features = ["derive", "env"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
 walkdir = "2"
 toml = "0.8"
 libc = "0.2"

@@ -224,6 +224,12 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
+            // Updater is desktop-only (no mobile updater); gate so mobile builds compile.
+            #[cfg(desktop)]
+            {
+                handle.plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+
             // Build an initial (empty) tray so an icon is present from boot;
             // the frontend repopulates it via set_tray_menu once nav.visible
             // facts are known.
