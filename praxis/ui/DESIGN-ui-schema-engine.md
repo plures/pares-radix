@@ -322,3 +322,65 @@ zero-config default.
     slice; absent, not stubbed.
   - *`maxLines` truncation default* — reserved in `RESPONSIVE_ATTRS`; responsive-map
     pass-through works, but there is no type-based default branch yet.
+
+## 12. Guidance-on-override layer (objective B) — status + the human-surface gap
+
+Objective B (§1a): "best practice ≠ always." The resolve engine makes the correct
+layout/density/theme the **default**; an author may override; **when (and only when) they
+override a resolved default, surface the rule's rationale at authoring time** — structured
+feedback for the AI composer, an inline hint for a human. This is *guidance on deviation*,
+not a validate-everything error wall.
+
+### 12.1 The shared primitive — BUILT (Stage 1, on `main`)
+- Every `UiPractice` now carries a required **`rationale: string`** (one author-facing
+  sentence), lifted out of the `.px`/TS prose into data and **drift-guarded** (the 3 sync
+  tests assert `.px` name→rationale parity — `.px` stays source of truth).
+- **`detectOverrides(root, facts) → OverrideNotice[]`** (`ui-overrides.ts`): a pure
+  tree-walk emitting `{ nodeId, nodeType, attr, practiceName, rationale, defaultValue,
+  explicitValue }` at the 4 override points (direction / padding / gap / color) **only on a
+  *meaningful* deviation** — the author's explicit value must actually differ from what the
+  default practice would resolve at the active facts. Explicit-equals-default ⇒ silent.
+  **Honest-absent:** a missing trigger fact (viewport/density/theme) ⇒ default not
+  determinable ⇒ no notice claimed. Never mutates the tree.
+- Default-value computation is extracted to **`ui-resolve-helpers.ts`** and consumed by
+  **both** `applyPractice` (resolver) and `detectOverrides` (detector), so resolved values
+  and override-detected defaults are structurally incapable of drifting.
+
+### 12.2 Presenter 1 — AI composer — BUILT (Stage 2, on `main`)
+- The MCP authoring handlers **`canvas.addNode`** and **`canvas.setTree`**
+  (`packages/mcp-dev-server`) now return `{ ok, tree, ...(guidance.length ? { guidance }
+  : {}) }` — the override notices for the resulting tree, attached only when non-empty.
+- Evaluated against **canonical authoring facts** (`AUTHORING_FACTS` in
+  `canvas-guidance.ts`): `md` baseline breakpoint (sourced from the schema `BREAKPOINTS`
+  table) / `comfortable` density / `light` theme. At compose time there is no live
+  viewport/theme, so we compare the author's explicit values to what the **default-correct
+  baseline** would produce — a notice means "this diverges from the default," not "at
+  1280px specifically."
+- **End-to-end proof on real authored data:** the shipped `demo-canvas.ts` tree has a node
+  with `props: { padding: '12px', gap: '8px' }`. Against `comfortable` density
+  (`DENSITY_SCALE.comfortable = { padding: '8px', gap: '8px' }`) the live guidance path
+  fires **exactly one** notice — `padding` (12px ≠ 8px) — and correctly stays **silent on
+  `gap`** (8px == default). The meaningful-deviation gate demonstrably suppresses noise on
+  genuinely-authored trees, not just synthetic tests.
+
+### 12.3 Presenter 2 — human-in-editor — BLOCKED ON AN ABSENT HOST SURFACE (deferred, not stubbed)
+**Finding (2026-06-27, verified against the live tree):** there is currently **no human
+surface in the app where an author sets explicit UI-node props on a canvas tree**, so there
+is nowhere honest to attach a human override hint yet.
+- The **`/design` route** is a *praxis-primitive / schema explorer* (browse facts, rules,
+  constraints, components; edit **rule definitions** via `RuleEditor`). It never edits a
+  `CanvasNode` tree, never sets `props.color` / `responsive.*` on UI nodes, never calls the
+  resolve engine.
+- The **`/canvas` route** is **viewer-only** — mounts the viewport/theme bridges and
+  renders; no addNode/setTree/prop-edit/selection affordance.
+- **`ComponentPicker.svelte`** (a catalog browser calling `onSelect(component)`, holding
+  *no* edited tree and no per-node props) and **`AIDesignAssistant.svelte`** are **orphan
+  components — imported nowhere.** Disconnected fragments, not an assembled editor.
+- **Therefore a "Stage 3 inline hint in ComponentPicker" would wire a hint into a component
+  nothing renders — a hollow deliverable (C-NOSTUB-001). It is deliberately NOT built.**
+  Presenter 2 is gated on a real human canvas-authoring surface existing first.
+- **Open strategic question for kbristol:** is AI-composer guidance sufficient to call
+  objective B done for now, or do we build the human canvas-authoring editor (the host that
+  Presenter 2 + the orphaned `ComponentPicker`/`AIDesignAssistant` need)? The hint is
+  ~trivial once a surface holds a selected node + its explicit props; the missing piece is
+  the **surface**, a much larger build than the hint.
