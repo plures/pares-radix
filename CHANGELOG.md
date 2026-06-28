@@ -1,3 +1,10 @@
+## [1.52.0] — 2026-06-28
+
+- feat(capabilities): scene@1.x CID (RSV render-state read-model + signed-Intent write-model) (d2f0e88)
+- docs(adr): ADR-0028 constraint-engine canonicalization (pluresdb-px canonical, already NAPI-bridged; @plures/praxis stays framework) (2a79cce)
+- docs(adr): ADR-0027 dev-lifecycle spine wiring (collapse .mjs driver into .px/actor/PluresDB loop) (561701c)
+- docs(ui): mark theme/density/contrast + renderer integration as built (212a3dd)
+
 ## [1.51.0] — 2026-06-28
 
 - chore(release): v1.51.0 [skip ci] (21091ff)
