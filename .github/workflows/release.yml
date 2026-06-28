@@ -1,6 +1,7 @@
 name: Release
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -12,15 +13,25 @@ on:
         description: 'Exact version to release (e.g. 1.0.0). Overrides bump logic.'
         type: string
         required: false
+      promote:
+        description: 'Promote the current odd/dev line to the next even/stable line (builds installers).'
+        type: boolean
+        required: false
+        default: false
 permissions:
   contents: write
   packages: write
   id-token: write
 
+# The org reusable pipeline owns ALL version logic: even/odd parity law, conventional-commit
+# transitions, guard rails, version-file sync (Cargo.toml/tauri.conf.json/package.json), tag,
+# changelog, GitHub Release, and registry publish. This repo no longer carries bespoke bump
+# logic (the former auto-version.yml was retired in favor of this single source of truth).
 jobs:
   release:
     uses: plures/.github/.github/workflows/release-reusable.yml@main
     with:
       bump: ${{ inputs.bump || '' }}
       target_version: ${{ inputs.target_version || '' }}
+      promote: ${{ inputs.promote || false }}
     secrets: inherit

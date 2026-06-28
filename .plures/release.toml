@@ -1,0 +1,20 @@
+# Plures per-repo release metadata.
+# Consumed by plures/.github → release-reusable.yml (+ the platform installer matrix).
+# The even/odd minor parity LAW is universal and enforced regardless of this file;
+# this file only controls whether/which platform INSTALLERS are emitted on even lines.
+#
+# See: development-guide/practices/even-odd-release-versioning.md
+#      development-guide/design/TAURI-BEST-PRACTICES.md
+#      pares-radix/.praxis/decisions/ADR-0029-even-odd-release-gating.md
+
+# pares-radix is a user-facing desktop/mobile app → it emits installers on even/stable lines.
+publishPlatformInstallers = true
+
+# Platform targets to build when on an EVEN (stable) line.
+# Desktop targets are live now. android/ios are intentionally DEFERRED until the build-caching
+# layer is proven (cold mobile builds historically time out) AND Apple signing creds exist —
+# they will be appended here once ADR-0029 Stage 4 gates are met.
+platformTargets = ["windows", "macos", "linux-flatpak", "nixos"]
+
+# Build-metric tracking: caching is only "done" when it measurably + persistently speeds builds.
+trackBuildMetrics = true
