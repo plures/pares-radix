@@ -1,6 +1,7 @@
 # ADR-0028: Constraint-Engine Canonicalization — `pluresdb-px` (Rust, NAPI-bridged) is the Source of Truth; `@plures/praxis` Stays the Framework
 
-- **Status:** Proposed (DESIGN stage of TASK-2026-06-27-006; FIX/rebind stage gated on this ADR)
+- **Status:** Accepted — FIX stage landed 2026-06-28 (`praxis@b431611`, `PluresDbConstraintAdapter` + 10/10 tests). Orchestration stage (§5 "then") is the next sequence step.
+- **Status (original):** Proposed (DESIGN stage of TASK-2026-06-27-006; FIX/rebind stage gated on this ADR)
 - **Date:** 2026-06-27
 - **Deciders:** kbristol (Level-1 architecture greenlight 2026-06-27: "fix architecture first, then orchestration"), dev-lifecycle orchestrator
 - **Relates:** ADR-0017 (single praxis system-of-record = CrdtStore), ADR-0020 (single-PluresDB reactive memory), ADR-0022 (capability-host-contract), ADR-0023 (procedure observability event contract), ADR-0024 (canonical plugin format)
