@@ -1,3 +1,7 @@
+## [1.55.3] — 2026-06-28
+
+- fix(release): catch up Cargo.lock to 1.55.2 (heal release-bump lock drift) (a4e908a)
+
 ## [1.55.2] — 2026-06-28
 
 - feat(desktop): wire Tauri updater (real signing pubkey, desktop-gated plugin, createUpdaterArtifacts) (607a632)
