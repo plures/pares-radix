@@ -50,6 +50,7 @@ import {
   toolCanvasValidate,
 } from '@plures/canvas-runtime';
 import type { CanvasDocument, CanvasNode, CanvasRule, CanvasProcedure } from '@plures/canvas-runtime';
+import { guidanceForTree } from './canvas-guidance.js';
 
 // ── Dev Gate ──────────────────────────────────────────────────────────────────
 
@@ -228,7 +229,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'canvas.addNode',
-    description: 'Add a component to the canvas tree under a parent node',
+    description: 'Add a component to the canvas tree under a parent node. Returns best-practice override guidance when an explicit value overrides a resolved default (read result.guidance).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -241,7 +242,8 @@ const tools: ToolDef[] = [
       if (!activeCanvas) return { error: 'No active canvas. Call canvas.create first.' };
       activeCanvas = toolCanvasAddNode(activeCanvas, parentId as string, node as CanvasNode);
       dbPut('canvas:_active', activeCanvas);
-      return { ok: true, tree: activeCanvas.tree };
+      const guidance = guidanceForTree(activeCanvas.tree);
+      return { ok: true, tree: activeCanvas.tree, ...(guidance.length ? { guidance } : {}) };
     },
   },
   {
@@ -293,13 +295,14 @@ const tools: ToolDef[] = [
   },
   {
     name: 'canvas.setTree',
-    description: 'Replace the entire component tree',
+    description: 'Replace the entire component tree. Returns best-practice override guidance when an explicit value overrides a resolved default (read result.guidance).',
     inputSchema: { type: 'object', properties: { tree: { type: 'object' } }, required: ['tree'] },
     handler: ({ tree }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasSetTree(activeCanvas, tree as CanvasNode);
       dbPut('canvas:_active', activeCanvas);
-      return { ok: true, tree: activeCanvas.tree };
+      const guidance = guidanceForTree(activeCanvas.tree);
+      return { ok: true, tree: activeCanvas.tree, ...(guidance.length ? { guidance } : {}) };
     },
   },
   {
