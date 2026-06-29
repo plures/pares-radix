@@ -3,8 +3,6 @@ resolver = "2"
 members = [
     "crates/radix-core",
     "crates/mcp-client",
-    "crates/cli",
-    "crates/cli-api",
     "crates/privacy",
     "crates/marketplace",
     "crates/agenda",
