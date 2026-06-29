@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Sync SvelteKit (generate .svelte-kit/tsconfig.json)
+        run: pnpm exec svelte-kit sync
+
       - name: MCP server vitest
         run: pnpm -C packages/mcp-dev-server test
 
@@ -95,6 +98,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Sync SvelteKit (generate .svelte-kit/tsconfig.json)
+        run: pnpm exec svelte-kit sync
 
       - name: Render-mode / platform tests
         run: pnpm test
