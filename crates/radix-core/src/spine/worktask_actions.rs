@@ -1022,3 +1022,823 @@ mod tests {
         assert_eq!(o["bytes"], 123);
     }
 }
+
+// ── END-TO-END TESTS ───────────────────────────────────────────────────────────
+//
+// Everything above unit-tests the handler actions in isolation. This module
+// proves the executor works **end-to-end through the assembled reactive
+// runtime** (`build_reactive_runtime`) against a REAL throwaway git repo and a
+// REAL on-disk `PluresDbStateStore` — "build the binary, run the binary" at the
+// library seam: a write into the live store fires the matching `worktask.px`
+// procedure, which drives the real `WorktaskActionHandler` (real `git`
+// subprocess, real fs, real durable state). No mock store, no fake git, no
+// canned fixtures (C-TEST-002).
+//
+// Wiring mirrors the landed PxWire proof test
+// (`spine::runtime::tests::end_to_end_write_triggers_px_procedure_persists_state`):
+// build the runtime, fire `registry.on_write(key, payload)`, then poll the
+// durable store for the effect (procedures run on a spawned task).
+#[cfg(test)]
+mod e2e {
+    use super::*;
+    use crate::model::{ToolDefinition, ToolDispatcher};
+    use crate::spine::conversation::{ConversationStore, MemoryConversationStore};
+    use crate::spine::runtime::{build_reactive_runtime, ReactiveRuntime};
+    use crate::state::PluresDbStateStore;
+    use serde_json::Value;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+    use tempfile::TempDir;
+
+    /// A dispatcher that does nothing — the worktask procedures only use core
+    /// `read_state`/`write_state` (CoreActionHandler) and worktask actions
+    /// (WorktaskActionHandler), never the tool dispatcher.
+    struct NullDispatcher;
+
+    #[async_trait]
+    impl ToolDispatcher for NullDispatcher {
+        async fn available_tools(&self) -> Vec<ToolDefinition> {
+            vec![]
+        }
+        async fn call_tool(&self, _name: &str, _args: Value) -> String {
+            "null".to_string()
+        }
+    }
+
+    /// Is a real `git` binary on PATH? E2E tests that need git skip (not fail)
+    /// when it is genuinely absent. On this box git IS present, so they RUN.
+    async fn git_available() -> bool {
+        GitEffects::default()
+            .run("probe", &["--version"])
+            .await
+            .map(|o| o.status == 0)
+            .unwrap_or(false)
+    }
+
+    /// Locate the repo's real `praxis/procedures` directory (the production
+    /// `worktask.px`). Resolved from CARGO_MANIFEST_DIR like the bootstrap
+    /// regression test, so the runtime loads the SAME `.px` that ships.
+    fn praxis_procedures_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent() // crates/
+            .and_then(|p| p.parent()) // project root
+            .expect("project root")
+            .join("praxis")
+            .join("procedures")
+    }
+
+    /// Build the assembled reactive runtime against a real on-disk
+    /// `PluresDbStateStore` rooted in `state_dir`, loading the real
+    /// `praxis/procedures` `.px` files (so `worktask.px` is live).
+    async fn build_runtime(state_dir: &Path) -> (ReactiveRuntime, Arc<dyn StateStore>) {
+        let pdb = PluresDbStateStore::open(state_dir).expect("open state store");
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+        let dispatcher: Arc<dyn ToolDispatcher> = Arc::new(NullDispatcher);
+        let runtime = build_reactive_runtime(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher,
+            &praxis_procedures_dir(),
+            32,
+        )
+        .await;
+        (runtime, state_store)
+    }
+
+    /// Initialize a real scratch git repo with one commit at `dir` (so worktrees
+    /// can branch off `HEAD`). Uses the REAL git binary. Pins the default branch
+    /// to `main` so direct-merge has a deterministic target.
+    async fn init_repo(git: &GitEffects, dir: &Path) {
+        let d = dir.to_string_lossy();
+        git.run_checked("init", &["-C", &d, "init", "-q"]).await.unwrap();
+        git.run_checked("cfg", &["-C", &d, "config", "user.email", "t@example.com"])
+            .await
+            .unwrap();
+        git.run_checked("cfg", &["-C", &d, "config", "user.name", "t"]).await.unwrap();
+        git.run_checked("br", &["-C", &d, "checkout", "-q", "-b", "main"]).await.ok();
+        std::fs::write(dir.join("seed.txt"), b"seed").unwrap();
+        git.run_checked("add", &["-C", &d, "add", "-A"]).await.unwrap();
+        git.run_checked("commit", &["-C", &d, "commit", "-q", "-m", "seed"]).await.unwrap();
+    }
+
+    /// Real `git -C <repo> worktree list --porcelain` → list of worktree paths.
+    async fn worktree_paths(git: &GitEffects, repo: &Path) -> Vec<String> {
+        let out = git
+            .run_checked(
+                "wt-list",
+                &["-C", &repo.to_string_lossy(), "worktree", "list", "--porcelain"],
+            )
+            .await
+            .unwrap();
+        out.stdout
+            .lines()
+            .filter_map(|l| l.strip_prefix("worktree ").map(|s| s.trim().to_string()))
+            .collect()
+    }
+
+    /// True if `repo`'s worktree list contains a worktree whose final path
+    /// component equals `wt`'s (robust to git canonicalizing the absolute path).
+    async fn worktree_listed(git: &GitEffects, repo: &Path, wt: &Path) -> bool {
+        worktree_paths(git, repo)
+            .await
+            .iter()
+            .any(|p| Path::new(p).file_name() == wt.file_name())
+    }
+
+    /// Poll the durable store until `key` holds a non-null value, or panic.
+    async fn await_node(store: &Arc<dyn StateStore>, key: &str) -> Value {
+        for _ in 0..200 {
+            if let Some(v) = store.get(key).await {
+                if !v.is_null() {
+                    return v;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("durable node `{key}` never appeared — write→.px→effect path did not run");
+    }
+
+    /// Poll for the single `worktask:task:*` node whose `task_type` matches.
+    /// Returns `(task_id, node)`. Polls because the procedure runs async.
+    async fn await_task_of_type(store: &Arc<dyn StateStore>, task_type: &str) -> (String, Value) {
+        for _ in 0..200 {
+            for k in store.keys_with_prefix("worktask:task:").await {
+                if let Some(v) = store.get(&k).await {
+                    if v.get("task_type").and_then(|t| t.as_str()) == Some(task_type) {
+                        let id = v
+                            .get("task_id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        return (id, v);
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("no worktask:task of type `{task_type}` appeared in time");
+    }
+
+    /// Poll for the first node under `prefix` (e.g. the generated-id reclaim
+    /// telemetry / quarantine record), returning its value.
+    async fn await_first_under(store: &Arc<dyn StateStore>, prefix: &str) -> Value {
+        for _ in 0..250 {
+            if let Some(k) = store.keys_with_prefix(prefix).await.first() {
+                if let Some(v) = store.get(k).await {
+                    if !v.is_null() {
+                        return v;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("no node under prefix `{prefix}` appeared in time");
+    }
+
+    /// Wait until a path exists (a real worktree dir created by the executor).
+    async fn await_path(p: &Path) {
+        for _ in 0..200 {
+            if p.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("path never appeared: {}", p.display());
+    }
+
+    /// Deterministic barrier: wait until at least `n` `worktask:task:*` nodes
+    /// are durably persisted AND each one has its matching `worktask:lease:*`
+    /// node. The executor writes the worktree dir (via `git_worktree_add`)
+    /// BEFORE it persists the task+lease nodes, so waiting only on the dir
+    /// races the `reclaim`/`doctor` enumeration (`list_tasks`). This closes that
+    /// race by gating on the durable nodes the enumeration actually reads.
+    async fn await_tasks_and_leases_persisted(store: &Arc<dyn StateStore>, n: usize) {
+        for _ in 0..300 {
+            let task_keys = store.keys_with_prefix("worktask:task:").await;
+            if task_keys.len() >= n {
+                let mut all_leased = true;
+                for tk in &task_keys {
+                    let id = tk.strip_prefix("worktask:task:").unwrap_or_default();
+                    let leased = store
+                        .get(&format!("worktask:lease:{id}"))
+                        .await
+                        .map(|v| !v.is_null())
+                        .unwrap_or(false);
+                    if !leased {
+                        all_leased = false;
+                        break;
+                    }
+                }
+                if all_leased {
+                    return;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("expected >= {n} task+lease node pairs to persist, timed out");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 2 — new_feature: real worktree + task node + lease node.
+    // ─────────────────────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn e2e_new_feature_creates_real_worktree_task_and_lease() {
+        if !git_available().await {
+            eprintln!("skipping e2e_new_feature: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+        let wt_path = tmp.path().join("wt-feature");
+
+        let payload = json!({
+            "org": "plures",
+            "repo": repo.to_string_lossy(),
+            "branch": "feat/e2e-feature",
+            "worktree_path": wt_path.to_string_lossy(),
+            "owner_session": "sess-1",
+            "owner_agent": "agent-1",
+            "lease_expires_at": 9_000_000_000u64,
+        });
+        runtime
+            .registry
+            .on_write("worktask:cmd:new_feature:req-1", &payload)
+            .await;
+
+        let (task_id, task) = await_task_of_type(&store, "feature").await;
+        assert_eq!(task["org"], "plures");
+        assert_eq!(task["status"], "active");
+        assert_eq!(task["branch"], "feat/e2e-feature");
+        // No policy seeded → feature default pr_mode is github-pr.
+        assert_eq!(task["pr_mode"], "github-pr", "feature default pr_mode");
+        assert_eq!(
+            task["worktree_path"].as_str().unwrap(),
+            wt_path.to_string_lossy()
+        );
+
+        let lease = await_node(&store, &format!("worktask:lease:{task_id}")).await;
+        assert_eq!(lease["task_id"], task_id);
+        assert_eq!(lease["owner_session"], "sess-1");
+        assert_eq!(lease["lease_expires_at"], 9_000_000_000u64);
+        assert!(lease["lease_expires_at"].is_number(), "native expiry preserved");
+
+        // The REAL git worktree must exist on disk AND in `git worktree list`.
+        await_path(&wt_path).await;
+        assert!(
+            worktree_listed(&git, &repo, &wt_path).await,
+            "git worktree list must show the new worktree {}",
+            wt_path.display()
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 3 — resolve_pr_mode precedence (4-tier chain lives in .px).
+    //   Order: override > repo > org+type > global, fallback github-pr.
+    // ─────────────────────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn e2e_pr_mode_repo_overrides_global() {
+        if !git_available().await {
+            eprintln!("skipping e2e_pr_mode_repo: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+
+        // GLOBAL = subagent-review, REPO = direct-merge. Repo tier must win.
+        store
+            .set("worktask:policy:global", json!({ "pr_mode": "subagent-review" }))
+            .await;
+        store
+            .set(
+                &format!("worktask:policy:repo:plures/{}", repo.to_string_lossy()),
+                json!({ "pr_mode": "direct-merge" }),
+            )
+            .await;
+
+        let payload = json!({
+            "org": "plures",
+            "repo": repo.to_string_lossy(),
+            "branch": "feat/pr-mode-repo",
+            "worktree_path": tmp.path().join("wt-prmode-repo").to_string_lossy(),
+            "owner_session": "s",
+            "owner_agent": "a",
+            "lease_expires_at": 9_000_000_000u64,
+        });
+        runtime
+            .registry
+            .on_write("worktask:cmd:new_feature:req-prmode-repo", &payload)
+            .await;
+
+        let (_id, task) = await_task_of_type(&store, "feature").await;
+        assert_eq!(
+            task["pr_mode"], "direct-merge",
+            "repo policy (direct-merge) must override global (subagent-review)"
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_pr_mode_global_overwrites_chore_default() {
+        if !git_available().await {
+            eprintln!("skipping e2e_pr_mode_global: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+        // Only GLOBAL set, to github-pr. A chore's built-in default is
+        // direct-merge, so this proves the global tier overwrites the default
+        // (a real precedence step, not the bare fallback).
+        store
+            .set("worktask:policy:global", json!({ "pr_mode": "github-pr" }))
+            .await;
+
+        let payload = json!({
+            "org": "plures",
+            "repo": repo.to_string_lossy(),
+            "branch": "chore/pr-mode-global",
+            "worktree_path": tmp.path().join("wt-prmode-global").to_string_lossy(),
+            "owner_session": "s",
+            "owner_agent": "a",
+            "lease_expires_at": 9_000_000_000u64,
+        });
+        runtime
+            .registry
+            .on_write("worktask:cmd:new_chore:req-prmode-global", &payload)
+            .await;
+
+        let (_id, task) = await_task_of_type(&store, "chore").await;
+        assert_eq!(
+            task["pr_mode"], "github-pr",
+            "global (github-pr) must overwrite the chore default (direct-merge)"
+        );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 4 — reclaim (SAFETY-CRITICAL): clean ⇒ removed, dirty ⇒ MOVED
+    //   to quarantine. Uncommitted work is preserved and NEVER deleted.
+    // ─────────────────────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn e2e_reclaim_removes_clean_and_quarantines_dirty_without_data_loss() {
+        if !git_available().await {
+            eprintln!("skipping e2e_reclaim: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+
+        // Seed TWO real worktrees via the executor, each with an ALREADY-EXPIRED
+        // lease (epoch 1 = long past) so reclaim acts on both.
+        let clean_wt = tmp.path().join("wt-clean");
+        let dirty_wt = tmp.path().join("wt-dirty");
+        for (i, (branch, wt)) in [("feat/clean", &clean_wt), ("feat/dirty", &dirty_wt)]
+            .iter()
+            .enumerate()
+        {
+            let payload = json!({
+                "org": "plures",
+                "repo": repo.to_string_lossy(),
+                "branch": branch,
+                "worktree_path": wt.to_string_lossy(),
+                "owner_session": "s",
+                "owner_agent": "a",
+                "lease_expires_at": 1u64,
+            });
+            runtime
+                .registry
+                .on_write(&format!("worktask:cmd:new_feature:seed-{i}"), &payload)
+                .await;
+            await_path(wt).await;
+        }
+
+        // Barrier: BOTH task+lease nodes must be durably persisted before we
+        // fire reclaim, else `list_tasks` may enumerate only one (a test race,
+        // not an executor bug).
+        await_tasks_and_leases_persisted(&store, 2).await;
+
+        // Make the DIRTY worktree actually dirty: an uncommitted file we must
+        // NOT lose under any circumstances.
+        let precious = dirty_wt.join("uncommitted-precious.txt");
+        std::fs::write(&precious, b"do not delete me").unwrap();
+
+        // Both worktrees present before reclaim.
+        let before = worktree_paths(&git, &repo).await;
+        assert!(
+            before.iter().any(|p| Path::new(p).file_name() == clean_wt.file_name()),
+            "clean worktree present before reclaim"
+        );
+        assert!(
+            before.iter().any(|p| Path::new(p).file_name() == dirty_wt.file_name()),
+            "dirty worktree present before reclaim"
+        );
+
+        // Fire reclaim.
+        runtime
+            .registry
+            .on_write("worktask:cmd:reclaim:run-1", &json!({}))
+            .await;
+
+        // Telemetry node (run_id generated) must record real per-task outcomes.
+        let telemetry = await_first_under(&store, "worktask:reclaim:").await;
+        let outcomes = telemetry["outcomes"].as_array().cloned().unwrap_or_default();
+        assert!(
+            outcomes.len() >= 2,
+            "telemetry records one outcome per examined task; got {outcomes:?}"
+        );
+        let actions: Vec<String> = outcomes
+            .iter()
+            .filter_map(|o| o.get("action").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+        assert!(
+            actions.iter().any(|a| a == "reclaimed"),
+            "one task must be reclaimed (clean); actions={actions:?}"
+        );
+        assert!(
+            actions.iter().any(|a| a == "quarantined"),
+            "one task must be quarantined (dirty); actions={actions:?}"
+        );
+
+        // ── CLEAN worktree must be GONE (removed from disk + git list) ────────
+        for _ in 0..200 {
+            if !clean_wt.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            !clean_wt.exists(),
+            "CLEAN worktree must be removed from disk after reclaim"
+        );
+        assert!(
+            !worktree_listed(&git, &repo, &clean_wt).await,
+            "CLEAN worktree must be gone from `git worktree list`"
+        );
+
+        // ── DIRTY worktree must be MOVED to quarantine, never deleted ─────────
+        let qnode = await_first_under(&store, "worktask:quarantine:").await;
+        let quarantined_path = qnode["quarantined_path"]
+            .as_str()
+            .expect("quarantine record has a real destination path")
+            .to_string();
+        let qdir = PathBuf::from(&quarantined_path);
+        assert_eq!(qnode["reason"], "expired_lease_dirty_tree");
+        assert!(
+            qnode["bytes"].as_u64().unwrap_or(0) > 0,
+            "quarantine record reports real byte size, got {:?}",
+            qnode["bytes"]
+        );
+
+        // Source GONE (moved out), destination EXISTS, file PRESERVED byte-exact.
+        assert!(
+            !dirty_wt.exists(),
+            "DIRTY worktree source path must be absent after a MOVE"
+        );
+        assert!(qdir.exists(), "quarantine destination must exist: {quarantined_path}");
+        let preserved = qdir.join("uncommitted-precious.txt");
+        assert!(
+            preserved.exists(),
+            "the uncommitted work must be PRESERVED at the quarantine path"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&preserved).unwrap(),
+            "do not delete me",
+            "quarantined file content must be byte-identical (no data loss)"
+        );
+
+        // Best-effort cleanup of the shared-temp quarantine dir.
+        let _ = std::fs::remove_dir_all(&qdir);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 5 — doctor: read-only health report; MUTATES NOTHING.
+    // ─────────────────────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn e2e_doctor_reports_health_and_mutates_nothing() {
+        if !git_available().await {
+            eprintln!("skipping e2e_doctor: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+
+        // One ACTIVE (future lease) + one EXPIRED (past lease) worktree task.
+        let active_wt = tmp.path().join("wt-active");
+        let expired_wt = tmp.path().join("wt-expired");
+        for (i, (branch, wt, expiry)) in [
+            ("feat/active", &active_wt, 9_000_000_000u64),
+            ("feat/expired", &expired_wt, 1u64),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let payload = json!({
+                "org": "plures",
+                "repo": repo.to_string_lossy(),
+                "branch": branch,
+                "worktree_path": wt.to_string_lossy(),
+                "owner_session": "s",
+                "owner_agent": "a",
+                "lease_expires_at": expiry,
+            });
+            runtime
+                .registry
+                .on_write(&format!("worktask:cmd:new_feature:doc-{i}"), &payload)
+                .await;
+            await_path(wt).await;
+        }
+        // Barrier: both task+lease nodes persisted before we snapshot, so a
+        // late-landing seed write can't masquerade as a doctor mutation.
+        await_tasks_and_leases_persisted(&store, 2).await;
+        // Make the expired one dirty so doctor would classify dirty=true.
+        std::fs::write(expired_wt.join("scratch.txt"), b"wip").unwrap();
+
+        // Snapshot the ENTIRE durable worktask state + worktree set before.
+        let keys_before = store.keys_with_prefix("worktask:").await;
+        let mut snapshot_before: Vec<(String, Value)> = Vec::new();
+        for k in &keys_before {
+            snapshot_before.push((k.clone(), store.get(k).await.unwrap_or(Value::Null)));
+        }
+        snapshot_before.sort_by(|a, b| a.0.cmp(&b.0));
+        let worktrees_before = worktree_paths(&git, &repo).await;
+
+        // Fire doctor; give it ample time to run all read steps.
+        runtime
+            .registry
+            .on_write("worktask:cmd:doctor:run-1", &json!({}))
+            .await;
+        tokio::time::sleep(Duration::from_millis(700)).await;
+
+        // ── ZERO mutations: same keys, same values, same worktrees. ───────────
+        let keys_after = store.keys_with_prefix("worktask:").await;
+        let mut snapshot_after: Vec<(String, Value)> = Vec::new();
+        for k in &keys_after {
+            snapshot_after.push((k.clone(), store.get(k).await.unwrap_or(Value::Null)));
+        }
+        snapshot_after.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            snapshot_before.len(),
+            snapshot_after.len(),
+            "doctor must not add or remove any state node"
+        );
+        assert_eq!(
+            snapshot_before, snapshot_after,
+            "doctor is read-only: every state node must be byte-identical"
+        );
+        assert!(
+            store.keys_with_prefix("worktask:reclaim:").await.is_empty(),
+            "doctor must not write reclaim telemetry"
+        );
+        assert!(
+            store.keys_with_prefix("worktask:quarantine:").await.is_empty(),
+            "doctor must not quarantine anything"
+        );
+        let worktrees_after = worktree_paths(&git, &repo).await;
+        assert_eq!(
+            worktrees_before.len(),
+            worktrees_after.len(),
+            "doctor must not remove or add worktrees"
+        );
+        assert!(active_wt.exists() && expired_wt.exists(), "both worktrees intact");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Scenario 6 — new_pr direct-merge: real merge to main + worktree/branch
+    //   cleanup + status→done. Plus the HONEST push-only boundary (github-pr).
+    // ─────────────────────────────────────────────────────────────────────────
+    #[tokio::test]
+    async fn e2e_new_pr_direct_merge_merges_cleans_up_and_marks_done() {
+        if !git_available().await {
+            eprintln!("skipping e2e_new_pr_direct: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+
+        // Force direct-merge via a global policy, then create a chore worktree.
+        store
+            .set("worktask:policy:global", json!({ "pr_mode": "direct-merge" }))
+            .await;
+        let wt = tmp.path().join("wt-merge");
+        let branch = "chore/e2e-merge";
+        runtime
+            .registry
+            .on_write(
+                "worktask:cmd:new_chore:merge-1",
+                &json!({
+                    "org": "plures",
+                    "repo": repo.to_string_lossy(),
+                    "branch": branch,
+                    "worktree_path": wt.to_string_lossy(),
+                    "owner_session": "s",
+                    "owner_agent": "a",
+                    "lease_expires_at": 9_000_000_000u64,
+                }),
+            )
+            .await;
+        let (task_id, task) = await_task_of_type(&store, "chore").await;
+        assert_eq!(task["pr_mode"], "direct-merge");
+        await_path(&wt).await;
+
+        // Commit a real change ON the worktree's branch so the merge has content.
+        let wtd = wt.to_string_lossy();
+        std::fs::write(wt.join("feature.txt"), b"new feature work").unwrap();
+        git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
+        git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "feature work"])
+            .await
+            .unwrap();
+
+        // Fire new_pr for the task.
+        runtime
+            .registry
+            .on_write("worktask:cmd:new_pr:pr-1", &json!({ "task_id": task_id }))
+            .await;
+
+        // Task status must reach `done`.
+        let mut done = false;
+        for _ in 0..200 {
+            if let Some(t) = store.get(&format!("worktask:task:{task_id}")).await {
+                if t.get("status").and_then(|s| s.as_str()) == Some("done") {
+                    done = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(done, "direct-merge new_pr must drive task status to `done`");
+
+        // The merge really happened: feature.txt is now on main in the repo.
+        let merged_file = repo.join("feature.txt");
+        assert!(
+            merged_file.exists(),
+            "merged content must be present on the repo's main worktree"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&merged_file).unwrap(),
+            "new feature work"
+        );
+
+        // Worktree removed + branch deleted + pruned.
+        for _ in 0..200 {
+            if !wt.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!wt.exists(), "worktree must be removed after a direct merge");
+        assert!(
+            !worktree_listed(&git, &repo, &wt).await,
+            "worktree must be gone from git worktree list"
+        );
+        let branches = git
+            .run_checked("br", &["-C", &repo.to_string_lossy(), "branch", "--list"])
+            .await
+            .unwrap();
+        assert!(
+            !branches.stdout.contains(branch),
+            "feature branch must be deleted after merge; branches=\n{}",
+            branches.stdout
+        );
+    }
+
+    /// github-pr (push-only) mode: a real `git push` of the branch happens and
+    /// the task is LEFT `in_review` (no fabricated merged PR). This is the
+    /// by-design honest boundary per the implement result. We give the repo a
+    /// real local `--bare` remote so the push genuinely succeeds.
+    #[tokio::test]
+    async fn e2e_new_pr_github_mode_pushes_real_branch_and_leaves_in_review() {
+        if !git_available().await {
+            eprintln!("skipping e2e_new_pr_github: git not on PATH");
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = GitEffects::default();
+        init_repo(&git, &repo).await;
+
+        // A real bare remote the worktree can push to.
+        let remote = tmp.path().join("remote.git");
+        git.run_checked(
+            "init-bare",
+            &["init", "--bare", "-q", &remote.to_string_lossy()],
+        )
+        .await
+        .unwrap();
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+        store
+            .set("worktask:policy:global", json!({ "pr_mode": "github-pr" }))
+            .await;
+
+        let wt = tmp.path().join("wt-push");
+        let branch = "feat/e2e-push";
+        runtime
+            .registry
+            .on_write(
+                "worktask:cmd:new_feature:push-1",
+                &json!({
+                    "org": "plures",
+                    "repo": repo.to_string_lossy(),
+                    "branch": branch,
+                    "worktree_path": wt.to_string_lossy(),
+                    "owner_session": "s",
+                    "owner_agent": "a",
+                    "lease_expires_at": 9_000_000_000u64,
+                }),
+            )
+            .await;
+        let (task_id, task) = await_task_of_type(&store, "feature").await;
+        assert_eq!(task["pr_mode"], "github-pr");
+        await_path(&wt).await;
+
+        // Wire the bare repo as `origin` on the worktree + commit a change so the
+        // push has content. (The .px push uses remote `origin` by default.)
+        let wtd = wt.to_string_lossy();
+        git.run_checked(
+            "remote-add",
+            &["-C", &wtd, "remote", "add", "origin", &remote.to_string_lossy()],
+        )
+        .await
+        .unwrap();
+        std::fs::write(wt.join("pushme.txt"), b"push this").unwrap();
+        git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
+        git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "push work"])
+            .await
+            .unwrap();
+
+        // Fire new_pr (github-pr mode).
+        runtime
+            .registry
+            .on_write("worktask:cmd:new_pr:pr-push-1", &json!({ "task_id": task_id }))
+            .await;
+
+        // Status must be left `in_review` (NOT done, NOT a fake merge). Poll for
+        // a stable terminal-ish state, then assert it's in_review.
+        let mut status = String::new();
+        for _ in 0..200 {
+            if let Some(t) = store.get(&format!("worktask:task:{task_id}")).await {
+                if let Some(s) = t.get("status").and_then(|v| v.as_str()) {
+                    status = s.to_string();
+                    if s == "in_review" {
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            status, "in_review",
+            "github-pr mode must leave the task in_review (honest boundary), got `{status}`"
+        );
+
+        // The branch was REALLY pushed: the bare remote now has it.
+        let ls = git
+            .run_checked(
+                "ls-remote",
+                &["ls-remote", "--heads", &remote.to_string_lossy()],
+            )
+            .await
+            .unwrap();
+        assert!(
+            ls.stdout.contains(branch),
+            "github-pr mode must have really pushed the branch to origin; ls-remote=\n{}",
+            ls.stdout
+        );
+
+        // The worktree was NOT torn down (push-only leaves it for the external step).
+        assert!(
+            wt.exists(),
+            "github-pr mode must NOT remove the worktree (no real merge happened)"
+        );
+    }
+}
