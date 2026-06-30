@@ -1,0 +1,410 @@
+# worktask.px — Worktask executor orchestration as .px procedures.
+#
+# Pure orchestration + policy logic for git-worktree task management. This file
+# performs NO side effects directly: every effect (git, filesystem, durable
+# state) is DESCRIBED by an action call and EXECUTED by the Rust handlers
+# (CoreActionHandler for read_state/write_state; WorktaskActionHandler in
+# crates/radix-core/src/spine/worktask_actions.rs for git/fs/quarantine and
+# native-typed record shaping). The dangerous clean-vs-dirty reclaim DECISION
+# lives here, in declarative `when` logic; Rust only runs the chosen effect
+# (C-DEV-001). The 4-tier PR-mode precedence chain also lives here, as an
+# explicit greedy `when`-overwrite (lowest priority first, highest last).
+#
+# Command surface (no CLI — the CLI crate was removed in #460): each command is
+# a reactive procedure that fires when its command key is written into the live
+# StateStore. A caller invokes a command by writing the command node, e.g.:
+#     write  worktask:cmd:new_feature:<reqid>  =  { org, repo, branch, ... }
+# The reactive registry binds that written value to `$value` (see
+# spine/reactive.rs) and fires the matching procedure. Each command is mapped to
+# its own key glob `worktask:cmd:<name>:*` in spine/bootstrap.rs so commands do
+# not trigger each other.
+#
+# .px expression rules used here (validated against the pluresdb-px executor):
+#   - dotted field in a string value : "${value.org}"   (dollar OUTSIDE brace)
+#   - dotted field in a condition     : $st.dirty         (bare, no brace)
+#   - whole-object value substitution : $task             (bare flat var)
+#   - flat scalar value               : $id, $now, $mode  (bare flat var)
+# `coalesce()` / `length()` are NOT available in object-literal values or string
+# interpolation, so PR-mode precedence is a sequential `when`-overwrite and
+# array counts go through the Rust `count` action. A loop's `-> $out` collects
+# the output of the loop body's LAST top-level step per iteration, so each
+# iteration ends in exactly one unconditional `make_outcome -> $row`.
+#
+# Durable state (C-PLURES-003 — all in PluresDB via StateStore):
+#   worktask:task:{task_id}                  full task record
+#   worktask:lease:{task_id}                 ownership lease (separate node)
+#   worktask:policy:override:{task_id}       per-task PR-mode override (tier 1)
+#   worktask:policy:repo:{org}/{repo}        repo PR-mode default      (tier 2)
+#   worktask:policy:orgtype:{org}:{type}     org+type PR-mode default  (tier 3)
+#   worktask:policy:global                   global PR-mode default    (tier 4)
+#   worktask:reclaim:{run_id}                reclaim telemetry
+#   worktask:quarantine:{task_id}            quarantine record (written by Rust)
+
+# ─────────────────────────────────────────────────────────────────────────
+# Facts (data shapes) — documentation only
+# ─────────────────────────────────────────────────────────────────────────
+
+# [parser-skip] fact Task:
+# [parser-skip]   task_id: string
+# [parser-skip]   org: string
+# [parser-skip]   repo: string                 # repo path or org/repo slug
+# [parser-skip]   task_type: enum(epic, feature, bugfix, chore)
+# [parser-skip]   branch: optional[string]
+# [parser-skip]   worktree_path: optional[string]
+# [parser-skip]   owner_session: string
+# [parser-skip]   owner_agent: string
+# [parser-skip]   status: enum(planned, active, in_review, merging, done, abandoned)
+# [parser-skip]   pr_mode: enum(github-pr, subagent-review, direct-merge, none)
+# [parser-skip]   created_at: int
+# [parser-skip]   updated_at: int
+# [parser-skip]
+# [parser-skip] fact Lease:
+# [parser-skip]   task_id: string
+# [parser-skip]   owner_session: string
+# [parser-skip]   owner_agent: string
+# [parser-skip]   acquired_at: int
+# [parser-skip]   lease_expires_at: int
+
+# ─────────────────────────────────────────────────────────────────────────
+# Constraints — documentation only
+# ─────────────────────────────────────────────────────────────────────────
+
+# [parser-skip] constraint dirty_tree_never_deleted:
+# [parser-skip]   given: "A worktree with uncommitted work must never be silently deleted"
+# [parser-skip]   check: when worktree.dirty == true: action == "quarantine_worktree"
+# [parser-skip]   severity: error
+# [parser-skip]   message: "Dirty worktrees are quarantined (moved), never deleted. No exceptions."
+
+# [parser-skip] constraint pr_mode_precedence_strict:
+# [parser-skip]   given: "PR mode resolves override -> repo -> org+type -> global"
+# [parser-skip]   severity: error
+
+# ─────────────────────────────────────────────────────────────────────────
+# Command Procedures (the 11 commands)
+# ─────────────────────────────────────────────────────────────────────────
+
+# new_epic — create an epic container task. No worktree; pr_mode none.
+procedure new_epic:
+  trigger: on_write
+  given: "Create an epic container task (no worktree, pr_mode=none)"
+
+  generate_id {} -> $id
+  timestamp_now {} -> $now
+
+  make_task_record {value: $value, id: $id, now: $now, task_type: "epic", status: "planned", pr_mode: "none"} -> $task
+  write_state {key: "worktask:task:${id}", value: $task} -> $written
+
+  return {task_id: $id, task_type: "epic", status: "planned", pr_mode: "none"}
+
+
+# new_feature — feature task WITH a real git worktree + ownership lease.
+# PR mode is resolved here via the 4-tier precedence chain (override > repo >
+# org+type > global), defaulting to github-pr.
+procedure new_feature:
+  trigger: on_write
+  given: "Create a feature task: real worktree + task node + ownership lease + resolved pr_mode"
+
+  generate_id {} -> $id
+  timestamp_now {} -> $now
+
+  # ── resolve_pr_mode: 4-tier precedence in .px (C-DEV-001). Read each policy
+  #    node, then overwrite $mode from lowest to highest priority so the
+  #    highest present tier wins. This greedy when-overwrite IS the chain.
+  read_state {key: "worktask:policy:override:${id}"} -> $ovr
+  read_state {key: "worktask:policy:repo:${value.org}/${value.repo}"} -> $repo_pol
+  read_state {key: "worktask:policy:orgtype:${value.org}:feature"} -> $orgtype_pol
+  read_state {key: "worktask:policy:global"} -> $global_pol
+  identity {v: "github-pr"} -> $mode
+  when $global_pol != null:
+    identity {v: "${global_pol.pr_mode}"} -> $mode
+  end
+  when $orgtype_pol != null:
+    identity {v: "${orgtype_pol.pr_mode}"} -> $mode
+  end
+  when $repo_pol != null:
+    identity {v: "${repo_pol.pr_mode}"} -> $mode
+  end
+  when $ovr != null:
+    identity {v: "${ovr.pr_mode}"} -> $mode
+  end
+
+  # ── real git worktree creation ─────────────────────────────────────────
+  git_worktree_add {repo_path: "${value.repo}", worktree_path: "${value.worktree_path}", branch: "${value.branch}"} -> $wt
+
+  make_task_record {value: $value, id: $id, now: $now, task_type: "feature", status: "active", pr_mode: $mode} -> $task
+  write_state {key: "worktask:task:${id}", value: $task} -> $w_task
+
+  make_lease_record {value: $value, id: $id, now: $now} -> $lease
+  write_state {key: "worktask:lease:${id}", value: $lease} -> $w_lease
+
+  return {task_id: $id, task_type: "feature", status: "active", pr_mode: $mode}
+
+
+# new_bugfix — as feature, task_type=bugfix.
+procedure new_bugfix:
+  trigger: on_write
+  given: "Create a bugfix task: real worktree + task node + ownership lease + resolved pr_mode"
+
+  generate_id {} -> $id
+  timestamp_now {} -> $now
+
+  read_state {key: "worktask:policy:override:${id}"} -> $ovr
+  read_state {key: "worktask:policy:repo:${value.org}/${value.repo}"} -> $repo_pol
+  read_state {key: "worktask:policy:orgtype:${value.org}:bugfix"} -> $orgtype_pol
+  read_state {key: "worktask:policy:global"} -> $global_pol
+  identity {v: "github-pr"} -> $mode
+  when $global_pol != null:
+    identity {v: "${global_pol.pr_mode}"} -> $mode
+  end
+  when $orgtype_pol != null:
+    identity {v: "${orgtype_pol.pr_mode}"} -> $mode
+  end
+  when $repo_pol != null:
+    identity {v: "${repo_pol.pr_mode}"} -> $mode
+  end
+  when $ovr != null:
+    identity {v: "${ovr.pr_mode}"} -> $mode
+  end
+
+  git_worktree_add {repo_path: "${value.repo}", worktree_path: "${value.worktree_path}", branch: "${value.branch}"} -> $wt
+
+  make_task_record {value: $value, id: $id, now: $now, task_type: "bugfix", status: "active", pr_mode: $mode} -> $task
+  write_state {key: "worktask:task:${id}", value: $task} -> $w_task
+
+  make_lease_record {value: $value, id: $id, now: $now} -> $lease
+  write_state {key: "worktask:lease:${id}", value: $lease} -> $w_lease
+
+  return {task_id: $id, task_type: "bugfix", status: "active", pr_mode: $mode}
+
+
+# new_chore — as feature, task_type=chore. Chores default to direct-merge.
+procedure new_chore:
+  trigger: on_write
+  given: "Create a chore task: real worktree + task node + ownership lease + resolved pr_mode"
+
+  generate_id {} -> $id
+  timestamp_now {} -> $now
+
+  read_state {key: "worktask:policy:override:${id}"} -> $ovr
+  read_state {key: "worktask:policy:repo:${value.org}/${value.repo}"} -> $repo_pol
+  read_state {key: "worktask:policy:orgtype:${value.org}:chore"} -> $orgtype_pol
+  read_state {key: "worktask:policy:global"} -> $global_pol
+  identity {v: "direct-merge"} -> $mode
+  when $global_pol != null:
+    identity {v: "${global_pol.pr_mode}"} -> $mode
+  end
+  when $orgtype_pol != null:
+    identity {v: "${orgtype_pol.pr_mode}"} -> $mode
+  end
+  when $repo_pol != null:
+    identity {v: "${repo_pol.pr_mode}"} -> $mode
+  end
+  when $ovr != null:
+    identity {v: "${ovr.pr_mode}"} -> $mode
+  end
+
+  git_worktree_add {repo_path: "${value.repo}", worktree_path: "${value.worktree_path}", branch: "${value.branch}"} -> $wt
+
+  make_task_record {value: $value, id: $id, now: $now, task_type: "chore", status: "active", pr_mode: $mode} -> $task
+  write_state {key: "worktask:task:${id}", value: $task} -> $w_task
+
+  make_lease_record {value: $value, id: $id, now: $now} -> $lease
+  write_state {key: "worktask:lease:${id}", value: $lease} -> $w_lease
+
+  return {task_id: $id, task_type: "chore", status: "active", pr_mode: $mode}
+
+
+# list_feature — enumerate all feature tasks (read-only).
+procedure list_feature:
+  trigger: on_write
+  given: "List all tasks of task_type=feature"
+
+  list_tasks {task_type: "feature"} -> $tasks
+  count {arr: $tasks} -> $n
+  return {task_type: "feature", count: $n, tasks: $tasks}
+
+
+# list_chore — enumerate all chore tasks (read-only).
+procedure list_chore:
+  trigger: on_write
+  given: "List all tasks of task_type=chore"
+
+  list_tasks {task_type: "chore"} -> $tasks
+  count {arr: $tasks} -> $n
+  return {task_type: "chore", count: $n, tasks: $tasks}
+
+
+# get_feature — fetch one feature task by id (read-only).
+procedure get_feature:
+  trigger: on_write
+  given: "Fetch a single feature task by id"
+
+  read_state {key: "worktask:task:${value.task_id}"} -> $task
+  return {task_id: "${value.task_id}", task: $task}
+
+
+# get_chore — fetch one chore task by id (read-only).
+procedure get_chore:
+  trigger: on_write
+  given: "Fetch a single chore task by id"
+
+  read_state {key: "worktask:task:${value.task_id}"} -> $task
+  return {task_id: "${value.task_id}", task: $task}
+
+
+# new_pr — land a task via its stored PR mode; on a real direct merge, clean up.
+# Only a real direct-merge (landed == true) triggers worktree/branch cleanup;
+# push-only modes (github-pr, subagent-review) leave the task in_review for the
+# external step to finish. The mode lives on the task record (resolved at
+# creation via the precedence chain).
+procedure new_pr:
+  trigger: on_write
+  given: "Land a task via its resolved PR mode; clean up only on a real direct merge"
+
+  read_state {key: "worktask:task:${value.task_id}"} -> $task
+
+  when $task == null:
+    return {task_id: "${value.task_id}", error: "task_not_found"}
+  end
+
+  timestamp_now {} -> $now
+  set_task_status {task: $task, status: "merging", updated_at: $now} -> $merging_task
+  write_state {key: "worktask:task:${value.task_id}", value: $merging_task} -> $w1
+
+  when $task.pr_mode == "direct-merge":
+    land_direct_merge {repo_path: "${task.repo}", branch: "${task.branch}"} -> $landing
+    git_worktree_remove {repo_path: "${task.repo}", worktree_path: "${task.worktree_path}"} -> $rm
+    git_branch_delete {repo_path: "${task.repo}", branch: "${task.branch}"} -> $bd
+    git_worktree_prune {repo_path: "${task.repo}"} -> $pr
+    timestamp_now {} -> $done_at
+    set_task_status {task: $merging_task, status: "done", updated_at: $done_at} -> $done_task
+    write_state {key: "worktask:task:${value.task_id}", value: $done_task} -> $w2
+    return {task_id: "${value.task_id}", pr_mode: "direct-merge", landed: true, status: "done", detail: $landing}
+  end
+
+  when $task.pr_mode == "github-pr":
+    land_github_pr {worktree_path: "${task.worktree_path}", branch: "${task.branch}"} -> $landing
+    timestamp_now {} -> $rev_at
+    set_task_status {task: $merging_task, status: "in_review", updated_at: $rev_at} -> $review_task
+    write_state {key: "worktask:task:${value.task_id}", value: $review_task} -> $w3
+    return {task_id: "${value.task_id}", pr_mode: "github-pr", landed: false, status: "in_review", detail: $landing}
+  end
+
+  when $task.pr_mode == "subagent-review":
+    land_subagent_review {worktree_path: "${task.worktree_path}", branch: "${task.branch}"} -> $landing
+    timestamp_now {} -> $rev_at2
+    set_task_status {task: $merging_task, status: "in_review", updated_at: $rev_at2} -> $review_task2
+    write_state {key: "worktask:task:${value.task_id}", value: $review_task2} -> $w4
+    return {task_id: "${value.task_id}", pr_mode: "subagent-review", landed: false, status: "in_review", detail: $landing}
+  end
+
+  # pr_mode == "none" (or unrecognized): honest no-op landing.
+  land_none {branch: "${task.branch}"} -> $landing_none
+  timestamp_now {} -> $none_at
+  set_task_status {task: $merging_task, status: "in_review", updated_at: $none_at} -> $none_task
+  write_state {key: "worktask:task:${value.task_id}", value: $none_task} -> $w5
+  return {task_id: "${value.task_id}", pr_mode: "none", landed: false, status: "in_review", detail: $landing_none}
+
+
+# reclaim — expired-lease scan: clean ⇒ remove; dirty ⇒ quarantine (move).
+# The DECISION (which lease is expired, which tree is clean vs dirty) is made
+# here in declarative `when` logic; Rust only executes the chosen effect. Each
+# loop iteration ALWAYS ends in a single unconditional `make_outcome -> $row`,
+# so exactly one outcome per task bubbles into `$outcomes` (the executor
+# collects the output of the loop body's last top-level step per iteration).
+# The chosen action + detail are bound to flat vars via greedy `when`-overwrite
+# (defaulting to "skipped" for non-expired / no-worktree / unleased tasks), the
+# same precedence mechanism proven for pr_mode. No fabricated counters — the
+# real per-task outcomes array is persisted verbatim as reclaim telemetry.
+procedure reclaim:
+  trigger: on_write
+  given: "Reclaim expired-lease worktrees: clean removed, dirty quarantined (moved). Persist real per-task outcomes."
+
+  generate_id {} -> $run_id
+  timestamp_now {} -> $now
+
+  list_tasks {} -> $all_tasks
+
+  loop over $all_tasks as task -> $outcomes:
+    # Per-task decision vars (defaults = no-op outcome).
+    identity {v: "skipped"} -> $action
+    identity {v: ""} -> $detail_path
+    identity {v: 0} -> $detail_bytes
+
+    when $task.worktree_path != null:
+      read_state {key: "worktask:lease:${task.task_id}"} -> $lease
+      when $lease != null:
+        when $now >= $lease.lease_expires_at:
+          git_worktree_status {worktree_path: "${task.worktree_path}"} -> $st
+
+          # DANGEROUS DECISION (kept in .px): dirty ⇒ quarantine (move, never
+          # delete); clean ⇒ remove. Each branch runs only the chosen effect.
+          when $st.dirty == true:
+            quarantine_worktree {worktree_path: "${task.worktree_path}", task_id: "${task.task_id}", branch: "${task.branch}", reason: "expired_lease_dirty_tree"} -> $q
+            set_task_status {task: $task, status: "abandoned", updated_at: $now} -> $ab
+            write_state {key: "worktask:task:${task.task_id}", value: $ab} -> $wq
+            identity {v: "quarantined"} -> $action
+            identity {v: "${q.quarantined_path}"} -> $detail_path
+            identity {v: "${q.bytes}"} -> $detail_bytes
+          end
+
+          when $st.dirty == false:
+            fs_dir_size {path: "${task.worktree_path}"} -> $sz
+            git_worktree_remove {repo_path: "${task.repo}", worktree_path: "${task.worktree_path}"} -> $rm
+            git_branch_delete {repo_path: "${task.repo}", branch: "${task.branch}"} -> $bd
+            git_worktree_prune {repo_path: "${task.repo}"} -> $pr
+            set_task_status {task: $task, status: "abandoned", updated_at: $now} -> $ab2
+            write_state {key: "worktask:task:${task.task_id}", value: $ab2} -> $wc
+            identity {v: "reclaimed"} -> $action
+            identity {v: "${sz.bytes}"} -> $detail_bytes
+          end
+        end
+      end
+    end
+
+    # ALWAYS the loop body's last top-level step → one outcome per task.
+    make_outcome {task_id: "${task.task_id}", action: $action, path: $detail_path, bytes: $detail_bytes} -> $row
+  end
+
+  count {arr: $all_tasks} -> $examined
+  make_outcome {run_id: "${run_id}", ran_at: $now, examined: $examined, outcomes: $outcomes} -> $telemetry
+  write_state {key: "worktask:reclaim:${run_id}", value: $telemetry} -> $w_tel
+
+  return {run_id: "${run_id}", examined: $examined, outcomes: $outcomes}
+
+
+# doctor — READ-ONLY health report. Mutates nothing. For each task with a
+# worktree it reads the lease + git status and emits one diagnostic row. The
+# decision (active/expired/missing-lease, clean/dirty) is bound to flat vars and
+# emitted once per task as the loop body's last step. Nothing is written.
+procedure doctor:
+  trigger: on_write
+  given: "Read-only diagnostics: classify each worktree task (active/expired/missing-lease, clean/dirty) without mutating anything"
+
+  timestamp_now {} -> $now
+  list_tasks {} -> $all_tasks
+
+  loop over $all_tasks as task -> $report:
+    identity {v: "no_worktree"} -> $lease_state
+    identity {v: false} -> $dirty
+    identity {v: false} -> $has_worktree
+
+    when $task.worktree_path != null:
+      identity {v: true} -> $has_worktree
+      read_state {key: "worktask:lease:${task.task_id}"} -> $lease
+      git_worktree_status {worktree_path: "${task.worktree_path}"} -> $st
+      identity {v: $st.dirty} -> $dirty
+      identity {v: "missing"} -> $lease_state
+      when $lease != null:
+        identity {v: "active"} -> $lease_state
+        when $now >= $lease.lease_expires_at:
+          identity {v: "expired"} -> $lease_state
+        end
+      end
+    end
+
+    make_outcome {task_id: "${task.task_id}", worktree: $has_worktree, lease: $lease_state, dirty: $dirty} -> $row
+  end
+
+  count {arr: $all_tasks} -> $examined
+  return {ran_at: $now, examined: $examined, report: $report}

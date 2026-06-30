@@ -24,6 +24,7 @@ pub mod model_selection_actions;
 pub mod rsi_actions;
 pub mod thread_actions;
 pub mod topic_routing_actions;
+pub mod worktask_actions;
 pub mod event;
 pub mod pipeline;
 pub mod procedures;

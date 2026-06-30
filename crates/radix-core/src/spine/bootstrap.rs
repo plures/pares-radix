@@ -81,6 +81,20 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("evaluate_gate", "stage_complete:*");
     m.insert("report_result", "task_complete:*");
 
+    // Worktask executor — each command fires only on its own command key
+    // (a write to `worktask:cmd:<name>:<reqid>` triggers exactly that procedure).
+    m.insert("new_epic", "worktask:cmd:new_epic:*");
+    m.insert("new_feature", "worktask:cmd:new_feature:*");
+    m.insert("new_bugfix", "worktask:cmd:new_bugfix:*");
+    m.insert("new_chore", "worktask:cmd:new_chore:*");
+    m.insert("list_feature", "worktask:cmd:list_feature:*");
+    m.insert("list_chore", "worktask:cmd:list_chore:*");
+    m.insert("get_feature", "worktask:cmd:get_feature:*");
+    m.insert("get_chore", "worktask:cmd:get_chore:*");
+    m.insert("new_pr", "worktask:cmd:new_pr:*");
+    m.insert("reclaim", "worktask:cmd:reclaim:*");
+    m.insert("doctor", "worktask:cmd:doctor:*");
+
     // RSI (recursive self-improvement)
     m.insert("evaluate_performance", "task_complete:*");
     m.insert("identify_improvement", "perf_signal:*");
@@ -302,6 +316,74 @@ procedure some_manual_proc:
             "real_spine_px_files_compile: loaded {} procedures from {}",
             count,
             spine_dir.display()
+        );
+    }
+
+    /// Regression guard: the real `praxis/procedures/worktask.px` must parse,
+    /// compile, and register all 11 reactive worktask commands. The broader
+    /// `real_spine_px_files_compile` test only scans `praxis/spine/`, so this
+    /// covers the worktask procedure surface specifically. Catches a `.px`
+    /// syntax regression that the Rust handler tests cannot see.
+    #[tokio::test]
+    async fn worktask_px_compiles_and_registers_all_commands() {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let project_root = PathBuf::from(manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("could not find project root")
+            .to_path_buf();
+
+        let procedures_dir = project_root.join("praxis").join("procedures");
+        let worktask_px = procedures_dir.join("worktask.px");
+        if !worktask_px.is_file() {
+            // The worktree layout always has this; skip only if the praxis dir
+            // is genuinely absent (e.g. a stripped CI checkout).
+            return;
+        }
+
+        // Parse + compile the file directly to assert every command is present
+        // (independent of trigger-map registration filtering).
+        let src = std::fs::read_to_string(&worktask_px).expect("read worktask.px");
+        let doc = pares_radix_praxis::px::parse(&src)
+            .expect("worktask.px must parse against the real .px parser");
+        let records = pares_radix_praxis::px::compiler::compile(&doc);
+        let names: Vec<String> = records
+            .iter()
+            .filter_map(|r| {
+                r.data
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .collect();
+        for cmd in [
+            "new_epic",
+            "new_feature",
+            "new_bugfix",
+            "new_chore",
+            "list_feature",
+            "list_chore",
+            "get_feature",
+            "get_chore",
+            "new_pr",
+            "reclaim",
+            "doctor",
+        ] {
+            assert!(
+                names.contains(&cmd.to_string()),
+                "worktask.px is missing command procedure `{cmd}`; compiled: {names:?}"
+            );
+        }
+
+        // And the full procedures dir must register reactively without panic;
+        // every worktask command is `trigger: on_write`, so they all register.
+        let registry = ReactiveRegistry::new();
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoOpHandler);
+        let count = register_reactive_procedures(&procedures_dir, &registry, handler).await;
+        assert!(
+            count >= 11,
+            "expected >= 11 reactive procedures from praxis/procedures (11 worktask \
+             commands + others), registered {count}"
         );
     }
 }

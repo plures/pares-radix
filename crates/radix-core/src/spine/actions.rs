@@ -174,19 +174,23 @@ impl AsyncActionHandler for CoreActionHandler {
 
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
+use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
 /// Composite action handler that delegates to multiple handlers in priority order.
 ///
 /// When a .px procedure calls an action:
 /// 1. `CoreActionHandler` handles state/history actions (read_state, append_history, etc.)
 /// 2. `DevLifecycleActionHandler` handles stage management actions
-/// 3. `SubagentActor` handles spawn_subagent calls
-/// 4. `ToolDispatchActionHandler` handles everything else as tool calls
+/// 3. `WorktaskActionHandler` handles worktask git/fs/quarantine effects
+/// 4. `SubagentActor` handles spawn_subagent calls
+/// 5. `ToolDispatchActionHandler` handles everything else as tool calls
 ///
-/// This gives .px procedures access to system state, lifecycle logic, subagent spawning, AND external tools.
+/// This gives .px procedures access to system state, lifecycle logic, worktask
+/// orchestration, subagent spawning, AND external tools.
 pub struct CompositeActionHandler {
     core: CoreActionHandler,
     dev_lifecycle: DevLifecycleActionHandler,
+    worktask: WorktaskActionHandler,
     subagent: Option<Arc<SubagentActor>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
@@ -198,6 +202,9 @@ impl CompositeActionHandler {
         tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
     ) -> Self {
         Self {
+            // Worktask shares the SAME durable state store as Core so worktask
+            // records and general `.px` state co-locate in one PluresDB.
+            worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
             subagent: None,
@@ -226,6 +233,8 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.core.call(action, params).await
         } else if is_dev_lifecycle_action(action) {
             self.dev_lifecycle.call(action, params).await
+        } else if is_worktask_action(action) {
+            self.worktask.call(action, params).await
         } else if is_subagent_action(action) {
             if let Some(ref actor) = self.subagent {
                 actor.call(action, params).await
