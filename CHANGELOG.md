@@ -1,3 +1,11 @@
+## [1.55.10] — 2026-06-30
+
+- feat(spine): wire .px runtime into shipped app (real PluresDB state + assembly) (0de86cf)
+- chore(template): conform pares-radix to svelte-tauri-template mandate (remove CLI crate, render-modes + MCP only) (#460) (b263d0f)
+- ci: svelte-kit sync before vitest (root tsconfig extends .svelte-kit/tsconfig.json) (3d983ad)
+- ci: drop pnpm version pin in real-tests (use packageManager from package.json) (98321b1)
+- ci: retarget Real Integration Tests to real surfaces (kill ghost CLI) (0013618)
+
 ## [1.55.9] — 2026-06-28
 
 - fix(ci): repair tech-doc-writer.yml YAML parse break (unindented template-literal lines terminated the script: block scalar) (73abda8)
