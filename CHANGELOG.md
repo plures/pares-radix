@@ -1,3 +1,10 @@
+## [1.55.11] — 2026-06-30
+
+- test(worktask): adversarial QA suite + fix pr_mode poisoning from malformed policy nodes (a4caad6)
+- test(worktask): add verify loop-closer e2e command-surface probe (cfec9dc)
+- test(worktask): end-to-end runtime + scratch-repo coverage (new_feature/reclaim-quarantine/doctor/pr-modes) (d474777)
+- feat(worktask): real .px+Rust worktask executor (11 cmds, git/fs effects, PluresDB state) (3c51dcb)
+
 ## [1.55.10] — 2026-06-30
 
 - feat(spine): wire .px runtime into shipped app (real PluresDB state + assembly) (0de86cf)
