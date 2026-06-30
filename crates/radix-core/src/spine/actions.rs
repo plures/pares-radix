@@ -16,6 +16,7 @@ use tracing::{debug, warn};
 use crate::model::ChatMessage;
 use crate::px_adapter::AsyncActionHandler;
 use crate::spine::conversation::ConversationStore;
+use crate::state::StateStore;
 use pares_radix_praxis::px::executor::ExecutionError;
 
 /// Trait for handling actions dispatched from .px procedure execution.
@@ -31,11 +32,24 @@ pub use crate::px_adapter::AsyncActionHandler as ActionHandler;
 /// Additional handlers (model, tools, channel) are composed separately.
 pub struct CoreActionHandler {
     conversation_store: Arc<dyn ConversationStore>,
+    /// Durable key-value state store (PluresDB-backed in production).
+    ///
+    /// `write_state` / `read_state` round-trip general keys through this store,
+    /// giving every `.px` procedure (dev-lifecycle.px included) real persistence.
+    state_store: Arc<dyn StateStore>,
 }
 
 impl CoreActionHandler {
-    pub fn new(conversation_store: Arc<dyn ConversationStore>) -> Self {
-        Self { conversation_store }
+    /// Construct a core handler backed by a conversation store (for history
+    /// actions) and a [`StateStore`] (for general `read_state`/`write_state`).
+    pub fn new(
+        conversation_store: Arc<dyn ConversationStore>,
+        state_store: Arc<dyn StateStore>,
+    ) -> Self {
+        Self {
+            conversation_store,
+            state_store,
+        }
     }
 
     /// Read conversation history for a chat.
@@ -93,7 +107,12 @@ impl CoreActionHandler {
         Ok(Value::Null)
     }
 
-    /// Read state from conversation store metadata.
+    /// Read state by key.
+    ///
+    /// The `chat_history:<chat_id>` prefix remains a virtual key projected from
+    /// the conversation store (the pipeline relies on it). Every other key is a
+    /// durable read from the [`StateStore`]; an absent key returns `Value::Null`
+    /// (not an error — state may simply not exist yet).
     async fn read_state(&self, params: &Value) -> Result<Value, ExecutionError> {
         let key = params
             .get("key")
@@ -103,8 +122,7 @@ impl CoreActionHandler {
                 message: "missing key".into(),
             })?;
 
-        // For now, conversation_tail and agent_promises map to conversation history
-        // This will be replaced by PluresDB reads once fully wired.
+        // `chat_history:` is a virtual projection over the conversation store.
         if key.starts_with("chat_history:") {
             let chat_id = key.strip_prefix("chat_history:").unwrap_or(key);
             return self
@@ -112,20 +130,29 @@ impl CoreActionHandler {
                 .await;
         }
 
-        // Unknown keys return null (not an error — state may not exist yet)
-        debug!(key = %key, "action: read_state — key not found, returning null");
-        Ok(Value::Null)
+        // General keys round-trip through the durable state store.
+        let value = self.state_store.get(key).await.unwrap_or(Value::Null);
+        debug!(key = %key, found = !value.is_null(), "action: read_state");
+        Ok(value)
     }
 
-    /// Write state (will become PluresDB write).
+    /// Write state by key into the durable [`StateStore`].
+    ///
+    /// Returns the value that was written so `.px` steps can bind it
+    /// (e.g. `write_state {...} -> $written`).
     async fn write_state(&self, params: &Value) -> Result<Value, ExecutionError> {
         let key = params
             .get("key")
             .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        debug!(key = %key, "action: write_state (stub — will be PluresDB)");
-        // TODO: Wire to PluresDB when available
-        Ok(Value::Null)
+            .ok_or_else(|| ExecutionError::ActionFailed {
+                action: "write_state".into(),
+                message: "missing key".into(),
+            })?;
+
+        let value = params.get("value").cloned().unwrap_or(Value::Null);
+        self.state_store.set(key, value.clone()).await;
+        debug!(key = %key, "action: write_state");
+        Ok(value)
     }
 }
 
@@ -167,10 +194,11 @@ pub struct CompositeActionHandler {
 impl CompositeActionHandler {
     pub fn new(
         conversation_store: Arc<dyn ConversationStore>,
+        state_store: Arc<dyn StateStore>,
         tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
     ) -> Self {
         Self {
-            core: CoreActionHandler::new(conversation_store),
+            core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
             subagent: None,
             tool_handler,
@@ -219,11 +247,16 @@ impl AsyncActionHandler for CompositeActionHandler {
 mod tests {
     use super::*;
     use crate::spine::conversation::MemoryConversationStore;
+    use crate::state::InMemoryStateStore;
+
+    fn test_state() -> Arc<dyn StateStore> {
+        Arc::new(InMemoryStateStore::new())
+    }
 
     #[tokio::test]
     async fn append_and_read_history() {
         let store = Arc::new(MemoryConversationStore::new());
-        let handler = CoreActionHandler::new(store);
+        let handler = CoreActionHandler::new(store, test_state());
 
         // Append a user message
         let result = handler
@@ -264,7 +297,7 @@ mod tests {
     #[tokio::test]
     async fn read_state_chat_history_prefix() {
         let store = Arc::new(MemoryConversationStore::new());
-        let handler = CoreActionHandler::new(Arc::clone(&store) as Arc<dyn ConversationStore>);
+        let handler = CoreActionHandler::new(Arc::clone(&store) as Arc<dyn ConversationStore>, test_state());
 
         // Add a message directly to store
         store
@@ -288,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn read_state_unknown_key_returns_null() {
         let store = Arc::new(MemoryConversationStore::new());
-        let handler = CoreActionHandler::new(store);
+        let handler = CoreActionHandler::new(store, test_state());
 
         let result = handler
             .call(
@@ -304,7 +337,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_action_returns_null() {
         let store = Arc::new(MemoryConversationStore::new());
-        let handler = CoreActionHandler::new(store);
+        let handler = CoreActionHandler::new(store, test_state());
 
         let result = handler
             .call("some_unknown_action", &serde_json::json!({}))

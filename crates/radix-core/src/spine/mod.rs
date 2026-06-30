@@ -28,5 +28,7 @@ pub mod event;
 pub mod pipeline;
 pub mod procedures;
 pub mod reactive;
+/// Runtime assembly — wires the `.px` engine + state store + handler into the live spine.
+pub mod runtime;
 pub mod shadow;
 pub mod subagent_actor;
