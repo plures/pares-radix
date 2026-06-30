@@ -251,9 +251,15 @@ mod tests {
     #[test]
     fn resolve_state_dir_honors_env() {
         // SAFETY: single-threaded test; we set then immediately read.
-        std::env::set_var(STATE_DIR_ENV, r"C:\some\override\state");
+        // Build the override with the OS-native separator so the assertion is
+        // portable: a hardcoded "C:\\..\\state" string is a SINGLE path
+        // component on Linux (backslash is not a separator there), which made
+        // `ends_with("state")` fail in CI. Use a real joined path instead.
+        let override_dir = std::env::temp_dir().join("radix-override").join("state");
+        std::env::set_var(STATE_DIR_ENV, &override_dir);
         let dir = resolve_state_dir();
         assert!(dir.ends_with("state"));
+        assert_eq!(dir, override_dir);
         std::env::remove_var(STATE_DIR_ENV);
     }
 
