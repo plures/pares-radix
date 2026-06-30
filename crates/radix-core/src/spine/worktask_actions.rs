@@ -1841,4 +1841,342 @@ mod e2e {
             "github-pr mode must NOT remove the worktree (no real merge happened)"
         );
     }
+
+    /// VERIFY loop-closer: drive the SHIPPED command surface end-to-end through
+    /// a complete real lifecycle (new_feature -> real commit work -> new_pr
+    /// direct-merge -> reclaim clean+dirty) and probe the safety guard surface.
+    ///
+    /// This test intentionally records concrete evidence (git worktree listings,
+    /// durable node snippets, origin/main merge visibility) and asserts the
+    /// effects the current shipped implementation guarantees. Contract checks
+    /// that may currently be unmet are captured in the evidence payload for the
+    /// VERIFY report (not silently ignored).
+    #[tokio::test]
+    async fn e2e_verify_command_surface_full_lifecycle_probe() {
+        if !git_available().await {
+            eprintln!("skipping e2e_verify_lifecycle: git not on PATH");
+            return;
+        }
+
+        let tmp = TempDir::new().unwrap();
+        let git = GitEffects::default();
+
+        // Real repo + real bare origin so github-pr push mode is testable.
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        init_repo(&git, &repo).await;
+        let origin = tmp.path().join("origin.git");
+        git.run_checked(
+            "init-bare",
+            &["init", "--bare", "-q", &origin.to_string_lossy()],
+        )
+        .await
+        .unwrap();
+        git.run_checked(
+            "remote-add",
+            &[
+                "-C",
+                &repo.to_string_lossy(),
+                "remote",
+                "add",
+                "origin",
+                &origin.to_string_lossy(),
+            ],
+        )
+        .await
+        .unwrap();
+        git.run_checked(
+            "push-main",
+            &["-C", &repo.to_string_lossy(), "push", "-u", "origin", "main"],
+        )
+        .await
+        .unwrap();
+
+        let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
+
+        // Force direct-merge for the lifecycle land step.
+        store
+            .set("worktask:policy:global", json!({ "pr_mode": "direct-merge" }))
+            .await;
+
+        // 1) newFeature (command surface = write worktask:cmd:*).
+        let wt_feature = tmp.path().join("wt-verify-feature");
+        let feature_branch = "feat/verify-lifecycle";
+        runtime
+            .registry
+            .on_write(
+                "worktask:cmd:new_feature:verify-1",
+                &json!({
+                    "org": "plures",
+                    "repo": repo.to_string_lossy(),
+                    "branch": feature_branch,
+                    "worktree_path": wt_feature.to_string_lossy(),
+                    "owner_session": "verify-session",
+                    "owner_agent": "verify-agent",
+                    "lease_expires_at": 9_000_000_000u64,
+                }),
+            )
+            .await;
+
+        let (feature_task_id, feature_task) = await_task_of_type(&store, "feature").await;
+        let feature_lease = await_node(&store, &format!("worktask:lease:{feature_task_id}")).await;
+        await_path(&wt_feature).await;
+        let wt_list_after_new = git
+            .run_checked(
+                "wt-list-after-new",
+                &[
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ],
+            )
+            .await
+            .unwrap()
+            .stdout;
+        assert!(
+            wt_list_after_new.contains("wt-verify-feature"),
+            "new_feature must create a real listed worktree"
+        );
+
+        // 2) work (real commit in the created worktree).
+        std::fs::write(wt_feature.join("verify-work.txt"), b"verify lifecycle work").unwrap();
+        let wt_feature_s = wt_feature.to_string_lossy();
+        git.run_checked("add", &["-C", &wt_feature_s, "add", "-A"])
+            .await
+            .unwrap();
+        git.run_checked(
+            "commit",
+            &["-C", &wt_feature_s, "commit", "-q", "-m", "verify lifecycle work"],
+        )
+        .await
+        .unwrap();
+
+        // 3) land via new_pr direct-merge + cleanup.
+        runtime
+            .registry
+            .on_write(
+                "worktask:cmd:new_pr:verify-pr-1",
+                &json!({ "task_id": feature_task_id }),
+            )
+            .await;
+
+        let mut landed_done = false;
+        for _ in 0..220 {
+            if let Some(t) = store
+                .get(&format!("worktask:task:{feature_task_id}"))
+                .await
+            {
+                if t.get("status").and_then(|s| s.as_str()) == Some("done") {
+                    landed_done = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            landed_done,
+            "direct-merge new_pr must mark task done in durable state"
+        );
+        assert!(
+            repo.join("verify-work.txt").exists(),
+            "direct-merge must land merged content on repo main"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.join("verify-work.txt")).unwrap(),
+            "verify lifecycle work"
+        );
+
+        for _ in 0..220 {
+            if !wt_feature.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            !wt_feature.exists(),
+            "worktree must be removed after direct-merge landing"
+        );
+        let wt_list_after_land = git
+            .run_checked(
+                "wt-list-after-land",
+                &[
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ],
+            )
+            .await
+            .unwrap()
+            .stdout;
+        let branches_after_land = git
+            .run_checked(
+                "branch-list-after-land",
+                &["-C", &repo.to_string_lossy(), "branch", "--list"],
+            )
+            .await
+            .unwrap()
+            .stdout;
+        assert!(
+            !branches_after_land.contains(feature_branch),
+            "feature branch must be deleted after direct-merge"
+        );
+
+        // Probe whether direct-merge landed on ORIGIN/main (skill contract).
+        // Keep this as evidence to report, not as a hard assertion here.
+        let origin_show = git
+            .run(
+                "origin-show",
+                &[
+                    "--git-dir",
+                    &origin.to_string_lossy(),
+                    "show",
+                    "refs/heads/main:verify-work.txt",
+                ],
+            )
+            .await
+            .ok();
+        let origin_has_merged_content = origin_show
+            .as_ref()
+            .map(|o| o.status == 0 && o.stdout.trim() == "verify lifecycle work")
+            .unwrap_or(false);
+
+        // 4) reclaim: second clean task reclaimed, dirty task quarantined.
+        let wt_clean = tmp.path().join("wt-verify-clean");
+        let wt_dirty = tmp.path().join("wt-verify-dirty");
+        for (i, (branch, wt)) in [("feat/verify-clean", &wt_clean), ("feat/verify-dirty", &wt_dirty)]
+            .iter()
+            .enumerate()
+        {
+            runtime
+                .registry
+                .on_write(
+                    &format!("worktask:cmd:new_feature:verify-reclaim-{i}"),
+                    &json!({
+                        "org": "plures",
+                        "repo": repo.to_string_lossy(),
+                        "branch": branch,
+                        "worktree_path": wt.to_string_lossy(),
+                        "owner_session": "verify-session",
+                        "owner_agent": "verify-agent",
+                        "lease_expires_at": 1u64,
+                    }),
+                )
+                .await;
+            await_path(wt).await;
+        }
+        await_tasks_and_leases_persisted(&store, 3).await;
+        std::fs::write(wt_dirty.join("dirty-preserve.txt"), b"preserve me").unwrap();
+
+        runtime
+            .registry
+            .on_write("worktask:cmd:reclaim:verify-1", &json!({}))
+            .await;
+
+        let reclaim_tel = await_first_under(&store, "worktask:reclaim:").await;
+        let quarantine = await_first_under(&store, "worktask:quarantine:").await;
+        let quarantined_path = quarantine
+            .get("quarantined_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let preserved = PathBuf::from(&quarantined_path).join("dirty-preserve.txt");
+
+        for _ in 0..220 {
+            if !wt_clean.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!wt_clean.exists(), "clean expired worktree must be removed");
+        assert!(!wt_dirty.exists(), "dirty expired worktree source must be moved");
+        assert!(preserved.exists(), "dirty quarantined data must be preserved");
+        assert_eq!(
+            std::fs::read_to_string(&preserved).unwrap(),
+            "preserve me",
+            "quarantined dirty file content must be preserved"
+        );
+
+        // 5) Refuse-unsafe probe: new_pr without task assignment should not
+        // mutate state or perform cleanup side effects.
+        let keys_before_refuse = store.keys_with_prefix("worktask:task:").await;
+        let wt_before_refuse = git
+            .run_checked(
+                "wt-list-before-refuse",
+                &[
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ],
+            )
+            .await
+            .unwrap()
+            .stdout;
+        runtime
+            .registry
+            .on_write(
+                "worktask:cmd:new_pr:verify-missing-task",
+                &json!({ "task_id": "missing-task-id" }),
+            )
+            .await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let keys_after_refuse = store.keys_with_prefix("worktask:task:").await;
+        let wt_after_refuse = git
+            .run_checked(
+                "wt-list-after-refuse",
+                &[
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ],
+            )
+            .await
+            .unwrap()
+            .stdout;
+        assert_eq!(
+            keys_before_refuse.len(),
+            keys_after_refuse.len(),
+            "missing-task new_pr should not create/mutate task records"
+        );
+        assert_eq!(
+            wt_before_refuse, wt_after_refuse,
+            "missing-task new_pr should not mutate worktree topology"
+        );
+
+        let evidence = json!({
+            "new_feature": {
+                "task_id": feature_task_id,
+                "task": feature_task,
+                "lease": feature_lease,
+                "git_worktree_list": wt_list_after_new,
+            },
+            "land": {
+                "repo_main_has_file": repo.join("verify-work.txt").exists(),
+                "repo_main_file": std::fs::read_to_string(repo.join("verify-work.txt")).unwrap_or_default(),
+                "git_worktree_list_after_land": wt_list_after_land,
+                "branches_after_land": branches_after_land,
+                "origin_main_has_merged_content": origin_has_merged_content,
+            },
+            "reclaim": {
+                "telemetry": reclaim_tel,
+                "quarantine": quarantine,
+                "preserved_file": preserved.to_string_lossy(),
+                "preserved_content": std::fs::read_to_string(&preserved).unwrap_or_default(),
+            },
+            "refuse_unsafe_probe": {
+                "keys_before": keys_before_refuse.len(),
+                "keys_after": keys_after_refuse.len(),
+                "worktrees_unchanged": wt_before_refuse == wt_after_refuse,
+                "surface": "new_pr with missing task_id leaves topology/state unchanged",
+            }
+        });
+        eprintln!("VERIFY_E2E_EVIDENCE={} ", evidence);
+    }
 }
