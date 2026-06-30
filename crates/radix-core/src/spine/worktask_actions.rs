@@ -498,17 +498,28 @@ impl WorktaskActionHandler {
         let v = params.get("value").cloned().unwrap_or(json!({}));
         let field = |k: &str| v.get(k).cloned().unwrap_or(Value::Null);
         let p = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
+        let task_type = p("task_type");
+        let task_type_str = task_type.as_str().unwrap_or_default();
+        // Normalize pr_mode against the known-valid set, failing safe to the
+        // per-task-type default. This is the single choke point that keeps a
+        // corrupted/unresolved pr_mode out of durable task state: the `.px`
+        // policy chain interpolates `${policy.pr_mode}`, and when a policy node
+        // is present but lacks a `pr_mode` field the executor yields the literal
+        // token `"${...}"` (an unresolved interpolation) rather than a value.
+        // Storing that literal would poison routing in `new_pr`. Empty strings,
+        // nulls, and any unknown string are likewise coerced to the default.
+        let pr_mode = normalize_pr_mode(p("pr_mode").as_str(), task_type_str);
         Ok(json!({
             "task_id": p("id"),
             "org": field("org"),
             "repo": field("repo"),
-            "task_type": p("task_type"),
+            "task_type": task_type,
             "branch": field("branch"),
             "worktree_path": field("worktree_path"),
             "owner_session": field("owner_session"),
             "owner_agent": field("owner_agent"),
             "status": p("status"),
-            "pr_mode": p("pr_mode"),
+            "pr_mode": pr_mode,
             "created_at": p("now"),
             "updated_at": p("now"),
         }))
@@ -555,6 +566,45 @@ impl WorktaskActionHandler {
 }
 
 // ── free helpers ────────────────────────────────────────────────────────────
+
+/// The closed set of valid PR-handling modes a task may carry. Anything outside
+/// this set is not routable by `new_pr` in `worktask.px`.
+const VALID_PR_MODES: [&str; 4] = ["github-pr", "subagent-review", "direct-merge", "none"];
+
+/// The documented fail-safe default pr_mode for a task type, used when policy
+/// resolution produced no usable value. Mirrors the per-procedure defaults in
+/// `worktask.px` (feature/bugfix → github-pr, chore → direct-merge, epic →
+/// none). Unknown task types fall back to `none` (the most conservative mode:
+/// a no-op landing that never auto-merges).
+fn default_pr_mode_for(task_type: &str) -> &'static str {
+    match task_type {
+        "feature" | "bugfix" => "github-pr",
+        "chore" => "direct-merge",
+        "epic" => "none",
+        _ => "none",
+    }
+}
+
+/// Normalize a resolved pr_mode to a known-valid value, failing safe to the
+/// per-task-type default. Returns a JSON string `Value`.
+///
+/// `raw` is whatever the `.px` policy chain produced. It may be:
+/// - a valid mode (kept as-is),
+/// - `None`/empty (no value resolved → default),
+/// - an **unresolved interpolation literal** like `"${global_pol.pr_mode}"`
+///   (produced when a policy node exists but has no `pr_mode` field → default),
+/// - any other unknown string (typo'd/hostile policy value → default).
+///
+/// Coercing to the default here is the correct fail-safe: an unroutable pr_mode
+/// in durable state would otherwise silently degrade `new_pr` to a no-op (or
+/// store a raw template token), which is exactly the kind of invisible breakage
+/// C-NOSTUB-001 forbids.
+fn normalize_pr_mode(raw: Option<&str>, task_type: &str) -> Value {
+    match raw {
+        Some(m) if VALID_PR_MODES.contains(&m) => Value::String(m.to_string()),
+        _ => Value::String(default_pr_mode_for(task_type).to_string()),
+    }
+}
 
 /// Extract a required string param or return a descriptive `ActionFailed`.
 fn require_str<'a>(
@@ -696,6 +746,13 @@ impl AsyncActionHandler for WorktaskActionHandler {
         }
     }
 }
+
+/// Adversarial QA tests (Stage QA) live in a sibling file to keep edit churn
+/// isolated from a parallel worker on this module. As a `#[path]`-included child
+/// module it reaches this module's private items via `use super::*`.
+#[cfg(test)]
+#[path = "worktask_actions_qa.rs"]
+mod qa;
 
 #[cfg(test)]
 mod tests {
