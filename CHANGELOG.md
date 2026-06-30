@@ -1,3 +1,7 @@
+## [1.55.12] — 2026-06-30
+
+- fix(spine): make resolve_state_dir_honors_env test portable (Linux CI fix) (#462) (98a485e)
+
 ## [1.55.11] — 2026-06-30
 
 - test(worktask): adversarial QA suite + fix pr_mode poisoning from malformed policy nodes (a4caad6)
