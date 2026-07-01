@@ -4957,14 +4957,15 @@ dependencies = [
 [[package]]
 name = "pluresdb-px"
 version = "3.0.1"
-source = "git+https://github.com/plures/pluresdb?rev=195c67b#195c67b202519e61e9467ead6ac87a9f53d588da"
+source = "git+https://github.com/plures/pluresdb?rev=0ec9523#0ec9523e814beebaa94756a489b195442b616ce1"
 dependencies = [
  "async-trait",
  "chrono",
  "futures",
  "notify",
- "pest",
- "pest_derive",
+ "px-ast",
+ "px-compiler",
+ "px-eval",
  "regex",
  "serde",
  "serde_json",
@@ -5292,6 +5293,45 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "px-ast"
+version = "0.0.0"
+source = "git+https://github.com/plures/praxis-lang.git?rev=bbc306ca4377cb437e7366d07dabb50392a0e659#bbc306ca4377cb437e7366d07dabb50392a0e659"
+dependencies = [
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "px-compiler"
+version = "0.0.0"
+source = "git+https://github.com/plures/praxis-lang.git?rev=bbc306ca4377cb437e7366d07dabb50392a0e659#bbc306ca4377cb437e7366d07dabb50392a0e659"
+dependencies = [
+ "pest",
+ "px-ast",
+ "px-grammar",
+]
+
+[[package]]
+name = "px-eval"
+version = "0.0.0"
+source = "git+https://github.com/plures/praxis-lang.git?rev=bbc306ca4377cb437e7366d07dabb50392a0e659#bbc306ca4377cb437e7366d07dabb50392a0e659"
+dependencies = [
+ "px-ast",
+ "px-compiler",
+ "serde_json",
+]
+
+[[package]]
+name = "px-grammar"
+version = "0.0.0"
+source = "git+https://github.com/plures/praxis-lang.git?rev=bbc306ca4377cb437e7366d07dabb50392a0e659#bbc306ca4377cb437e7366d07dabb50392a0e659"
+dependencies = [
+ "pest",
+ "pest_derive",
 ]
 
 [[package]]

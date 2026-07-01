@@ -5,7 +5,11 @@
 
 use pares_radix_praxis::px::compiler::compile;
 use pares_radix_praxis::px::executor::default_evaluate_condition;
+use pares_radix_praxis::px::expr_to_string;
 use pares_radix_praxis::px::parse;
+use pares_radix_praxis::px::px_ast::{
+    ConstraintDecl, FactDecl, ProcedureBody, PxDocument, RuleDecl, Severity, Statement, Step,
+};
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
@@ -15,19 +19,96 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
 
+// ── AST access helpers (px-ast migration) ─────────────────────────────────────
+// The old flat `PxDocument` exposed `.facts`, `.constraints`, `.rules`, and
+// `.procedures` as `Vec` fields with `String` names and flat `require_expr` /
+// `when_expr` / `steps` fields. px-ast replaces the root with a single
+// `statements: Vec<Statement>` enum, decl names are `Ident` (`.name.name`),
+// constraint conditions are `Option<Expr>` (`require` / `when`, rendered via
+// `expr_to_string`), and a procedure body is a `ProcedureBody` enum. These
+// helpers reproduce the old ordered views so each test keeps its exact intent.
+
+fn facts(doc: &PxDocument) -> Vec<&FactDecl> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::Fact(f) => Some(f),
+            _ => None,
+        })
+        .collect()
+}
+
+fn constraints(doc: &PxDocument) -> Vec<&ConstraintDecl> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::Constraint(c) => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+fn rules(doc: &PxDocument) -> Vec<&RuleDecl> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::Rule(r) => Some(r),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A procedure view (dataflow + legacy) exposing the fields these tests read:
+/// the declared name and the ordered v1 step list. All procedure fixtures here
+/// use the legacy `procedure foo:\n  trigger: ...` form, but dataflow decls are
+/// included too so the count matches the old summed `doc.procedures` list.
+struct ProcView<'a> {
+    name: &'a str,
+    steps: Vec<&'a Step>,
+}
+
+fn procedures(doc: &PxDocument) -> Vec<ProcView<'_>> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::LegacyProcedure(p) => Some(ProcView {
+                name: p.name.name.as_str(),
+                steps: step_list(&p.body),
+            }),
+            Statement::DataflowProcedure(p) => Some(ProcView {
+                name: p.name.name.as_str(),
+                steps: step_list(&p.body),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Extract the v1 step list from a procedure body. Code-block (v2) bodies have
+/// no `Step` list; the fixtures in this suite are all v1 step lists, so an empty
+/// slice is the honest answer for a code body (and would fail a step-count
+/// assertion loudly rather than silently masking a shape change).
+fn step_list(body: &ProcedureBody) -> Vec<&Step> {
+    match body {
+        ProcedureBody::Steps(steps) => steps.iter().collect(),
+        ProcedureBody::Code(_) => Vec::new(),
+    }
+}
+
 #[test]
 fn parse_personality_px() {
     let source = fs::read_to_string(fixtures_dir().join("personality.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.constraints.len(), 4);
-    assert_eq!(doc.constraints[0].name, "warmth");
-    assert_eq!(doc.constraints[1].name, "directness");
-    assert_eq!(doc.constraints[2].name, "no_personality_in_code");
-    assert_eq!(doc.constraints[3].name, "humor");
+    let cs = constraints(&doc);
+    assert_eq!(cs.len(), 4);
+    assert_eq!(cs[0].name.name, "warmth");
+    assert_eq!(cs[1].name.name, "directness");
+    assert_eq!(cs[2].name.name, "no_personality_in_code");
+    assert_eq!(cs[3].name.name, "humor");
 
     // Verify severity parsing
-    assert_eq!(doc.constraints[2].severity, "error");
+    assert_eq!(cs[2].severity, Severity::Error);
 }
 
 #[test]
@@ -36,15 +117,18 @@ fn parse_array_workflow_px() {
     let doc = parse(&source).unwrap();
 
     // Should have facts, constraints, and a procedure
-    assert_eq!(doc.facts.len(), 1);
-    assert_eq!(doc.facts[0].name, "deployment_targets");
+    let fs_ = facts(&doc);
+    assert_eq!(fs_.len(), 1);
+    assert_eq!(fs_[0].name.name, "deployment_targets");
 
-    assert_eq!(doc.constraints.len(), 2);
-    assert_eq!(doc.constraints[0].name, "first_env_healthy");
-    assert_eq!(doc.constraints[1].name, "prod_replica_minimum");
+    let cs = constraints(&doc);
+    assert_eq!(cs.len(), 2);
+    assert_eq!(cs[0].name.name, "first_env_healthy");
+    assert_eq!(cs[1].name.name, "prod_replica_minimum");
 
-    assert_eq!(doc.procedures.len(), 1);
-    assert_eq!(doc.procedures[0].name, "deploy_check");
+    let ps = procedures(&doc);
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].name, "deploy_check");
 }
 
 #[test]
@@ -52,17 +136,19 @@ fn parse_server_config_px() {
     let source = fs::read_to_string(fixtures_dir().join("server_config.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 1);
-    assert_eq!(doc.facts[0].name, "config");
-    assert_eq!(doc.constraints.len(), 1);
-    assert_eq!(doc.constraints[0].name, "primary_server_port");
+    let fs_ = facts(&doc);
+    assert_eq!(fs_.len(), 1);
+    assert_eq!(fs_[0].name.name, "config");
+    let cs = constraints(&doc);
+    assert_eq!(cs.len(), 1);
+    assert_eq!(cs[0].name.name, "primary_server_port");
 }
 
 #[test]
 fn compile_procedures_from_fixture() {
     let source = fs::read_to_string(fixtures_dir().join("array_workflow.px")).unwrap();
     let doc = parse(&source).unwrap();
-    assert_eq!(doc.procedures.len(), 1);
+    assert_eq!(procedures(&doc).len(), 1);
 
     let compiled = compile(&doc);
     // compile returns CompiledRecord list — should include the procedure
@@ -144,29 +230,24 @@ fn parse_pipeline_workflow_px() {
     let doc = parse(&source).unwrap();
 
     // Facts
-    assert_eq!(doc.facts.len(), 1);
-    assert_eq!(doc.facts[0].name, "pipeline");
+    let fs_ = facts(&doc);
+    assert_eq!(fs_.len(), 1);
+    assert_eq!(fs_[0].name.name, "pipeline");
 
     // Constraints with bracket indexing
-    assert_eq!(doc.constraints.len(), 2);
-    assert_eq!(doc.constraints[0].name, "all_stages_named");
-    assert_eq!(doc.constraints[1].name, "prod_stage_requires_approval");
-    assert!(doc.constraints[0]
-        .require_expr
-        .as_ref()
-        .unwrap()
-        .contains("[0]"));
-    assert!(doc.constraints[1]
-        .when_expr
-        .as_ref()
-        .unwrap()
-        .contains("[2]"));
+    let cs = constraints(&doc);
+    assert_eq!(cs.len(), 2);
+    assert_eq!(cs[0].name.name, "all_stages_named");
+    assert_eq!(cs[1].name.name, "prod_stage_requires_approval");
+    assert!(expr_to_string(cs[0].require.as_ref().unwrap()).contains("[0]"));
+    assert!(expr_to_string(cs[1].when.as_ref().unwrap()).contains("[2]"));
 
     // Procedure with when, try/catch, emit
-    assert_eq!(doc.procedures.len(), 1);
-    assert_eq!(doc.procedures[0].name, "run_pipeline");
+    let ps = procedures(&doc);
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].name, "run_pipeline");
     // Steps: call, when, when, try
-    assert_eq!(doc.procedures[0].steps.len(), 4);
+    assert_eq!(ps[0].steps.len(), 4);
 }
 
 #[test]
@@ -451,28 +532,30 @@ fn parse_parallel_workflow_px() {
     let source = fs::read_to_string(fixtures_dir().join("parallel_workflow.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.procedures.len(), 1);
-    let proc = &doc.procedures[0];
+    let ps = procedures(&doc);
+    assert_eq!(ps.len(), 1);
+    let proc = &ps[0];
     assert_eq!(proc.name, "dashboard_refresh");
 
     // Should have: parallel step followed by emit
     assert_eq!(proc.steps.len(), 2);
 
-    match &proc.steps[0] {
-        pares_radix_praxis::px::PxStep::Parallel {
-            branches,
-            output_var,
-        } => {
+    match proc.steps[0] {
+        Step::Parallel(parallel) => {
+            let branches = &parallel.branches;
             assert_eq!(branches.len(), 3);
-            assert_eq!(branches[0].name, "metrics");
-            assert_eq!(branches[1].name, "alerts");
-            assert_eq!(branches[2].name, "status");
+            assert_eq!(branches[0].name.name, "metrics");
+            assert_eq!(branches[1].name.name, "alerts");
+            assert_eq!(branches[2].name.name, "status");
             // metrics branch has 2 steps
             assert_eq!(branches[0].steps.len(), 2);
             // alerts and status have 1 step each
             assert_eq!(branches[1].steps.len(), 1);
             assert_eq!(branches[2].steps.len(), 1);
-            assert_eq!(output_var.as_deref(), Some("data"));
+            assert_eq!(
+                parallel.output.as_ref().map(|i| i.name.as_str()),
+                Some("data")
+            );
         }
         other => panic!("expected Parallel step, got {:?}", other),
     }
@@ -527,11 +610,13 @@ fn parse_example_ci_pipeline() {
     let source = fs::read_to_string(examples_dir().join("ci-pipeline.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 1);
-    assert_eq!(doc.facts[0].name, "BuildConfig");
-    assert_eq!(doc.constraints.len(), 1);
-    assert_eq!(doc.procedures.len(), 1);
-    assert_eq!(doc.procedures[0].name, "ci_pipeline");
+    let fs_ = facts(&doc);
+    assert_eq!(fs_.len(), 1);
+    assert_eq!(fs_[0].name.name, "BuildConfig");
+    assert_eq!(constraints(&doc).len(), 1);
+    let ps = procedures(&doc);
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].name, "ci_pipeline");
 
     let compiled = compile(&doc);
     assert!(!compiled.is_empty());
@@ -542,9 +627,9 @@ fn parse_example_incident_response() {
     let source = fs::read_to_string(examples_dir().join("incident-response.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 2);
-    assert_eq!(doc.rules.len(), 1);
-    assert_eq!(doc.procedures.len(), 4); // respond + handle_p1..p3
+    assert_eq!(facts(&doc).len(), 2);
+    assert_eq!(rules(&doc).len(), 1);
+    assert_eq!(procedures(&doc).len(), 4); // respond + handle_p1..p3
 
     let compiled = compile(&doc);
     assert!(!compiled.is_empty());
@@ -555,8 +640,8 @@ fn parse_example_data_sync() {
     let source = fs::read_to_string(examples_dir().join("data-sync.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 2);
-    assert_eq!(doc.procedures.len(), 2); // nightly_data_sync + resync_source
+    assert_eq!(facts(&doc).len(), 2);
+    assert_eq!(procedures(&doc).len(), 2); // nightly_data_sync + resync_source
 
     let compiled = compile(&doc);
     assert!(!compiled.is_empty());
@@ -567,11 +652,12 @@ fn parse_example_pr_review_bot() {
     let source = fs::read_to_string(examples_dir().join("pr-review-bot.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 2);
-    assert_eq!(doc.constraints.len(), 2);
-    assert_eq!(doc.rules.len(), 3);
-    assert_eq!(doc.procedures.len(), 1);
-    assert_eq!(doc.procedures[0].name, "review_pr");
+    assert_eq!(facts(&doc).len(), 2);
+    assert_eq!(constraints(&doc).len(), 2);
+    assert_eq!(rules(&doc).len(), 3);
+    let ps = procedures(&doc);
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].name, "review_pr");
 
     let compiled = compile(&doc);
     assert!(!compiled.is_empty());
@@ -582,8 +668,8 @@ fn parse_example_memory_maintenance() {
     let source = fs::read_to_string(examples_dir().join("memory-maintenance.px")).unwrap();
     let doc = parse(&source).unwrap();
 
-    assert_eq!(doc.facts.len(), 1);
-    assert_eq!(doc.procedures.len(), 2); // memory_maintenance + cleanup_category
+    assert_eq!(facts(&doc).len(), 1);
+    assert_eq!(procedures(&doc).len(), 2); // memory_maintenance + cleanup_category
 
     let compiled = compile(&doc);
     assert!(!compiled.is_empty());

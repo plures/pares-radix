@@ -5,11 +5,29 @@
 
 use pares_radix_praxis::px::lint::{lint, LintSeverity};
 use pares_radix_praxis::px::parse;
+use pares_radix_praxis::px::px_ast::{PxDocument, Statement};
 use std::fs;
 use std::path::PathBuf;
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+/// Number of procedure declarations (dataflow + legacy) in the document.
+///
+/// The old flat AST exposed a single `doc.procedures` list; px-ast splits
+/// procedures into `DataflowProcedure` and `LegacyProcedure` statements, so the
+/// migrated count sums both to preserve the original meaning.
+fn procedure_count(doc: &PxDocument) -> usize {
+    doc.statements
+        .iter()
+        .filter(|s| {
+            matches!(
+                s,
+                Statement::DataflowProcedure(_) | Statement::LegacyProcedure(_)
+            )
+        })
+        .count()
 }
 
 /// Parse the lint_triggers.px fixture and run lints — produces diagnostics for all rules.
@@ -20,9 +38,9 @@ fn lint_triggers_fixture_parses_successfully() {
 
     // We expect multiple procedures to have been parsed
     assert!(
-        doc.procedures.len() >= 10,
+        procedure_count(&doc) >= 10,
         "Expected at least 10 procedures, got {}",
-        doc.procedures.len()
+        procedure_count(&doc)
     );
 }
 

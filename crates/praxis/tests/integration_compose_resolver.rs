@@ -8,6 +8,7 @@ use pares_radix_praxis::px::async_executor::{execute_async_with_vars, AsyncActio
 use pares_radix_praxis::px::compose::{pipe, ComposableHandler, ProcedureRegistry};
 use pares_radix_praxis::px::executor::ExecutionError;
 use pares_radix_praxis::px::parse;
+use pares_radix_praxis::px::px_ast::{PxDocument, Statement};
 use pares_radix_praxis::px::resolver::{resolve_imports, ResolveError};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -16,6 +17,67 @@ use std::path::PathBuf;
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+// ── AST access helpers (px-ast migration) ─────────────────────────────────────
+// The old flat `PxDocument` exposed `.imports`, `.procedures`, `.constraints`
+// lists directly. px-ast replaces these with a single `statements: Vec<Statement>`
+// enum, so these helpers reproduce the old views without changing test intent.
+
+/// All import statements in the document.
+fn imports(doc: &PxDocument) -> Vec<&pares_radix_praxis::px::px_ast::ImportDecl> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::Import(i) => Some(i),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The names of every procedure (dataflow + legacy). Mirrors the old
+/// `doc.procedures.iter().map(|p| p.name.as_str())` view, summing both variants
+/// exactly as the flat list did before the AST split.
+fn procedure_names(doc: &PxDocument) -> Vec<&str> {
+    doc.statements
+        .iter()
+        .filter_map(|s| match s {
+            Statement::DataflowProcedure(p) => Some(p.name.name.as_str()),
+            Statement::LegacyProcedure(p) => Some(p.name.name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every procedure statement (dataflow + legacy), preserving declaration order,
+/// so callers can serialize each decl and register it by name.
+fn procedure_statements(doc: &PxDocument) -> Vec<&Statement> {
+    doc.statements
+        .iter()
+        .filter(|s| {
+            matches!(
+                s,
+                Statement::DataflowProcedure(_) | Statement::LegacyProcedure(_)
+            )
+        })
+        .collect()
+}
+
+/// The name of a procedure statement (dataflow or legacy).
+fn procedure_name(stmt: &Statement) -> &str {
+    match stmt {
+        Statement::DataflowProcedure(p) => p.name.name.as_str(),
+        Statement::LegacyProcedure(p) => p.name.name.as_str(),
+        _ => "",
+    }
+}
+
+/// True if any constraint declaration has the given name.
+fn has_constraint(doc: &PxDocument, name: &str) -> bool {
+    doc.statements.iter().any(|s| match s {
+        Statement::Constraint(c) => c.name.name == name,
+        _ => false,
+    })
 }
 
 // ── Test Handler ──────────────────────────────────────────────────────────────
@@ -66,20 +128,15 @@ fn resolver_resolves_single_import() {
     let doc = parse(&source).unwrap();
 
     // Should have imports before resolution
-    assert_eq!(doc.imports.len(), 2);
+    assert_eq!(imports(&doc).len(), 2);
 
     let resolved = resolve_imports(&doc, &fixtures_dir()).unwrap();
 
     // After resolution, imports are inlined
-    assert!(resolved.document.imports.is_empty());
+    assert!(imports(&resolved.document).is_empty());
 
     // Procedures from validation_utils and math_utils should be merged in
-    let proc_names: Vec<&str> = resolved
-        .document
-        .procedures
-        .iter()
-        .map(|p| p.name.as_str())
-        .collect();
+    let proc_names: Vec<&str> = procedure_names(&resolved.document);
     assert!(
         proc_names.contains(&"validate_input"),
         "missing validate_input, got: {:?}",
@@ -102,11 +159,7 @@ fn resolver_resolves_single_import() {
     );
 
     // The local constraint should still be there
-    assert!(resolved
-        .document
-        .constraints
-        .iter()
-        .any(|c| c.name == "timeout_sane"));
+    assert!(has_constraint(&resolved.document, "timeout_sane"));
 }
 
 #[test]
@@ -140,11 +193,9 @@ procedure main_proc:
     let resolved = resolve_imports(&doc, &fixtures_dir()).unwrap();
 
     // Count how many times "validate_input" appears — should be exactly 1
-    let count = resolved
-        .document
-        .procedures
+    let count = procedure_names(&resolved.document)
         .iter()
-        .filter(|p| p.name == "validate_input")
+        .filter(|name| **name == "validate_input")
         .count();
     assert_eq!(
         count, 1,
@@ -186,12 +237,7 @@ async fn compose_resolved_procedures_execute() {
     let resolved = resolve_imports(&doc, &fixtures_dir()).unwrap();
 
     // Verify all procedures from imports + local are present
-    let proc_names: Vec<&str> = resolved
-        .document
-        .procedures
-        .iter()
-        .map(|p| p.name.as_str())
-        .collect();
+    let proc_names: Vec<&str> = procedure_names(&resolved.document);
 
     assert!(
         proc_names.contains(&"validate_input"),
@@ -208,9 +254,9 @@ async fn compose_resolved_procedures_execute() {
 
     // Build a registry — use procedure name as key, full serialized proc as value
     let mut registry = ProcedureRegistry::new();
-    for proc_decl in &resolved.document.procedures {
+    for proc_decl in procedure_statements(&resolved.document) {
         let proc_data = serde_json::to_value(proc_decl).unwrap();
-        registry.register_as(&proc_decl.name, proc_data);
+        registry.register_as(procedure_name(proc_decl), proc_data);
     }
 
     // All imported procedures should be in the registry
