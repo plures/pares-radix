@@ -1,3 +1,9 @@
+## [1.55.13] — 2026-07-01
+
+- fix(praxis): release PX-L010/PX-L012 lint fix (pluresdb-px 0ec9523) (53f9623)
+- M6.4: pin pluresdb-px to 0ec9523 + migrate praxis integration tests to px-ast (cbbe7c7)
+- chore(ci): drop testing/** path triggers + remove dormant ghost-CLI workflow (Thread-3 tail) (#461) (07afb9a)
+
 ## [1.55.12] — 2026-06-30
 
 - fix(spine): make resolve_state_dir_honors_env test portable (Linux CI fix) (#462) (98a485e)
