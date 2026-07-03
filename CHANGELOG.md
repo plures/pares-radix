@@ -1,3 +1,7 @@
+## [1.55.15] — 2026-07-03
+
+- feat(rsi): Phase 3b — observe/detect/wire (parse RSI rails, undo→remove wiring, chronos-watcher) (f01b271)
+
 ## [1.55.14] — 2026-07-03
 
 - feat(praxis): add rollback primitives to PraxisWriteGate (remove/disable/list constraints) (ef4469f)
