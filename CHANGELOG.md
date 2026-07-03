@@ -1,3 +1,7 @@
+## [1.55.14] — 2026-07-03
+
+- feat(praxis): add rollback primitives to PraxisWriteGate (remove/disable/list constraints) (ef4469f)
+
 ## [1.55.13] — 2026-07-01
 
 - fix(praxis): release PX-L010/PX-L012 lint fix (pluresdb-px 0ec9523) (53f9623)
