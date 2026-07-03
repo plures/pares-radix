@@ -22,77 +22,103 @@
 
 # ═══════════════════════════════════════════════════════════════════════
 # Facts
+#
+# NOTE (Phase 3b, 2026-07-03): These fact/constraint blocks were previously
+# parser-skipped (each line prefixed with a skip directive) because their original
+# syntax used `given:`/`check:` clauses
+# and `NOT IN` / `when:` operators that the px grammar (plures/praxis-lang) does
+# NOT define for constraints. They are now rewritten to the real grammar
+# (`scope:`/`require:`/`severity:`/`message:`, `require:` expr) and un-skipped so
+# they PARSE and load as the source-of-truth RSI safety model.
+#
+# ENFORCEMENT BOUNDARY (honest, per System-Cohesion Phase 3b design §4): parsing
+# clean is NOT the same as live hard-enforcement. Today bootstrap.rs loads .px
+# *procedures* into the reactive registry; there is NO loader that ingests .px
+# `constraint` blocks into the live PraxisWriteGate. Wiring that loader (the
+# NL/px -> WriteConstraint encode arrow, incl. `compile_nl`) is Phase 4. So these
+# constraints are declared + parseable now; they begin ENFORCING in Phase 4.
 # ═══════════════════════════════════════════════════════════════════════
 
-# [parser-skip] fact PerformanceSignal:
-# [parser-skip]   task_id: string
-# [parser-skip]   task_type: string
-# [parser-skip]   stages_attempted: int
-# [parser-skip]   stages_passed_first_try: int
-# [parser-skip]   total_retries: int
-# [parser-skip]   total_duration_ms: int
-# [parser-skip]   model_selections: list[object]    # which models were picked and how they performed
-# [parser-skip]   context_quality: float            # did the context contain what was needed?
-# [parser-skip]   final_result_quality: float       # human signal or automated check
-# [parser-skip]   bottleneck_stage: optional[string] # which stage took longest / retried most
-# [parser-skip]
-# [parser-skip] fact ImprovementCandidate:
-# [parser-skip]   target_procedure: string          # which .px to improve
-# [parser-skip]   improvement_type: string          # "tune", "grow", "prune", "recombine"
-# [parser-skip]   rationale: string                 # why this improvement
-# [parser-skip]   proposed_change: string           # the new .px content or parameter delta
-# [parser-skip]   confidence: float                 # how confident are we this helps
-# [parser-skip]   evidence: list[string]            # task_ids that support this improvement
-# [parser-skip]
-# [parser-skip] fact ImprovementHistory:
-# [parser-skip]   procedure_name: string
-# [parser-skip]   version: int
-# [parser-skip]   previous_content: string          # for rollback
-# [parser-skip]   change_description: string
-# [parser-skip]   applied_at: int
-# [parser-skip]   performance_before: float         # avg quality before change
-# [parser-skip]   performance_after: optional[float] # measured after N tasks
-# [parser-skip]
+fact PerformanceSignal:
+  task_id: string
+  task_type: string
+  stages_attempted: int
+  stages_passed_first_try: int
+  total_retries: int
+  total_duration_ms: int
+  model_selections: list[object]
+  context_quality: float
+  final_result_quality: float
+  bottleneck_stage: optional[string]
+
+fact ImprovementCandidate:
+  target_procedure: string
+  improvement_type: string
+  rationale: string
+  proposed_change: string
+  confidence: float
+  evidence: list[string]
+
+fact ImprovementHistory:
+  procedure_name: string
+  version: int
+  previous_content: string
+  change_description: string
+  applied_at: int
+  performance_after: optional[float]
 
 # ═══════════════════════════════════════════════════════════════════════
-# Constraints (SAFETY BOUNDARIES)
+# Constraints (SAFETY BOUNDARIES) — R1..R6 of the Phase 3b design.
+# Rewritten from given:/check: to real grammar. `require:` uses only grammar-
+# defined operators (==, !=, >=, <=, >, <, &&, ||, NOT, call_expr, dotted_ident).
+# `NOT IN [...]` was expanded to a conjunction of `!=`; `when:` to `if..else:`.
 # ═══════════════════════════════════════════════════════════════════════
 
-# [parser-skip] constraint cannot_modify_self:
-# [parser-skip]   given: "The RSI procedure cannot modify itself or constraint-checking procedures"
-# [parser-skip]   check: improvement_candidate.target_procedure NOT IN ["recursive-self-improvement", "validate_improvement", "constraint_check"]
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Self-modification of RSI or safety procedures requires human approval. Write to notification queue instead."
+# R1 — the loop may not modify itself or its own safety/validation procedures.
+# (Design B1 extends this to the OpenClaw safety/tool/prompt layer, enforced in
+# the Rust self-guard `is_self_guard_constraint`, not expressible as a .px id here.)
+constraint cannot_modify_self:
+  scope: improvement_candidate
+  require: target_procedure != "recursive-self-improvement" && target_procedure != "validate_improvement" && target_procedure != "constraint_check"
+  severity: error
+  message: "Self-modification of RSI or safety procedures requires human approval. Write to notification queue instead."
 
-# [parser-skip] constraint improvement_needs_evidence:
-# [parser-skip]   given: "Improvements must be backed by at least 3 task observations"
-# [parser-skip]   check: improvement_candidate.evidence.length >= 3
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Cannot propose improvement without at least 3 supporting observations. Collect more data."
+# R2 — no improvement on fewer than 3 supporting observations (noise guard).
+constraint improvement_needs_evidence:
+  scope: improvement_candidate
+  require: evidence.length >= 3
+  severity: error
+  message: "Cannot propose improvement without at least 3 supporting observations. Collect more data."
 
-# [parser-skip] constraint rate_limited_modifications:
-# [parser-skip]   given: "No more than 3 procedure modifications per 24h without human approval"
-# [parser-skip]   check: count(improvements_applied_last_24h) < 3
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Modification rate limit reached. Queue remaining improvements for human review."
+# R3 — at most 3 applied modifications per 24h without human approval.
+constraint rate_limited_modifications:
+  scope: improvement
+  require: count(improvements_applied_last_24h) < 3
+  severity: error
+  message: "Modification rate limit reached. Queue remaining improvements for human review."
 
-# [parser-skip] constraint must_be_rollbackable:
-# [parser-skip]   given: "Every improvement must store the previous version for rollback"
-# [parser-skip]   check: improvement.previous_content != null
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Cannot apply improvement without storing previous version. Rollback must always be possible."
+# R4 — every improvement must store its previous version before apply.
+constraint must_be_rollbackable:
+  scope: improvement
+  require: improvement.has_previous_content == true
+  severity: error
+  message: "Cannot apply improvement without storing previous version. Rollback must always be possible."
 
-# [parser-skip] constraint validated_before_registration:
-# [parser-skip]   given: "New/modified procedures must pass constraint validation before going live"
-# [parser-skip]   check: improvement.validation_passed == true
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Procedure failed constraint validation. Cannot register."
+# R5 — a proposed procedure must pass validation before it goes live.
+constraint validated_before_registration:
+  scope: improvement
+  require: improvement.validation_passed == true
+  severity: error
+  message: "Procedure failed constraint validation. Cannot register."
 
-# [parser-skip] constraint regression_triggers_rollback:
-# [parser-skip]   given: "If performance degrades after an improvement, auto-rollback"
-# [parser-skip]   check: when improvement.performance_after != null: improvement.performance_after >= improvement.performance_before * 0.9
-# [parser-skip]   severity: error
-# [parser-skip]   message: "Performance regression detected. Rolling back to previous version."
+# R6 — if a post-apply performance sample exists and regressed, auto-rollback.
+# performance_ratio = performance_after / performance_before, computed by the
+# side-effect boundary; the invariant is ratio >= 0.9 (else regression -> undo).
+constraint regression_triggers_rollback:
+  scope: improvement
+  require: if improvement.has_performance_after == true: improvement.performance_ratio >= 0.9 else: true
+  severity: error
+  message: "Performance regression detected. Rolling back to previous version."
 
 # ═══════════════════════════════════════════════════════════════════════
 # Procedures

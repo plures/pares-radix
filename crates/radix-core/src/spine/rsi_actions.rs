@@ -20,6 +20,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
+use crate::praxis::write_gate::PraxisWriteGate;
 use crate::px_adapter::{load_px_procedures, AsyncActionHandler};
 use crate::spine::reactive::ReactiveRegistry;
 use pares_radix_praxis::px::executor::ExecutionError;
@@ -32,6 +33,40 @@ fn err(action: &str, message: impl Into<String>) -> ExecutionError {
     }
 }
 
+/// Constraint ids that the RSI loop may **never** auto-remove or auto-disable,
+/// even via the rollback (`undo -> remove_constraint`) path.
+///
+/// This is the mechanical enforcement of design rail **R1 (`cannot_modify_self`)**
+/// and its extension **B1**: a self-improvement loop that could strip its own
+/// oversight/safety rails (or the platform's foundational write guards) would be
+/// untrustworthy, and rollback could not save us from it (you cannot roll back a
+/// loop that already removed the rail that would have caught the bad change).
+///
+/// The set is intentionally defined **here in the Rust side-effect boundary**,
+/// not as `.px` data: the guard list itself must not be editable by the loop it
+/// guards. The declarative rail (`constraint cannot_modify_self`) lives in
+/// `praxis/procedures/recursive-self-improvement.px`; this predicate is the
+/// side-effect gate that makes it real for the removal path.
+///
+/// A constraint id is self-guarded when it is one of the platform foundational
+/// write-gate constraints, or lives in a reserved safety namespace prefix.
+pub fn is_self_guard_constraint(id: &str) -> bool {
+    // Platform foundational write-gate guards (seeded by PraxisWriteGate::new()).
+    const FOUNDATIONAL: &[&str] = &["praxis:no-secrets", "praxis:max-size"];
+    if FOUNDATIONAL.contains(&id) {
+        return true;
+    }
+    // Reserved safety namespaces: the RSI rails (R1..R6), any explicitly-tagged
+    // safety/oversight constraint, and the OpenClaw safety/tool/prompt layer (B1).
+    const GUARD_PREFIXES: &[&str] = &[
+        "rsi:guard:",       // the RSI safety rails themselves
+        "safety:",          // any constraint tagged as a safety/oversight invariant
+        "oversight:",       // human-oversight invariants
+        "openclaw:safety:", // B1: OpenClaw safety/tool/prompt layer
+    ];
+    GUARD_PREFIXES.iter().any(|p| id.starts_with(p))
+}
+
 /// RSI action handler — provides boundary actors for recursive self-improvement.
 ///
 /// Holds references to the ReactiveRegistry (for hot-reload) and the shared
@@ -41,6 +76,12 @@ pub struct RsiActionHandler {
     handler: Arc<dyn AsyncActionHandler>,
     /// Tracks which patterns procedures were registered under (for replacement).
     procedure_patterns: Arc<RwLock<std::collections::HashMap<String, String>>>,
+    /// Optional write-gate handle. When present, the RSI rollback path
+    /// (`rollback_constraint`) can revert a loop-applied constraint for real by
+    /// calling [`PraxisWriteGate::remove_constraint`]. `None` in contexts where
+    /// no gate is mounted (the loop then reports the rollback as unavailable
+    /// rather than silently succeeding).
+    write_gate: Option<Arc<PraxisWriteGate>>,
 }
 
 impl RsiActionHandler {
@@ -49,7 +90,98 @@ impl RsiActionHandler {
             registry,
             handler,
             procedure_patterns: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            write_gate: None,
         }
+    }
+
+    /// Construct with a live [`PraxisWriteGate`] so the rollback path can
+    /// actually remove/disable constraints from the enforcement set.
+    pub fn with_write_gate(
+        registry: Arc<ReactiveRegistry>,
+        handler: Arc<dyn AsyncActionHandler>,
+        write_gate: Arc<PraxisWriteGate>,
+    ) -> Self {
+        Self {
+            registry,
+            handler,
+            procedure_patterns: Arc::new(RwLock::new(std::collections::HashMap::new())),
+            write_gate: Some(write_gate),
+        }
+    }
+
+    /// Roll back a previously auto-applied constraint by id.
+    ///
+    /// This is the wiring that closes the correction/undo loop: when the
+    /// correction engine's `undo` fires for a constraint-origin correction it
+    /// yields the `constraint_id`; this action turns that id into a REAL removal
+    /// (or, with `"disable": true`, a reversible disable) from the live
+    /// [`PraxisWriteGate`].
+    ///
+    /// **Safety leash (R1/B1):** ids for which [`is_self_guard_constraint`]
+    /// returns true are REFUSED — the loop cannot use its own rollback path to
+    /// strip its oversight/safety rails or the platform's foundational write
+    /// guards. Refusal is reported as `{ "rolled_back": false, "refused":
+    /// "self_guard" }`, never as a silent success.
+    ///
+    /// Params: `{ "constraint_id": string, "disable"?: bool }`.
+    async fn rollback_constraint(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let constraint_id = params
+            .get("constraint_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| err("rollback_constraint", "requires 'constraint_id' string"))?;
+
+        // R1/B1 self-guard: never let the loop remove its own rails.
+        if is_self_guard_constraint(constraint_id) {
+            tracing::warn!(
+                constraint_id,
+                "RSI: refused to roll back a self-guard/safety constraint (R1/B1)"
+            );
+            return Ok(json!({
+                "rolled_back": false,
+                "refused": "self_guard",
+                "constraint_id": constraint_id,
+                "reason": "constraint is a self-guard/safety rail and is exempt from auto-rollback (R1/B1)"
+            }));
+        }
+
+        let gate = match &self.write_gate {
+            Some(g) => g,
+            None => {
+                // Honest "not available" — not a fake success.
+                return Ok(json!({
+                    "rolled_back": false,
+                    "unavailable": "no_write_gate",
+                    "constraint_id": constraint_id,
+                    "reason": "no PraxisWriteGate is mounted in this context; cannot remove constraint"
+                }));
+            }
+        };
+
+        let disable = params
+            .get("disable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let changed = if disable {
+            gate.set_constraint_enabled(constraint_id, false)
+        } else {
+            gate.remove_constraint(constraint_id)
+        };
+
+        tracing::info!(
+            constraint_id,
+            disable,
+            changed,
+            "RSI: rollback_constraint applied to live write-gate"
+        );
+
+        Ok(json!({
+            "rolled_back": changed,
+            "constraint_id": constraint_id,
+            "mode": if disable { "disabled" } else { "removed" },
+            // false here means the id was simply not present (idempotent no-op).
+            "found": changed
+        }))
     }
 
     /// Validate .px source — parse and compile without registering.
@@ -452,6 +584,7 @@ impl AsyncActionHandler for RsiActionHandler {
         match name {
             "validate_px_syntax" => self.validate_px_syntax(params),
             "register_procedure" => self.register_procedure_action(params).await,
+            "rollback_constraint" => self.rollback_constraint(params).await,
             "compute_stage_stats" => self.compute_stage_stats(params),
             "find_bottleneck" => self.find_bottleneck(params),
             "detect_recurring_pattern" => self.detect_recurring_pattern(params),
@@ -592,5 +725,181 @@ mod tests {
         let avg_q = result["avg_quality"].as_f64().unwrap();
         assert!((avg_q - 0.84).abs() < 0.001);
         assert_eq!(result["count"], 11);
+    }
+
+    // ── Scope 2: undo -> remove_constraint wiring (Gate-Zero rollback proof) ──
+
+    use crate::praxis::write_gate::{PraxisWriteGate, WriteConstraint, WriteSeverity};
+    use pares_radix_praxis::px::executor::ExecutionError as PxErr;
+
+    /// A trivial always-pass write-check used to register throwaway constraints.
+    struct AlwaysOk;
+    impl crate::praxis::write_gate::WriteCheck for AlwaysOk {
+        fn check(&self, _key: &str, _data: &serde_json::Value) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
+    fn handler_with_gate(gate: Arc<PraxisWriteGate>) -> RsiActionHandler {
+        let registry = Arc::new(ReactiveRegistry::new());
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoOpHandler);
+        RsiActionHandler::with_write_gate(registry, handler, gate)
+    }
+
+    fn add_constraint(gate: &mut PraxisWriteGate, id: &str) {
+        gate.add_constraint(
+            WriteConstraint {
+                id: id.to_string(),
+                name: id.to_string(),
+                description: "test constraint".into(),
+                severity: WriteSeverity::Warning,
+                enabled: true,
+            },
+            Box::new(AlwaysOk),
+        );
+    }
+
+    /// PROOF for scope 2: a constraint added via the gate is *actually removed*
+    /// from `constraint_ids()` when the RSI rollback path fires for its id.
+    #[tokio::test]
+    async fn rollback_constraint_removes_from_live_gate() {
+        // Build a gate, add a loop-applied (non-guard) constraint.
+        let mut gate = PraxisWriteGate::new();
+        add_constraint(&mut gate, "rsi:learned:no-empty-response");
+        let gate = Arc::new(gate);
+        assert!(
+            gate.constraint_ids()
+                .contains(&"rsi:learned:no-empty-response".to_string()),
+            "precondition: constraint is present before rollback"
+        );
+
+        let rsi = handler_with_gate(Arc::clone(&gate));
+
+        // Trigger undo -> remove for that constraint id.
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "rsi:learned:no-empty-response"}))
+            .await
+            .unwrap();
+
+        assert_eq!(out["rolled_back"], true, "rollback must report success");
+        assert_eq!(out["mode"], "removed");
+        // The real proof: it is GONE from the live enforcement set.
+        assert!(
+            !gate
+                .constraint_ids()
+                .contains(&"rsi:learned:no-empty-response".to_string()),
+            "constraint must be removed from constraint_ids() after rollback"
+        );
+    }
+
+    /// The `disable: true` mode keeps the constraint registered but flips enabled.
+    #[tokio::test]
+    async fn rollback_constraint_disable_mode_keeps_but_disables() {
+        let mut gate = PraxisWriteGate::new();
+        add_constraint(&mut gate, "rsi:learned:some-rule");
+        let gate = Arc::new(gate);
+        let rsi = handler_with_gate(Arc::clone(&gate));
+
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "rsi:learned:some-rule", "disable": true}))
+            .await
+            .unwrap();
+        assert_eq!(out["rolled_back"], true);
+        assert_eq!(out["mode"], "disabled");
+        // Still registered (disable, not remove).
+        assert!(gate
+            .constraint_ids()
+            .contains(&"rsi:learned:some-rule".to_string()));
+    }
+
+    /// Rolling back an absent id is an idempotent no-op (not an error).
+    #[tokio::test]
+    async fn rollback_constraint_absent_id_is_noop() {
+        let gate = Arc::new(PraxisWriteGate::new());
+        let rsi = handler_with_gate(gate);
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "rsi:learned:does-not-exist"}))
+            .await
+            .unwrap();
+        assert_eq!(out["rolled_back"], false);
+        assert_eq!(out["found"], false);
+    }
+
+    /// With no gate mounted, rollback reports `unavailable` honestly (no fake success).
+    #[tokio::test]
+    async fn rollback_constraint_without_gate_reports_unavailable() {
+        let rsi = make_handler(); // no write_gate
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "rsi:learned:x"}))
+            .await
+            .unwrap();
+        assert_eq!(out["rolled_back"], false);
+        assert_eq!(out["unavailable"], "no_write_gate");
+    }
+
+    #[tokio::test]
+    async fn rollback_constraint_missing_id_errors() {
+        let rsi = make_handler();
+        let res = rsi.rollback_constraint(&json!({})).await;
+        assert!(matches!(res, Err(PxErr::ActionFailed { .. })));
+    }
+
+    // ── Scope 4: self-guard exemption (R1/B1) ──
+
+    #[test]
+    fn is_self_guard_constraint_covers_foundational_and_namespaces() {
+        // Platform foundational write guards.
+        assert!(is_self_guard_constraint("praxis:no-secrets"));
+        assert!(is_self_guard_constraint("praxis:max-size"));
+        // Reserved safety namespaces (R1..R6 rails, B1 OpenClaw safety).
+        assert!(is_self_guard_constraint("rsi:guard:cannot_modify_self"));
+        assert!(is_self_guard_constraint("safety:no-self-harm"));
+        assert!(is_self_guard_constraint("oversight:human-approval"));
+        assert!(is_self_guard_constraint("openclaw:safety:tool-policy"));
+        // Ordinary learned constraints are NOT self-guarded.
+        assert!(!is_self_guard_constraint("rsi:learned:no-empty-response"));
+        assert!(!is_self_guard_constraint("praxis:some-other"));
+    }
+
+    /// PROOF for scope 4: the rollback path REFUSES to remove a self-guard
+    /// constraint, and the constraint remains in the live enforcement set.
+    #[tokio::test]
+    async fn rollback_refuses_to_strip_self_guard_constraint() {
+        let mut gate = PraxisWriteGate::new();
+        // A safety rail the loop must never be able to auto-remove.
+        add_constraint(&mut gate, "rsi:guard:cannot_modify_self");
+        let gate = Arc::new(gate);
+        let rsi = handler_with_gate(Arc::clone(&gate));
+
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "rsi:guard:cannot_modify_self"}))
+            .await
+            .unwrap();
+
+        assert_eq!(out["rolled_back"], false, "self-guard rollback must be refused");
+        assert_eq!(out["refused"], "self_guard");
+        // The rail is STILL enforced.
+        assert!(
+            gate.constraint_ids()
+                .contains(&"rsi:guard:cannot_modify_self".to_string()),
+            "self-guard constraint must remain after a refused rollback"
+        );
+    }
+
+    /// Even the platform foundational guards are exempt from auto-rollback.
+    #[tokio::test]
+    async fn rollback_refuses_to_strip_foundational_guard() {
+        // PraxisWriteGate::new() seeds praxis:no-secrets + praxis:max-size.
+        let gate = Arc::new(PraxisWriteGate::new());
+        let rsi = handler_with_gate(Arc::clone(&gate));
+
+        let out = rsi
+            .rollback_constraint(&json!({"constraint_id": "praxis:no-secrets"}))
+            .await
+            .unwrap();
+        assert_eq!(out["refused"], "self_guard");
+        assert!(gate
+            .constraint_ids()
+            .contains(&"praxis:no-secrets".to_string()));
     }
 }

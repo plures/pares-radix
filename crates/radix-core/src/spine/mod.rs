@@ -17,6 +17,7 @@
 pub mod actions;
 pub mod bootstrap;
 pub mod channel;
+pub mod chronos_watcher;
 pub mod conversation;
 pub mod dev_lifecycle_actions;
 pub mod dispatcher;
