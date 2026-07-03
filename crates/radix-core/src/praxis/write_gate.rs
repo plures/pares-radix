@@ -118,6 +118,53 @@ impl PraxisWriteGate {
         self.constraints.write().unwrap().push((meta, check));
     }
 
+    /// Remove a previously-registered constraint by its `id`.
+    ///
+    /// This is the rollback counterpart to [`add_constraint`]. It is the
+    /// mechanical primitive that makes aggressive auto-enforcement safe: a
+    /// constraint that was applied by the recursive-self-improvement loop (and
+    /// tagged via [`crate::memory`]/`correction`'s `constraint_id`) can be
+    /// fully reverted from the live enforcement set, not merely disabled.
+    ///
+    /// Returns `true` if a constraint with `id` was found and removed, `false`
+    /// otherwise. Removal is idempotent: removing an absent id is a no-op that
+    /// returns `false`.
+    pub fn remove_constraint(&self, id: &str) -> bool {
+        let mut constraints = self.constraints.write().unwrap();
+        let before = constraints.len();
+        constraints.retain(|(meta, _)| meta.id != id);
+        constraints.len() != before
+    }
+
+    /// Enable or disable a constraint by `id` without removing it.
+    ///
+    /// A reversible, softer alternative to [`remove_constraint`]: the
+    /// constraint stays registered but is skipped during [`evaluate`] while
+    /// disabled. Useful for a temporary rollback that can be re-enabled without
+    /// re-compiling the check. Returns `true` if the constraint was found.
+    pub fn set_constraint_enabled(&self, id: &str, enabled: bool) -> bool {
+        let mut constraints = self.constraints.write().unwrap();
+        for (meta, _) in constraints.iter_mut() {
+            if meta.id == id {
+                meta.enabled = enabled;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Return the ids of all currently-registered constraints.
+    ///
+    /// Lets a rollback caller (or an audit) observe the live enforcement set.
+    pub fn constraint_ids(&self) -> Vec<String> {
+        self.constraints
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(meta, _)| meta.id.clone())
+            .collect()
+    }
+
     /// Evaluate all enabled constraints against a proposed write.
     ///
     /// Returns `Ok(warnings)` on success or `Err(rejection)` if an
@@ -369,6 +416,95 @@ mod tests {
         let data = json!({"t": "ghp_should_pass_now"});
         let result = gate.evaluate("k", &data, "a");
         assert!(result.is_ok());
+    }
+
+    // ── rollback primitives (add/remove/enable) ──────────────────────────────
+
+    #[test]
+    fn remove_constraint_reverts_live_enforcement() {
+        let mut gate = PraxisWriteGate::new();
+        // Add an aggressive blocking constraint, like the RSI loop would.
+        gate.add_constraint(
+            WriteConstraint {
+                id: "rsi:no-warn-prefix".into(),
+                name: "Block warn: prefix".into(),
+                description: "Auto-encoded by RSI loop".into(),
+                severity: WriteSeverity::Error,
+                enabled: true,
+            },
+            Box::new(WarnOnPrefixCheck("warn:")),
+        );
+        let data = json!({"x": 1});
+        // It blocks now.
+        assert!(gate.evaluate("warn:x", &data, "a").is_err());
+
+        // Roll it back by id — this is the counterpart to correction::undo.
+        let removed = gate.remove_constraint("rsi:no-warn-prefix");
+        assert!(removed);
+
+        // Enforcement is reverted: the same write now passes.
+        assert!(gate.evaluate("warn:x", &data, "a").is_ok());
+    }
+
+    #[test]
+    fn remove_constraint_absent_is_noop() {
+        let gate = PraxisWriteGate::new();
+        assert!(!gate.remove_constraint("does-not-exist"));
+    }
+
+    #[test]
+    fn set_constraint_enabled_toggles_without_removal() {
+        let mut gate = PraxisWriteGate::new();
+        gate.add_constraint(
+            WriteConstraint {
+                id: "rsi:toggle".into(),
+                name: "Toggleable block".into(),
+                description: "Reversible rollback target".into(),
+                severity: WriteSeverity::Error,
+                enabled: true,
+            },
+            Box::new(WarnOnPrefixCheck("warn:")),
+        );
+        let data = json!({"x": 1});
+        assert!(gate.evaluate("warn:x", &data, "a").is_err());
+
+        // Soft rollback: disable, don't remove.
+        assert!(gate.set_constraint_enabled("rsi:toggle", false));
+        assert!(gate.evaluate("warn:x", &data, "a").is_ok());
+        // Still registered (not removed), so it can be re-enabled.
+        assert!(gate.constraint_ids().contains(&"rsi:toggle".to_string()));
+
+        // Re-enable restores enforcement.
+        assert!(gate.set_constraint_enabled("rsi:toggle", true));
+        assert!(gate.evaluate("warn:x", &data, "a").is_err());
+    }
+
+    #[test]
+    fn set_constraint_enabled_absent_returns_false() {
+        let gate = PraxisWriteGate::new();
+        assert!(!gate.set_constraint_enabled("nope", false));
+    }
+
+    #[test]
+    fn constraint_ids_lists_defaults_plus_added() {
+        let mut gate = PraxisWriteGate::new();
+        let before = gate.constraint_ids();
+        // Defaults from new(): no-secrets + max-size.
+        assert!(before.contains(&"praxis:no-secrets".to_string()));
+        assert!(before.contains(&"praxis:max-size".to_string()));
+        gate.add_constraint(
+            WriteConstraint {
+                id: "rsi:extra".into(),
+                name: "Extra".into(),
+                description: "x".into(),
+                severity: WriteSeverity::Warning,
+                enabled: true,
+            },
+            Box::new(WarnOnPrefixCheck("warn:")),
+        );
+        let after = gate.constraint_ids();
+        assert_eq!(after.len(), before.len() + 1);
+        assert!(after.contains(&"rsi:extra".to_string()));
     }
 
     // Helper for warning test
