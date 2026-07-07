@@ -1,3 +1,8 @@
+## [1.55.16] — 2026-07-07
+
+- fix(mcp-dev-server): faithful praxis-evaluate — resolve bare top-level keys + includes() + arithmetic (5505009)
+- ci: add security-aware Dependabot auto-merge workflow (org backfill) (3add620)
+
 ## [1.55.15] — 2026-07-03
 
 - feat(rsi): Phase 3b — observe/detect/wire (parse RSI rails, undo→remove wiring, chronos-watcher) (f01b271)
