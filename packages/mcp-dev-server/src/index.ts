@@ -50,7 +50,6 @@ import {
   toolCanvasValidate,
 } from '@plures/canvas-runtime';
 import type { CanvasDocument, CanvasNode, CanvasRule, CanvasProcedure } from '@plures/canvas-runtime';
-import { guidanceForTree } from './canvas-guidance.js';
 
 // ── Dev Gate ──────────────────────────────────────────────────────────────────
 
@@ -229,7 +228,7 @@ const tools: ToolDef[] = [
   },
   {
     name: 'canvas.addNode',
-    description: 'Add a component to the canvas tree under a parent node. Returns best-practice override guidance when an explicit value overrides a resolved default (read result.guidance).',
+    description: 'Add a component to the canvas tree under a parent node',
     inputSchema: {
       type: 'object',
       properties: {
@@ -242,8 +241,7 @@ const tools: ToolDef[] = [
       if (!activeCanvas) return { error: 'No active canvas. Call canvas.create first.' };
       activeCanvas = toolCanvasAddNode(activeCanvas, parentId as string, node as CanvasNode);
       dbPut('canvas:_active', activeCanvas);
-      const guidance = guidanceForTree(activeCanvas.tree);
-      return { ok: true, tree: activeCanvas.tree, ...(guidance.length ? { guidance } : {}) };
+      return { ok: true, tree: activeCanvas.tree };
     },
   },
   {
@@ -295,14 +293,13 @@ const tools: ToolDef[] = [
   },
   {
     name: 'canvas.setTree',
-    description: 'Replace the entire component tree. Returns best-practice override guidance when an explicit value overrides a resolved default (read result.guidance).',
+    description: 'Replace the entire component tree',
     inputSchema: { type: 'object', properties: { tree: { type: 'object' } }, required: ['tree'] },
     handler: ({ tree }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasSetTree(activeCanvas, tree as CanvasNode);
       dbPut('canvas:_active', activeCanvas);
-      const guidance = guidanceForTree(activeCanvas.tree);
-      return { ok: true, tree: activeCanvas.tree, ...(guidance.length ? { guidance } : {}) };
+      return { ok: true, tree: activeCanvas.tree };
     },
   },
   {
@@ -443,8 +440,15 @@ const tools: ToolDef[] = [
         if (phase && c.phases?.length > 0 && !c.phases.includes(phase)) continue;
 
         // Evaluate `when` guard — if set, constraint only applies when condition holds
-        // Wrap context so expressions like `context.type` resolve correctly
-        const evalScope = { context } as Record<string, unknown>;
+        // Wrap context so BOTH `context.foo` and bare `foo` resolve: constraints in the
+        // ledger are written against top-level domain keys (config/trade/policy/security/
+        // devex/ops) as well as `context.*`. Exposing only `{ context }` made every bare-key
+        // constraint resolve to undefined → falsy → false-positive violation (the faithfulness
+        // bug). Spreading the context's own keys makes the evaluator faithful to the require expr.
+        const evalScope =
+          context && typeof context === 'object'
+            ? ({ context, ...(context as Record<string, unknown>) } as Record<string, unknown>)
+            : ({ context } as Record<string, unknown>);
 
         if (c.when) {
           const whenResult = simpleEval(c.when, evalScope);
@@ -697,6 +701,16 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
     return !simpleEval(trimmed.slice(1), context);
   }
 
+  // Handle Array.includes(x): `path.to.array.includes(valueExpr)`
+  // Must run BEFORE the comparison branches (this expression has no ==/</> operators,
+  // so it would otherwise fall through to a bare-path truthy check and misfire).
+  const includesMatch = trimmed.match(/^(.+)\.includes\((.*)\)$/);
+  if (includesMatch) {
+    const arrVal = resolvePath(includesMatch[1].trim(), context);
+    const needle = resolveValue(includesMatch[2].trim(), context);
+    return Array.isArray(arrVal) ? arrVal.includes(needle) : false;
+  }
+
   // Handle === comparison (must check before == to avoid false split)
   if (trimmed.includes('===')) {
     const [lhs, rhs] = trimmed.split('===').map((s) => s.trim());
@@ -716,33 +730,25 @@ function simpleEval(expr: string, context: Record<string, unknown>): boolean {
   // Handle >= comparison (must check before > to avoid false match)
   if (trimmed.includes('>=')) {
     const [lhs, rhs] = trimmed.split('>=').map((s) => s.trim());
-    const lhsVal = resolvePath(lhs, context);
-    const rhsVal = resolveValue(rhs, context);
-    return Number(lhsVal) >= Number(rhsVal);
+    return resolveNumeric(lhs, context) >= resolveNumeric(rhs, context);
   }
 
   // Handle <= comparison (must check before < to avoid false match)
   if (trimmed.includes('<=')) {
     const [lhs, rhs] = trimmed.split('<=').map((s) => s.trim());
-    const lhsVal = resolvePath(lhs, context);
-    const rhsVal = resolveValue(rhs, context);
-    return Number(lhsVal) <= Number(rhsVal);
+    return resolveNumeric(lhs, context) <= resolveNumeric(rhs, context);
   }
 
   // Handle > comparison
   if (trimmed.includes('>')) {
     const [lhs, rhs] = trimmed.split('>').map((s) => s.trim());
-    const lhsVal = resolvePath(lhs, context);
-    const rhsVal = resolveValue(rhs, context);
-    return Number(lhsVal) > Number(rhsVal);
+    return resolveNumeric(lhs, context) > resolveNumeric(rhs, context);
   }
 
   // Handle < comparison
   if (trimmed.includes('<')) {
     const [lhs, rhs] = trimmed.split('<').map((s) => s.trim());
-    const lhsVal = resolvePath(lhs, context);
-    const rhsVal = resolveValue(rhs, context);
-    return Number(lhsVal) < Number(rhsVal);
+    return resolveNumeric(lhs, context) < resolveNumeric(rhs, context);
   }
 
   // Handle == comparison
@@ -786,6 +792,37 @@ function resolvePath(path: string, obj: Record<string, unknown>): unknown {
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+}
+
+// Resolve a comparison operand to a number, supporting simple arithmetic on paths/literals,
+// e.g. `(trade.dailySpentUsd + trade.notionalUsd)` or `policy.dailyMaxUsd`. Only + - * / and
+// parentheses are honored; each atom is a numeric literal or a resolved path. Any unparseable
+// atom yields NaN (so the comparison is false), never a thrown error.
+function resolveNumeric(expr: string, context: Record<string, unknown>): number {
+  let s = expr.trim();
+  // Strip one layer of wrapping parens if they enclose the whole expression.
+  while (s.startsWith('(') && s.endsWith(')')) {
+    s = s.slice(1, -1).trim();
+  }
+  // Fast path: no arithmetic operator → a single literal or path.
+  if (!/[+\-*/]/.test(s.replace(/^-/, ''))) {
+    return Number(resolveValue(s, context));
+  }
+  // Tokenize into numbers and operators; resolve each non-operator atom to a number.
+  const tokens = s.match(/[+\-*/]|[^+\-*/\s]+/g);
+  if (!tokens || tokens.length === 0) return Number.NaN;
+  const resolved = tokens
+    .map((t) => (/^[+\-*/]$/.test(t) ? t : String(Number(resolveValue(t, context)))))
+    .join(' ');
+  // Evaluate the pure numeric arithmetic string safely (digits, operators, dot, space only).
+  if (!/^[-+*/.\d\s]+$/.test(resolved)) return Number.NaN;
+  try {
+    // eslint-disable-next-line no-new-func
+    const val = Function(`"use strict"; return (${resolved});`)() as unknown;
+    return typeof val === 'number' ? val : Number.NaN;
+  } catch {
+    return Number.NaN;
+  }
 }
 
 // ── MCP JSON-RPC Server (stdio) ───────────────────────────────────────────────
