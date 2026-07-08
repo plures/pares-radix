@@ -246,12 +246,9 @@ mod tests {
     #[tokio::test]
     async fn nonzero_exit_is_available_with_code() {
         let handler = RunCommandActionHandler::new();
-        // `exit 3` works under sh -c; under cmd /C use the same token.
-        let cmd = if cfg!(target_os = "windows") {
-            "exit 3"
-        } else {
-            "exit 3"
-        };
+        // `exit 3` is a valid non-zero exit under both `sh -c` (Unix) and
+        // `cmd /C` (Windows), so no per-OS branch is needed here.
+        let cmd = "exit 3";
         let out = handler
             .call("run_command", &json!({"command": cmd}))
             .await
