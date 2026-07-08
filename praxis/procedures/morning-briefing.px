@@ -1,0 +1,75 @@
+# morning-briefing.px — Scheduled morning briefing (gather → classify → deliver)
+#
+# TASK-2026-07-08-briefing-px. Pure decision logic in .px; every side effect is a
+# named action executed at the Rust boundary (C-PLURES-004, C-DEV-001).
+#
+# Lifecycle (all logic, NO file mutation anywhere in this path):
+#   1. A cron writes  briefing:request:<ts>  with value {scope, chat_id}. That
+#      write is the clock — the procedure never schedules itself.
+#   2. This procedure GATHERS three read-only sources by shelling out via
+#      `run_command` (real ShellExecutor, governed): ADO work items, open GitHub
+#      PRs, and CI run health. Each call returns {available, exit_code, stdout,
+#      stderr}; a failed/blocked/timed-out source returns {available:false,...}
+#      (it never aborts the procedure — proven: run_command yields Ok(json), and
+#      execute_parallel/execute_call only abort on a real Err).
+#   3. `assemble_briefing_report` (pure Rust) PARSES + CLASSIFIES the gathered
+#      text into urgent/watch/healthy and records any unavailable source as an
+#      explicit GAP (never faked, C-NOSTUB-001), then composes the report text.
+#      This assembly is in Rust because `.px` cannot parse a JSON/line string
+#      (no from_json filter) nor resolve dotted refs in object literals (§1.8).
+#   4. DELIVER by emitting SpineEvent::DeliveryRequest to Telegram. The failure
+#      branch is structural: gaps are part of the report, so we ALWAYS deliver —
+#      a missing source degrades the content, it does not skip the briefing.
+#
+# NOTE (parser): gather runs as sequential top-level steps (not a `parallel`
+# block) on purpose — a `parallel -> $x` stores each branch result under
+# `$x.<branch>`, and a dotted ref like `$x.ado` does NOT resolve when passed as a
+# call param (only whole-string `$ado` is type-preserving; dotted access works
+# only in `${...}` interpolation / conditions). Sequential top-level captures are
+# the correct shape for threading each source object into the assembler. The
+# strategic intent (gather 3 sources, classify, deliver, note gaps) is fully met.
+
+# [parser-skip] fact BriefingInput:
+# [parser-skip]   ado: optional[string]         # run_command result: {available, stdout, ...}
+# [parser-skip]   github_prs: optional[string]
+# [parser-skip]   ci_health: optional[string]
+# [parser-skip]
+# [parser-skip] fact BriefingReport:
+# [parser-skip]   urgent: list[string]
+# [parser-skip]   watch: list[string]
+# [parser-skip]   healthy: list[string]
+# [parser-skip]   gaps: list[string]            # unavailable sources — noted, not faked
+# [parser-skip]   report_text: string
+# [parser-skip]   has_content: bool
+
+procedure morning_briefing:
+  trigger: on_write {pattern: "briefing:request:*"}
+  given: "Gather ADO/PR/CI status, classify by urgency, and deliver a morning briefing to Telegram. Read-only gather; notes any unavailable source as a gap and still delivers."
+
+  # ── GATHER (read-only; each returns {available, exit_code, stdout, stderr}) ──
+  # ADO work items assigned to me (workspace helper emits parseable text lines,
+  # or NO_ACTIVE_ITEMS). Read-only WIQL query; no mutation.
+  # NOTE: `.px` strings have NO escape sequences (grammar: string = "..." until
+  # the next quote). So the command is SINGLE-quoted, letting the Windows path
+  # keep its double quotes and literal backslashes verbatim.
+  run_command {command: 'pwsh -NoProfile -File "C:\Users\kbristol\.openclaw\workspace\scripts\briefing-ado.ps1"', timeout_secs: 60} -> $ado
+
+  # Open PRs on this repo (JSON array). Read-only.
+  run_command {command: 'gh pr list --repo plures/pares-radix --state open --limit 30 --json number,title,isDraft,reviewDecision,mergeable,createdAt', timeout_secs: 45} -> $prs
+
+  # Recent CI runs on this repo (JSON array). Read-only.
+  run_command {command: 'gh run list --repo plures/pares-radix --limit 20 --json databaseId,name,status,conclusion,workflowName,headBranch', timeout_secs: 45} -> $ci
+
+  # ── EVALUATE + FORMAT (pure Rust assembler over gathered data) ──────────────
+  assemble_briefing_report {ado: $ado, github_prs: $prs, ci_health: $ci, scope: "morning"} -> $report
+
+  # A real UUID for the DeliveryRequest correlation id.
+  generate_id {} -> $delivery_id
+
+  # ── DELIVER (emit externally-tagged SpineEvent::DeliveryRequest → Telegram) ──
+  # content/chat_id use ${...} interpolation (dotted access + raw-string result);
+  # metadata carries the bucket counts for downstream observability. This is the
+  # ONLY effect — there is deliberately no edit/write/repair action anywhere.
+  emit {DeliveryRequest: {id: $delivery_id, channel: "telegram", chat_id: "${value.chat_id}", content: "${report.report_text}", metadata: {kind: "morning_briefing", urgent: "${report.counts.urgent}", watch: "${report.counts.watch}", gaps: "${report.counts.gaps}"}}}
+
+  return {delivered: true, urgent: "${report.counts.urgent}", watch: "${report.counts.watch}", gaps: "${report.counts.gaps}"}

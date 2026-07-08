@@ -173,6 +173,8 @@ impl AsyncActionHandler for CoreActionHandler {
 }
 
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
+use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
+use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
@@ -182,15 +184,19 @@ use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 /// 1. `CoreActionHandler` handles state/history actions (read_state, append_history, etc.)
 /// 2. `DevLifecycleActionHandler` handles stage management actions
 /// 3. `WorktaskActionHandler` handles worktask git/fs/quarantine effects
-/// 4. `SubagentActor` handles spawn_subagent calls
-/// 5. `ToolDispatchActionHandler` handles everything else as tool calls
+/// 4. `RunCommandActionHandler` handles `run_command` (real ShellExecutor, governed)
+/// 5. `BriefingActionHandler` handles `assemble_briefing_report` (pure classify/format)
+/// 6. `SubagentActor` handles spawn_subagent calls
+/// 7. `ToolDispatchActionHandler` handles everything else as tool calls
 ///
 /// This gives .px procedures access to system state, lifecycle logic, worktask
-/// orchestration, subagent spawning, AND external tools.
+/// orchestration, shell commands, subagent spawning, AND external tools.
 pub struct CompositeActionHandler {
     core: CoreActionHandler,
     dev_lifecycle: DevLifecycleActionHandler,
     worktask: WorktaskActionHandler,
+    run_command: RunCommandActionHandler,
+    briefing: BriefingActionHandler,
     subagent: Option<Arc<SubagentActor>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
@@ -207,6 +213,8 @@ impl CompositeActionHandler {
             worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
+            run_command: RunCommandActionHandler::new(),
+            briefing: BriefingActionHandler::new(),
             subagent: None,
             tool_handler,
         }
@@ -235,6 +243,10 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.dev_lifecycle.call(action, params).await
         } else if is_worktask_action(action) {
             self.worktask.call(action, params).await
+        } else if is_run_command_action(action) {
+            self.run_command.call(action, params).await
+        } else if is_briefing_action(action) {
+            self.briefing.call(action, params).await
         } else if is_subagent_action(action) {
             if let Some(ref actor) = self.subagent {
                 actor.call(action, params).await
