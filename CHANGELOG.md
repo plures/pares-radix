@@ -1,3 +1,7 @@
+## [1.55.17] — 2026-07-08
+
+- feat(spine): morning_briefing .px procedure + run_command wiring (#463) (2d7a4e7)
+
 ## [1.55.16] — 2026-07-07
 
 - fix(mcp-dev-server): faithful praxis-evaluate — resolve bare top-level keys + includes() + arithmetic (5505009)
