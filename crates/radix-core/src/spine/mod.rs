@@ -16,6 +16,7 @@
 
 pub mod actions;
 pub mod bootstrap;
+pub mod briefing_actions;
 pub mod channel;
 pub mod chronos_watcher;
 pub mod conversation;
@@ -30,6 +31,7 @@ pub mod event;
 pub mod pipeline;
 pub mod procedures;
 pub mod reactive;
+pub mod run_command_actions;
 /// Runtime assembly — wires the `.px` engine + state store + handler into the live spine.
 pub mod runtime;
 pub mod shadow;

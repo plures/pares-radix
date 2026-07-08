@@ -72,6 +72,14 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     // Delivery (fires on delivery_request events)
     m.insert("deliver_response", "delivery_request:*");
 
+    // Scheduled briefings — the cron writes `briefing:request:<ts>` (the clock
+    // stays in cron; the procedure owns gather->evaluate->format->deliver). The
+    // inline `trigger: on_write {pattern: "briefing:request:*"}` in the .px is
+    // not yet threaded through the adapter (see px_adapter trigger.kind gap),
+    // so this name-map entry is what routes it to the correct pattern instead
+    // of the noisy `on_write:*` fallback. (TASK-2026-07-08-briefing-px STEP 1.)
+    m.insert("morning_briefing", "briefing:request:*");
+
     // Task management
     m.insert("task_evaluation", "inbound:*");
     m.insert("task_steering", "task:*");
