@@ -126,6 +126,7 @@ export function initPraxisFacts(): void {
 		{ href: '/inventory', label: 'Inventory', icon: '📦', badge: undefined },
 	);
 	navItems.push(
+		{ href: '/admin', label: 'Admin', icon: '🛠️', badge: undefined },
 		{ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined },
 		{ href: '/settings', label: 'Settings', icon: '⚙️', badge: undefined },
 		{ href: '/help', label: 'Help', icon: '❓', badge: undefined },

@@ -1,0 +1,161 @@
+# admin-console.px — the PURE decision rules for the Radix Admin Console
+#
+# `.px`-FIRST source of truth for the admin console's operational logic. The
+# admin console is the operator's window into the running Radix platform: it
+# reports plugin lifecycle, system readiness (gates), constraint health, and
+# lets an operator toggle feature flags and request plugin activation/reload.
+#
+# Per PLURES-FOUNDATION + C-DEV-001: the LOGIC lives here as praxis procedures;
+# the executing TypeScript twin (src/lib/praxis/admin.ts — the PraxisModule) is
+# the faithful implementation the engine runs, and the Svelte route
+# (src/routes/admin/+page.svelte) is a pure VIEW of the facts these rules emit.
+# NO business logic in the view; NO direct db.put — all state flows through
+# emitFact / the praxis adapter (C-PLURES-003).
+#
+# ─────────────────────────────────────────────────────────────────────────
+# The admin console answers four operator questions, each a pure rule:
+#   1. Is the system operable?          → derive_system_readiness (gates + constraints)
+#   2. What is each plugin's health?    → assess_plugin_health
+#   3. Which constraints are violated?  → collect_violations
+#   4. May this admin action proceed?   → authorize_admin_action (guard)
+# ─────────────────────────────────────────────────────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════
+# Facts (documentation only — the executable twin declares these in admin.ts)
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] fact PluginHealth:
+# [parser-skip]   pluginId: string
+# [parser-skip]   status: enum(healthy, degraded, failed, inactive)
+# [parser-skip]   active: boolean
+# [parser-skip]   routes: number
+# [parser-skip]   lastError: string?
+
+# [parser-skip] fact SystemReadiness:
+# [parser-skip]   operable: boolean          # every required gate open AND no error-severity violation
+# [parser-skip]   openGates: number
+# [parser-skip]   totalGates: number
+# [parser-skip]   violations: number
+
+# [parser-skip] fact AdminActionVerdict:
+# [parser-skip]   action: enum(activate, deactivate, reload, toggle-flag)
+# [parser-skip]   target: string
+# [parser-skip]   verdict: enum(allowed, blocked)
+# [parser-skip]   reason: string
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rule 1 — Derive system readiness from gate + constraint state (PURE)
+# ═══════════════════════════════════════════════════════════════════════
+
+# The system is operable iff every required gate is open AND no error-severity
+# constraint is violated. Degraded (warn-severity) violations do NOT block
+# operability — they surface as advisories.
+procedure derive_system_readiness:
+  given: "Compute whether the platform is operable from open-gate count and error-severity violation count"
+
+  compute_readiness {
+    openGates: $openGates,
+    totalGates: $totalGates,
+    errorViolations: $errorViolations
+  } -> $operable
+
+  return {
+    operable: $operable,
+    openGates: $openGates,
+    totalGates: $totalGates,
+    violations: $errorViolations
+  }
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rule 2 — Assess a single plugin's health (PURE)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Map a plugin's observable state to a health status:
+#   inactive  ⇐ not active
+#   failed    ⇐ active but lastError present
+#   degraded  ⇐ active, no error, but contributes 0 routes AND 0 nav (dead weight)\n#   healthy   ⇐ active, no error, contributes surface
+procedure assess_plugin_health:
+  given: "Classify a plugin as healthy | degraded | failed | inactive from its active flag, lastError, and contributed surface"
+
+  classify_plugin_health {
+    active: $active,
+    lastError: $lastError,
+    surface: $surface
+  } -> $status
+
+  return {status: $status}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rule 3 — Collect constraint violations against live state (PURE)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Given the set of module constraints and the current fact state, return the
+# violations (the ones whose check() is false). Ordering is stable by id so the
+# console renders deterministically.
+procedure collect_violations:
+  given: "Return the constraints that do NOT hold against current fact state, stable-ordered by id"
+
+  filter_failing_constraints {
+    constraints: $constraints,
+    state: $state
+  } -> $violations
+
+  return {violations: $violations}
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rule 4 — Authorize an admin action (GUARD)
+# ═══════════════════════════════════════════════════════════════════════
+
+# Guards operator actions. An action is BLOCKED when it would drive the system
+# out of a safe posture:
+#   - deactivating a plugin that a currently-active plugin depends on → blocked
+#   - reloading/activating while a hard gate is closed is allowed (recovery path)
+#   - toggling a flag is always allowed (flags are reversible, non-destructive)
+# A destructive-by-dependency action must be blocked; everything reversible is
+# allowed. This mirrors the operations module's admissibility discipline.
+procedure authorize_admin_action:
+  given: "Decide whether an admin action may proceed given the action kind, target, and active-dependency graph"
+
+  decide_admin_action {
+    action: $action,
+    target: $target,
+    dependents: $dependents
+  } -> $verdict
+
+  return {
+    action: $action,
+    target: $target,
+    verdict: $verdict.decision,
+    reason: $verdict.reason
+  }
+
+# ═══════════════════════════════════════════════════════════════════════
+# Expectations (invariants the executable twin's tests prove)
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] expect readiness_requires_all_gates:
+# [parser-skip]   given: "openGates < totalGates"
+# [parser-skip]   require: "derive_system_readiness.operable == false"
+# [parser-skip]   because: "a closed required gate means the platform is not fully operable"
+
+# [parser-skip] expect readiness_blocks_on_error_violation:
+# [parser-skip]   given: "errorViolations > 0"
+# [parser-skip]   require: "derive_system_readiness.operable == false"
+
+# [parser-skip] expect health_inactive_when_not_active:
+# [parser-skip]   given: "active == false"
+# [parser-skip]   require: "assess_plugin_health == inactive"
+
+# [parser-skip] expect health_failed_on_error:
+# [parser-skip]   given: "active == true AND lastError present"
+# [parser-skip]   require: "assess_plugin_health == failed"
+
+# [parser-skip] expect action_blocks_on_active_dependent:
+# [parser-skip]   given: "action == deactivate AND target has an active dependent"
+# [parser-skip]   require: "authorize_admin_action == blocked"
+# [parser-skip]   because: "deactivating a depended-upon plugin would break its dependents"
+
+# [parser-skip] expect flag_toggle_always_allowed:
+# [parser-skip]   given: "action == toggle-flag"
+# [parser-skip]   require: "authorize_admin_action == allowed"
+# [parser-skip]   because: "feature flags are reversible and non-destructive"

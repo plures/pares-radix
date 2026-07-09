@@ -17,6 +17,7 @@
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
 	import { operationsModule, wireOperationsScene } from '$lib/praxis/operations.js';
+	import { adminModule, wireAdminScene } from '$lib/praxis/admin.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
@@ -51,6 +52,7 @@
 					...agensModule.facts,
 					...designModule.facts,
 					...operationsModule.facts,
+					...adminModule.facts,
 				],
 			}),
 		);
@@ -62,6 +64,11 @@
 		// PluresDB, so a restart keeps operator-modified state.
 		wireOperationsScene(emitFact, (factId) => query(factId));
 
+		// Seed the Admin Console scene (feature flags + audit log) through the
+		// sanctioned emitFact path; idempotent + hydration-safe so operator toggles
+		// survive a restart. Health/readiness are derived live by the route on mount.
+		wireAdminScene(emitFact, (factId) => query(factId));
+
 		// Activate all registered plugins now that the PluresDB adapter is wired.
 		// Each plugin's onActivate(ctx) receives a pluginId-scoped PluginContext so
 		// ctx.data.collection(name) persists under pluresdb:plugin:{pluginId}/...
@@ -71,7 +78,7 @@
 		void activateAll((pluginId) => createPluginContext(pluginId, { goto }));
 
 		// Initialize the design mode schema registry from all loaded praxis modules
-		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule);
+		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule, adminModule);
 		emitFact('design.schema.registry', schemas);
 
 		// Register modules for hot-reload
@@ -79,6 +86,7 @@
 		registerForHotReload(agensModule);
 		registerForHotReload(designModule);
 		registerForHotReload(operationsModule);
+		registerForHotReload(adminModule);
 
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
