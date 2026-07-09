@@ -15,6 +15,7 @@
  */
 
 import { browser } from '$app/environment';
+import { SvelteMap } from 'svelte/reactivity';
 import { getAllNavItems } from '$lib/platform/plugin-loader.js';
 import type { NavItem } from '$lib/types/plugin.js';
 import { getSharedAdapter } from './plures-db-adapter.js';
@@ -23,10 +24,26 @@ import { getSharedAdapter } from './plures-db-adapter.js';
 
 /**
  * Internal reactive map of fact values keyed by fact ID.
- * Uses Svelte 5 $state so that reads inside $derived or Svelte templates
- * are automatically tracked.
+ *
+ * Uses SvelteMap (svelte/reactivity) — NOT a plain `$state<Map>`. A plain
+ * $state wrapping a native Map only reacts to whole-value reassignment; it does
+ * NOT track `.get()`/`.set()` mutations, so `emitFact()` writes would silently
+ * fail to notify `query()` subscribers inside `$derived`/templates (the fact
+ * would update in memory but the UI would never re-render — e.g. the Operations
+ * scene stayed on its empty-state because the seeded fleet never propagated).
+ * SvelteMap makes per-key `.get()`/`.set()` reactive, which is exactly what the
+ * fact store needs.
  */
-const facts = $state<Map<string, unknown>>(new Map());
+const facts = new SvelteMap<string, unknown>();
+
+/**
+ * Test-only accessor to the internal fact map. Exists so the reactivity
+ * invariant test can assert `facts instanceof SvelteMap` (the structural
+ * guarantee of per-key reactivity). Not part of the public store API; do not
+ * use in application code.
+ * @internal
+ */
+export const __factsForTest = facts;
 
 /**
  * Read a praxis fact reactively.
@@ -123,6 +140,7 @@ export function initPraxisFacts(): void {
 		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
 		{ href: '/chat', label: 'Chat', icon: '💬', badge: undefined },
 		{ href: '/canvas', label: 'Canvas', icon: '🎨', badge: undefined },
+		{ href: '/operations', label: 'Operations', icon: '🖥️', badge: undefined },
 		{ href: '/inventory', label: 'Inventory', icon: '📦', badge: undefined },
 	);
 	navItems.push(

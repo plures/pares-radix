@@ -12,6 +12,8 @@
 	 */
 	import { onMount } from 'svelte';
 	import { Box, Heading, Text, Badge, Toggle, Button, Card } from '@plures/design-dojo';
+	import { PluginModule, BeaconBadge } from '@plures/design-dojo';
+	import type { BeaconStatus } from '@plures/design-dojo';
 	import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import { getPluginIds, getPlugin, isPluginActive } from '$lib/platform/plugin-loader.js';
 	import { getSharedGraph } from '$lib/stores/plures-db-adapter.js';
@@ -135,11 +137,12 @@
 		});
 	}
 
-	function statusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-		if (status === 'healthy') return 'success';
+	/** Plugin health rollup → beacon status for the physical module lamp. */
+	function pluginBeacon(status: string): BeaconStatus {
+		if (status === 'healthy') return 'healthy';
 		if (status === 'degraded') return 'warning';
-		if (status === 'failed') return 'danger';
-		return 'neutral';
+		if (status === 'failed') return 'critical';
+		return 'idle';
 	}
 
 	onMount(() => {
@@ -160,6 +163,7 @@
 		<Heading level={2}>System readiness</Heading>
 		{#if readiness}
 			<Box class="readiness-row">
+				<BeaconBadge status={readiness.operable ? 'healthy' : 'critical'} size={28} />
 				<Badge variant={readiness.operable ? 'success' : 'danger'}>
 					{readiness.operable ? 'OPERABLE' : 'NOT OPERABLE'}
 				</Badge>
@@ -179,14 +183,15 @@
 		{#if roster.length === 0}
 			<Text as="p" class="muted">No plugins registered.</Text>
 		{:else}
-			<Box class="plugin-list">
+			<Box class="plugin-bay">
 				{#each roster as p (p.pluginId)}
-					<Box class="plugin-row">
-						<Badge variant={statusVariant(p.status)}>{p.status}</Badge>
-						<Text as="span" class="plugin-name">{p.name}</Text>
-						<Text as="span" class="muted">v{p.version}</Text>
-						<Text as="span" class="muted">{p.surface} surface</Text>
-					</Box>
+					<PluginModule
+						name={p.name}
+						version={p.version}
+						status={pluginBeacon(p.status)}
+						active={p.status !== 'inactive'}
+						surfaces={p.surface}
+					/>
 				{/each}
 			</Box>
 		{/if}
@@ -248,4 +253,19 @@
 		</Card>
 	{/if}
 </Box>
+
+<style>
+	:global(.readiness-row) {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	:global(.plugin-bay) {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 1rem 1.25rem;
+		align-items: flex-end;
+		padding-top: 0.5rem;
+	}
+</style>
 
