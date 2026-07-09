@@ -14,8 +14,10 @@ export default defineConfig({
 					port: 5173,
 					strictPort: true,
 					watch: {
-						// Tell Vite to ignore watching `src-tauri`
-						ignored: ['**/src-tauri/**'],
+						// Tell Vite to ignore watching `src-tauri` and the Rust build
+						// output. Watching `target/` on Windows crashes the dev watcher
+						// with EBUSY when cargo is writing build-script .exe files.
+						ignored: ['**/src-tauri/**', '**/target/**'],
 					},
 				},
 			}
