@@ -129,22 +129,12 @@ export class PluginRegistry {
     return [...this.plugins.values()];
   }
 
-  /**
-   * Get enabled plugins only.
-   */
-  enabled(): InstalledPlugin[] {
-    return this.list().filter((p) => p.enabled);
-  }
-
-  /**
-   * Toggle a plugin's enabled state.
-   */
-  toggle(id: string): boolean {
-    const p = this.plugins.get(id);
-    if (!p) return false;
-    p.enabled = !p.enabled;
-    return true;
-  }
+  // NOTE: enabled/disabled state is NOT owned here. The single source of truth
+  // for whether a plugin may activate is the persisted praxis fact
+  // `admin.plugins.enabled` (see praxis/admin.ts + plugin-loader.activateAll).
+  // A per-registry enabled()/toggle() previously lived here but was orphaned
+  // (zero callers) and would have been a competing authority — removed to avoid
+  // drift. `InstalledPlugin.enabled` remains only as descriptive manifest state.
 
   /**
    * Get a specific plugin.

@@ -19,6 +19,8 @@ import {
 	decideAdminAction,
 	collectViolations,
 	defaultFeatureFlags,
+	isPluginEnabled,
+	shouldActivateOnStartup,
 	type SystemReadiness,
 	type PluginHealth,
 	type AdminActionVerdict,
@@ -153,5 +155,54 @@ describe('admin — constraints + scene seeding', () => {
 		expect(constraint('constraint.no-blocked-action-in-audit').check(state())).toBe(false);
 		facts.set('admin.audit.log', [{ verdict: 'blocked', executed: false }]);
 		expect(constraint('constraint.no-blocked-action-in-audit').check(state())).toBe(true);
+	});
+});
+
+describe('admin - plugin enable/startup policy (opt-out model)', () => {
+	it('isPluginEnabled: absent id => enabled; explicit false => disabled; true => enabled', () => {
+		expect(isPluginEnabled(undefined, 'canvas')).toBe(true);
+		expect(isPluginEnabled({}, 'canvas')).toBe(true);
+		expect(isPluginEnabled({ canvas: true }, 'canvas')).toBe(true);
+		expect(isPluginEnabled({ canvas: false }, 'canvas')).toBe(false);
+		// a false for a DIFFERENT plugin must not disable this one
+		expect(isPluginEnabled({ other: false }, 'canvas')).toBe(true);
+	});
+
+	it('shouldActivateOnStartup: absent id => startup-on; explicit false => on-demand only', () => {
+		expect(shouldActivateOnStartup(undefined, 'canvas')).toBe(true);
+		expect(shouldActivateOnStartup({}, 'canvas')).toBe(true);
+		expect(shouldActivateOnStartup({ canvas: true }, 'canvas')).toBe(true);
+		expect(shouldActivateOnStartup({ canvas: false }, 'canvas')).toBe(false);
+	});
+
+	it('the boot eligibility gate = enabled AND startup (both must hold to auto-activate)', () => {
+		// This mirrors the predicate +layout.svelte passes to activateAll.
+		const eligible = (
+			enabled: Record<string, boolean> | undefined,
+			startup: Record<string, boolean> | undefined,
+			id: string,
+		) => isPluginEnabled(enabled, id) && shouldActivateOnStartup(startup, id);
+
+		expect(eligible({}, {}, 'canvas')).toBe(true); // default: boots
+		expect(eligible({ canvas: false }, {}, 'canvas')).toBe(false); // disabled: no boot
+		expect(eligible({}, { canvas: false }, 'canvas')).toBe(false); // startup-off: no boot
+		expect(eligible({ canvas: false }, { canvas: false }, 'canvas')).toBe(false);
+	});
+
+	it('wireAdminScene seeds enabled+startup policy maps only when absent (hydration-safe)', () => {
+		const { facts, query } = makeStore();
+		const emit = (id: string, v: unknown) => facts.set(id, v);
+
+		wireAdminScene(emit, query);
+		expect(facts.get('admin.plugins.enabled')).toEqual({});
+		expect(facts.get('admin.plugins.startup')).toEqual({});
+
+		// Simulate a restart with operator-modified state already restored: re-wiring
+		// must NOT clobber it (proves persisted disable/startup choices survive).
+		facts.set('admin.plugins.enabled', { canvas: false });
+		facts.set('admin.plugins.startup', { canvas: false });
+		wireAdminScene(emit, query);
+		expect(facts.get('admin.plugins.enabled')).toEqual({ canvas: false });
+		expect(facts.get('admin.plugins.startup')).toEqual({ canvas: false });
 	});
 });

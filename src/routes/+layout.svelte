@@ -17,7 +17,7 @@
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
 	import { operationsModule, wireOperationsScene } from '$lib/praxis/operations.js';
-	import { adminModule, wireAdminScene } from '$lib/praxis/admin.js';
+	import { adminModule, wireAdminScene, isPluginEnabled, shouldActivateOnStartup } from '$lib/praxis/admin.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
@@ -75,7 +75,21 @@
 		// (createPluginContext bridges the adapter; goto is injected for navigation).
 		// Fire-and-forget: activation is async but must not block first paint;
 		// per-plugin failures are isolated and logged inside activateAll.
-		void activateAll((pluginId) => createPluginContext(pluginId, { goto }));
+		//
+		// Enable/startup gate: a plugin activates on boot only if it is enabled AND
+		// its startup policy is on. Both come from hydrated, persisted admin facts
+		// (admin.plugins.enabled / admin.plugins.startup), so an operator's disable
+		// or startup-off choice survives a restart. Absent id => enabled + startup-on
+		// (opt-out model). Disabled/startup-off plugins stay registered and can be
+		// activated on demand from the Plugins page without a reboot.
+		void activateAll(
+			(pluginId) => createPluginContext(pluginId, { goto }),
+			(pluginId) => {
+				const enabled = query('admin.plugins.enabled') as Record<string, boolean> | undefined;
+				const startup = query('admin.plugins.startup') as Record<string, boolean> | undefined;
+				return isPluginEnabled(enabled, pluginId) && shouldActivateOnStartup(startup, pluginId);
+			},
+		);
 
 		// Initialize the design mode schema registry from all loaded praxis modules
 		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule, adminModule);

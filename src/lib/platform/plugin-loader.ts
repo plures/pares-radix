@@ -29,6 +29,16 @@ interface LoadedPlugin {
 
 const plugins = new Map<string, LoadedPlugin>();
 
+/**
+ * Test-only: clear the module-level plugin registry so each test starts from a
+ * clean slate (the registry is a module singleton that otherwise persists
+ * across tests). Not part of the public API; do not call from app code.
+ * @internal
+ */
+export function __resetRegistryForTest(): void {
+  plugins.clear();
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────
 
 /**
@@ -51,9 +61,16 @@ export function registerPlugin(plugin: RadixPlugin): void {
  *   - a context factory `(pluginId) => PluginContext` (preferred — gives every
  *     plugin a `pluginId`-scoped context so data is namespace-isolated), or
  *   - a single shared `PluginContext` (legacy; same ctx for all plugins).
+ *
+ * `isEligible(pluginId)` optionally gates activation: return false to SKIP a
+ * plugin (it stays registered but inactive). The layout passes a predicate
+ * backed by the hydrated `admin.plugins.enabled` + `admin.plugins.startup`
+ * facts, so a disabled plugin — or one whose startup policy is off — does not
+ * boot. When omitted, every registered plugin activates (default-on).
  */
 export async function activateAll(
   ctxOrFactory: PluginContext | ((pluginId: string) => PluginContext),
+  isEligible?: (pluginId: string) => boolean,
 ): Promise<void> {
   const order = topologicalSort(plugins);
   const makeCtx =
@@ -64,6 +81,13 @@ export async function activateAll(
   for (const id of order) {
     const entry = plugins.get(id);
     if (!entry || entry.active) continue;
+    // Enable/startup gate: a disabled or non-startup plugin is skipped here.
+    // It remains registered and can be activated on demand via activatePlugin.
+    if (isEligible && !isEligible(id)) {
+      // eslint-disable-next-line plures/no-manual-logging
+      console.log(`[radix] ⏸ Skipped plugin (disabled or startup-off): ${entry.plugin.name}`);
+      continue;
+    }
 
     try {
       await entry.plugin.onActivate?.(makeCtx(id));
@@ -74,6 +98,55 @@ export async function activateAll(
       // eslint-disable-next-line plures/no-manual-logging
       console.error(`[radix] ✗ Failed to activate plugin "${id}":`, err);
     }
+  }
+}
+
+/**
+ * Activate a single registered plugin on demand (idempotent). Used when an
+ * operator enables a plugin, or activates one whose startup policy is off,
+ * without a full reboot. Returns true if the plugin is active afterwards.
+ */
+export async function activatePlugin(
+  id: string,
+  ctxOrFactory: PluginContext | ((pluginId: string) => PluginContext),
+): Promise<boolean> {
+  const entry = plugins.get(id);
+  if (!entry) return false;
+  if (entry.active) return true;
+  const ctx =
+    typeof ctxOrFactory === 'function' ? ctxOrFactory(id) : ctxOrFactory;
+  try {
+    await entry.plugin.onActivate?.(ctx);
+    entry.active = true;
+    // eslint-disable-next-line plures/no-manual-logging
+    console.log(`[radix] ✓ Activated plugin on demand: ${entry.plugin.name}`);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line plures/no-manual-logging
+    console.error(`[radix] ✗ Failed to activate plugin "${id}":`, err);
+    return false;
+  }
+}
+
+/**
+ * Deactivate a single plugin on demand (idempotent). Used when an operator
+ * disables a plugin without a reboot. Calls the plugin's onDeactivate hook so
+ * it can tear down its surface. Returns true if the plugin is inactive after.
+ */
+export async function deactivatePlugin(id: string): Promise<boolean> {
+  const entry = plugins.get(id);
+  if (!entry) return false;
+  if (!entry.active) return true;
+  try {
+    await entry.plugin.onDeactivate?.();
+    entry.active = false;
+    // eslint-disable-next-line plures/no-manual-logging
+    console.log(`[radix] ⏹ Deactivated plugin on demand: ${entry.plugin.name}`);
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line plures/no-manual-logging
+    console.error(`[radix] ✗ Failed to deactivate plugin "${id}":`, err);
+    return false;
   }
 }
 

@@ -122,6 +122,32 @@ export function decideAdminAction(
 	return { decision: 'allowed', reason: `${action} on "${target}" is permitted` };
 }
 
+/**
+ * plugin_enabled_policy — is a plugin permitted to activate?
+ * Opt-out model: a plugin is enabled unless its id is explicitly set false in
+ * the admin.plugins.enabled record. Absent id => enabled. This is the single
+ * gate the loader consults; disabling here must actually prevent activation.
+ */
+export function isPluginEnabled(
+	enabledMap: Record<string, boolean> | undefined,
+	pluginId: string,
+): boolean {
+	return enabledMap?.[pluginId] !== false;
+}
+
+/**
+ * plugin_startup_policy — should a plugin auto-activate on boot?
+ * Absent id => activate on startup (true). false => on-demand only. A plugin
+ * that is enabled but startup=false is NOT booted automatically; it can still be
+ * activated on demand later. startup is meaningless when the plugin is disabled.
+ */
+export function shouldActivateOnStartup(
+	startupMap: Record<string, boolean> | undefined,
+	pluginId: string,
+): boolean {
+	return startupMap?.[pluginId] !== false;
+}
+
 /** Stable-ordered constraint violations against a live fact state. */
 export function collectViolations(
 	constraints: PraxisConstraint[],
@@ -161,6 +187,22 @@ const adminFacts: PraxisFact[] = [
 	{
 		id: 'admin.feature.flags',
 		description: 'Operator-toggleable feature flags (reversible, non-destructive)',
+		persist: true,
+	},
+	{
+		id: 'admin.plugins.enabled',
+		description:
+			'Per-plugin enabled state (Record<pluginId, boolean>). SINGLE SOURCE OF TRUTH for ' +
+			'whether a plugin may activate. Absent id => enabled (opt-out model). Persisted so ' +
+			'operator enable/disable survives restart; consulted by the loader gate on boot.',
+		persist: true,
+	},
+	{
+		id: 'admin.plugins.startup',
+		description:
+			'Per-plugin startup/activation policy (Record<pluginId, boolean>). true => activate on ' +
+			'boot; false => do not auto-activate, on-demand only. Absent id => activate on startup. ' +
+			'Persisted; consulted alongside admin.plugins.enabled by the loader gate.',
 		persist: true,
 	},
 	{
@@ -488,6 +530,15 @@ export function wireAdminScene(
 	}
 	if (query('admin.audit.log') == null) {
 		emitFact('admin.audit.log', []);
+	}
+	// Plugin enable/startup policy maps. Seed empty (opt-out model: absent id =>
+	// enabled + activate-on-startup) only when never persisted, so operator
+	// enable/disable and startup choices survive a restart.
+	if (query('admin.plugins.enabled') == null) {
+		emitFact('admin.plugins.enabled', {});
+	}
+	if (query('admin.plugins.startup') == null) {
+		emitFact('admin.plugins.startup', {});
 	}
 }
 

@@ -43,6 +43,15 @@
 # [parser-skip]   verdict: enum(allowed, blocked)
 # [parser-skip]   reason: string
 
+# Per-plugin enable + startup policy. SINGLE SOURCE OF TRUTH for whether a
+# plugin may activate. Opt-out model: an id absent from the map takes the
+# permissive default (enabled / activate-on-startup). Both are persisted so an
+# operator's choice survives a restart; the loader consults them on boot.
+# [parser-skip] fact admin.plugins.enabled:
+# [parser-skip]   map: Record<pluginId, boolean>   # absent id => enabled
+# [parser-skip] fact admin.plugins.startup:
+# [parser-skip]   map: Record<pluginId, boolean>   # absent id => activate on startup
+
 # ═══════════════════════════════════════════════════════════════════════
 # Rule 1 — Derive system readiness from gate + constraint state (PURE)
 # ═══════════════════════════════════════════════════════════════════════
@@ -159,3 +168,37 @@ procedure authorize_admin_action:
 # [parser-skip]   given: "action == toggle-flag"
 # [parser-skip]   require: "authorize_admin_action == allowed"
 # [parser-skip]   because: "feature flags are reversible and non-destructive"
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rule 5 - Plugin boot eligibility (PURE) — the enable/startup gate
+# ═══════════════════════════════════════════════════════════════════════
+
+# A plugin is activated on boot iff it is BOTH enabled AND its startup policy is
+# on. Disabling a plugin, or turning its startup off, must actually prevent
+# activation (not merely hide it). A disabled/startup-off plugin stays
+# registered and may be activated on demand later without a reboot.
+procedure authorize_plugin_activation:
+  given: "Decide whether a plugin may auto-activate on boot from its enabled + startup policy"
+
+  plugin_enabled_policy { enabled: $enabledMap, pluginId: $pluginId } -> $isEnabled
+  plugin_startup_policy { startup: $startupMap, pluginId: $pluginId } -> $onStartup
+
+  return {
+    pluginId: $pluginId,
+    eligible: $isEnabled and $onStartup
+  }
+
+# [parser-skip] expect disabled_plugin_never_boots:
+# [parser-skip]   given: "admin.plugins.enabled[pluginId] == false"
+# [parser-skip]   require: "authorize_plugin_activation.eligible == false"
+# [parser-skip]   because: "a disabled plugin must not activate on boot AND contributes zero surface"
+
+# [parser-skip] expect startup_off_plugin_never_auto_boots:
+# [parser-skip]   given: "admin.plugins.startup[pluginId] == false"
+# [parser-skip]   require: "authorize_plugin_activation.eligible == false"
+# [parser-skip]   because: "startup-off means on-demand only; it may still be activated later"
+
+# [parser-skip] expect absent_id_takes_permissive_default:
+# [parser-skip]   given: "pluginId absent from both policy maps"
+# [parser-skip]   require: "authorize_plugin_activation.eligible == true"
+# [parser-skip]   because: "opt-out model: unknown plugins boot by default"
