@@ -16,6 +16,7 @@
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
+	import { operationsModule, wireOperationsScene } from '$lib/praxis/operations.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
@@ -45,10 +46,21 @@
 		setSharedAdapter(
 			createPluresDBAdapter({
 				db,
-				registry: [...shellModule.facts, ...agensModule.facts, ...designModule.facts],
+				registry: [
+					...shellModule.facts,
+					...agensModule.facts,
+					...designModule.facts,
+					...operationsModule.facts,
+				],
 			}),
 		);
 		initPraxisFacts();
+
+		// Seed the Operations-as-Intent demo scene (real fleet + constraint-checked
+		// state) through the sanctioned emitFact path. Idempotent + hydration-safe:
+		// wireOperationsScene no-ops if the fleet fact was already restored from
+		// PluresDB, so a restart keeps operator-modified state.
+		wireOperationsScene(emitFact, (factId) => query(factId));
 
 		// Activate all registered plugins now that the PluresDB adapter is wired.
 		// Each plugin's onActivate(ctx) receives a pluginId-scoped PluginContext so
@@ -59,13 +71,14 @@
 		void activateAll((pluginId) => createPluginContext(pluginId, { goto }));
 
 		// Initialize the design mode schema registry from all loaded praxis modules
-		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule);
+		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule);
 		emitFact('design.schema.registry', schemas);
 
 		// Register modules for hot-reload
 		registerForHotReload(shellModule);
 		registerForHotReload(agensModule);
 		registerForHotReload(designModule);
+		registerForHotReload(operationsModule);
 
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
