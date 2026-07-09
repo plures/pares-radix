@@ -1,3 +1,7 @@
+## [1.55.18] — 2026-07-09
+
+- feat(vscode): register radix MCP server for Copilot .px evaluation (#2919091) (#464) (66b14b1)
+
 ## [1.55.17] — 2026-07-08
 
 - feat(spine): morning_briefing .px procedure + run_command wiring (#463) (2d7a4e7)
