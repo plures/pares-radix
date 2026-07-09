@@ -1,3 +1,7 @@
+## [1.55.19] — 2026-07-09
+
+- feat(demo): Operations-as-Intent praxis scene (real ontology, no mocks) (#465) (faa0686)
+
 ## [1.55.18] — 2026-07-09
 
 - feat(vscode): register radix MCP server for Copilot .px evaluation (#2919091) (#464) (66b14b1)
