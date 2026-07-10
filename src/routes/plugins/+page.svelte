@@ -16,14 +16,18 @@
 	// Honest install boundary: native install is a desktop (Tauri) capability that
 	// invokes the `plugin_install` command. In the browser that command is absent,
 	// so we surface a real "desktop only" state instead of faking a success.
+	// eslint-disable-next-line plures/no-raw-stores -- local UI feature-detection flag, not domain state (no Chronos relevance)
 	let installAvailable = $state(false);
+	// eslint-disable-next-line plures/no-raw-stores -- local UI copy string, not domain state
 	let installNote = $state('');
 
 	// Reactive projections of the persisted enable/startup policy facts. These
 	// are the SINGLE SOURCE OF TRUTH; the loader gate reads the same facts on boot.
+	// eslint-disable-next-line plures/no-raw-stores -- query() is the sanctioned reactive read from PluresDB
 	const enabledMap = $derived(
 		(query('admin.plugins.enabled') as Record<string, boolean> | undefined) ?? {},
 	);
+	// eslint-disable-next-line plures/no-raw-stores -- query() is the sanctioned reactive read from PluresDB
 	const startupMap = $derived(
 		(query('admin.plugins.startup') as Record<string, boolean> | undefined) ?? {},
 	);
@@ -139,7 +143,7 @@
 				{@const enabled = isEnabled(plugin.name)}
 				{@const active = isPluginActive(plugin.name)}
 				<Box class={enabled ? 'plugin-card' : 'plugin-card disabled'}>
-					<div
+					<Box
 						class="plugin-body"
 						role="button"
 						tabindex={0}
@@ -159,23 +163,23 @@
 						<Text as="span" class="entity-count">
 							{plugin.entities.length} {plugin.entities.length === 1 ? 'entity' : 'entities'}
 						</Text>
-					</div>
+					</Box>
 
 					<Box class="plugin-controls">
-						<label class="control-row">
+						<Box as="label" class="control-row">
 							<Toggle
 								checked={enabled}
 								onchange={() => void toggleEnabled(plugin.name)}
 							/>
 							<Text as="span" class="control-label">Enabled</Text>
-						</label>
-						<label class="control-row">
+						</Box>
+						<Box as="label" class="control-row">
 							<Toggle
 								checked={onStartup(plugin.name)}
 								onchange={() => toggleStartup(plugin.name)}
 							/>
 							<Text as="span" class="control-label">Activate on startup</Text>
-						</label>
+						</Box>
 						<Button
 							class="uninstall-btn"
 							variant="ghost"
