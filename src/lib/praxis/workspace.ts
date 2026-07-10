@@ -41,6 +41,12 @@ const workspaceFacts: PraxisFact[] = [
 			'Index of live instance ids: string[]. Per-instance detail stored under ' +
 			'workspace.paneInstances.<instanceId> facts (also persist:true).',
 		persist: true,
+		// Dynamic per-instance facts (workspace.paneInstances.<instanceId>) carry the
+		// pane's pluginId/dockId/title/state. They are minted at runtime with ids the
+		// static registry cannot know, so declare the namespace persistent: any
+		// `workspace.paneInstances.*` fact is persisted + hydrated. Without this the
+		// per-instance title is dropped on reload and the tab falls back to the id.
+		persistPrefix: true,
 	},
 ];
 

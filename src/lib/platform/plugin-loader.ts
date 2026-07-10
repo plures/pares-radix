@@ -14,6 +14,7 @@ import type {
   DashboardWidget,
   HelpSection,
   OnboardingStep,
+  PaneContribution,
   InferenceRule,
   Expectation,
   Constraint,
@@ -196,6 +197,18 @@ export function getAllNavItems(): NavItem[] {
     items.push(...plugin.navItems);
   }
   return items;
+}
+
+/** All pane contributions from all active plugins, scoped by plugin ID. */
+export function getAllPaneContributions(): Array<PaneContribution & { pluginId: string }> {
+  const out: Array<PaneContribution & { pluginId: string }> = [];
+  for (const [id, { plugin, active }] of plugins) {
+    if (!active) continue;
+    for (const pane of plugin.panes ?? []) {
+      out.push({ ...pane, pluginId: id });
+    }
+  }
+  return out;
 }
 
 /** All settings from all active plugins */

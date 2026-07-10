@@ -38,6 +38,17 @@ export const agensPlugin: RadixPlugin = {
     },
   ],
 
+  panes: [
+    {
+      id: 'agens',
+      title: 'Agens',
+      icon: '💬',
+      preferredDock: 'right',
+      defaultVisible: true,
+      allowMultiple: true,
+    },
+  ],
+
   settings: [],
   rules: [],
   expectations: [],

@@ -16,6 +16,8 @@
  * The plugin loader reads this directory on startup and activates all plugins.
  */
 
+import type { PaneContribution } from '../types/plugin.js';
+
 export interface PluginSource {
   type: 'local' | 'github' | 'npm' | 'modulus';
   /** For local: path. For github: owner/repo. For npm: package name. */
@@ -39,6 +41,8 @@ export interface PluginManifest {
   radix?: string; // minimum radix version
   dependencies?: string[];
   peerDependencies?: Record<string, string>;
+  /** Dockable panes this plugin contributes (parity with RadixPlugin.panes). */
+  panes?: PaneContribution[];
 }
 
 export interface InstalledPlugin {

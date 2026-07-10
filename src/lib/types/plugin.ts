@@ -35,6 +35,8 @@ export interface RadixPlugin {
   routes: PluginRoute[];
   /** Sidebar navigation items */
   navItems: NavItem[];
+  /** Dockable panes this plugin contributes (orthogonal to nav routes). */
+  panes?: PaneContribution[];
   /** Settings this plugin exposes in the unified settings page */
   settings: PluginSetting[];
   /** Dashboard widgets for the home page */
@@ -76,6 +78,29 @@ export interface PluginRoute {
   title?: string;
   /** Data prerequisites — page shows empty state if unmet */
   requires?: DataRequirement[];
+}
+
+/**
+ * A dockable pane a plugin contributes to the workspace (VS Code Panel /
+ * Secondary Sidebar model). Distinct from a nav-routed surface: a pane instance
+ * mounts in a WorkspaceLayout dock and lives ORTHOGONALLY to center routing.
+ */
+export interface PaneContribution {
+  /** Stable contribution id (unique within the plugin), e.g. 'agens'. */
+  id: string;
+  /** Tab title shown in the dock. */
+  title: string;
+  /** Emoji or icon path. */
+  icon?: string;
+  /** Where the pane wants to dock; user override + resolve_pane_dock decide the actual dock. */
+  preferredDock: 'center' | 'right' | 'bottom' | 'left';
+  /** Seed one instance visible on first boot (agens: true). */
+  defaultVisible?: boolean;
+  /**
+   * Whether more than one instance may exist (VS Code "two terminals" model).
+   * Default true — panes are NOT singletons (study §7 decision 3).
+   */
+  allowMultiple?: boolean;
 }
 
 export interface NavItem {

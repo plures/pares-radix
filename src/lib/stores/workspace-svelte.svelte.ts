@@ -9,6 +9,8 @@
 import { query, emitFact } from './praxis-svelte.svelte.js';
 import { applyAction } from '$lib/workspace/reducer.js';
 import { serializeLayout, deserializeLayout } from '$lib/workspace/persistence.js';
+import { seedInstancesFromContributions } from '$lib/workspace/pane-contributions.js';
+import type { ScopedPaneContribution } from '$lib/workspace/pane-contributions.js';
 import type { PaneInstanceFact } from '$lib/workspace/persistence.js';
 import { defaultLayout } from '$lib/workspace/types.js';
 import type {
@@ -49,6 +51,20 @@ function writeLayout(state: WorkspaceLayoutState): void {
 export function dispatch(action: WorkspaceAction): void {
 	const next = applyAction(readLayout(), action);
 	writeLayout(next);
+}
+
+/**
+ * Seed pane instances from plugin contributions through the sanctioned write
+ * path. Idempotent + hydration-safe: seedInstancesFromContributions returns the
+ * SAME state reference when nothing is added (an agens#1 already restored from
+ * PluresDB, or a defaultVisible singleton-by-default already present), so a
+ * reload is a no-op and a user who closed the pane is respected. Only writes
+ * (and thus persists) when an instance was actually added.
+ */
+export function seedPaneInstances(contributions: ScopedPaneContribution[]): void {
+	const current = readLayout();
+	const seeded = seedInstancesFromContributions(current, contributions);
+	if (seeded !== current) writeLayout(seeded);
 }
 
 /**

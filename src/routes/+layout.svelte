@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Box, Sidebar, PluginContentArea, CommandPalette, WorkspaceLayout } from '@plures/design-dojo';
+	import { Box, Sidebar, PluginContentArea, CommandPalette, WorkspaceLayout, EmptyState } from '@plures/design-dojo';
 	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
+	import AgensSurface from '$lib/plugins/agens/AgensSurface.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
 	import { query, initPraxisFacts, seedNavItems, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
@@ -12,6 +13,7 @@
 		setSharedAdapter,
 	} from '$lib/stores/plures-db-adapter.js';
 	import { activateAll, registerPlugin } from '$lib/platform/plugin-loader.js';
+	import { getAllPaneContributions } from '$lib/platform/plugin-loader.js';
 	import { createPluginContext } from '$lib/platform/plugin-context.js';
 	import { agensPlugin } from '$lib/plugins/agens/index.js';
 	import { shellModule } from '$lib/praxis/shell.js';
@@ -20,7 +22,7 @@
 	import { operationsModule, wireOperationsScene } from '$lib/praxis/operations.js';
 	import { adminModule, wireAdminScene, isPluginEnabled, shouldActivateOnStartup } from '$lib/praxis/admin.js';
 	import { workspaceModule } from '$lib/praxis/workspace.js';
-	import { readLayout, dispatch as dispatchWorkspace, wireWorkspaceScene } from '$lib/stores/workspace-svelte.svelte.js';
+	import { readLayout, dispatch as dispatchWorkspace, wireWorkspaceScene, seedPaneInstances } from '$lib/stores/workspace-svelte.svelte.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
@@ -31,6 +33,7 @@
 	} from '$lib/platform/tauri.js';
 	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import type { PaneInstance } from '$lib/workspace/types.js';
 
 	interface Props {
 		children: Snippet;
@@ -108,6 +111,12 @@
 			// Re-derive nav.visible now that agent-type/registry plugins are active,
 			// so registry-contributed items (e.g. Agens → /agent) appear in the sidebar.
 			seedNavItems();
+			// Seed dockable pane instances from ACTIVE plugins' contributions now that
+			// activation resolved. Hydration-safe: seedPaneInstances no-ops when an
+			// instance of the plugin already exists (restored from PluresDB), so the
+			// agens right-dock pane is seeded once on first boot and an operator who
+			// closed it is respected on reload (mirrors the default-layout seed).
+			seedPaneInstances(getAllPaneContributions());
 		});
 
 		// Initialize the design mode schema registry from all loaded praxis modules
@@ -297,7 +306,7 @@
 		onCommandPaletteOpen={() => (paletteOpen = true)}
 		{statusItems}
 	>
-		<WorkspaceLayout layout={workspaceLayout} ondispatch={dispatchWorkspace}>
+		<WorkspaceLayout layout={workspaceLayout} ondispatch={dispatchWorkspace} {paneBody}>
 			<Breadcrumbs />
 			{@render children()}
 		</WorkspaceLayout>
@@ -313,6 +322,25 @@
 		{@html `<style>${tuiCssOverrides}</style>`}
 	{/if}
 </Box>
+
+<!--
+	The pane body renderer for docked instances. Defined at the layout root so it
+	is a SIBLING of {@render children()} inside WorkspaceLayout: the agens pane
+	lives in the right dock, NOT under the routed center page, so navigating the
+	center does NOT unmount it (VS Code Copilot-Chat orthogonality). One
+	implementation — the same AgensSurface the /agent route renders. Unknown pane
+	types get an honest EmptyState (C-NOSTUB-001), never fabricated content.
+-->
+{#snippet paneBody(instance: PaneInstance)}
+	{#if instance?.pluginId === 'agens'}
+		<AgensSurface />
+	{:else}
+		<EmptyState
+			title={instance?.title ?? 'Pane'}
+			description="No surface registered for this pane."
+		/>
+	{/if}
+{/snippet}
 
 <style>
 	:global(:root), :global([data-theme="light"]) {
