@@ -70,6 +70,7 @@ export { default as PluginModule } from './infra/PluginModule.svelte';
 export { default as WtSplitPane } from './panes/WtSplitPane.svelte';
 export { default as WtPane } from './panes/WtPane.svelte';
 export { default as WtPaneTabs } from './panes/WtPaneTabs.svelte';
+export { default as WorkspaceLayout } from './WorkspaceLayout.svelte';
 export type {
 	Orientation as WtOrientation,
 	TabDescriptor as WtTabDescriptor,

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Box, Sidebar, PluginContentArea, CommandPalette } from '@plures/design-dojo';
+	import { Box, Sidebar, PluginContentArea, CommandPalette, WorkspaceLayout } from '@plures/design-dojo';
 	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
@@ -19,6 +19,8 @@
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
 	import { operationsModule, wireOperationsScene } from '$lib/praxis/operations.js';
 	import { adminModule, wireAdminScene, isPluginEnabled, shouldActivateOnStartup } from '$lib/praxis/admin.js';
+	import { workspaceModule } from '$lib/praxis/workspace.js';
+	import { readLayout, dispatch as dispatchWorkspace, wireWorkspaceScene } from '$lib/stores/workspace-svelte.svelte.js';
 	import { registerForHotReload } from '$lib/praxis/hot-reload.js';
 	import { detectRenderMode, renderModeClass, tuiCssOverrides, type RenderMode } from '$lib/platform/render-mode.js';
 	import {
@@ -54,6 +56,7 @@
 					...designModule.facts,
 					...operationsModule.facts,
 					...adminModule.facts,
+					...workspaceModule.facts,
 				],
 			}),
 		);
@@ -74,6 +77,12 @@
 		// sanctioned emitFact path; idempotent + hydration-safe so operator toggles
 		// survive a restart. Health/readiness are derived live by the route on mount.
 		wireAdminScene(emitFact, (factId) => query(factId));
+
+		// Seed the default workspace dock layout (center + empty-but-real docks)
+		// through the sanctioned emitFact path. Idempotent + hydration-safe:
+		// wireWorkspaceScene no-ops if workspace.layout was already restored from
+		// PluresDB, so an operator's dock/resize/collapse choices survive a restart.
+		wireWorkspaceScene(emitFact, (factId) => query(factId));
 
 		// Activate all registered plugins now that the PluresDB adapter is wired.
 		// Each plugin's onActivate(ctx) receives a pluginId-scoped PluginContext so
@@ -102,7 +111,7 @@
 		});
 
 		// Initialize the design mode schema registry from all loaded praxis modules
-		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule, adminModule);
+		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule, adminModule, workspaceModule);
 		emitFact('design.schema.registry', schemas);
 
 		// Register modules for hot-reload
@@ -111,6 +120,7 @@
 		registerForHotReload(designModule);
 		registerForHotReload(operationsModule);
 		registerForHotReload(adminModule);
+		registerForHotReload(workspaceModule);
 
 		// ── Tauri 2 integration ────────────────────────────────────────────────
 		// Wire Tauri backend events → praxis facts (events not commands pattern).
@@ -163,6 +173,17 @@
 	let designModeActive = $derived(
 		(query<{ active: boolean }>('design.mode.active')?.active) ?? false
 	);
+
+	// Reactive projection of the persisted workspace dock layout. readLayout() is a
+	// pure fact->state map (deserializeLayout); re-deriving on query() change keeps
+	// the dock manager in sync with PluresDB. Dock decisions live in the reducer/.px
+	// twins — this is only the read projection; dispatch() writes changed facts.
+	let workspaceLayout = $derived.by(() => {
+		// Touch the layout facts so this $derived re-runs when they change.
+		void query('workspace.layout');
+		void query('workspace.paneInstances');
+		return readLayout();
+	});
 
 	// Sync tray menu whenever nav.visible changes (Tauri only).
 	// Item hrefs are used directly as IDs so the Rust on_menu_event handler
@@ -276,8 +297,10 @@
 		onCommandPaletteOpen={() => (paletteOpen = true)}
 		{statusItems}
 	>
-		<Breadcrumbs />
-		{@render children()}
+		<WorkspaceLayout layout={workspaceLayout} ondispatch={dispatchWorkspace}>
+			<Breadcrumbs />
+			{@render children()}
+		</WorkspaceLayout>
 	</PluginContentArea>
 
 	<CommandPalette

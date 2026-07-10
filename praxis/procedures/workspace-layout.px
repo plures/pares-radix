@@ -1,0 +1,42 @@
+# workspace-layout.px — dock placement + visibility as pure logic (C-DEV-001).
+#
+# Source of truth for WHERE a pane docks and WHETHER it is visible. The Svelte
+# layer only READS the resulting facts; no dock-decision logic lives in the
+# components. Executable twin: src/lib/workspace/dock-resolution.ts + the
+# pane_visibility constraint in src/lib/praxis/workspace.ts.
+#
+# Queue topology:
+#
+#   pane contribution ─→ [resolve_pane_dock] ─→ workspace.resolvedDock
+#
+
+# [parser-skip] fact ResolvedDock:
+# [parser-skip]   instanceId: string
+# [parser-skip]   dock: string
+# [parser-skip]   visible: bool
+# [parser-skip]
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint pane_visibility:
+# [parser-skip]   given: "A defaultVisible pane is present in some dock unless the user explicitly hid it."
+# [parser-skip]   check: FORALL p IN panes: (p.defaultVisible AND NOT userHidden[p.id]) IMPLIES present(p.id)
+# [parser-skip]   severity: error
+# [parser-skip]
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Resolve a pane's actual dock from its plugin preferredDock + optional user override.
+procedure resolve_pane_dock(preferred: string, override: string, allowed: list) -> dock into "workspace.resolvedDock":
+  given: "A pane lands in the user override dock if set & allowed, else its plugin preferredDock if allowed, else 'right'."
+  select_dock {override: $override, preferred: $preferred, allowed: $allowed} -> $dock
+  return $dock
+
+# Resolve a pane's visibility: defaultVisible AND NOT userHidden.
+procedure resolve_pane_visibility(defaultVisible: bool, userHidden: bool) -> visible:
+  given: "A defaultVisible pane is visible unless the user explicitly hid it."
+  and_not {a: $defaultVisible, b: $userHidden} -> $visible
+  return $visible
