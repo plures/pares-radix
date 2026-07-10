@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { Box, Button, Heading, Input, Text, Toggle, Badge } from '@plures/design-dojo';
+	import { Box, Button, Heading, Input, Text, Toggle, Badge, Link } from '@plures/design-dojo';
 	import { plugins } from '$lib/stores/plugins.svelte.js';
 	import { goto } from '$app/navigation';
 	import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
@@ -143,14 +143,9 @@
 				{@const enabled = isEnabled(plugin.name)}
 				{@const active = isPluginActive(plugin.name)}
 				<Box class={enabled ? 'plugin-card' : 'plugin-card disabled'}>
-					<Box
+					<Link
 						class="plugin-body"
-						role="button"
-						tabindex={0}
-						onclick={() => goto(`/plugins/${plugin.name}`)}
-						onkeydown={(e: KeyboardEvent) => {
-							if (e.key === 'Enter' || e.key === ' ') goto(`/plugins/${plugin.name}`);
-						}}
+						href={`/plugins/${plugin.name}`}
 					>
 						<Box class="plugin-header">
 							<Heading level={2} class="plugin-title">{plugin.name}</Heading>
@@ -163,7 +158,7 @@
 						<Text as="span" class="entity-count">
 							{plugin.entities.length} {plugin.entities.length === 1 ? 'entity' : 'entities'}
 						</Text>
-					</Box>
+					</Link>
 
 					<Box class="plugin-controls">
 						<Box as="label" class="control-row">
@@ -210,7 +205,7 @@
 	}
 	:global(.plugin-card:hover) { border-color: var(--color-accent); }
 	:global(.plugin-card.disabled) { opacity: 0.6; }
-	:global(.plugin-body) { cursor: pointer; padding: 1.25rem 1.25rem 0.75rem; }
+	:global(.plugin-body) { display: block; text-decoration: none; color: inherit; cursor: pointer; padding: 1.25rem 1.25rem 0.75rem; }
 	:global(.plugin-header) { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
 	:global(.plugin-title) { margin: 0; font-size: 1.1rem; }
 	:global(.version) { font-size: 0.8rem; color: var(--color-text-muted); }

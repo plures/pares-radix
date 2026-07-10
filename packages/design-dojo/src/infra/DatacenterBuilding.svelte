@@ -10,7 +10,7 @@
 <script lang="ts">
 	import { Rect, Group, Text, Path } from "@plures/design-dojo-npm/svg";
 	import type { SvgFill } from "@plures/design-dojo-npm/svg";
-	import type { BeaconStatus } from "./StatusBeacon.svelte";
+	import type { BeaconStatus } from "../types-local.js";
 
 	interface Props {
 		name: string;

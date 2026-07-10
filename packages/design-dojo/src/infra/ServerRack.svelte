@@ -12,15 +12,7 @@
 <script lang="ts">
 	import { Rect, Group, Text } from "@plures/design-dojo-npm/svg";
 	import StatusBeacon from "./StatusBeacon.svelte";
-	import type { BeaconStatus } from "./StatusBeacon.svelte";
-
-	export interface RackUnit {
-		id: string;
-		label?: string;
-		status: BeaconStatus;
-		/** 0..1 utilisation → activity LED bar fill. */
-		load?: number;
-	}
+	import type { BeaconStatus, RackUnit } from "../types-local.js";
 
 	interface Props {
 		label: string;

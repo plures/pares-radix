@@ -12,8 +12,7 @@
 <script lang="ts">
 	import { Circle } from "@plures/design-dojo-npm/svg";
 	import type { SvgFill } from "@plures/design-dojo-npm/svg";
-
-	export type BeaconStatus = "healthy" | "warning" | "critical" | "idle" | "unknown";
+	import type { BeaconStatus } from "../types-local.js";
 
 	interface Props {
 		status?: BeaconStatus;

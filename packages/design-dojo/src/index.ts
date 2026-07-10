@@ -63,10 +63,7 @@ export { default as ServerRack } from './infra/ServerRack.svelte';
 export { default as DatacenterBuilding } from './infra/DatacenterBuilding.svelte';
 export { default as RegionMap } from './infra/RegionMap.svelte';
 export { default as PluginModule } from './infra/PluginModule.svelte';
-export type { BeaconStatus } from './infra/StatusBeacon.svelte';
-export type { RackUnit } from './infra/ServerRack.svelte';
-export type { RegionTone } from './infra/RegionMap.svelte';
 
 export type CommandItem = { id: string; label: string; icon?: string; action: () => void; };
 
-export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps } from './types-local.js';
+export type { BeaconStatus, RackUnit, RegionTone, DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps } from './types-local.js';

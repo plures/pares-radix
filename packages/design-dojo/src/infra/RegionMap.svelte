@@ -13,8 +13,7 @@
 -->
 <script lang="ts">
 	import type { Snippet } from "svelte";
-
-	export type RegionTone = "healthy" | "warning" | "critical" | "neutral";
+	import type { RegionTone } from "../types-local.js";
 
 	interface Props {
 		region: string;

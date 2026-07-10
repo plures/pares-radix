@@ -8,7 +8,7 @@
 -->
 <script lang="ts">
 	import StatusBeacon from "./StatusBeacon.svelte";
-	import type { BeaconStatus } from "./StatusBeacon.svelte";
+	import type { BeaconStatus } from "../types-local.js";
 
 	interface Props {
 		status?: BeaconStatus;

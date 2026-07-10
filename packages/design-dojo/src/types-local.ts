@@ -1,5 +1,20 @@
 import type { SvelteComponent, Snippet } from 'svelte';
 
+// Infra visualisation family — status/shape types. Defined here (a plain .ts
+// module) rather than inside the .svelte components so they can be re-exported
+// from the package index: `export type { X } from '*.svelte'` does not
+// type-check under svelte-check/tsc (the ambient *.svelte module only declares
+// a default export). The components import these back from here.
+export type BeaconStatus = 'healthy' | 'warning' | 'critical' | 'idle' | 'unknown';
+export type RegionTone = 'healthy' | 'warning' | 'critical' | 'neutral';
+export interface RackUnit {
+  id: string;
+  label?: string;
+  status: BeaconStatus;
+  /** 0..1 utilisation → activity LED bar fill. */
+  load?: number;
+}
+
 export interface DashboardWidgetItem {
   id: string;
   title: string;
