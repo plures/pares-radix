@@ -2,6 +2,7 @@
 	import { query, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import type { DesignSchema, SchemaKind } from '$lib/praxis/design.js';
 	import RuleEditor from '$lib/components/RuleEditor.svelte';
+	import { Box, Heading, Text, Input, Button, Badge, CodeBlock } from '@plures/design-dojo';
 	import { applySchemaChange, recordDecision, getDecisionLedger } from '$lib/praxis/hot-reload.js';
 
 	// Read schema registry from praxis facts
@@ -117,64 +118,64 @@
 	let decisionLedger = $derived(getDecisionLedger());
 </script>
 
-<div class="design-page">
-	<header class="design-header">
-		<h1>🎨 Design Mode — Schema Explorer</h1>
-		<p class="subtitle">
+<Box class="design-page">
+	<Box as="header" class="design-header">
+		<Heading level={1}>🎨 Design Mode — Schema Explorer</Heading>
+		<Text as="p" class="subtitle">
 			{#if designModeActive}
 				Editing enabled — select a schema to modify
 			{:else}
 				Read-only — enter design mode (Ctrl+Shift+D) to edit
 			{/if}
-		</p>
-	</header>
+		</Text>
+	</Box>
 
-	<div class="design-layout">
+	<Box class="design-layout">
 		<!-- Filter sidebar -->
-		<aside class="filter-sidebar">
-			<input
+		<Box as="aside" class="filter-sidebar">
+			<Input
 				type="search"
 				placeholder="Search schemas..."
 				bind:value={searchQuery}
 				class="search-input"
 			/>
 
-			<nav class="kind-filters">
+			<Box as="nav" class="kind-filters">
 				{#each Object.entries(kindIcons) as [kind, icon]}
-					<button
-						class="kind-btn"
-						class:active={selectedKind === kind}
+					<Button
+						variant="ghost"
+						class={selectedKind === kind ? 'kind-btn active' : 'kind-btn'}
 						onclick={() => selectedKind = kind as SchemaKind | 'all'}
 					>
-						<span class="kind-icon">{icon}</span>
-						<span class="kind-label">{kind}</span>
-						<span class="kind-count">{kindCounts()[kind] ?? 0}</span>
-					</button>
+						<Text as="span" class="kind-icon">{icon}</Text>
+						<Text as="span" class="kind-label">{kind}</Text>
+						<Text as="span" class="kind-count">{kindCounts()[kind] ?? 0}</Text>
+					</Button>
 				{/each}
-			</nav>
+			</Box>
 
-			<div class="schema-list">
+			<Box class="schema-list">
 				{#each schemas() as schema}
-					<button
-						class="schema-item"
-						class:selected={selectedSchema === schema.id}
+					<Button
+						variant="ghost"
+						class={selectedSchema === schema.id ? 'schema-item selected' : 'schema-item'}
 						onclick={() => selectSchema(schema.id)}
 					>
-						<span class="schema-icon">{kindIcons[schema.kind]}</span>
-						<div class="schema-info">
-							<span class="schema-id">{schema.id}</span>
-							<span class="schema-module">{schema.moduleId}</span>
-						</div>
+						<Text as="span" class="schema-icon">{kindIcons[schema.kind]}</Text>
+						<Box class="schema-info">
+							<Text as="span" class="schema-id">{schema.id}</Text>
+							<Text as="span" class="schema-module">{schema.moduleId}</Text>
+						</Box>
 						{#if schema.userCreated}
-							<span class="user-badge">user</span>
+							<Badge variant="success">user</Badge>
 						{/if}
-					</button>
+					</Button>
 				{/each}
-			</div>
-		</aside>
+			</Box>
+		</Box>
 
 	<!-- Detail panel -->
-		<main class="detail-panel">
+		<Box as="main" class="detail-panel">
 			{#if editingSchema && registry[editingSchema]}
 				<RuleEditor
 					schema={registry[editingSchema]}
@@ -182,86 +183,86 @@
 					onCancel={cancelEditing}
 				/>
 			{:else if selectedSchemaData}
-				<div class="schema-detail">
-					<div class="detail-header">
-						<span class="detail-icon">{kindIcons[selectedSchemaData.kind]}</span>
-						<div>
-							<h2>{selectedSchemaData.id}</h2>
-							<p class="detail-module">Module: {selectedSchemaData.moduleId}</p>
-						</div>
-						<span class="detail-kind-badge">{selectedSchemaData.kind}</span>
-					</div>
+				<Box class="schema-detail">
+					<Box class="detail-header">
+						<Text as="span" class="detail-icon">{kindIcons[selectedSchemaData.kind]}</Text>
+						<Box>
+							<Heading level={2}>{selectedSchemaData.id}</Heading>
+							<Text as="p" class="detail-module">Module: {selectedSchemaData.moduleId}</Text>
+						</Box>
+						<Box class="detail-kind-badge"><Badge variant="neutral">{selectedSchemaData.kind}</Badge></Box>
+					</Box>
 
-					<p class="detail-description">{selectedSchemaData.description}</p>
+					<Text as="p" class="detail-description">{selectedSchemaData.description}</Text>
 
-					<section class="definition-section">
-						<h3>Definition</h3>
-						<pre class="definition-json">{JSON.stringify(selectedSchemaData.definition, null, 2)}</pre>
-					</section>
+					<Box as="section" class="definition-section">
+						<Heading level={3}>Definition</Heading>
+						<CodeBlock class="definition-json" language="json">{JSON.stringify(selectedSchemaData.definition, null, 2)}</CodeBlock>
+					</Box>
 
 					{#if designModeActive}
-						<div class="edit-actions">
-							<button class="btn-primary" onclick={() => startEditing(selectedSchemaData?.id ?? '')}>
+						<Box class="edit-actions">
+							<Button variant="primary" class="btn-primary" onclick={() => startEditing(selectedSchemaData?.id ?? '')}>
 								✏️ Edit Schema
-							</button>
+							</Button>
 							{#if selectedSchemaData.userCreated}
-								<button class="btn-danger" onclick={() => {
+								<Button variant="danger" class="btn-danger" onclick={() => {
 									emitFact('design.schema.deleted', { schemaId: selectedSchemaData?.id });
 								}}>
 									🗑️ Delete
-								</button>
+								</Button>
 							{/if}
-						</div>
+						</Box>
 					{/if}
 
-					<footer class="detail-footer">
-						<span>Last modified: {selectedSchemaData.updatedAt}</span>
+					<Box as="footer" class="detail-footer">
+						<Text as="span">Last modified: {selectedSchemaData.updatedAt}</Text>
 						{#if selectedSchemaData.userCreated}
-							<span>User-created</span>
+							<Text as="span">User-created</Text>
 						{:else}
-							<span>Built-in</span>
+							<Text as="span">Built-in</Text>
 						{/if}
-					</footer>
-				</div>
+					</Box>
+				</Box>
 			{:else}
-				<div class="empty-state">
-					<span class="empty-icon">🎨</span>
-					<h2>Select a schema</h2>
-					<p>Choose a praxis primitive from the list to view its definition</p>
-				</div>
+				<Box class="empty-state">
+					<Text as="span" class="empty-icon">🎨</Text>
+					<Heading level={2}>Select a schema</Heading>
+					<Text as="p">Choose a praxis primitive from the list to view its definition</Text>
+				</Box>
 			{/if}
-		</main>
-	</div>
+		</Box>
+	</Box>
 
 	<!-- Decision Ledger -->
 	{#if designModeActive}
-		<footer class="ledger-bar">
-			<button class="ledger-toggle" onclick={() => showLedger = !showLedger}>
+		<Box as="footer" class="ledger-bar">
+			<Button variant="ghost" class="ledger-toggle" onclick={() => showLedger = !showLedger}>
 				📜 Decision Ledger ({decisionLedger.length} entries)
-				<span class="chevron">{showLedger ? '▲' : '▼'}</span>
-			</button>
+				<Text as="span" class="chevron">{showLedger ? '▲' : '▼'}</Text>
+			</Button>
 			{#if showLedger && decisionLedger.length > 0}
-				<div class="ledger-entries">
+				<Box class="ledger-entries">
 					{#each decisionLedger.toReversed() as entry}
-						<div class="ledger-entry">
-							<span class="ledger-action">{entry.action}</span>
-							<span class="ledger-schema">{entry.schemaId}</span>
-							<span class="ledger-time">{new Date(entry.timestamp).toLocaleTimeString()}</span>
+						<Box class="ledger-entry">
+							<Text as="span" class="ledger-action">{entry.action}</Text>
+							<Text as="span" class="ledger-schema">{entry.schemaId}</Text>
+							<Text as="span" class="ledger-time">{new Date(entry.timestamp).toLocaleTimeString()}</Text>
 							{#if entry.hotReloadResult.applied}
-								<span class="ledger-status ok">✅ applied</span>
+								<Box class="ledger-status ok"><Badge variant="success">✅ applied</Badge></Box>
 							{:else}
-								<span class="ledger-status err">❌ {entry.hotReloadResult.error}</span>
+								<Box class="ledger-status err"><Badge variant="danger">❌ {entry.hotReloadResult.error}</Badge></Box>
 							{/if}
-						</div>
+						</Box>
 					{/each}
-				</div>
+				</Box>
 			{/if}
-		</footer>
+		</Box>
 	{/if}
-</div>
+</Box>
 
 <style>
-	.design-page {
+	:global(.design-page) {
 		padding: 1.5rem;
 		height: 100%;
 		display: flex;
@@ -269,29 +270,29 @@
 		overflow: hidden;
 	}
 
-	.design-header {
+	:global(.design-header) {
 		margin-bottom: 1rem;
 	}
 
-	.design-header h1 {
+	:global(.design-header :is(h1, .heading)) {
 		font-size: 1.5rem;
 		margin: 0;
 	}
 
-	.subtitle {
+	:global(.subtitle) {
 		color: var(--color-text-muted);
 		margin: 0.25rem 0 0;
 		font-size: 0.875rem;
 	}
 
-	.design-layout {
+	:global(.design-layout) {
 		display: flex;
 		gap: 1rem;
 		flex: 1;
 		min-height: 0;
 	}
 
-	.filter-sidebar {
+	:global(.filter-sidebar) {
 		width: 320px;
 		display: flex;
 		flex-direction: column;
@@ -299,7 +300,7 @@
 		overflow: hidden;
 	}
 
-	.search-input {
+	:global(.search-input) {
 		padding: 0.5rem 0.75rem;
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -308,13 +309,13 @@
 		font-size: 0.875rem;
 	}
 
-	.kind-filters {
+	:global(.kind-filters) {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
 	}
 
-	.kind-btn {
+	:global(.kind-btn) {
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
@@ -327,20 +328,20 @@
 		font-size: 0.75rem;
 	}
 
-	.kind-btn.active {
+	:global(.kind-btn.active) {
 		background: var(--color-accent-bg);
 		color: var(--color-accent);
 		border-color: var(--color-accent);
 	}
 
-	.kind-count {
+	:global(.kind-count) {
 		background: var(--color-hover);
 		padding: 0 0.25rem;
 		border-radius: 3px;
 		font-size: 0.7rem;
 	}
 
-	.schema-list {
+	:global(.schema-list) {
 		flex: 1;
 		overflow-y: auto;
 		display: flex;
@@ -348,7 +349,7 @@
 		gap: 2px;
 	}
 
-	.schema-item {
+	:global(.schema-item) {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -362,17 +363,17 @@
 		width: 100%;
 	}
 
-	.schema-item:hover { background: var(--color-hover); }
-	.schema-item.selected { background: var(--color-accent-bg); }
+	:global(.schema-item:hover) { background: var(--color-hover); }
+	:global(.schema-item.selected) { background: var(--color-accent-bg); }
 
-	.schema-info {
+	:global(.schema-info) {
 		flex: 1;
 		min-width: 0;
 		display: flex;
 		flex-direction: column;
 	}
 
-	.schema-id {
+	:global(.schema-id) {
 		font-size: 0.8rem;
 		font-weight: 500;
 		overflow: hidden;
@@ -380,12 +381,12 @@
 		white-space: nowrap;
 	}
 
-	.schema-module {
+	:global(.schema-module) {
 		font-size: 0.7rem;
 		color: var(--color-text-muted);
 	}
 
-	.user-badge {
+	:global(.user-badge) {
 		font-size: 0.65rem;
 		padding: 1px 4px;
 		border-radius: 3px;
@@ -393,36 +394,36 @@
 		color: var(--color-accent);
 	}
 
-	.detail-panel {
+	:global(.detail-panel) {
 		flex: 1;
 		overflow-y: auto;
 	}
 
-	.schema-detail {
+	:global(.schema-detail) {
 		padding: 1rem;
 	}
 
-	.detail-header {
+	:global(.detail-header) {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		margin-bottom: 1rem;
 	}
 
-	.detail-icon { font-size: 2rem; }
+	:global(.detail-icon) { font-size: 2rem; }
 
-	.detail-header h2 {
+	:global(.detail-header :is(h2, .heading)) {
 		margin: 0;
 		font-size: 1.25rem;
 	}
 
-	.detail-module {
+	:global(.detail-module) {
 		margin: 0;
 		font-size: 0.8rem;
 		color: var(--color-text-muted);
 	}
 
-	.detail-kind-badge {
+	:global(.detail-kind-badge) {
 		margin-left: auto;
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
@@ -433,12 +434,12 @@
 		text-transform: uppercase;
 	}
 
-	.detail-description {
+	:global(.detail-description) {
 		color: var(--color-text-muted);
 		line-height: 1.5;
 	}
 
-	.definition-section h3 {
+	:global(.definition-section :is(h3, .heading)) {
 		font-size: 0.875rem;
 		margin: 1.5rem 0 0.5rem;
 		color: var(--color-text-muted);
@@ -446,7 +447,7 @@
 		letter-spacing: 0.05em;
 	}
 
-	.definition-json {
+	:global(.definition-json) {
 		background: var(--color-surface);
 		border: 1px solid var(--color-border);
 		border-radius: 6px;
@@ -457,13 +458,13 @@
 		line-height: 1.5;
 	}
 
-	.edit-actions {
+	:global(.edit-actions) {
 		display: flex;
 		gap: 0.5rem;
 		margin-top: 1.5rem;
 	}
 
-	.btn-primary {
+	:global(.btn-primary) {
 		padding: 0.5rem 1rem;
 		border: none;
 		border-radius: 6px;
@@ -473,7 +474,7 @@
 		font-weight: 500;
 	}
 
-	.btn-danger {
+	:global(.btn-danger) {
 		padding: 0.5rem 1rem;
 		border: 1px solid var(--color-danger);
 		border-radius: 6px;
@@ -483,7 +484,7 @@
 		font-weight: 500;
 	}
 
-	.detail-footer {
+	:global(.detail-footer) {
 		display: flex;
 		justify-content: space-between;
 		margin-top: 2rem;
@@ -493,7 +494,7 @@
 		color: var(--color-text-muted);
 	}
 
-	.empty-state {
+	:global(.empty-state) {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -502,17 +503,17 @@
 		color: var(--color-text-muted);
 	}
 
-	.empty-icon { font-size: 3rem; margin-bottom: 1rem; }
-	.empty-state h2 { margin: 0; }
-	.empty-state p { margin: 0.5rem 0 0; }
+	:global(.empty-icon) { font-size: 3rem; margin-bottom: 1rem; }
+	:global(.empty-state :is(h2, .heading)) { margin: 0; }
+	:global(.empty-state p) { margin: 0.5rem 0 0; }
 
 	/* Decision Ledger */
-	.ledger-bar {
+	:global(.ledger-bar) {
 		border-top: 1px solid var(--color-border);
 		padding: 0.5rem 0;
 	}
 
-	.ledger-toggle {
+	:global(.ledger-toggle) {
 		width: 100%;
 		display: flex;
 		align-items: center;
@@ -525,13 +526,13 @@
 		font-size: 0.8rem;
 	}
 
-	.ledger-entries {
+	:global(.ledger-entries) {
 		max-height: 200px;
 		overflow-y: auto;
 		padding: 0.5rem;
 	}
 
-	.ledger-entry {
+	:global(.ledger-entry) {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -540,7 +541,7 @@
 		border-bottom: 1px solid var(--color-border);
 	}
 
-	.ledger-action {
+	:global(.ledger-action) {
 		padding: 0.1rem 0.35rem;
 		border-radius: 3px;
 		background: var(--color-accent-bg);
@@ -550,12 +551,12 @@
 		font-size: 0.65rem;
 	}
 
-	.ledger-schema {
+	:global(.ledger-schema) {
 		font-family: 'JetBrains Mono', monospace;
 		flex: 1;
 	}
 
-	.ledger-time { color: var(--color-text-muted); }
-	.ledger-status.ok { color: #22c55e; }
-	.ledger-status.err { color: var(--color-danger); }
+	:global(.ledger-time) { color: var(--color-text-muted); }
+	:global(.ledger-status.ok) { color: #22c55e; }
+	:global(.ledger-status.err) { color: var(--color-danger); }
 </style>
