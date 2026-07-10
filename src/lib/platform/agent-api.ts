@@ -49,6 +49,12 @@ let listen: ((event: string, handler: (e: { payload: unknown }) => void) => Prom
 
 async function ensureTauri(): Promise<boolean> {
   if (!browser) return false;
+  // Honest IPC-host detection: the @tauri-apps/api/core module RESOLVES in a plain
+  // browser (it's an installed dep), so a successful import must NOT be treated as
+  // "runtime available". Only a real Tauri window injects __TAURI_INTERNALS__. Without
+  // this guard the browser falsely reports the agent runtime present and mounts a
+  // hollow, non-functional chat bridge (C-NOSTUB-001 violation).
+  if (!('__TAURI_INTERNALS__' in window)) return false;
   if (invoke) return true;
 
   try {
