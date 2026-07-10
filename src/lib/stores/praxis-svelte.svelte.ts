@@ -134,11 +134,35 @@ export function initPraxisFacts(): void {
 	}
 
 	// 3. Seed nav.visible from currently registered plugins (always ephemeral)
-	const navItems = toSidebarItems(getAllNavItems());
-	// Platform nav items (always present)
+	seedNavItems();
+
+	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
+	emitFact('app.ready', { ready: true });
+}
+
+/**
+ * (Re)derive and emit nav.visible from the platform's static nav items plus the
+ * nav items contributed by every ACTIVE registry plugin (getAllNavItems()).
+ *
+ * The agent surface (Agens → /agent) is NOT hardcoded here — it is contributed
+ * by the agens agent-type plugin and only appears once that plugin is active.
+ * Because plugin activation is async, the layout calls this again after
+ * activateAll() resolves so registry-derived items (e.g. Agens) flow in.
+ *
+ * Registry NavItems may carry an optional `order`; platform items use the
+ * baseline positions below and registry items are placed by ascending `order`
+ * (unordered items keep registration order, appended after the platform block).
+ */
+export function seedNavItems(): void {
+	const pluginItems = getAllNavItems();
+	const ordered = [...pluginItems].sort(
+		(a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER),
+	);
+	const navItems = toSidebarItems(ordered);
+	// Platform nav items (always present). No hardcoded agent/chat entry — the
+	// agent surface is registry-derived from the agens plugin.
 	navItems.unshift(
 		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
-		{ href: '/chat', label: 'Chat', icon: '💬', badge: undefined },
 		{ href: '/canvas', label: 'Canvas', icon: '🎨', badge: undefined },
 		{ href: '/operations', label: 'Operations', icon: '🖥️', badge: undefined },
 		{ href: '/inventory', label: 'Inventory', icon: '📦', badge: undefined },
@@ -150,9 +174,6 @@ export function initPraxisFacts(): void {
 		{ href: '/help', label: 'Help', icon: '❓', badge: undefined },
 	);
 	emitFact('nav.visible', { items: navItems });
-
-	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
-	emitFact('app.ready', { ready: true });
 }
 
 // ─── Theme Helpers ────────────────────────────────────────────────────────────

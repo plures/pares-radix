@@ -4,15 +4,16 @@
 	import Breadcrumbs from '$lib/components/Breadcrumbs.svelte';
 	import type { CommandItem } from '@plures/design-dojo';
 	import { goto } from '$app/navigation';
-	import { query, initPraxisFacts, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
+	import { query, initPraxisFacts, seedNavItems, toggleTheme, getTheme, emitFact } from '$lib/stores/praxis-svelte.svelte.js';
 	import {
 		createPluresDBAdapter,
 		getSharedGraph,
 		setSharedGraph,
 		setSharedAdapter,
 	} from '$lib/stores/plures-db-adapter.js';
-	import { activateAll } from '$lib/platform/plugin-loader.js';
+	import { activateAll, registerPlugin } from '$lib/platform/plugin-loader.js';
 	import { createPluginContext } from '$lib/platform/plugin-context.js';
+	import { agensPlugin } from '$lib/plugins/agens/index.js';
 	import { shellModule } from '$lib/praxis/shell.js';
 	import { agensModule } from '$lib/praxis/agens.js';
 	import { designModule, buildSchemaRegistry } from '$lib/praxis/design.js';
@@ -58,6 +59,11 @@
 		);
 		initPraxisFacts();
 
+		// Register the agens agent-type plugin before activation so its nav item
+		// (💬 Agens → /agent) flows through getAllNavItems() → toSidebarItems().
+		// registerPlugin is idempotent (dedupes by id), so a hot-reload re-run is safe.
+		registerPlugin(agensPlugin);
+
 		// Seed the Operations-as-Intent demo scene (real fleet + constraint-checked
 		// state) through the sanctioned emitFact path. Idempotent + hydration-safe:
 		// wireOperationsScene no-ops if the fleet fact was already restored from
@@ -89,7 +95,11 @@
 				const startup = query('admin.plugins.startup') as Record<string, boolean> | undefined;
 				return isPluginEnabled(enabled, pluginId) && shouldActivateOnStartup(startup, pluginId);
 			},
-		);
+		).then(() => {
+			// Re-derive nav.visible now that agent-type/registry plugins are active,
+			// so registry-contributed items (e.g. Agens → /agent) appear in the sidebar.
+			seedNavItems();
+		});
 
 		// Initialize the design mode schema registry from all loaded praxis modules
 		const schemas = buildSchemaRegistry(shellModule, agensModule, designModule, operationsModule, adminModule);

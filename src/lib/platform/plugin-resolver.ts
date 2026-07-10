@@ -27,6 +27,8 @@ export interface PluginSource {
 export interface PluginManifest {
   id: string;
   name: string;
+  /** Surface class; defaults to panel. Discriminates panel plugins from agent-runtime plugins. */
+  type?: 'panel' | 'agent';
   version: string;
   description: string;
   author: string;

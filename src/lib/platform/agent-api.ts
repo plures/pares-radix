@@ -6,7 +6,8 @@
  *
  * Architecture:
  * - In Tauri: Svelte → invoke() → Rust agent runtime → model API → response
- * - In browser: Svelte → mock/MCP fallback → simulated response
+ * - In browser: no agent runtime — calls return a typed capability-unavailable
+ *   signal so callers render a real "desktop only" empty-state (no fake chat).
  *
  * Every call flows through PluresDB for persistence and Chronos for logging.
  */
@@ -61,21 +62,56 @@ async function ensureTauri(): Promise<boolean> {
   }
 }
 
+// ── Capability Detection ────────────────────────────────────────────────────────
+
+/**
+ * Whether the real agent runtime (Tauri IPC bridge) is available in this
+ * render context. Wraps ensureTauri(). In browser mode this is false and the
+ * agent surface must render a real "desktop only" empty-state rather than fake
+ * a conversation.
+ */
+export async function agentRuntimeAvailable(): Promise<boolean> {
+  return ensureTauri();
+}
+
+/**
+ * Typed signal returned by sendMessage when no agent runtime is available.
+ * Callers must handle this explicitly; it is NOT a fabricated response.
+ */
+export interface AgentRuntimeUnavailable {
+  unavailable: true;
+  capability: 'agent-runtime';
+}
+
+/** Type guard for the capability-unavailable signal. */
+export function isAgentRuntimeUnavailable(
+  v: unknown,
+): v is AgentRuntimeUnavailable {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    (v as AgentRuntimeUnavailable).unavailable === true &&
+    (v as AgentRuntimeUnavailable).capability === 'agent-runtime'
+  );
+}
+
 // ── Chat API ──────────────────────────────────────────────────────────────────
 
 /**
  * Send a message to the agent and get a response.
  *
  * In Tauri mode: calls send_message command, which goes through the full
- * agent runtime (cerebellum → model → tool calls → response).
+ * agent runtime (cerebellum → model → tool calls → response). Returns the
+ * final response text. For streaming, use onChunk callback.
  *
- * Returns the final response text. For streaming, use onChunk callback.
+ * In browser mode: no agent runtime exists — returns a typed
+ * AgentRuntimeUnavailable signal instead of fabricating a reply.
  */
 export async function sendMessage(
   content: string,
   requestId: string,
   onChunk?: (chunk: ModelChunkEvent) => void,
-): Promise<string> {
+): Promise<string | AgentRuntimeUnavailable> {
   const hasTauri = await ensureTauri();
 
   if (hasTauri && invoke && listen) {
@@ -99,8 +135,8 @@ export async function sendMessage(
     }
   }
 
-  // Browser fallback — no agent runtime
-  return `[No agent runtime available — running in browser mode. Your message: "${content}"]`;
+  // No agent runtime (browser mode) — real capability-unavailable signal.
+  return { unavailable: true, capability: 'agent-runtime' };
 }
 
 /**

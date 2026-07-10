@@ -16,6 +16,12 @@ export interface RadixPlugin {
   name: string;
   /** SemVer version */
   version: string;
+  /**
+   * Surface class; defaults to 'panel'. Runtime discriminator: nav-derivation
+   * and the agent-surface route key off this. 'agent' plugins contribute the
+   * agent console surface; 'panel' plugins are ordinary panels.
+   */
+  type?: 'panel' | 'agent';
   /** Emoji or icon path */
   icon: string;
   /** Short description */
@@ -79,6 +85,8 @@ export interface NavItem {
   label: string;
   /** Emoji or icon */
   icon: string;
+  /** Sort order within the nav (lower = earlier); unset items keep registration order */
+  order?: number;
   /** Sub-items for nested navigation */
   children?: NavItem[];
   /** Badge count (e.g., unread items) */

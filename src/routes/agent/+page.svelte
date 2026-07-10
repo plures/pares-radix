@@ -5,6 +5,8 @@
     sendMessage as apiSendMessage,
     getConversationHistory,
     listenEvent,
+    agentRuntimeAvailable,
+    isAgentRuntimeUnavailable,
     type ChatMessage,
   } from '$lib/platform/agent-api.js';
 
@@ -14,8 +16,16 @@
   let inputValue = $state('');
   // eslint-disable-next-line plures/no-raw-stores
   let isStreaming = $state(false);
+  // Real capability gate — null until detected, then true/false. Drives the
+  // empty-state: in browser mode there is NO agent runtime, so we render a real
+  // "desktop only" notice instead of fabricating a conversation.
+  // eslint-disable-next-line plures/no-raw-stores
+  let runtimeReady = $state<boolean | null>(null);
 
   onMount(async () => {
+    runtimeReady = await agentRuntimeAvailable();
+    if (!runtimeReady) return; // No runtime — show empty-state, wire nothing.
+
     const history = await getConversationHistory();
     messages = history.map((entry, i) => ({
       id: `history-${i}`,
@@ -37,7 +47,7 @@
   });
 
   async function sendMessage() {
-    if (!inputValue.trim() || isStreaming) return;
+    if (!inputValue.trim() || isStreaming || !runtimeReady) return;
     const requestId = crypto.randomUUID();
     const userMsg: ChatMessage = {
       id: `user-${requestId}`, role: 'user', content: inputValue.trim(),
@@ -53,7 +63,7 @@
     inputValue = '';
     isStreaming = true;
     try {
-      const finalResponse = await apiSendMessage(query, requestId, (chunk) => {
+      const result = await apiSendMessage(query, requestId, (chunk) => {
         const idx = messages.findIndex((m) => m.id === requestId);
         if (idx !== -1) {
           messages[idx] = { ...messages[idx], content: messages[idx].content + chunk.text, streaming: !chunk.done };
@@ -61,8 +71,15 @@
         }
       });
       const idx = messages.findIndex((m) => m.id === requestId);
-      if (idx !== -1 && !messages[idx].content) {
-        messages[idx] = { ...messages[idx], content: finalResponse, streaming: false };
+      if (isAgentRuntimeUnavailable(result)) {
+        // Runtime dropped out mid-session — reflect it honestly, don't fake a reply.
+        runtimeReady = false;
+        if (idx !== -1) {
+          messages[idx] = { ...messages[idx], content: 'Agent runtime unavailable — desktop only.', streaming: false };
+          messages = [...messages];
+        }
+      } else if (idx !== -1 && !messages[idx].content) {
+        messages[idx] = { ...messages[idx], content: result, streaming: false };
         messages = [...messages];
       } else if (idx !== -1) {
         messages[idx] = { ...messages[idx], streaming: false };
@@ -86,40 +103,58 @@
   }
 </script>
 
-<svelte:head><title>Chat — Radix</title></svelte:head>
+<svelte:head><title>Agens — Radix</title></svelte:head>
 
 <Box gap="0" class="chat-page">
   <Box as="header" direction="row" justify="space-between" align="center" padding={3}>
-    <Heading level={2}>Agent Console</Heading>
-    <Button variant="ghost" onclick={() => { messages = []; }}>Clear</Button>
-  </Box>
-
-  <Box class="chat-messages" padding={4} gap="12px">
-    {#if messages.length === 0}
-      <Box align="center" padding={8} gap="12px">
-        <Text size="2rem">💬</Text>
-        <Text as="p" color="var(--color-text-muted)">Start a conversation with your AI agent.</Text>
-      </Box>
-    {:else}
-      {#each messages as msg (msg.id)}
-        <Box class="message {msg.role}" padding={3} gap="4px">
-          <Box direction="row" justify="space-between" align="center">
-            <Text weight="600" size="0.8rem">{msg.role === 'user' ? '👤 You' : '🤖 Agent'}</Text>
-            <Text size="0.75rem" color="var(--color-text-muted)">{formatTime(msg.timestamp)}</Text>
-          </Box>
-          <Text as="p">{msg.content || '...'}</Text>
-          {#if msg.streaming}<Text size="0.75rem" color="var(--color-accent)">●●●</Text>{/if}
-        </Box>
-      {/each}
+    <Heading level={2}>Agens</Heading>
+    {#if runtimeReady}
+      <Button variant="ghost" onclick={() => { messages = []; }}>Clear</Button>
     {/if}
   </Box>
 
-  <Box as="footer" direction="row" gap="8px" padding={3} align="end">
-    <Box style="flex: 1;">
-      <TextArea bind:value={inputValue} placeholder="Type a message..." rows={2} onkeydown={handleKeydown} />
+  {#if runtimeReady === false}
+    <!-- Real capability-unavailable empty state (browser / non-desktop). -->
+    <Box align="center" justify="center" padding={8} gap="12px" class="chat-messages">
+      <Text size="2.5rem">🖥️</Text>
+      <Heading level={3}>Agent runtime unavailable</Heading>
+      <Text as="p" color="var(--color-text-muted)">
+        The Agens console runs on the pares-agens desktop runtime. Open Radix as
+        the desktop app to chat with your agent — it is not available in the browser.
+      </Text>
     </Box>
-    <Button variant="primary" disabled={!inputValue.trim() || isStreaming} onclick={sendMessage}>Send</Button>
-  </Box>
+  {:else if runtimeReady === null}
+    <Box align="center" justify="center" padding={8} class="chat-messages">
+      <Text as="p" color="var(--color-text-muted)">Detecting agent runtime…</Text>
+    </Box>
+  {:else}
+    <Box class="chat-messages" padding={4} gap="12px">
+      {#if messages.length === 0}
+        <Box align="center" padding={8} gap="12px">
+          <Text size="2rem">💬</Text>
+          <Text as="p" color="var(--color-text-muted)">Start a conversation with your AI agent.</Text>
+        </Box>
+      {:else}
+        {#each messages as msg (msg.id)}
+          <Box class="message {msg.role}" padding={3} gap="4px">
+            <Box direction="row" justify="space-between" align="center">
+              <Text weight="600" size="0.8rem">{msg.role === 'user' ? '👤 You' : '🤖 Agent'}</Text>
+              <Text size="0.75rem" color="var(--color-text-muted)">{formatTime(msg.timestamp)}</Text>
+            </Box>
+            <Text as="p">{msg.content || '...'}</Text>
+            {#if msg.streaming}<Text size="0.75rem" color="var(--color-accent)">●●●</Text>{/if}
+          </Box>
+        {/each}
+      {/if}
+    </Box>
+
+    <Box as="footer" direction="row" gap="8px" padding={3} align="end">
+      <Box style="flex: 1;">
+        <TextArea bind:value={inputValue} placeholder="Type a message..." rows={2} onkeydown={handleKeydown} />
+      </Box>
+      <Button variant="primary" disabled={!inputValue.trim() || isStreaming} onclick={sendMessage}>Send</Button>
+    </Box>
+  {/if}
 </Box>
 
 <style>
