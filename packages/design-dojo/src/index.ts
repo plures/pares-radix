@@ -64,6 +64,21 @@ export { default as DatacenterBuilding } from './infra/DatacenterBuilding.svelte
 export { default as RegionMap } from './infra/RegionMap.svelte';
 export { default as PluginModule } from './infra/PluginModule.svelte';
 
+// Interactive pane primitives (Wt-prefixed to avoid collision with the
+// non-interactive npm SplitPane/Pane/Tabs exports above). Thin Svelte 5
+// adapters over the framework-free logic in src/lib/panes/.
+export { default as WtSplitPane } from './panes/WtSplitPane.svelte';
+export { default as WtPane } from './panes/WtPane.svelte';
+export { default as WtPaneTabs } from './panes/WtPaneTabs.svelte';
+export type {
+	Orientation as WtOrientation,
+	TabDescriptor as WtTabDescriptor,
+	DragItem as WtDragItem,
+	DropTarget as WtDropTarget,
+	DndSession as WtDndSession,
+	MoveCommand as WtMoveCommand
+} from './panes/types.js';
+
 export type CommandItem = { id: string; label: string; icon?: string; action: () => void; };
 
 export type { BeaconStatus, RackUnit, RegionTone, DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps } from './types-local.js';
