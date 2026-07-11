@@ -53,7 +53,9 @@ export { default as Link } from './Link.svelte';
 export { default as CodeBlock } from './CodeBlock.svelte';
 export { default as Canvas2D } from './Canvas2D.svelte';
 export { default as PluginContentArea } from './PluginContentArea.svelte';
+export { default as DataGrid } from './DataGrid.svelte';
+export { default as SchemaForm } from './SchemaForm.svelte';
 
 export type CommandItem = { id: string; label: string; icon?: string; action: () => void; };
 
-export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps } from './types-local.js';
+export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps, SchemaFieldType, SchemaField, EntitySchema, DataRow, SortDirection, DataGridProps, SchemaFormErrors, SchemaFormProps } from './types-local.js';

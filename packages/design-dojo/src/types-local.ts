@@ -87,3 +87,63 @@ export interface SelectProps {
   class?: string;
   onchange?: (e: Event) => void;
 }
+
+/**
+ * Entity-schema primitives (Phase B, design-dojo data kit).
+ * A schema is an ordered list of field descriptors. `DataGrid` derives its
+ * columns from it and `SchemaForm` derives its inputs from it.
+ */
+export type SchemaFieldType = 'string' | 'number' | 'boolean' | 'datetime' | 'select';
+
+export interface SchemaField {
+  name: string;
+  type: SchemaFieldType;
+  description?: string;
+  /** Human-friendly column/label override; defaults to a titleised `name`. */
+  label?: string;
+  /** Options for `select` fields. */
+  options?: SelectOption[];
+  required?: boolean;
+  /** Hide from the grid (still available to forms) or vice-versa. */
+  hidden?: boolean;
+}
+
+export interface EntitySchema {
+  name?: string;
+  fields: SchemaField[];
+}
+
+export type DataRow = Record<string, unknown>;
+
+export type SortDirection = 'asc' | 'desc';
+
+export interface DataGridProps {
+  schema: EntitySchema;
+  rows: DataRow[];
+  /** Rows per page; 0 disables pagination. */
+  pageSize?: number;
+  /** Enable the per-column filter row. */
+  filterable?: boolean;
+  /** Enable clickable column-header sorting. */
+  sortable?: boolean;
+  /** Row-click handler (receives the row record). */
+  onRowClick?: (row: DataRow) => void;
+  class?: string;
+}
+
+export type SchemaFormErrors = Record<string, string>;
+
+export interface SchemaFormProps {
+  schema: EntitySchema;
+  /** Initial/edit record; omit for a blank create form. */
+  value?: DataRow;
+  /** Optional synchronous validation hook returning field -> message. */
+  validate?: (record: DataRow) => SchemaFormErrors;
+  submitLabel?: string;
+  cancelLabel?: string;
+  disabled?: boolean;
+  /** Fired with the assembled record when the form validates + submits. */
+  onsubmit?: (record: DataRow) => void;
+  oncancel?: () => void;
+  class?: string;
+}
