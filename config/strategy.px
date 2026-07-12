@@ -11,20 +11,31 @@
 #   - pares-agens/crates/cli/src/{migrate,openclaw}.rs → migration orchestrator ALREADY EXISTS
 #   - pares-radix/docs/transition/migration-plan.md    → the plan (do not reinvent)
 #
-# ARCHITECTURE (recon-verified): dependency is ONE-WAY agens → radix (git-tag pinned).
-#   pares-agens = the DEPLOYABLE agent host (the OpenClaw replacement; bin `pares-agens`).
-#   pares-radix = the PLATFORM it links (event spine, procedure/task executor, .px engine,
-#                 PluresDB bridge, model pool, subagent+RSI spine, Tauri desktop shell).
-#   The proactive loop's RUNTIME lives in agens; its LOGIC/DATA lives in radix .px. Correct.
+# ARCHITECTURE (kbristol 2026-07-11 — the VS Code / GitHub Copilot model):
+#   pares-radix = the APPLICATION / platform = VS CODE. The deployable you install and RUN
+#                 (event loop, procedure/task executor, .px engine, PluresDB bridge, model pool,
+#                 channels, subagent+RSI spine, Tauri desktop shell, AND the extension host in
+#                 crates/radix-core/src/plugins/). THIS is what replaces OpenClaw and ships to
+#                 desktop + phone.
+#   pares-agens = an EXTENSION / plugin loaded INTO radix = GITHUB COPILOT. Provides the
+#                 cognition/agent-IP capability (delegation, headroom, model/bitnet) through
+#                 radix's plugin system. It is NOT a standalone app and does NOT own the runtime.
+#   Correct dependency shape: radix does NOT depend on agens (verified: radix-core/Cargo.toml has
+#   no agens dep). The app must not depend on its extension.
+#
+#   KNOWN DRIFT (unfinished extraction): radix-core still describes itself as "modules extracted
+#   from pares-agens-core, which depends on this crate" and agens still carries standalone-app
+#   scaffolding (a duplicate bin `pares-agens`). That is the OLD inverted (agens=app) history not
+#   yet fully cleaned up. Finishing agens-as-extension is real backlog (see blk:agens-not-yet-extension).
 #
 # THE CENTRAL INSIGHT: the rubric scores CAPABILITY-EXISTS (it reads 100% across all 10
 # categories as of 2026-05-15) — yet kbristol is STILL on OpenClaw. So "100% parity" on paper
-# is NOT migration-done. The real bar is VERIFIED_RUNNING: the capability proven running on
-# agens AND replacing the OpenClaw equivalent for kbristol, on desktop AND phone. Every category
-# below therefore carries verified_running (default false) alongside its rubric score.
+# is NOT migration-done. The real bar is VERIFIED_RUNNING: the capability proven running in the
+# radix APP (with the agens extension loaded) AND replacing the OpenClaw equivalent for kbristol,
+# on desktop AND phone. Every category below carries verified_running (default false).
 #
 # .px-first (C-DEV-001): objectives + backlog are DATA here; ranking/initiation LOGIC lives in
-# work-prioritization.px + the loop; the agens/agenda crate is only the IO/scheduler boundary.
+# work-prioritization.px + the loop; the radix plugin/agenda crates are only the IO boundary.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Strategic objectives — top of the priority hierarchy (kbristol 2026-07-11)
@@ -34,8 +45,8 @@ config objective_parity:
   id: "obj:parity"
   rank: 1
   title: "Pares-agens/radix parity with OpenClaw"
-  definition: "agens (host) + radix (platform) natively do everything OpenClaw does for kbristol"
-  done_when: "every rubric category is verified_running (proven running on agens AND replacing OpenClaw), not merely scored 100% on capability-exists"
+  definition: "the radix APP (with the agens extension loaded) natively does everything OpenClaw does for kbristol"
+  done_when: "every rubric category is verified_running in the radix app, not merely scored 100% on capability-exists"
   measured_by: "memory/radix-parity-rubric.md (canonical 10-category weighted rubric)"
   source: "kbristol 2026-07-11"
 
@@ -43,8 +54,8 @@ config objective_migration:
   id: "obj:migration"
   rank: 2
   title: "Migration to pares-agens/radix"
-  definition: "cut over to agens/radix as the daily driver; retire the OpenClaw dependency for kbristol"
-  done_when: "agens runs as kbristol's assistant (Telegram + memory + cron + tools + proactive loop) on desktop AND phone, migrated from ~/.openclaw, OpenClaw decommissioned"
+  definition: "cut over to the radix app (agens loaded as an extension) as the daily driver; retire the OpenClaw dependency for kbristol"
+  done_when: "the radix app runs as kbristol's assistant (Telegram + memory + cron + tools + proactive loop, agens extension loaded) on desktop AND phone, migrated from ~/.openclaw, OpenClaw decommissioned"
   depends_on: ["obj:parity", "obj:mobile"]
   prior_art: "pares-agens migrate --from ~/.openclaw (orchestrator EXISTS, dry-run capable) + pares-radix/docs/transition/migration-plan.md — RUN and VERIFY, do not reinvent"
   note: "slipped past the original June-1-2026 target; this backlog exists to drive it proactively"
@@ -54,7 +65,7 @@ config objective_mobile:
   id: "obj:mobile"
   rank: 3
   title: "Pares-radix iOS and Android support"
-  definition: "radix/agens runs on kbristol's phone (iOS + Android) — the surface that makes migration real, since OpenClaw reaches kbristol via Telegram on mobile"
+  definition: "the radix app runs on kbristol's phone (iOS + Android) — the surface that makes migration real, since OpenClaw reaches kbristol via Telegram on mobile"
   done_when: "the agent app installs + runs the assistant loop on iOS + Android; device-pairing gap closed"
   blocks: "obj:migration"
   source: "kbristol 2026-07-11; .praxis/decisions/ADR-0030-mobile-tauri-targets.md"
@@ -64,14 +75,14 @@ config objective_mobile:
 # These are the real top-of-queue: nothing migrates until the host binary builds.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-config blocker_agens_dupe_bin:
-  id: "blk:agens-dupe-bin"
-  objective: "obj:migration"
-  title: "agens cargo build --workspace broken — duplicate bin name pares-agens"
-  detail: "agens-cli and agens-plugin both declare bin pares-agens, causing an LNK1104 self-collision. Library graph 100% healthy; only the deployable host binary is blocked. Fix: rename one bin (e.g. cli to pares-agens-cli) or gate them."
-  gap: "trivial"
+config blocker_agens_not_extension:
+  id: "blk:agens-not-yet-extension"
+  objective: "obj:parity"
+  title: "agens still carries standalone-app scaffolding instead of being purely a radix extension"
+  detail: "Per the VS Code / Copilot model, radix is the app and agens is an extension loaded into radix's plugin host (crates/radix-core/src/plugins/). But agens still declares a standalone bin `pares-agens` (duplicated across agens-cli and agens-plugin, causing LNK1104), and radix-core's own docs still say it was 'extracted from pares-agens-core'. This is unfinished extraction from the OLD inverted (agens=app) shape. Finish it: agens loads as a radix extension; remove/repurpose the standalone-app bin scaffolding."
+  gap: "medium"
   blocks_migration: true
-  priority_hint: "highest — produces the deployable OpenClaw-replacement binary"
+  priority_hint: "architectural correctness gate — the migration target is the RADIX app, not an agens binary"
 
 config blocker_radix_tag_lag:
   id: "blk:radix-tag-lag"
@@ -85,7 +96,7 @@ config blocker_migration_unproven:
   id: "blk:migration-unproven"
   objective: "obj:migration"
   title: "migration orchestrator exists but is unproven end-to-end against real ~/.openclaw"
-  detail: "`pares-agens migrate --from ~/.openclaw --dry-run` emits memories/channels/state/procedures.json + MigrationReport. Not yet run against kbristol's live install nor loaded into a running agens. This is the verify gate for obj:migration."
+  detail: "`pares-agens migrate --from ~/.openclaw --dry-run` emits memories/channels/state/procedures.json + MigrationReport. Not yet run against kbristol's live install nor loaded into a running radix app. This is the verify gate for obj:migration."
   gap: "medium"
   blocks_migration: true
 
@@ -198,5 +209,5 @@ config cat_remote_node:
 config parity_math:
   formula: "overall_parity = sum(category_weight × category_rubric_score) / 100"
   capability_parity_2026_05_15: 100
-  verified_parity: "computed by work-prioritization.px from verified_running flags — starts near 0 because nothing is proven running-and-replacing-OpenClaw yet"
+  verified_parity: "computed by work-prioritization.px from verified_running flags — starts near 0 because nothing is proven running-in-the-radix-app-and-replacing-OpenClaw yet"
   rubric_authority: "memory/radix-parity-rubric.md — the ONLY rubric; no ad-hoc scoring"
