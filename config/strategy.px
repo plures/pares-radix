@@ -11,22 +11,31 @@
 #   - pares-agens/crates/cli/src/{migrate,openclaw}.rs → migration orchestrator ALREADY EXISTS
 #   - pares-radix/docs/transition/migration-plan.md    → the plan (do not reinvent)
 #
-# ARCHITECTURE (kbristol 2026-07-11 — the VS Code / GitHub Copilot model):
-#   pares-radix = the APPLICATION / platform = VS CODE. The deployable you install and RUN
-#                 (event loop, procedure/task executor, .px engine, PluresDB bridge, model pool,
-#                 channels, subagent+RSI spine, Tauri desktop shell, AND the extension host in
-#                 crates/radix-core/src/plugins/). THIS is what replaces OpenClaw and ships to
-#                 desktop + phone.
-#   pares-agens = an EXTENSION / plugin loaded INTO radix = GITHUB COPILOT. Provides the
-#                 cognition/agent-IP capability (delegation, headroom, model/bitnet) through
-#                 radix's plugin system. It is NOT a standalone app and does NOT own the runtime.
-#   Correct dependency shape: radix does NOT depend on agens (verified: radix-core/Cargo.toml has
-#   no agens dep). The app must not depend on its extension.
+# ARCHITECTURE (kbristol 2026-07-11 — ONE installed application; think installed app, NOT binaries):
+#   There is exactly ONE installed application: RADIX. Not "radix + agens", not "an agens host
+#   linking radix". One app. (Reasoning in binaries/[[bin]] targets was a category error.)
 #
-#   KNOWN DRIFT (unfinished extraction): radix-core still describes itself as "modules extracted
-#   from pares-agens-core, which depends on this crate" and agens still carries standalone-app
-#   scaffolding (a duplicate bin `pares-agens`). That is the OLD inverted (agens=app) history not
-#   yet fully cleaned up. Finishing agens-as-extension is real backlog (see blk:agens-not-yet-extension).
+#   radix ships WITH agens as the DEFAULT AGENT PLUGIN — bundled first-party, in the box, the way
+#   VS Code ships with built-in extensions. agens is the default cognition/agent extension, not a
+#   separate product and not optional-to-exist.
+#
+#   ONE core, THREE faces (a UX axis, NOT a migration gate): the single installed radix can run
+#   HEADLESS, or present a GUI, or present a TUI. These are presentation surfaces / clients over
+#   the same core — not different products.
+#
+#   THE INVARIANT: radix ALWAYS runs a background SERVICE / DAEMON. That daemon is what is always
+#   alive — receiving Telegram, running heartbeats/cron, holding sessions, executing the proactive
+#   loop, agens loaded as its default agent plugin. GUI/TUI ATTACH to the daemon as clients;
+#   headless IS the daemon with no attached UI. THIS is the OpenClaw-replacement shape: OpenClaw
+#   is a persistent gateway daemon reached via Telegram — radix must be the same. The daemon being
+#   solid + always-on is THE migration spine; the three faces are verification surfaces of it.
+#
+#   CURRENT STATE (probe 2026-07-11): radix HAS a plugin/extension host (radix-core/src/plugins/)
+#   and does NOT depend on agens (correct — app must not depend on its extension). BUT: agens is
+#   NOT yet declared as a bundled default plugin inside radix; there is no obvious Serve/Daemon
+#   always-on mode; only src-tauri (GUI) exists in-repo (no headless/TUI surface). So "one app,
+#   agens bundled, always-on daemon, three faces" is substantially BUILD, not verify — real backlog.
+#   radix-core also still self-describes as "extracted from pares-agens-core" (old inverted history).
 #
 # THE CENTRAL INSIGHT: the rubric scores CAPABILITY-EXISTS (it reads 100% across all 10
 # categories as of 2026-05-15) — yet kbristol is STILL on OpenClaw. So "100% parity" on paper
@@ -45,8 +54,8 @@ config objective_parity:
   id: "obj:parity"
   rank: 1
   title: "Pares-agens/radix parity with OpenClaw"
-  definition: "the radix APP (with the agens extension loaded) natively does everything OpenClaw does for kbristol"
-  done_when: "every rubric category is verified_running in the radix app, not merely scored 100% on capability-exists"
+  definition: "the one installed radix app (agens bundled as the default agent plugin) natively does everything OpenClaw does for kbristol"
+  done_when: "every rubric category is verified_running in the radix daemon (agens loaded), reachable via its faces, not merely scored 100% on capability-exists"
   measured_by: "memory/radix-parity-rubric.md (canonical 10-category weighted rubric)"
   source: "kbristol 2026-07-11"
 
@@ -54,8 +63,8 @@ config objective_migration:
   id: "obj:migration"
   rank: 2
   title: "Migration to pares-agens/radix"
-  definition: "cut over to the radix app (agens loaded as an extension) as the daily driver; retire the OpenClaw dependency for kbristol"
-  done_when: "the radix app runs as kbristol's assistant (Telegram + memory + cron + tools + proactive loop, agens extension loaded) on desktop AND phone, migrated from ~/.openclaw, OpenClaw decommissioned"
+  definition: "cut over to the one installed radix app (always-on daemon, agens bundled as default agent plugin) as the daily driver; retire the OpenClaw dependency for kbristol"
+  done_when: "the radix daemon runs always-on as kbristol's assistant (Telegram + memory + cron + tools + proactive loop, agens loaded) reachable headless/GUI/TUI on desktop AND phone, migrated from ~/.openclaw, OpenClaw decommissioned"
   depends_on: ["obj:parity", "obj:mobile"]
   prior_art: "pares-agens migrate --from ~/.openclaw (orchestrator EXISTS, dry-run capable) + pares-radix/docs/transition/migration-plan.md — RUN and VERIFY, do not reinvent"
   note: "slipped past the original June-1-2026 target; this backlog exists to drive it proactively"
@@ -75,14 +84,23 @@ config objective_mobile:
 # These are the real top-of-queue: nothing migrates until the host binary builds.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-config blocker_agens_not_extension:
-  id: "blk:agens-not-yet-extension"
+config blocker_daemon_alwayson:
+  id: "blk:radix-daemon-alwayson"
+  objective: "obj:migration"
+  title: "radix has no hardened always-on background service/daemon mode (the migration spine)"
+  detail: "THE invariant: radix must always run a background daemon (receives Telegram, runs heartbeats/cron, holds sessions, runs the proactive loop, agens loaded) with headless/GUI/TUI as clients that attach to it. Probe 2026-07-11 found no obvious Serve/Daemon always-on command and only src-tauri (GUI) in-repo. This is THE OpenClaw-replacement shape and the migration spine — nothing cuts over until the daemon is solid and always-on."
+  gap: "large"
+  blocks_migration: true
+  priority_hint: "highest — the always-on daemon is the migration spine; the three faces are verification surfaces of it"
+
+config blocker_agens_bundled_default:
+  id: "blk:agens-bundled-default"
   objective: "obj:parity"
-  title: "agens still carries standalone-app scaffolding instead of being purely a radix extension"
-  detail: "Per the VS Code / Copilot model, radix is the app and agens is an extension loaded into radix's plugin host (crates/radix-core/src/plugins/). But agens still declares a standalone bin `pares-agens` (duplicated across agens-cli and agens-plugin, causing LNK1104), and radix-core's own docs still say it was 'extracted from pares-agens-core'. This is unfinished extraction from the OLD inverted (agens=app) shape. Finish it: agens loads as a radix extension; remove/repurpose the standalone-app bin scaffolding."
+  title: "agens is not yet declared as radix's bundled DEFAULT agent plugin"
+  detail: "Per the model, radix ships WITH agens as the default agent plugin (in the box, like VS Code built-in extensions). Probe 2026-07-11: agens is NOT declared as a bundled default plugin inside radix's plugin host, and agens still carries old standalone-app scaffolding (dup bin pares-agens) + radix-core still self-describes as 'extracted from pares-agens-core'. Finish it: agens registers/loads as radix's default agent plugin; remove standalone-app remnants."
   gap: "medium"
   blocks_migration: true
-  priority_hint: "architectural correctness gate — the migration target is the RADIX app, not an agens binary"
+  priority_hint: "architectural correctness — one app, agens bundled default"
 
 config blocker_radix_tag_lag:
   id: "blk:radix-tag-lag"
@@ -96,7 +114,7 @@ config blocker_migration_unproven:
   id: "blk:migration-unproven"
   objective: "obj:migration"
   title: "migration orchestrator exists but is unproven end-to-end against real ~/.openclaw"
-  detail: "`pares-agens migrate --from ~/.openclaw --dry-run` emits memories/channels/state/procedures.json + MigrationReport. Not yet run against kbristol's live install nor loaded into a running radix app. This is the verify gate for obj:migration."
+  detail: "`pares-agens migrate --from ~/.openclaw --dry-run` emits memories/channels/state/procedures.json + MigrationReport. Not yet run against kbristol's live install nor loaded into a running radix daemon. This is the verify gate for obj:migration."
   gap: "medium"
   blocks_migration: true
 
@@ -209,5 +227,5 @@ config cat_remote_node:
 config parity_math:
   formula: "overall_parity = sum(category_weight × category_rubric_score) / 100"
   capability_parity_2026_05_15: 100
-  verified_parity: "computed by work-prioritization.px from verified_running flags — starts near 0 because nothing is proven running-in-the-radix-app-and-replacing-OpenClaw yet"
+  verified_parity: "computed by work-prioritization.px from verified_running flags — starts near 0 because nothing is proven running-in-the-always-on-radix-daemon-and-replacing-OpenClaw yet"
   rubric_authority: "memory/radix-parity-rubric.md — the ONLY rubric; no ad-hoc scoring"
