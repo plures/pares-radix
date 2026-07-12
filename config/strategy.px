@@ -87,10 +87,11 @@ config objective_mobile:
 config blocker_daemon_alwayson:
   id: "blk:radix-daemon-alwayson"
   objective: "obj:migration"
-  title: "radix has no hardened always-on background service/daemon mode (the migration spine)"
-  detail: "THE invariant: radix must always run a background daemon (receives Telegram, runs heartbeats/cron, holds sessions, runs the proactive loop, agens loaded) with headless/GUI/TUI as clients that attach to it. Probe 2026-07-11 found no obvious Serve/Daemon always-on command and only src-tauri (GUI) in-repo. This is THE OpenClaw-replacement shape and the migration spine — nothing cuts over until the daemon is solid and always-on."
+  title: "radix has no headless always-on daemon entrypoint (the migration spine)"
+  detail: "THE invariant: radix always runs a background daemon (receives Telegram, runs heartbeats/cron, holds sessions, runs the proactive loop, agens loaded) with headless/GUI/TUI as clients. GROUND TRUTH (probe 2026-07-11): the daemon ENGINE already exists as library APIs — spine/pipeline.rs::run(rx) (async event loop over SpineEvent) + spine/runtime.rs::spawn() (JoinHandle). But the ONLY fn main is src-tauri (GUI window shell) and it boots only the UI (tray/window/app-booted) — it does NOT start the spine runtime. Nothing in-repo boots the always-on core. BUILD (not verify): (1) factor core-boot (spine runtime spawn + channel spine wiring + plugin-host load) out of the Tauri shell into a shared radix-host lib; (2) add a headless daemon entrypoint that calls it and stays alive; (3) GUI/TUI become clients of it. Assembles REAL existing pieces (no stubs)."
   gap: "large"
   blocks_migration: true
+  status: "greenfield — mine to drive (commit history shows no in-flight daemon work; releases are auto-cut)"
   priority_hint: "highest — the always-on daemon is the migration spine; the three faces are verification surfaces of it"
 
 config blocker_agens_bundled_default:
