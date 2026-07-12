@@ -1,3 +1,7 @@
+## [1.55.22] — 2026-07-12
+
+- fix(strategy): ONE installed app model — radix daemon + agens bundled default (3708c82)
+
 ## [1.55.21] — 2026-07-12
 
 - fix(strategy): correct architecture model — radix=app, agens=extension (cb4167f)
