@@ -57,6 +57,12 @@ domain plugin like inventory needs. Add, in priority order:
       (field types → inputs, validation from `.px` constraints). The write path for any
       collection. This is what makes a plugin "customizable without code."
 - [ ] **`EntityList` / `DetailView`** — master/detail surfaces bound to a collection + a node.
+- [ ] **`GraphView`** (ADR-0032) — ego-centric, space-adaptive graph-navigation primitive (peer to
+      `DataGrid`): a focus node centered among its edge-linked stubs; selecting a stub re-centers it
+      (host-mediated PluresDB walk); "graph-flex" layout that reflows to available space
+      (phone → multi-monitor, no breakpoint forks) prioritizing the center; auto-summarization
+      (icon→title→fields→full), per-node zoom/expand with minimum-aware neighbor reflow, drill-down
+      actions. GUI + TUI tokens. Agens-drivable via host-mediated focus-change (ADR-0031).
 - [ ] **`FieldEditor` / `SchemaDesigner`** — lets a user (or agens) add/rename/retype fields on a
       customizable entity at runtime, persisting the schema delta to PluresDB (see Phase E).
 - [ ] **`FilterBar`, `Toolbar`, `Badge`, `Tag`, `EmptyState`** — the supporting surface a
