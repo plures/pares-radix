@@ -87,12 +87,12 @@ config objective_mobile:
 config blocker_daemon_alwayson:
   id: "blk:radix-daemon-alwayson"
   objective: "obj:migration"
-  title: "radix has no headless always-on daemon entrypoint (the migration spine)"
-  detail: "THE invariant: radix always runs a background daemon (receives Telegram, runs heartbeats/cron, holds sessions, runs the proactive loop, agens loaded) with headless/GUI/TUI as clients. GROUND TRUTH (probe 2026-07-11): the daemon ENGINE already exists as library APIs — spine/pipeline.rs::run(rx) (async event loop over SpineEvent) + spine/runtime.rs::spawn() (JoinHandle). But the ONLY fn main is src-tauri (GUI window shell) and it boots only the UI (tray/window/app-booted) — it does NOT start the spine runtime. Nothing in-repo boots the always-on core. BUILD (not verify): (1) factor core-boot (spine runtime spawn + channel spine wiring + plugin-host load) out of the Tauri shell into a shared radix-host lib; (2) add a headless daemon entrypoint that calls it and stays alive; (3) GUI/TUI become clients of it. Assembles REAL existing pieces (no stubs)."
-  gap: "large"
+  title: "the always-on daemon EXISTS (agens serve) and BUILDS — the gate is verifying it runs as kbristol's assistant, not building it"
+  detail: "CORRECTION (build-verified 2026-07-11, C-TEST-001): the always-on daemon is NOT greenfield. `pares-agens serve` is a fully-wired headless daemon ('Run the agent as a headless daemon with a channel adapter') that boots Telegram + model/deep-model (Copilot auth) + embeddings + Brave + headroom compression + PluresDB runtime-state + sync, initializes TaskManager+StateStore via ServeSpine, and dispatches through a full ProcedureRegistry. The `pares-agens` bin BUILDS CLEAN (cargo build -p pares-agens-cli --bin pares-agens = Finished, 1m40s) and RUNS (--version = 1.14.0; serve --help works). Earlier 'daemon greenfield/unbuilt' + 'blk:agens-dupe-bin LNK1104' conclusions were WRONG — made by inspecting only the RADIX repo and stale notes; the daemon lives in AGENS' CLI. Bins are unique (cli=pares-agens, agens-plugin=agens-host); NO dup-bin collision. radix's build_default_reactive_runtime (doc: 'what the cognition serve loop calls at startup') is the assembly seam agens serve builds on. THE REAL GATE (verify, not build): run `pares-agens serve` against kbristol's migrated ~/.openclaw state and confirm it replaces the OpenClaw assistant on desktop, then phone."
+  gap: "medium"
   blocks_migration: true
-  status: "greenfield — mine to drive (commit history shows no in-flight daemon work; releases are auto-cut)"
-  priority_hint: "highest — the always-on daemon is the migration spine; the three faces are verification surfaces of it"
+  status: "daemon EXISTS + BUILDS + RUNS — remaining work is migration-verify (run against live ~/.openclaw), NOT construction"
+  priority_hint: "highest — verify the existing daemon runs as kbristol's assistant; the three faces are its clients"
 
 config blocker_agens_bundled_default:
   id: "blk:agens-bundled-default"
