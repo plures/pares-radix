@@ -1,3 +1,7 @@
+## [1.55.21] — 2026-07-12
+
+- fix(strategy): correct architecture model — radix=app, agens=extension (cb4167f)
+
 ## [1.55.20] — 2026-07-12
 
 - Merge: strategy.px — objectives + parity/migration/mobile backlog as .px data (a46d151)
