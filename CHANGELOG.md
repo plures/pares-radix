@@ -1,3 +1,8 @@
+## [1.55.23] — 2026-07-12
+
+- fix(strategy): CORRECTION — always-on daemon EXISTS (agens serve), build-verified (c3fa49e)
+- chore(strategy): pin daemon build spec from ground-truth probe (0dc90a3)
+
 ## [1.55.22] — 2026-07-12
 
 - fix(strategy): ONE installed app model — radix daemon + agens bundled default (3708c82)
