@@ -1,3 +1,16 @@
+## [1.55.20] — 2026-07-12
+
+- Merge: strategy.px — objectives + parity/migration/mobile backlog as .px data (a46d151)
+- feat(strategy): objectives + parity/migration/mobile backlog as .px data (05fea4e)
+- feat(design-dojo): implement GraphView ego-centric graph-flex primitive (ADR-0032) (b8b5cec)
+- feat(design-dojo): add FieldEditor + SchemaDesigner runtime-customization primitives (Phase B) (4be4ba3)
+- docs(roadmap): ADR-0032 GraphView — ego-centric space-adaptive graph navigation primitive (215918d)
+- feat(tooling): add create-radix-plugin scaffolder for canonical ADR-0024 plugins (ea2fb63)
+- feat(design-dojo): add schema-driven DataGrid and SchemaForm primitives (Phase B) (0e3c09a)
+- docs(roadmap): refresh strategic roadmap + ADR-0030 (mobile iOS/Android via Tauri) + ADR-0031 (plugins-as-tools for agens, user/agent-parity customization) (b31f164)
+- fix(spine): collapse identical if/else in run_command test (clippy if-same-then-else) (ebe3341)
+- feat(spine): morning_briefing .px procedure + run_command wiring (157bbd1)
+
 ## [1.55.19] — 2026-07-09
 
 - feat(demo): Operations-as-Intent praxis scene (real ontology, no mocks) (#465) (faa0686)
