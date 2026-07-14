@@ -1,3 +1,8 @@
+## [1.55.24] — 2026-07-14
+
+- fix(build): bump pluresdb deps to d08f88b (carries BOM-free praxis-lang 37be99e) (1456712)
+- docs(adr): accept ADR-0033 — .px as component composition language (view-trees over design-dojo primitives) (3f2ff6a)
+
 ## [1.55.23] — 2026-07-12
 
 - fix(strategy): CORRECTION — always-on daemon EXISTS (agens serve), build-verified (c3fa49e)
