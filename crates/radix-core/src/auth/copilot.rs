@@ -642,6 +642,24 @@ pub struct AvailableModel {
     pub capabilities: Vec<String>,
 }
 
+impl AvailableModel {
+    /// Context window for this model.
+    ///
+    /// Prefers the real discovered `max_input_tokens` from the provider; falls
+    /// back to a name-based estimate only when the provider did not report it.
+    /// Returns `None` only if there is genuinely no basis for an estimate
+    /// (never a fabricated placeholder).
+    pub fn context_window(&self) -> Option<u64> {
+        self.max_input_tokens
+            .or_else(|| Some(estimate_context_window(&self.id)))
+    }
+
+    /// Tier classification derived from the model id.
+    pub fn tier(&self) -> ModelTier {
+        classify_model_tier(&self.id)
+    }
+}
+
 /// Model tier classification for smart selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ModelTier {
@@ -801,7 +819,7 @@ fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
 
 /// Estimate a model's context window from its name.
 /// Returns conservative estimates; discovery-based `max_input_tokens` overrides these.
-fn estimate_context_window(model_id: &str) -> u64 {
+pub fn estimate_context_window(model_id: &str) -> u64 {
     let id = model_id.to_lowercase();
 
     // Premium models — typically largest context windows
@@ -842,7 +860,7 @@ fn estimate_context_window(model_id: &str) -> u64 {
 }
 
 /// Classify a model into a tier based on its identifier.
-fn classify_model_tier(model_id: &str) -> ModelTier {
+pub fn classify_model_tier(model_id: &str) -> ModelTier {
     let id = model_id.to_lowercase();
 
     // Premium tier — large reasoning models
