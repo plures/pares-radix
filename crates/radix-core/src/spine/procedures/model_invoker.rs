@@ -880,4 +880,58 @@ mod tests {
             "no task block should be injected when there are no open tasks"
         );
     }
+
+    /// Defect E, C-NOSTUB-001 / C-TEST-002: prove a persisted open task is
+    /// injected into the model grounding after a FRESH on-disk store handle
+    /// (simulates a process restart — not an in-memory cache). Uses real
+    /// SledStorage on disk, drops the writer handle, reopens fresh, and
+    /// verifies the task text reaches build_messages.
+    #[test]
+    fn injects_open_tasks_after_fresh_process_reload() {
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, SledStorage, StorageEngine};
+
+        let dir = std::env::temp_dir().join(format!("radix-e-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // --- Process 1: create + persist a task, then drop everything ---
+        {
+            let storage: Arc<dyn StorageEngine> =
+                Arc::new(SledStorage::open(&dir).expect("open sled (write)"));
+            let store = CrdtStore::default().with_persistence(storage);
+            let manager = Arc::new(TaskManager::new(Arc::new(store)));
+            manager.create_task("Finish the deploy verify", "chat-reload", vec![]);
+            assert_eq!(manager.open_tasks().len(), 1);
+        } // writer handle dropped — sled flushed to disk
+
+        // --- Process 2: fresh handle to the SAME on-disk store ---
+        let storage2: Arc<dyn StorageEngine> =
+            Arc::new(SledStorage::open(&dir).expect("reopen sled (read)"));
+        let store2 = CrdtStore::default().with_persistence(storage2);
+        let manager2 = Arc::new(TaskManager::new(Arc::new(store2)));
+        assert_eq!(
+            manager2.open_tasks().len(),
+            1,
+            "persisted task must survive a fresh store handle (process reload)"
+        );
+
+        let invoker =
+            ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+                .with_task_manager(Arc::clone(&manager2));
+        let messages = invoker.build_messages(
+            "what am I working on?",
+            Some("base system prompt"),
+            &json!({}),
+            &[],
+            "chat-reload",
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.role == "system" && m.content.contains("Finish the deploy verify")),
+            "reloaded persisted task must be injected into model grounding after restart"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
