@@ -68,6 +68,14 @@ impl CopilotAuth {
             api_base_url: DEFAULT_API_BASE.to_string(),
             client: reqwest::Client::builder()
                 .http1_only()
+                // Fail fast if the endpoint is unreachable, and abort a stream
+                // that goes silent (server accepted the connection but stops
+                // sending SSE data — a real failure mode that otherwise hangs
+                // the whole agentic turn forever / eternal Telegram hourglass).
+                // read_timeout is per-read, so it does NOT cap legitimately long
+                // streams — only a stalled one with no bytes for the interval.
+                .connect_timeout(std::time::Duration::from_secs(20))
+                .read_timeout(std::time::Duration::from_secs(120))
                 .build()
                 .expect("failed to build HTTP client"),
         }
@@ -281,6 +289,12 @@ impl CopilotModelClient {
             model,
             client: reqwest::Client::builder()
                 .http1_only()
+                // See device-flow client above: connect_timeout fails fast on an
+                // unreachable endpoint; read_timeout aborts a stalled stream that
+                // stops sending bytes (prevents the agentic turn hanging forever).
+                // Per-read, so long-but-live streams are unaffected.
+                .connect_timeout(std::time::Duration::from_secs(20))
+                .read_timeout(std::time::Duration::from_secs(120))
                 .build()
                 .expect("failed to build HTTP client"),
             fallback_models: vec![],
