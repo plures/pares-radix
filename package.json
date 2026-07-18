@@ -13,8 +13,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri": "node scripts/tauri.mjs",
+    "tauri:dev": "node scripts/tauri.mjs dev",
+    "tauri:build": "node scripts/tauri.mjs build",
     "tui:dev": "cross-env RENDER_MODE=tui-css vite dev",
     "mcp": "pnpm -F @plures/radix-mcp-server start"
   },
@@ -38,7 +39,7 @@
     "@sveltejs/adapter-static": "^3.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/cli": "2.11.1",
     "@types/node": "25.6.2",
     "eslint-plugin-plures": "workspace:*",
     "eslint-plugin-svelte": "^2.0.0",
@@ -57,5 +58,8 @@
     "@plures/canvas-runtime": "workspace:*",
     "@plures/design-dojo": "workspace:*",
     "@tauri-apps/api": "^2.10.1"
+  },
+  "optionalDependencies": {
+    "@tauri-apps/cli-win32-x64-msvc": "2.11.1"
   }
 }

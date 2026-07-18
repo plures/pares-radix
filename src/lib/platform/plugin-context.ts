@@ -58,7 +58,6 @@ export type NotifyLevel = 'success' | 'info' | 'warning' | 'error';
 export type NotifySink = (level: NotifyLevel, message: string) => void;
 
 const defaultNotifySink: NotifySink = (level, message) => {
-  // eslint-disable-next-line plures/no-manual-logging
   const fn = level === 'error' ? console.error : level === 'warning' ? console.warn : console.log;
   fn(`[radix:notify:${level}] ${message}`);
 };

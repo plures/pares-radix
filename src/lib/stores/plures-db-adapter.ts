@@ -97,20 +97,33 @@ export const SETTING_PREFIX = 'pluresdb:setting:';
  * const hydrated = adapter.hydrateAll(); // Map { 'theme.applied' → { value: 'dark' } }
  */
 export function createPluresDBAdapter({ db, registry }: PluresDBAdapterOptions): PluresDBAdapter {
-	const persistentIds = new Set(registry.filter((f) => f.persist).map((f) => f.id));
+	const persistentIds = new Set(
+		registry.filter((f) => f.persist || f.persistPrefix).map((f) => f.id),
+	);
+	// Namespace prefixes: a fact with persistPrefix persists itself AND any fact
+	// whose id starts with `<id>.` (dynamic per-instance facts like
+	// workspace.paneInstances.agens#1, which are never statically registered).
+	const persistentPrefixes = registry
+		.filter((f) => f.persistPrefix)
+		.map((f) => `${f.id}.`);
+
+	function persistent(factId: string): boolean {
+		if (persistentIds.has(factId)) return true;
+		return persistentPrefixes.some((p) => factId.startsWith(p));
+	}
 
 	return {
 		isPersistent(factId: string): boolean {
-			return persistentIds.has(factId);
+			return persistent(factId);
 		},
 
 		persistFact(factId: string, value: unknown): void {
-			if (!persistentIds.has(factId)) return;
+			if (!persistent(factId)) return;
 			db.put(`${FACT_PREFIX}${factId}`, value);
 		},
 
 		loadFact(factId: string): unknown {
-			if (!persistentIds.has(factId)) return undefined;
+			if (!persistent(factId)) return undefined;
 			return db.get(`${FACT_PREFIX}${factId}`);
 		},
 
@@ -126,7 +139,7 @@ export function createPluresDBAdapter({ db, registry }: PluresDBAdapterOptions):
 			const result = new Map<string, unknown>();
 			for (const key of db.keys(FACT_PREFIX)) {
 				const factId = key.slice(FACT_PREFIX.length);
-				if (persistentIds.has(factId)) {
+				if (persistent(factId)) {
 					result.set(factId, db.get(key));
 				}
 			}

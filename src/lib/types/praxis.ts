@@ -17,6 +17,13 @@ export interface PraxisFact<T = unknown> {
   description: string;
   /** Whether this fact persists to PluresDB via the praxis adapter */
   persist?: boolean;
+  /**
+   * When true, this fact declares a persistent NAMESPACE: any fact whose id
+   * begins with `<id>.` (e.g. dynamic per-instance facts
+   * `workspace.paneInstances.agens#1`) is persisted + hydrated even though its
+   * exact id is not statically registered. Implies persist for the base id too.
+   */
+  persistPrefix?: boolean;
   /** Initial/default value */
   initial?: T;
 }

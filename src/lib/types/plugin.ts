@@ -16,6 +16,12 @@ export interface RadixPlugin {
   name: string;
   /** SemVer version */
   version: string;
+  /**
+   * Surface class; defaults to 'panel'. Runtime discriminator: nav-derivation
+   * and the agent-surface route key off this. 'agent' plugins contribute the
+   * agent console surface; 'panel' plugins are ordinary panels.
+   */
+  type?: 'panel' | 'agent';
   /** Emoji or icon path */
   icon: string;
   /** Short description */
@@ -29,6 +35,8 @@ export interface RadixPlugin {
   routes: PluginRoute[];
   /** Sidebar navigation items */
   navItems: NavItem[];
+  /** Dockable panes this plugin contributes (orthogonal to nav routes). */
+  panes?: PaneContribution[];
   /** Settings this plugin exposes in the unified settings page */
   settings: PluginSetting[];
   /** Dashboard widgets for the home page */
@@ -72,6 +80,29 @@ export interface PluginRoute {
   requires?: DataRequirement[];
 }
 
+/**
+ * A dockable pane a plugin contributes to the workspace (VS Code Panel /
+ * Secondary Sidebar model). Distinct from a nav-routed surface: a pane instance
+ * mounts in a WorkspaceLayout dock and lives ORTHOGONALLY to center routing.
+ */
+export interface PaneContribution {
+  /** Stable contribution id (unique within the plugin), e.g. 'agens'. */
+  id: string;
+  /** Tab title shown in the dock. */
+  title: string;
+  /** Emoji or icon path. */
+  icon?: string;
+  /** Where the pane wants to dock; user override + resolve_pane_dock decide the actual dock. */
+  preferredDock: 'center' | 'right' | 'bottom' | 'left';
+  /** Seed one instance visible on first boot (agens: true). */
+  defaultVisible?: boolean;
+  /**
+   * Whether more than one instance may exist (VS Code "two terminals" model).
+   * Default true — panes are NOT singletons (study §7 decision 3).
+   */
+  allowMultiple?: boolean;
+}
+
 export interface NavItem {
   /** URL path */
   href: string;
@@ -79,6 +110,8 @@ export interface NavItem {
   label: string;
   /** Emoji or icon */
   icon: string;
+  /** Sort order within the nav (lower = earlier); unset items keep registration order */
+  order?: number;
   /** Sub-items for nested navigation */
   children?: NavItem[];
   /** Badge count (e.g., unread items) */

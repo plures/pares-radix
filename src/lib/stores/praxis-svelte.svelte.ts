@@ -15,6 +15,7 @@
  */
 
 import { browser } from '$app/environment';
+import { SvelteMap } from 'svelte/reactivity';
 import { getAllNavItems } from '$lib/platform/plugin-loader.js';
 import type { NavItem } from '$lib/types/plugin.js';
 import { getSharedAdapter } from './plures-db-adapter.js';
@@ -23,10 +24,26 @@ import { getSharedAdapter } from './plures-db-adapter.js';
 
 /**
  * Internal reactive map of fact values keyed by fact ID.
- * Uses Svelte 5 $state so that reads inside $derived or Svelte templates
- * are automatically tracked.
+ *
+ * Uses SvelteMap (svelte/reactivity) — NOT a plain `$state<Map>`. A plain
+ * $state wrapping a native Map only reacts to whole-value reassignment; it does
+ * NOT track `.get()`/`.set()` mutations, so `emitFact()` writes would silently
+ * fail to notify `query()` subscribers inside `$derived`/templates (the fact
+ * would update in memory but the UI would never re-render — e.g. the Operations
+ * scene stayed on its empty-state because the seeded fleet never propagated).
+ * SvelteMap makes per-key `.get()`/`.set()` reactive, which is exactly what the
+ * fact store needs.
  */
-const facts = $state<Map<string, unknown>>(new Map());
+const facts = new SvelteMap<string, unknown>();
+
+/**
+ * Test-only accessor to the internal fact map. Exists so the reactivity
+ * invariant test can assert `facts instanceof SvelteMap` (the structural
+ * guarantee of per-key reactivity). Not part of the public store API; do not
+ * use in application code.
+ * @internal
+ */
+export const __factsForTest = facts;
 
 /**
  * Read a praxis fact reactively.
@@ -117,23 +134,46 @@ export function initPraxisFacts(): void {
 	}
 
 	// 3. Seed nav.visible from currently registered plugins (always ephemeral)
-	const navItems = toSidebarItems(getAllNavItems());
-	// Platform nav items (always present)
+	seedNavItems();
+
+	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
+	emitFact('app.ready', { ready: true });
+}
+
+/**
+ * (Re)derive and emit nav.visible from the platform's static nav items plus the
+ * nav items contributed by every ACTIVE registry plugin (getAllNavItems()).
+ *
+ * The agent surface (Agens → /agent) is NOT hardcoded here — it is contributed
+ * by the agens agent-type plugin and only appears once that plugin is active.
+ * Because plugin activation is async, the layout calls this again after
+ * activateAll() resolves so registry-derived items (e.g. Agens) flow in.
+ *
+ * Registry NavItems may carry an optional `order`; platform items use the
+ * baseline positions below and registry items are placed by ascending `order`
+ * (unordered items keep registration order, appended after the platform block).
+ */
+export function seedNavItems(): void {
+	const pluginItems = getAllNavItems();
+	const ordered = [...pluginItems].sort(
+		(a, b) => (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER),
+	);
+	const navItems = toSidebarItems(ordered);
+	// Platform nav items (always present). No hardcoded agent/chat entry — the
+	// agent surface is registry-derived from the agens plugin.
 	navItems.unshift(
 		{ href: '/', label: 'Dashboard', icon: '🏠', badge: undefined },
-		{ href: '/chat', label: 'Chat', icon: '💬', badge: undefined },
 		{ href: '/canvas', label: 'Canvas', icon: '🎨', badge: undefined },
+		{ href: '/operations', label: 'Operations', icon: '🖥️', badge: undefined },
 		{ href: '/inventory', label: 'Inventory', icon: '📦', badge: undefined },
 	);
 	navItems.push(
+		{ href: '/admin', label: 'Admin', icon: '🛠️', badge: undefined },
 		{ href: '/plugins', label: 'Plugins', icon: '🧩', badge: undefined },
 		{ href: '/settings', label: 'Settings', icon: '⚙️', badge: undefined },
 		{ href: '/help', label: 'Help', icon: '❓', badge: undefined },
 	);
 	emitFact('nav.visible', { items: navItems });
-
-	// 4. Seed app.ready (always true for now — gates not yet wired to real checks)
-	emitFact('app.ready', { ready: true });
 }
 
 // ─── Theme Helpers ────────────────────────────────────────────────────────────

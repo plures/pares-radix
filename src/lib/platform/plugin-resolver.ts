@@ -16,6 +16,8 @@
  * The plugin loader reads this directory on startup and activates all plugins.
  */
 
+import type { PaneContribution } from '../types/plugin.js';
+
 export interface PluginSource {
   type: 'local' | 'github' | 'npm' | 'modulus';
   /** For local: path. For github: owner/repo. For npm: package name. */
@@ -27,6 +29,8 @@ export interface PluginSource {
 export interface PluginManifest {
   id: string;
   name: string;
+  /** Surface class; defaults to panel. Discriminates panel plugins from agent-runtime plugins. */
+  type?: 'panel' | 'agent';
   version: string;
   description: string;
   author: string;
@@ -37,6 +41,8 @@ export interface PluginManifest {
   radix?: string; // minimum radix version
   dependencies?: string[];
   peerDependencies?: Record<string, string>;
+  /** Dockable panes this plugin contributes (parity with RadixPlugin.panes). */
+  panes?: PaneContribution[];
 }
 
 export interface InstalledPlugin {
@@ -129,22 +135,12 @@ export class PluginRegistry {
     return [...this.plugins.values()];
   }
 
-  /**
-   * Get enabled plugins only.
-   */
-  enabled(): InstalledPlugin[] {
-    return this.list().filter((p) => p.enabled);
-  }
-
-  /**
-   * Toggle a plugin's enabled state.
-   */
-  toggle(id: string): boolean {
-    const p = this.plugins.get(id);
-    if (!p) return false;
-    p.enabled = !p.enabled;
-    return true;
-  }
+  // NOTE: enabled/disabled state is NOT owned here. The single source of truth
+  // for whether a plugin may activate is the persisted praxis fact
+  // `admin.plugins.enabled` (see praxis/admin.ts + plugin-loader.activateAll).
+  // A per-registry enabled()/toggle() previously lived here but was orphaned
+  // (zero callers) and would have been a competing authority — removed to avoid
+  // drift. `InstalledPlugin.enabled` remains only as descriptive manifest state.
 
   /**
    * Get a specific plugin.
