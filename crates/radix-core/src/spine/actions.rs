@@ -274,10 +274,10 @@ impl AsyncActionHandler for CompositeActionHandler {
             if let Some(ref h) = self.task_grounding {
                 h.call(action, params).await
             } else {
-                // No task store wired — return null so `.px` injects no block.
-                // Honest absence (C-NOSTUB-001): we do NOT fabricate tasks.
-                warn!(action = %action, "task grounding not wired — returning null");
-                Ok(Value::Null)
+                // No task store wired — degrade gracefully. If `.px` supplied a base prompt, pass it through.
+                warn!(action = %action, "task grounding not wired — passing through base prompt");
+                let base = params.get("base").and_then(|v| v.as_str());
+                Ok(Value::String(base.unwrap_or("").to_string()))
             }
         } else if is_subagent_action(action) {
             if let Some(ref actor) = self.subagent {
