@@ -91,7 +91,15 @@ impl TaskAwareToolDispatcher {
 impl ToolDispatcher for TaskAwareToolDispatcher {
     async fn available_tools(&self) -> Vec<ToolDefinition> {
         let mut tools = TaskRegistryTool::tool_definitions();
-        tools.extend(self.inner.available_tools().await);
+        let mut seen: std::collections::HashSet<String> =
+            tools.iter().map(|tool| tool.name.clone()).collect();
+
+        for tool in self.inner.available_tools().await {
+            if seen.insert(tool.name.clone()) {
+                tools.push(tool);
+            }
+        }
+
         tools
     }
 
