@@ -294,6 +294,10 @@ pub fn render_open_tasks_block(manager: &TaskManager, chat_id: &str) -> Option<S
     let mut seen: std::collections::HashSet<String> =
         tasks.iter().map(|t| t.id.clone()).collect();
     for t in manager.open_tasks() {
+        // Only include truly-global tasks (no chat_id) to avoid leaking tasks across chats.
+        if t.chat_id.is_some() {
+            continue;
+        }
         if seen.insert(t.id.clone()) {
             tasks.push(t);
         }
