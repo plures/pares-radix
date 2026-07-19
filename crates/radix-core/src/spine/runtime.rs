@@ -302,14 +302,14 @@ pub async fn build_task_aware_runtime(
     )
     .await;
 
-    runtime
-        .pipeline
+    let pipeline = Arc::clone(&runtime.pipeline);
+
+    pipeline
         .register(Arc::new(InboundRouter::with_reactive(Arc::clone(
             &runtime.registry,
         ))))
         .await;
-    runtime
-        .pipeline
+    pipeline
         .register(Arc::new(HistoryRecorder::new(Arc::clone(
             &conversation_store,
         ))))
@@ -323,14 +323,12 @@ pub async fn build_task_aware_runtime(
     .with_conversation_store(Arc::clone(&conversation_store))
     .with_task_manager(Arc::clone(&task_manager));
 
-    runtime.pipeline.register(Arc::new(invoker)).await;
-    runtime
-        .pipeline
+    pipeline.register(Arc::new(invoker)).await;
+    pipeline
         .register(Arc::new(ToolExecutor::new(Arc::clone(&task_dispatcher))))
         .await;
-    runtime.pipeline.register(Arc::new(ResponseRouter)).await;
-    runtime
-        .pipeline
+    pipeline.register(Arc::new(ResponseRouter)).await;
+    pipeline
         .register(Arc::new(CommitmentDetector::new(task_manager)))
         .await;
 
@@ -594,7 +592,11 @@ mod tests {
         // Create a second TaskManager over the same durable store to simulate an
         // external writer (for example, commitment detection on a prior turn).
         let manager = Arc::new(TaskManager::new(task_store));
-        manager.create_task("Finish the follow-up investigation", "chat-1", vec![]);
+        manager.create_task(
+            "Finish the follow-up investigation",
+            "chat-1",
+            vec![], // no completion conditions needed for this grounding test
+        );
 
         let mut deliveries = runtime.pipeline.subscribe_deliveries();
         let handle = runtime.spawn();
