@@ -1,3 +1,7 @@
+## [1.55.29] — 2026-07-19
+
+- fix(spine): inject durable open-tasks grounding on live reactive .px path (#467) (#469) (8805792)
+
 ## [1.55.24] — 2026-07-14
 
 - fix(build): bump pluresdb deps to d08f88b (carries BOM-free praxis-lang 37be99e) (1456712)
