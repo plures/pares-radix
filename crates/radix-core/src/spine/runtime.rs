@@ -591,6 +591,8 @@ mod tests {
         )
         .await;
 
+        // Create a second TaskManager over the same durable store to simulate an
+        // external writer (for example, commitment detection on a prior turn).
         let manager = Arc::new(TaskManager::new(task_store));
         manager.create_task("Finish the follow-up investigation", "chat-1", vec![]);
 
