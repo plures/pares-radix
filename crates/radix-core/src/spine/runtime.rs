@@ -591,7 +591,7 @@ mod tests {
         )
         .await;
 
-        let manager = TaskManager::new(task_store);
+        let manager = Arc::new(TaskManager::new(task_store));
         manager.create_task("Finish the follow-up investigation", "chat-1", vec![]);
 
         let mut deliveries = runtime.pipeline.subscribe_deliveries();
