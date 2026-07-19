@@ -307,10 +307,10 @@ pub fn render_open_tasks_block(manager: &TaskManager, chat_id: &str) -> Option<S
         return None;
     }
 
-    // Highest priority first (priority 1 = highest), then most recent.
+    // Highest priority first (priority 10 = highest), then most recent.
     tasks.sort_by(|a, b| {
-        a.priority
-            .cmp(&b.priority)
+        b.priority
+            .cmp(&a.priority)
             .then(b.created_at.cmp(&a.created_at))
     });
 
@@ -318,10 +318,10 @@ pub fn render_open_tasks_block(manager: &TaskManager, chat_id: &str) -> Option<S
         "## Your open tasks/commitments (durable, from the task store — treat as authoritative)\n",
     );
     for t in tasks.iter().take(25) {
-        block.push_str(&format!(
-            "- [{:?}] (p{}) {}\n",
-            t.status, t.priority, t.description
-        ));
+        // Descriptions are user-controlled; keep them single-line and bounded.
+        let desc = t.description.lines().collect::<Vec<_>>().join(" ");
+        let desc: String = desc.chars().take(200).collect();
+        block.push_str(&format!("- [{:?}] (p{}) {}\n", t.status, t.priority, desc));
     }
     block.push_str(
         "\nThese are your actual tracked obligations regardless of chat history length. \
