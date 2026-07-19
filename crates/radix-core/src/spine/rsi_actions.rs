@@ -277,8 +277,14 @@ impl RsiActionHandler {
 
         for stage in stages {
             let attempts = stage.get("attempts").and_then(|v| v.as_u64()).unwrap_or(1);
-            let duration = stage.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-            let status = stage.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let duration = stage
+                .get("duration_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let status = stage
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
 
             if status == "passed" && attempts == 1 {
                 passed_first_try += 1;
@@ -309,9 +315,15 @@ impl RsiActionHandler {
         let mut worst_score: u64 = 0;
 
         for stage in stages {
-            let name = stage.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let name = stage
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             let attempts = stage.get("attempts").and_then(|v| v.as_u64()).unwrap_or(1);
-            let duration = stage.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            let duration = stage
+                .get("duration_ms")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
 
             let score = (attempts - 1) * 10_000 + duration;
             if score > worst_score {
@@ -457,7 +469,10 @@ impl RsiActionHandler {
     /// Check if a pattern is actionable.
     fn check_actionable(&self, params: &Value) -> Result<Value, ExecutionError> {
         let pattern = params.get("pattern").unwrap_or(&Value::Null);
-        let actionable = pattern.get("actionable").and_then(|v| v.as_bool()).unwrap_or(false);
+        let actionable = pattern
+            .get("actionable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         Ok(json!({"actionable": actionable}))
     }
 
@@ -465,9 +480,18 @@ impl RsiActionHandler {
     fn compute_quality_signal(&self, params: &Value) -> Result<Value, ExecutionError> {
         let stats = params.get("stats").unwrap_or(&Value::Null);
 
-        let total = stats.get("total_stages").and_then(|v| v.as_f64()).unwrap_or(1.0);
-        let first_try = stats.get("passed_first_try").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let retries = stats.get("total_retries").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let total = stats
+            .get("total_stages")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        let first_try = stats
+            .get("passed_first_try")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let retries = stats
+            .get("total_retries")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
 
         let quality = if total > 0.0 {
             (first_try / total) * (1.0 - (retries * 0.1).min(0.5))
@@ -544,7 +568,11 @@ impl RsiActionHandler {
 
         let regressions: Vec<&Value> = evaluations
             .iter()
-            .filter(|e| e.get("regressed").and_then(|v| v.as_bool()).unwrap_or(false))
+            .filter(|e| {
+                e.get("regressed")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
             .collect();
 
         if regressions.is_empty() {
@@ -557,16 +585,29 @@ impl RsiActionHandler {
     /// Update a running average with a new data point (EMA, alpha=0.2).
     fn update_running_average(&self, params: &Value) -> Result<Value, ExecutionError> {
         let stats = params.get("stats").unwrap_or(&Value::Null);
-        let new_quality = params.get("new_quality").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let new_latency = params.get("new_latency").and_then(|v| v.as_u64()).unwrap_or(0);
+        let new_quality = params
+            .get("new_quality")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let new_latency = params
+            .get("new_latency")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
-        let prev_avg_quality = stats.get("avg_quality").and_then(|v| v.as_f64()).unwrap_or(new_quality);
-        let prev_avg_latency = stats.get("avg_latency_ms").and_then(|v| v.as_u64()).unwrap_or(new_latency);
+        let prev_avg_quality = stats
+            .get("avg_quality")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(new_quality);
+        let prev_avg_latency = stats
+            .get("avg_latency_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(new_latency);
         let count = stats.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
 
         let alpha = 0.2;
         let avg_quality = prev_avg_quality * (1.0 - alpha) + new_quality * alpha;
-        let avg_latency = (prev_avg_latency as f64 * (1.0 - alpha) + new_latency as f64 * alpha) as u64;
+        let avg_latency =
+            (prev_avg_latency as f64 * (1.0 - alpha) + new_latency as f64 * alpha) as u64;
 
         Ok(json!({
             "avg_quality": avg_quality,
@@ -684,8 +725,16 @@ mod tests {
     #[test]
     fn check_rate_limit_enforces_max() {
         let rsi = make_handler();
-        assert_eq!(rsi.check_rate_limit(&json!({"count": 2, "max": 3})).unwrap()["within_limit"], true);
-        assert_eq!(rsi.check_rate_limit(&json!({"count": 3, "max": 3})).unwrap()["within_limit"], false);
+        assert_eq!(
+            rsi.check_rate_limit(&json!({"count": 2, "max": 3}))
+                .unwrap()["within_limit"],
+            true
+        );
+        assert_eq!(
+            rsi.check_rate_limit(&json!({"count": 3, "max": 3}))
+                .unwrap()["within_limit"],
+            false
+        );
     }
 
     #[test]
@@ -801,7 +850,9 @@ mod tests {
         let rsi = handler_with_gate(Arc::clone(&gate));
 
         let out = rsi
-            .rollback_constraint(&json!({"constraint_id": "rsi:learned:some-rule", "disable": true}))
+            .rollback_constraint(
+                &json!({"constraint_id": "rsi:learned:some-rule", "disable": true}),
+            )
             .await
             .unwrap();
         assert_eq!(out["rolled_back"], true);
@@ -876,7 +927,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(out["rolled_back"], false, "self-guard rollback must be refused");
+        assert_eq!(
+            out["rolled_back"], false,
+            "self-guard rollback must be refused"
+        );
         assert_eq!(out["refused"], "self_guard");
         // The rail is STILL enforced.
         assert!(

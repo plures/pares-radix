@@ -166,7 +166,9 @@ async fn discover_copilot(provider: &ProviderConfig) -> Result<Vec<DiscoveredMod
                 vendor: m.vendor,
                 category: m.model_picker_category,
                 api: None, // use provider default
-                context_window: limits.and_then(|l| l.max_context_window_tokens).unwrap_or(128_000),
+                context_window: limits
+                    .and_then(|l| l.max_context_window_tokens)
+                    .unwrap_or(128_000),
                 max_output: limits.and_then(|l| l.max_output_tokens).unwrap_or(8_192),
                 input_types,
                 reasoning,
@@ -284,16 +286,66 @@ fn openai_model_specs(id: &str) -> (u64, u64, bool) {
 /// Known costs for OpenAI models (per 1M tokens).
 fn openai_cost(id: &str) -> ModelCost {
     match id {
-        "gpt-5.5" => ModelCost { input: 5.0, output: 30.0, cache_read: 0.5, cache_write: 0.0 },
-        "gpt-5.5-pro" => ModelCost { input: 30.0, output: 180.0, cache_read: 0.0, cache_write: 0.0 },
-        "gpt-5.4" => ModelCost { input: 2.5, output: 15.0, cache_read: 0.25, cache_write: 0.0 },
-        "gpt-5.4-pro" => ModelCost { input: 30.0, output: 180.0, cache_read: 0.0, cache_write: 0.0 },
-        "gpt-5.4-mini" => ModelCost { input: 0.75, output: 4.5, cache_read: 0.075, cache_write: 0.0 },
-        "gpt-5.4-nano" => ModelCost { input: 0.2, output: 1.25, cache_read: 0.02, cache_write: 0.0 },
-        "gpt-5.3-codex" => ModelCost { input: 1.75, output: 14.0, cache_read: 0.175, cache_write: 0.0 },
-        "o3" => ModelCost { input: 2.0, output: 8.0, cache_read: 0.5, cache_write: 0.0 },
-        "o3-pro" => ModelCost { input: 20.0, output: 80.0, cache_read: 0.0, cache_write: 0.0 },
-        "o4-mini" => ModelCost { input: 1.1, output: 4.4, cache_read: 0.28, cache_write: 0.0 },
+        "gpt-5.5" => ModelCost {
+            input: 5.0,
+            output: 30.0,
+            cache_read: 0.5,
+            cache_write: 0.0,
+        },
+        "gpt-5.5-pro" => ModelCost {
+            input: 30.0,
+            output: 180.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        },
+        "gpt-5.4" => ModelCost {
+            input: 2.5,
+            output: 15.0,
+            cache_read: 0.25,
+            cache_write: 0.0,
+        },
+        "gpt-5.4-pro" => ModelCost {
+            input: 30.0,
+            output: 180.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        },
+        "gpt-5.4-mini" => ModelCost {
+            input: 0.75,
+            output: 4.5,
+            cache_read: 0.075,
+            cache_write: 0.0,
+        },
+        "gpt-5.4-nano" => ModelCost {
+            input: 0.2,
+            output: 1.25,
+            cache_read: 0.02,
+            cache_write: 0.0,
+        },
+        "gpt-5.3-codex" => ModelCost {
+            input: 1.75,
+            output: 14.0,
+            cache_read: 0.175,
+            cache_write: 0.0,
+        },
+        "o3" => ModelCost {
+            input: 2.0,
+            output: 8.0,
+            cache_read: 0.5,
+            cache_write: 0.0,
+        },
+        "o3-pro" => ModelCost {
+            input: 20.0,
+            output: 80.0,
+            cache_read: 0.0,
+            cache_write: 0.0,
+        },
+        "o4-mini" => ModelCost {
+            input: 1.1,
+            output: 4.4,
+            cache_read: 0.28,
+            cache_write: 0.0,
+        },
         _ => ModelCost::default(),
     }
 }
@@ -331,18 +383,62 @@ async fn discover_anthropic(provider: &ProviderConfig) -> Result<Vec<DiscoveredM
     // This is the one place we're somewhat static, but it's isolated here
     // and easily updated when they add an API.
     let models = vec![
-        anthropic_model("claude-opus-4-8", "Claude Opus 4.8", 1_048_576, 128_000, true,
-            ModelCost { input: 15.0, output: 75.0, cache_read: 1.5, cache_write: 0.0 },
-            &provider.name),
-        anthropic_model("claude-opus-4-7", "Claude Opus 4.7", 200_000, 64_000, true,
-            ModelCost { input: 15.0, output: 75.0, cache_read: 1.5, cache_write: 0.0 },
-            &provider.name),
-        anthropic_model("claude-sonnet-4-6", "Claude Sonnet 4.6", 200_000, 64_000, true,
-            ModelCost { input: 3.0, output: 15.0, cache_read: 0.3, cache_write: 0.0 },
-            &provider.name),
-        anthropic_model("claude-opus-4-6", "Claude Opus 4.6", 200_000, 64_000, true,
-            ModelCost { input: 15.0, output: 75.0, cache_read: 1.5, cache_write: 0.0 },
-            &provider.name),
+        anthropic_model(
+            "claude-opus-4-8",
+            "Claude Opus 4.8",
+            1_048_576,
+            128_000,
+            true,
+            ModelCost {
+                input: 15.0,
+                output: 75.0,
+                cache_read: 1.5,
+                cache_write: 0.0,
+            },
+            &provider.name,
+        ),
+        anthropic_model(
+            "claude-opus-4-7",
+            "Claude Opus 4.7",
+            200_000,
+            64_000,
+            true,
+            ModelCost {
+                input: 15.0,
+                output: 75.0,
+                cache_read: 1.5,
+                cache_write: 0.0,
+            },
+            &provider.name,
+        ),
+        anthropic_model(
+            "claude-sonnet-4-6",
+            "Claude Sonnet 4.6",
+            200_000,
+            64_000,
+            true,
+            ModelCost {
+                input: 3.0,
+                output: 15.0,
+                cache_read: 0.3,
+                cache_write: 0.0,
+            },
+            &provider.name,
+        ),
+        anthropic_model(
+            "claude-opus-4-6",
+            "Claude Opus 4.6",
+            200_000,
+            64_000,
+            true,
+            ModelCost {
+                input: 15.0,
+                output: 75.0,
+                cache_read: 1.5,
+                cache_write: 0.0,
+            },
+            &provider.name,
+        ),
     ];
 
     Ok(models)

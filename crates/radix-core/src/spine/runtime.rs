@@ -42,22 +42,67 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use pluresdb::CrdtStore;
+use serde_json::Value;
 use tracing::{info, warn};
 
-use crate::model::ToolDispatcher;
+use crate::model::{ModelClient, ToolDefinition, ToolDispatcher};
 use crate::px_adapter::ToolDispatchActionHandler;
 use crate::spine::actions::CompositeActionHandler;
 use crate::spine::bootstrap::register_reactive_procedures;
 use crate::spine::conversation::ConversationStore;
 use crate::spine::pipeline::Pipeline;
+use crate::spine::procedures::commitment_detector::CommitmentDetector;
+use crate::spine::procedures::history_recorder::HistoryRecorder;
+use crate::spine::procedures::inbound_router::InboundRouter;
+use crate::spine::procedures::model_invoker::ModelInvoker;
+use crate::spine::procedures::response_router::ResponseRouter;
+use crate::spine::procedures::tool_executor::ToolExecutor;
 use crate::spine::reactive::ReactiveRegistry;
 use crate::state::{PluresDbStateStore, StateStore};
+use crate::task_manager::TaskManager;
+use crate::tools::TaskRegistryTool;
 
 /// Environment variable that overrides the durable state directory.
 pub const STATE_DIR_ENV: &str = "RADIX_STATE_DIR";
 
 /// Environment variable that overrides the `.px` procedure directory.
 pub const PRAXIS_DIR_ENV: &str = "RADIX_PRAXIS_DIR";
+
+/// A [`ToolDispatcher`] wrapper that adds built-in `task_*` tools backed by a
+/// durable [`TaskManager`] while delegating all other tools to an inner
+/// dispatcher.
+struct TaskAwareToolDispatcher {
+    inner: Arc<dyn ToolDispatcher>,
+    task_registry: Arc<TaskRegistryTool>,
+}
+
+impl TaskAwareToolDispatcher {
+    fn new(inner: Arc<dyn ToolDispatcher>, task_manager: Arc<TaskManager>) -> Self {
+        Self {
+            inner,
+            task_registry: Arc::new(TaskRegistryTool::new(task_manager)),
+        }
+    }
+}
+
+#[async_trait]
+impl ToolDispatcher for TaskAwareToolDispatcher {
+    async fn available_tools(&self) -> Vec<ToolDefinition> {
+        let mut tools = TaskRegistryTool::tool_definitions();
+        tools.extend(self.inner.available_tools().await);
+        tools
+    }
+
+    async fn call_tool(&self, name: &str, arguments: Value) -> String {
+        if TaskRegistryTool::handles_tool(name) {
+            return self.task_registry.call(name, arguments).await;
+        }
+
+        self.inner.call_tool(name, arguments).await
+    }
+}
 
 /// Resolve the durable state directory.
 ///
@@ -189,8 +234,9 @@ pub async fn build_reactive_runtime(
 /// store in the same CRDT store, then calls [`build_reactive_runtime`] with the
 /// `.px` directory from [`resolve_praxis_dir`].
 ///
-/// This is what a shipped runtime driver (e.g. the cognition `serve` loop or a
-/// Tauri integration) calls at startup. Errors only if the durable store can't
+/// This is the low-level reactive-only constructor. Shipped agent runtimes that
+/// need model invocation, task retention, and built-in task tools should prefer
+/// [`build_default_task_aware_runtime`]. Errors only if the durable store can't
 /// be opened.
 pub async fn build_default_reactive_runtime(
     tool_dispatcher: Arc<dyn ToolDispatcher>,
@@ -217,17 +263,129 @@ pub async fn build_default_reactive_runtime(
     .await)
 }
 
+/// Assemble a full task-aware spine runtime.
+///
+/// In addition to the reactive `.px` registry, this registers the core spine
+/// procedures needed for a live conversational agent:
+/// - inbound routing
+/// - durable history recording
+/// - model invocation
+/// - tool execution
+/// - response routing
+/// - commitment detection
+///
+/// Open tasks are injected into every model turn and `task_*` tools are exposed
+/// through a built-in dispatcher wrapper, so obligations survive vague follow-up
+/// turns and process restarts.
+pub async fn build_task_aware_runtime(
+    state_store: Arc<dyn StateStore>,
+    conversation_store: Arc<dyn ConversationStore>,
+    model_client: Arc<dyn ModelClient>,
+    tool_dispatcher: Arc<dyn ToolDispatcher>,
+    task_store: Arc<CrdtStore>,
+    system_prompt: Option<String>,
+    praxis_dir: &Path,
+    capacity: usize,
+) -> ReactiveRuntime {
+    let task_manager = Arc::new(TaskManager::new(task_store));
+    let task_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(TaskAwareToolDispatcher::new(
+        tool_dispatcher,
+        Arc::clone(&task_manager),
+    ));
+
+    let runtime = build_reactive_runtime(
+        state_store,
+        Arc::clone(&conversation_store),
+        Arc::clone(&task_dispatcher),
+        praxis_dir,
+        capacity,
+    )
+    .await;
+
+    runtime
+        .pipeline
+        .register(Arc::new(InboundRouter::with_reactive(Arc::clone(
+            &runtime.registry,
+        ))))
+        .await;
+    runtime
+        .pipeline
+        .register(Arc::new(HistoryRecorder::new(Arc::clone(
+            &conversation_store,
+        ))))
+        .await;
+
+    let invoker = if let Some(prompt) = system_prompt {
+        ModelInvoker::with_system_prompt(model_client, Arc::clone(&task_dispatcher), prompt)
+    } else {
+        ModelInvoker::new(model_client, Arc::clone(&task_dispatcher))
+    }
+    .with_conversation_store(Arc::clone(&conversation_store))
+    .with_task_manager(Arc::clone(&task_manager));
+
+    runtime.pipeline.register(Arc::new(invoker)).await;
+    runtime
+        .pipeline
+        .register(Arc::new(ToolExecutor::new(Arc::clone(&task_dispatcher))))
+        .await;
+    runtime.pipeline.register(Arc::new(ResponseRouter)).await;
+    runtime
+        .pipeline
+        .register(Arc::new(CommitmentDetector::new(task_manager)))
+        .await;
+
+    runtime
+}
+
+/// Convenience constructor for the shipped task-aware agent runtime.
+///
+/// Uses the default durable PluresDB-backed state and conversation stores,
+/// co-locates task persistence in the same CRDT store, and registers the core
+/// conversational pipeline with durable task grounding enabled.
+pub async fn build_default_task_aware_runtime(
+    model_client: Arc<dyn ModelClient>,
+    tool_dispatcher: Arc<dyn ToolDispatcher>,
+    capacity: usize,
+    system_prompt: Option<String>,
+) -> Result<ReactiveRuntime, String> {
+    let state_dir = resolve_state_dir();
+    let praxis_dir = resolve_praxis_dir();
+
+    let pdb = PluresDbStateStore::open(&state_dir)
+        .map_err(|e| format!("open state store at {}: {e}", state_dir.display()))?;
+    let task_store = pdb.crdt_store();
+    let conversation_store: Arc<dyn ConversationStore> = Arc::new(
+        crate::spine::conversation::PluresConversationStore::new(Arc::clone(&task_store)),
+    );
+    let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+
+    Ok(build_task_aware_runtime(
+        state_store,
+        conversation_store,
+        model_client,
+        tool_dispatcher,
+        task_store,
+        system_prompt,
+        &praxis_dir,
+        capacity,
+    )
+    .await)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ToolDefinition, ToolDispatcher};
+    use crate::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition, ToolDispatcher};
     use crate::spine::conversation::MemoryConversationStore;
+    use crate::spine::event::SpineEvent;
+    use crate::task_manager::TaskManager;
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use std::time::Duration;
     use tempfile::TempDir;
+    use tokio::sync::Mutex;
 
     /// A dispatcher that records nothing and returns null — the runtime's
     /// `.px` procedures under test use only core `write_state`/`read_state`,
@@ -246,6 +404,28 @@ mod tests {
 
     fn dispatcher() -> Arc<dyn ToolDispatcher> {
         Arc::new(NullDispatcher)
+    }
+
+    struct CapturingModel {
+        seen_messages: Arc<Mutex<Vec<ChatMessage>>>,
+    }
+
+    #[async_trait]
+    impl ModelClient for CapturingModel {
+        async fn complete(
+            &self,
+            messages: &[ChatMessage],
+            _tools: &[ToolDefinition],
+            _options: &ChatOptions,
+        ) -> Result<ModelCompletion, String> {
+            *self.seen_messages.lock().await = messages.to_vec();
+            Ok(ModelCompletion {
+                content: Some("ok".into()),
+                tool_calls: vec![],
+                logprobs: None,
+                model: Some("test".into()),
+            })
+        }
     }
 
     #[test]
@@ -356,5 +536,98 @@ mod tests {
         );
         assert_eq!(landed["task"], "wire-px-runtime");
         assert_eq!(landed["n"], 42);
+    }
+
+    #[tokio::test]
+    async fn task_aware_dispatcher_exposes_and_executes_task_tools() {
+        let pdb = PluresDbStateStore::in_memory();
+        let manager = Arc::new(TaskManager::new(pdb.crdt_store()));
+        let dispatcher = TaskAwareToolDispatcher::new(dispatcher(), Arc::clone(&manager));
+
+        let tools = dispatcher.available_tools().await;
+        assert!(
+            tools.iter().any(|tool| tool.name == "task_create"),
+            "task_create should be exposed to the model"
+        );
+
+        let created = dispatcher
+            .call_tool(
+                "task_create",
+                json!({"description": "Investigate the Telegram timeout"}),
+            )
+            .await;
+        assert!(
+            created.contains("\"status\":\"created\""),
+            "task_create should be handled by the built-in task registry"
+        );
+        assert_eq!(manager.open_tasks().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn task_aware_runtime_injects_persisted_tasks_into_model_turns() {
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        let pdb = PluresDbStateStore::in_memory();
+        let task_store = pdb.crdt_store();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+        let seen_messages = Arc::new(Mutex::new(Vec::new()));
+        let model: Arc<dyn ModelClient> = Arc::new(CapturingModel {
+            seen_messages: Arc::clone(&seen_messages),
+        });
+
+        let mut runtime = build_task_aware_runtime(
+            state_store,
+            conversation_store,
+            model,
+            dispatcher(),
+            Arc::clone(&task_store),
+            Some("system prompt".into()),
+            &praxis,
+            16,
+        )
+        .await;
+
+        let manager = TaskManager::new(task_store);
+        manager.create_task("Finish the follow-up investigation", "chat-1", vec![]);
+
+        let mut deliveries = runtime.pipeline.subscribe_deliveries();
+        let handle = runtime.spawn();
+
+        runtime
+            .pipeline
+            .emitter()
+            .emit(SpineEvent::ModelRequest {
+                id: SpineEvent::new_id(),
+                source: "telegram".into(),
+                chat_id: "chat-1".into(),
+                sender: "user".into(),
+                content: "try again".into(),
+                system_prompt: None,
+                metadata: json!({}),
+            })
+            .await;
+
+        let delivered = tokio::time::timeout(Duration::from_secs(1), deliveries.recv())
+            .await
+            .expect("delivery request should be emitted")
+            .expect("delivery broadcast should succeed");
+        assert_eq!(delivered.event_type(), "delivery_request");
+
+        let messages = seen_messages.lock().await.clone();
+        assert!(
+            messages.iter().any(|message| {
+                message.role == "system"
+                    && message
+                        .content
+                        .contains("Finish the follow-up investigation")
+            }),
+            "persisted open task should be injected into the model context"
+        );
+
+        handle.abort();
     }
 }
