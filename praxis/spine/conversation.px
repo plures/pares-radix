@@ -46,12 +46,18 @@ procedure record_assistant_response(response: Message from "model_response") -> 
 
 # Build conversation context for model invocation
 procedure build_context(request: string from "model_request") -> enriched into "enriched_request":
-  given: "Assemble conversation history into an enriched model request"
+  given: "Assemble conversation history + durable open-task grounding into an enriched model request"
   pluresdb_read {key: "chat:history"} -> $history
   slice {list: $history, last: 50} -> $recent
   pluresdb_read {key: "config:system_prompt"} -> $system_prompt
+  # Durable task grounding (pares-radix#467): prepend the agent's persisted
+  # open-tasks block to the system prompt so obligations reach EVERY inbound
+  # turn, independent of trimmed history. Reads the shared PluresDB task store
+  # via the read_open_tasks_block action; returns the base prompt unchanged
+  # when there are no open tasks (no noise).
+  read_open_tasks_block {chat_id: request.chat_id, base: $system_prompt} -> $grounded_prompt
   return {
     history: $recent,
-    system_prompt: $system_prompt,
+    system_prompt: $grounded_prompt,
     source: request
   }
