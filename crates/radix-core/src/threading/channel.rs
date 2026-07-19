@@ -57,10 +57,7 @@ pub trait ChannelThreading: Send + Sync {
 
     /// Called when a new thread is created — the channel may need to
     /// send a notification or create a visual anchor.
-    async fn on_thread_created(
-        &self,
-        thread: &Thread,
-    ) -> Result<Option<ChannelAnchor>, ThreadError>;
+    async fn on_thread_created(&self, thread: &Thread) -> Result<Option<ChannelAnchor>, ThreadError>;
 
     /// Called when the active thread switches — update visual indicators.
     async fn on_thread_switched(
@@ -107,10 +104,7 @@ mod tests {
             }
         }
 
-        async fn on_thread_created(
-            &self,
-            _thread: &Thread,
-        ) -> Result<Option<ChannelAnchor>, ThreadError> {
+        async fn on_thread_created(&self, _thread: &Thread) -> Result<Option<ChannelAnchor>, ThreadError> {
             Ok(Some(serde_json::json!({"message_id": 42})))
         }
 
@@ -134,10 +128,7 @@ mod tests {
             &self,
             metadata: &Value,
         ) -> Result<Option<String>, ThreadError> {
-            Ok(metadata
-                .get("thread_id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()))
+            Ok(metadata.get("thread_id").and_then(|v| v.as_str()).map(|s| s.to_string()))
         }
 
         async fn present_thread_list(&self, _threads: &[Thread]) -> Result<(), ThreadError> {
@@ -173,10 +164,7 @@ mod tests {
         assert_eq!(resolved, Some("t1".to_string()));
 
         let empty_meta = serde_json::json!({});
-        let resolved = channel
-            .resolve_thread_from_message(&empty_meta)
-            .await
-            .unwrap();
+        let resolved = channel.resolve_thread_from_message(&empty_meta).await.unwrap();
         assert!(resolved.is_none());
     }
 

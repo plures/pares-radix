@@ -101,11 +101,12 @@ impl RunCommandActionHandler {
     async fn run_command(&self, params: &Value) -> Result<Value, ExecutionError> {
         // Deserialize the request. A missing/blank `command` is a real usage
         // error → surface it (not a silent success).
-        let req: ExecRequest =
-            serde_json::from_value(params.clone()).map_err(|e| ExecutionError::ActionFailed {
+        let req: ExecRequest = serde_json::from_value(params.clone()).map_err(|e| {
+            ExecutionError::ActionFailed {
                 action: "run_command".to_string(),
                 message: format!("invalid run_command params: {e}"),
-            })?;
+            }
+        })?;
 
         if req.command.trim().is_empty() {
             return Err(ExecutionError::ActionFailed {
@@ -219,10 +220,7 @@ mod tests {
             .expect("blocked command returns structured failure, not an Err");
         assert_eq!(out["available"], json!(false));
         assert!(
-            out["error"]
-                .as_str()
-                .unwrap()
-                .contains("blocked by governance"),
+            out["error"].as_str().unwrap().contains("blocked by governance"),
             "error was: {:?}",
             out["error"]
         );

@@ -203,21 +203,9 @@ mod tests {
                 "created_at": "2026-01-01T00:00:00Z",
             })
         };
-        crdt.put(
-            "d1",
-            "pares-radix",
-            mk("d1", "Use tokio for async", "decision"),
-        );
-        crdt.put(
-            "d2",
-            "pares-radix",
-            mk("d2", "Avoid blocking calls", "decision"),
-        );
-        crdt.put(
-            "c1",
-            "pares-radix",
-            mk("c1", "fn main() {}", "code-pattern"),
-        );
+        crdt.put("d1", "pares-radix", mk("d1", "Use tokio for async", "decision"));
+        crdt.put("d2", "pares-radix", mk("d2", "Avoid blocking calls", "decision"));
+        crdt.put("c1", "pares-radix", mk("c1", "fn main() {}", "code-pattern"));
         crdt
     }
 

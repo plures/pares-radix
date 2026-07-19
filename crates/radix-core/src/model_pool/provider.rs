@@ -8,8 +8,8 @@ use tracing::info;
 
 /// Load providers from a TOML config file.
 pub fn load_from_config(path: &Path) -> Result<Vec<ProviderConfig>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     let config: ConfigFile =
         toml::from_str(&content).map_err(|e| format!("failed to parse TOML: {e}"))?;
 
@@ -35,8 +35,8 @@ pub fn load_from_config(path: &Path) -> Result<Vec<ProviderConfig>, String> {
 
 /// Load model overrides from config file.
 pub fn load_overrides_from_config(path: &Path) -> Result<Vec<super::types::ModelOverride>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     let config: ConfigFile =
         toml::from_str(&content).map_err(|e| format!("failed to parse TOML: {e}"))?;
 
@@ -60,8 +60,8 @@ pub fn load_overrides_from_config(path: &Path) -> Result<Vec<super::types::Model
 
 /// Load selection weights from config file.
 pub fn load_weights_from_config(path: &Path) -> Result<super::types::SelectionWeights, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
     let config: ConfigFile =
         toml::from_str(&content).map_err(|e| format!("failed to parse TOML: {e}"))?;
 
@@ -157,8 +157,8 @@ pub fn save_overrides_to_config(
 ) -> Result<(), String> {
     // Read existing config, patch the overrides section, write back.
     // This preserves all other config content.
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("failed to read {}: {e}", path.display()))?;
 
     // Find the [models.overrides] section and replace it.
     // For robustness, we rebuild the overrides section and append/replace.

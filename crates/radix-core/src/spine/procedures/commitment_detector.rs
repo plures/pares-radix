@@ -83,32 +83,9 @@ fn detect_commitments(text: &str) -> Vec<String> {
     let commitment_patterns = ["i'll ", "i will ", "let me ", "going to "];
 
     let action_verbs = [
-        "diagnose",
-        "fix",
-        "implement",
-        "write",
-        "create",
-        "update",
-        "check",
-        "verify",
-        "build",
-        "deploy",
-        "configure",
-        "refactor",
-        "optimize",
-        "debug",
-        "test",
-        "add",
-        "remove",
-        "migrate",
-        "install",
-        "resolve",
-        "investigate",
-        "wire",
-        "connect",
-        "integrate",
-        "port",
-        "rewrite",
+        "diagnose", "fix", "implement", "write", "create", "update", "check", "verify", "build",
+        "deploy", "configure", "refactor", "optimize", "debug", "test", "add", "remove", "migrate",
+        "install", "resolve", "investigate", "wire", "connect", "integrate", "port", "rewrite",
     ];
 
     let mut promises: Vec<String> = Vec::new();
@@ -120,7 +97,11 @@ fn detect_commitments(text: &str) -> Vec<String> {
         }
 
         // Numbered list items with action verbs
-        if trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+        if trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+        {
             if let Some(text_after) = trimmed.split_once('.').map(|(_, t)| t.trim()) {
                 let lower = text_after.to_lowercase();
                 if action_verbs.iter().any(|v| lower.starts_with(v)) {

@@ -31,11 +31,7 @@ pub struct Thread {
 
 impl Thread {
     /// Create a new thread with the given id, chat_id, and topic.
-    pub fn new(
-        id: impl Into<String>,
-        chat_id: impl Into<String>,
-        topic: impl Into<String>,
-    ) -> Self {
+    pub fn new(id: impl Into<String>, chat_id: impl Into<String>, topic: impl Into<String>) -> Self {
         let now = Utc::now();
         Self {
             id: id.into(),

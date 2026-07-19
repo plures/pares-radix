@@ -138,9 +138,9 @@ pub fn score_model(
 
         // Adjust for urgency
         match task.urgency {
-            Urgency::High => latency_score,               // speed matters a lot
+            Urgency::High => latency_score, // speed matters a lot
             Urgency::Normal => latency_score * 0.8 + 0.2, // moderate influence
-            Urgency::Low => 0.5,                          // speed doesn't matter, equalize
+            Urgency::Low => 0.5, // speed doesn't matter, equalize
         }
     };
 

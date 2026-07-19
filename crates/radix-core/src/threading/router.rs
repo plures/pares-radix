@@ -92,11 +92,7 @@ impl ThreadRouter {
         }
 
         // Check if there's an existing thread for this topic
-        if let Some(thread) = self
-            .store
-            .find_matching_thread(chat_id, &classification.topic)
-            .await
-        {
+        if let Some(thread) = self.store.find_matching_thread(chat_id, &classification.topic).await {
             return ThreadDecision::Existing {
                 thread_id: thread.id,
             };
@@ -183,11 +179,7 @@ mod tests {
         let router = make_router(store);
 
         let decision = router
-            .route_message(
-                "chat-1",
-                "/thread new debugging",
-                &MessageMetadata::default(),
-            )
+            .route_message("chat-1", "/thread new debugging", &MessageMetadata::default())
             .await;
         assert_eq!(
             decision,
@@ -219,11 +211,7 @@ mod tests {
         let router = make_router(store);
 
         let decision = router
-            .route_message(
-                "chat-1",
-                "/thread switch abc-123",
-                &MessageMetadata::default(),
-            )
+            .route_message("chat-1", "/thread switch abc-123", &MessageMetadata::default())
             .await;
         assert_eq!(
             decision,
@@ -273,11 +261,7 @@ mod tests {
         let router = make_router_with_config(store, config);
 
         let decision = router
-            .route_message(
-                "chat-1",
-                "something about a new topic",
-                &MessageMetadata::default(),
-            )
+            .route_message("chat-1", "something about a new topic", &MessageMetadata::default())
             .await;
         assert_eq!(decision, ThreadDecision::Continue);
     }

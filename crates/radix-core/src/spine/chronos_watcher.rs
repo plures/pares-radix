@@ -154,11 +154,14 @@ impl ChronosWatcher {
         // (a) A user correction/rejection, but only when it is an OutcomeRecorded
         //     entry (that action is what carries user acceptance/correction).
         let is_correction_outcome = matches!(entry.action, ChronosAction::OutcomeRecorded)
-            && (lc.contains("correction") || lc.contains("corrected") || lc.contains("rejected"));
+            && (lc.contains("correction")
+                || lc.contains("corrected")
+                || lc.contains("rejected"));
 
         // (b) An explicit performance problem marker on any action kind.
-        let is_performance_problem =
-            lc.contains("regression") || lc.contains("repeated retry") || lc.contains("bottleneck");
+        let is_performance_problem = lc.contains("regression")
+            || lc.contains("repeated retry")
+            || lc.contains("bottleneck");
 
         if is_correction_outcome || is_performance_problem {
             // The improvement target is the entry's data key (which the RSI
@@ -360,11 +363,7 @@ mod tests {
         let watcher = ChronosWatcher::new(Arc::clone(&timeline), store);
         let out = watcher.observe_once(100);
 
-        assert_eq!(
-            out.proposals.len(),
-            1,
-            "exactly one proposal for the target"
-        );
+        assert_eq!(out.proposals.len(), 1, "exactly one proposal for the target");
         assert_eq!(out.notifications.len(), 1);
         let p = &out.proposals[0];
         assert_eq!(p.target, "procedure:bar");

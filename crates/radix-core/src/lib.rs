@@ -28,10 +28,10 @@ pub mod executor;
 pub mod handlers;
 /// License key validation and Pro feature gates.
 pub mod license;
-/// Handler-facing memory interface (trait + DTOs; impl lives in cognition).
-pub mod memory;
 /// LLM model client and tool dispatcher abstractions.
 pub mod model;
+/// Handler-facing memory interface (trait + DTOs; impl lives in cognition).
+pub mod memory;
 
 pub mod memory_client;
 
@@ -42,10 +42,10 @@ pub mod optimization;
 pub mod otel;
 #[cfg(feature = "otel")]
 pub mod otel_metrics;
-/// Platform bridge to the PluresDB procedure engine (procedure/constraint execution).
-pub mod pluresdb_bridge;
 /// Praxis decision ledger and approval gate procedures.
 pub mod praxis;
+/// Platform bridge to the PluresDB procedure engine (procedure/constraint execution).
+pub mod pluresdb_bridge;
 /// Procedure registry and priority-based event dispatch.
 pub mod procedure;
 /// Shipped default PluresLM procedure bundles (JSON library).

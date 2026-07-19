@@ -182,9 +182,7 @@ impl PoolControl for PoolControlAdapter {
         for m in &found {
             self.pool.prefer_model(&m.provider, model_id, true).await;
         }
-        Ok(format!(
-            "⭐ Preferred <code>{model_id}</code> (soft boost in selection)"
-        ))
+        Ok(format!("⭐ Preferred <code>{model_id}</code> (soft boost in selection)"))
     }
 
     async fn stats(&self, model_id: Option<&str>) -> String {
@@ -227,10 +225,7 @@ impl PoolControl for PoolControlAdapter {
                     return "No performance data recorded yet.".to_string();
                 }
 
-                let mut lines = vec![format!(
-                    "📊 <b>Model Performance</b> ({} tracked)\n",
-                    stats.len()
-                )];
+                let mut lines = vec![format!("📊 <b>Model Performance</b> ({} tracked)\n", stats.len())];
                 let mut sorted: Vec<_> = stats.iter().collect();
                 sorted.sort_by(|a, b| {
                     b.1.success_rate
@@ -264,11 +259,7 @@ impl PoolControl for PoolControlAdapter {
         format!(
             "🔄 Discovery complete: {} models from {} providers ({} enabled)",
             status.total_models,
-            status
-                .providers
-                .iter()
-                .filter(|p| p.status == ProviderStatus::Active)
-                .count(),
+            status.providers.iter().filter(|p| p.status == ProviderStatus::Active).count(),
             status.enabled_models
         )
     }
@@ -276,10 +267,7 @@ impl PoolControl for PoolControlAdapter {
     async fn legacy_model_pair(&self) -> (String, String) {
         // For backward compat with /status: pick top 2 enabled models
         let models = self.pool.enabled_models().await;
-        let primary = models
-            .first()
-            .map(|m| m.id.clone())
-            .unwrap_or_else(|| "none".into());
+        let primary = models.first().map(|m| m.id.clone()).unwrap_or_else(|| "none".into());
         let deep = models
             .iter()
             .find(|m| m.reasoning && m.id != primary)

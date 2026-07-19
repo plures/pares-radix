@@ -142,7 +142,11 @@ impl ModelPool {
                 name: p.name.clone(),
                 kind: p.kind.clone(),
                 status: p.status,
-                model_count: inner.models.iter().filter(|m| m.provider == p.name).count(),
+                model_count: inner
+                    .models
+                    .iter()
+                    .filter(|m| m.provider == p.name)
+                    .count(),
                 enabled: p.enabled,
             })
             .collect();
@@ -245,7 +249,8 @@ impl ModelPool {
         *task_score = *task_score * (1.0 - alpha) + success_val * alpha;
 
         // Overall success rate (simple running average)
-        entry.success_rate = entry.success_rate * ((n - 1.0) / n) + success_val * (1.0 / n);
+        entry.success_rate =
+            entry.success_rate * ((n - 1.0) / n) + success_val * (1.0 / n);
 
         // Average latency
         entry.avg_latency_ms = ((entry.avg_latency_ms as f64 * (n - 1.0) / n)

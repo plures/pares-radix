@@ -407,9 +407,9 @@ mod tests {
 
     // ── Helper: MemoryThreadStore variant with anchor data ──────────────────
 
-    use crate::model::ChatMessage;
     use crate::threading::store::ThreadStoreError;
     use crate::threading::types::Thread;
+    use crate::model::ChatMessage;
 
     /// A minimal thread store that returns a thread with a channel anchor, for testing.
     struct MemoryThreadStoreWithAnchor;

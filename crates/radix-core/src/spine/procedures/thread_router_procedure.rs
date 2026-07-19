@@ -167,9 +167,7 @@ impl SpineProcedure for ThreadRoutingProcedure {
                                         sender: sender.clone(),
                                         content: content.clone(),
                                         metadata: enrich_metadata(
-                                            metadata,
-                                            &active.id,
-                                            &active.topic,
+                                            metadata, &active.id, &active.topic,
                                         ),
                                     })
                                     .await;
@@ -251,11 +249,7 @@ mod tests {
     fn make_procedure_and_emitter(
         router: Arc<ThreadRouter>,
         store: Arc<MemoryThreadStore>,
-    ) -> (
-        ThreadRoutingProcedure,
-        PipelineEmitter,
-        mpsc::Receiver<SpineEvent>,
-    ) {
+    ) -> (ThreadRoutingProcedure, PipelineEmitter, mpsc::Receiver<SpineEvent>) {
         let (tx, rx) = mpsc::channel(32);
         let emitter = PipelineEmitter { tx };
         let procedure = ThreadRoutingProcedure::new(router, store as Arc<dyn ThreadStore>);
@@ -310,7 +304,10 @@ mod tests {
         // Should emit ThreadCreated
         let first = rx.recv().await.unwrap();
         assert_eq!(first.event_type(), "thread_created");
-        if let SpineEvent::ThreadCreated { chat_id, topic, .. } = &first {
+        if let SpineEvent::ThreadCreated {
+            chat_id, topic, ..
+        } = &first
+        {
             assert_eq!(chat_id, "chat-1");
             assert_eq!(topic, "debugging");
         } else {
@@ -470,10 +467,7 @@ mod tests {
         procedure.handle(&event, &emitter).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(
-            rx.try_recv().is_err(),
-            "non-inbound events should be ignored"
-        );
+        assert!(rx.try_recv().is_err(), "non-inbound events should be ignored");
     }
 
     #[tokio::test]

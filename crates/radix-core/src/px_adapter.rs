@@ -640,11 +640,7 @@ pub fn load_px_directory_excluding(
                 continue;
             }
             // Recurse into subdirectories, carrying the same exclusion set.
-            adapters.extend(load_px_directory_excluding(
-                &path,
-                exclude_subdirs,
-                handler.clone(),
-            ));
+            adapters.extend(load_px_directory_excluding(&path, exclude_subdirs, handler.clone()));
         } else if path.extension().is_some_and(|ext| ext == "px") {
             match std::fs::read_to_string(&path) {
                 Ok(source) => match load_px_procedures(&source, handler.clone()) {

@@ -9,9 +9,9 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::model::ChatMessage;
+use crate::threading::store::ThreadStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
-use crate::threading::store::ThreadStore;
 
 /// Records user and assistant messages into thread-aware storage.
 ///
@@ -46,7 +46,9 @@ impl SpineProcedure for ThreadedHistoryRecorder {
                 metadata,
                 ..
             } => {
-                let thread_id = metadata.get("thread_id").and_then(|v| v.as_str());
+                let thread_id = metadata
+                    .get("thread_id")
+                    .and_then(|v| v.as_str());
 
                 if let Some(tid) = thread_id {
                     debug!(
@@ -75,7 +77,9 @@ impl SpineProcedure for ThreadedHistoryRecorder {
                 metadata,
                 ..
             } if tool_calls.is_empty() && !content.is_empty() => {
-                let thread_id = metadata.get("thread_id").and_then(|v| v.as_str());
+                let thread_id = metadata
+                    .get("thread_id")
+                    .and_then(|v| v.as_str());
 
                 if let Some(tid) = thread_id {
                     debug!(
@@ -115,11 +119,7 @@ mod tests {
         PipelineEmitter { tx }
     }
 
-    async fn setup() -> (
-        Arc<MemoryThreadStore>,
-        ThreadedHistoryRecorder,
-        PipelineEmitter,
-    ) {
+    async fn setup() -> (Arc<MemoryThreadStore>, ThreadedHistoryRecorder, PipelineEmitter) {
         let store = Arc::new(MemoryThreadStore::new());
         // Create a default thread so add_message has somewhere to go
         store.create_thread("chat-1", "general").await;

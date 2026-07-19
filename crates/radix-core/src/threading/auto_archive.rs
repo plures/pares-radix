@@ -116,7 +116,10 @@ mod tests {
     use crate::threading::store::MemoryThreadStore;
     use chrono::Duration;
 
-    fn make_archiver(store: Arc<MemoryThreadStore>, config: ThreadConfig) -> AutoArchiver {
+    fn make_archiver(
+        store: Arc<MemoryThreadStore>,
+        config: ThreadConfig,
+    ) -> AutoArchiver {
         AutoArchiver::new(store as Arc<dyn ThreadStore>, config)
     }
 
@@ -300,10 +303,7 @@ mod tests {
 
         // Verify at least one thread remains active
         let remaining = store.list_threads("chat-1").await;
-        let active_count = remaining
-            .iter()
-            .filter(|t| t.state == ThreadState::Active)
-            .count();
+        let active_count = remaining.iter().filter(|t| t.state == ThreadState::Active).count();
         assert_eq!(active_count, 1, "must keep at least one active thread");
     }
 }

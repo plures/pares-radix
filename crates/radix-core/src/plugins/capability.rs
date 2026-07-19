@@ -574,7 +574,8 @@ pub fn validate_provider_surface(
     // (2b) Every provider-side event must be declared. Union of each operation's
     //      result_event and the explicit events.emitted_by_provider vocabulary
     //      (deterministic, de-duplicated).
-    let mut provider_events: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut provider_events: std::collections::BTreeSet<&str> =
+        std::collections::BTreeSet::new();
     for op in &cid.operations {
         if let Some(ev) = op.result_event.as_deref() {
             provider_events.insert(ev);
@@ -646,7 +647,9 @@ pub fn resolve_and_validate_capabilities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::manifest::{CapabilityInterfaceRef, PluginCapabilities, PluginManifest};
+    use crate::plugins::manifest::{
+        CapabilityInterfaceRef, PluginCapabilities, PluginManifest,
+    };
 
     /// Path to the real, shipped commerce CID descriptor.
     fn commerce_cid_path() -> std::path::PathBuf {
@@ -1040,7 +1043,9 @@ mod tests {
         let mut provider = commerce_provider_manifest();
         // Drop check_nullifier from the declared surface.
         if let Some(iface) = provider.capabilities.interface.get_mut("commerce") {
-            iface.provides_operations.retain(|o| o != "check_nullifier");
+            iface
+                .provides_operations
+                .retain(|o| o != "check_nullifier");
             iface
                 .provides_events
                 .retain(|e| e != "commerce.nullifier.check.completed");
@@ -1091,7 +1096,8 @@ mod tests {
                     "all operations reported missing, got: {missing:?}"
                 );
                 assert!(
-                    missing.contains(&"provider-event 'commerce.redeem.completed'".to_string()),
+                    missing
+                        .contains(&"provider-event 'commerce.redeem.completed'".to_string()),
                     "all provider events reported missing, got: {missing:?}"
                 );
             }
@@ -1149,18 +1155,14 @@ mod tests {
             "shipped provider manifest must exist at {}",
             manifest_path.display()
         );
-        let toml =
-            std::fs::read_to_string(&manifest_path).expect("read plugins/commerce/plugin.toml");
+        let toml = std::fs::read_to_string(&manifest_path)
+            .expect("read plugins/commerce/plugin.toml");
         let manifest = crate::plugins::manifest::parse_manifest(&toml)
             .expect("the shipped commerce plugin.toml must parse through the real loader");
 
         // It declares it provides commerce@1.0.0.
         assert_eq!(
-            manifest
-                .capabilities
-                .provided
-                .get("commerce")
-                .map(String::as_str),
+            manifest.capabilities.provided.get("commerce").map(String::as_str),
             Some("1.0.0"),
             "shipped provider declares [capabilities.provided] commerce = 1.0.0"
         );
@@ -1230,7 +1232,8 @@ mod tests {
             "real shipped provider manifest must exist at {}",
             path.display()
         );
-        let toml = std::fs::read_to_string(&path).expect("read plugins/commerce/plugin.toml");
+        let toml = std::fs::read_to_string(&path)
+            .expect("read plugins/commerce/plugin.toml");
         crate::plugins::manifest::parse_manifest(&toml)
             .expect("the shipped commerce plugin.toml must parse through the real loader")
     }
@@ -1243,10 +1246,12 @@ mod tests {
     /// the presence of the full required map; the commerce binding itself is
     /// against the REAL provider, never a stand-in.
     fn innerspace_other_cap_providers() -> Vec<PluginManifest> {
-        ["scanning", "scene", "physics", "audio", "input", "location"]
-            .iter()
-            .map(|cap| provider_manifest(&format!("host-{cap}"), &[(cap, "1.0.0")]))
-            .collect()
+        [
+            "scanning", "scene", "physics", "audio", "input", "location",
+        ]
+        .iter()
+        .map(|cap| provider_manifest(&format!("host-{cap}"), &[(cap, "1.0.0")]))
+        .collect()
     }
 
     /// END-TO-END BINDING PROOF (ADR-0022 step 5).
@@ -1265,7 +1270,8 @@ mod tests {
         let mut manifests = vec![provider.clone(), consumer];
         manifests.extend(innerspace_other_cap_providers());
 
-        let bindings = resolve_capabilities(&manifests).expect("full inner-space map resolves");
+        let bindings =
+            resolve_capabilities(&manifests).expect("full inner-space map resolves");
 
         // The commerce binding: inner-space.commerce → the REAL commerce
         // provider at concrete 1.0.0. (We assert specifically on the commerce
@@ -1300,17 +1306,16 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         assert!(
-            !innerspace_bindings
-                .iter()
-                .any(|b| b.capability == "network"),
+            !innerspace_bindings.iter().any(|b| b.capability == "network"),
             "network is a platform capability and must not be provider-bound"
         );
 
         // The bound provider actually satisfies the CID it claims (ADR-0022 §7):
         // the REAL provider surface validates against the REAL commerce CID.
         let cid = load_cid_from_toml_path(&commerce_cid_path()).expect("parse real CID");
-        validate_provider_surface(&provider, &cid)
-            .expect("the bound REAL commerce provider must satisfy the real commerce CID");
+        validate_provider_surface(&provider, &cid).expect(
+            "the bound REAL commerce provider must satisfy the real commerce CID",
+        );
     }
 
     /// Same as above but through the WIRED resolve+validate path
@@ -1399,11 +1404,7 @@ mod tests {
 
         // Provided capability + concrete version.
         assert_eq!(
-            manifest
-                .capabilities
-                .provided
-                .get("commerce")
-                .map(String::as_str),
+            manifest.capabilities.provided.get("commerce").map(String::as_str),
             Some("1.0.0"),
             "shipped provider declares [capabilities.provided] commerce = 1.0.0"
         );
@@ -1415,10 +1416,7 @@ mod tests {
             .get("commerce")
             .expect("shipped provider declares [capabilities.interface.commerce]");
         assert_eq!(iface.cid, "commerce@1.x");
-        assert_eq!(
-            iface.spec.as_deref(),
-            Some("capabilities/commerce.cid.toml")
-        );
+        assert_eq!(iface.spec.as_deref(), Some("capabilities/commerce.cid.toml"));
 
         // The 4 mediated operations (verbatim from the committed plugin.toml).
         assert_eq!(

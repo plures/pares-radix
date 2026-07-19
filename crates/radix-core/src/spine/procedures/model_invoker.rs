@@ -276,13 +276,8 @@ impl SpineProcedure for ModelInvoker {
         };
 
         // Build messages
-        let messages = self.build_messages(
-            content,
-            system_prompt.as_deref(),
-            metadata,
-            &prior_history,
-            chat_id,
-        );
+        let messages =
+            self.build_messages(content, system_prompt.as_deref(), metadata, &prior_history, chat_id);
 
         if messages.is_empty() || (messages.len() == 1 && messages[0].role == "system") {
             error!(event_id = %id, "model_invoker: no user content to send to model");
@@ -294,7 +289,10 @@ impl SpineProcedure for ModelInvoker {
             .get("model_tier")
             .and_then(|v| v.as_str())
             .unwrap_or("standard");
-        let routed_by_px = metadata.get("routed_by").and_then(|v| v.as_str()) == Some("px");
+        let routed_by_px = metadata
+            .get("routed_by")
+            .and_then(|v| v.as_str())
+            == Some("px");
 
         if routed_by_px {
             debug!(
@@ -764,15 +762,9 @@ mod tests {
 
     #[test]
     fn tier_to_model_maps_correctly() {
-        assert_eq!(
-            ModelInvoker::tier_to_model("fast"),
-            Some("qwen2.5:3b".to_string())
-        );
+        assert_eq!(ModelInvoker::tier_to_model("fast"), Some("qwen2.5:3b".to_string()));
         assert_eq!(ModelInvoker::tier_to_model("standard"), None);
-        assert_eq!(
-            ModelInvoker::tier_to_model("premium"),
-            Some("qwen2.5:14b".to_string())
-        );
+        assert_eq!(ModelInvoker::tier_to_model("premium"), Some("qwen2.5:14b".to_string()));
         assert_eq!(ModelInvoker::tier_to_model("unknown"), None);
     }
 
@@ -862,10 +854,7 @@ mod tests {
         let injected = messages
             .iter()
             .any(|m| m.role == "system" && m.content.contains("Ship the release binary"));
-        assert!(
-            injected,
-            "expected persisted open task injected into system context"
-        );
+        assert!(injected, "expected persisted open task injected into system context");
         let has_header = messages
             .iter()
             .any(|m| m.content.contains("Your open tasks/commitments"));
@@ -884,11 +873,10 @@ mod tests {
         let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
             .with_task_manager(manager);
 
-        let messages = invoker.build_messages("hi", Some("sys"), &json!({}), &[], "empty-chat");
+        let messages =
+            invoker.build_messages("hi", Some("sys"), &json!({}), &[], "empty-chat");
         assert!(
-            !messages
-                .iter()
-                .any(|m| m.content.contains("open tasks/commitments")),
+            !messages.iter().any(|m| m.content.contains("open tasks/commitments")),
             "no task block should be injected when there are no open tasks"
         );
     }
@@ -927,8 +915,9 @@ mod tests {
             "persisted task must survive a fresh store handle (process reload)"
         );
 
-        let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
-            .with_task_manager(Arc::clone(&manager2));
+        let invoker =
+            ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+                .with_task_manager(Arc::clone(&manager2));
         let messages = invoker.build_messages(
             "what am I working on?",
             Some("base system prompt"),

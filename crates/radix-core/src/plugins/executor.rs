@@ -368,10 +368,7 @@ impl PluginCrudExecutor {
     /// consumer's binding for a given capability is a single addressable node
     /// (re-resolving overwrites it deterministically rather than accumulating).
     pub fn persist_binding(&self, binding: &CapabilityBinding) -> Result<(), PluginError> {
-        let key = format!(
-            "{BINDINGS_PREFIX}{}:{}",
-            binding.consumer, binding.capability
-        );
+        let key = format!("{BINDINGS_PREFIX}{}:{}", binding.consumer, binding.capability);
         let data = serde_json::to_value(binding)
             .map_err(|e| PluginError::Storage(format!("serialize binding: {e}")))?;
         self.gate_put(&key, ACTOR, data)?;

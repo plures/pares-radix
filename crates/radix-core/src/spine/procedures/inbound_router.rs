@@ -318,8 +318,7 @@ mod tests {
 
         let reactive = Arc::new(ReactiveRegistry::new());
         let reactive_clone = Arc::clone(&reactive);
-        let router =
-            InboundRouter::with_reactive(reactive).with_timeout(Duration::from_millis(500));
+        let router = InboundRouter::with_reactive(reactive).with_timeout(Duration::from_millis(500));
 
         // Simulate a .px procedure writing a route_decision by spawning a task
         // that writes to the registry after a short delay
@@ -331,9 +330,7 @@ mod tests {
                 "tier": "premium",
                 "reason": "high complexity"
             });
-            reactive_clone
-                .on_write("route_decision:test-5", &decision)
-                .await;
+            reactive_clone.on_write("route_decision:test-5", &decision).await;
         });
 
         let event = SpineEvent::Inbound {
@@ -370,8 +367,7 @@ mod tests {
 
         let reactive = Arc::new(ReactiveRegistry::new());
         let reactive_clone = Arc::clone(&reactive);
-        let router =
-            InboundRouter::with_reactive(reactive).with_timeout(Duration::from_millis(500));
+        let router = InboundRouter::with_reactive(reactive).with_timeout(Duration::from_millis(500));
 
         // Simulate classify_and_route producing a "procedural" decision
         tokio::spawn(async move {
@@ -381,9 +377,7 @@ mod tests {
                 "tier": "fast",
                 "reason": "greeting"
             });
-            reactive_clone
-                .on_write("route_decision:test-6", &decision)
-                .await;
+            reactive_clone.on_write("route_decision:test-6", &decision).await;
         });
 
         let event = SpineEvent::Inbound {
@@ -399,10 +393,7 @@ mod tests {
 
         // Procedural route should NOT emit any ModelRequest
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            rx.try_recv().is_err(),
-            "procedural route should not emit ModelRequest"
-        );
+        assert!(rx.try_recv().is_err(), "procedural route should not emit ModelRequest");
     }
 
     #[tokio::test]

@@ -150,12 +150,10 @@ impl DevLifecycleActionHandler {
     /// Params: `{task: {stages: [...]}, after: "stage_name"}`
     /// Returns: next stage name (string) or null if all done
     fn find_next_stage(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let task = params
-            .get("task")
-            .ok_or_else(|| ExecutionError::ActionFailed {
-                action: "find_next_stage".into(),
-                message: "missing 'task'".into(),
-            })?;
+        let task = params.get("task").ok_or_else(|| ExecutionError::ActionFailed {
+            action: "find_next_stage".into(),
+            message: "missing 'task'".into(),
+        })?;
 
         let stages = task
             .get("stages")
@@ -204,19 +202,18 @@ impl DevLifecycleActionHandler {
     /// Params: `{task: {stages: [...]}, name: "stage_name"}`
     /// Returns: the stage object, or null if not found
     fn get_stage(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let task = params
-            .get("task")
+        let task = params.get("task").ok_or_else(|| ExecutionError::ActionFailed {
+            action: "get_stage".into(),
+            message: "missing 'task'".into(),
+        })?;
+
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ExecutionError::ActionFailed {
                 action: "get_stage".into(),
-                message: "missing 'task'".into(),
-            })?;
-
-        let name = params.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
-            ExecutionError::ActionFailed {
-                action: "get_stage".into(),
                 message: "missing 'name'".into(),
-            }
-        })?;
+            })?;
 
         let stages = task
             .get("stages")
@@ -322,12 +319,10 @@ impl DevLifecycleActionHandler {
     ///   OR   `{task: {...}, summary: "..."}`
     /// Returns: formatted brief string
     fn format_stage_brief(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let task = params
-            .get("task")
-            .ok_or_else(|| ExecutionError::ActionFailed {
-                action: "format_stage_brief".into(),
-                message: "missing 'task'".into(),
-            })?;
+        let task = params.get("task").ok_or_else(|| ExecutionError::ActionFailed {
+            action: "format_stage_brief".into(),
+            message: "missing 'task'".into(),
+        })?;
 
         // If this is a report_result call (has summary), format as notification
         if let Some(summary) = params.get("summary").and_then(|v| v.as_str()) {
@@ -336,10 +331,7 @@ impl DevLifecycleActionHandler {
                 .get("description")
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            let status = task
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
+            let status = task.get("status").and_then(|v| v.as_str()).unwrap_or("unknown");
 
             let icon = match status {
                 "passed" => "✅",
@@ -348,7 +340,9 @@ impl DevLifecycleActionHandler {
                 _ => "📋",
             };
 
-            let message = format!("{icon} Task {task_id} ({status}): {description}\n\n{summary}");
+            let message = format!(
+                "{icon} Task {task_id} ({status}): {description}\n\n{summary}"
+            );
             return Ok(json!(message));
         }
 
@@ -416,12 +410,10 @@ impl DevLifecycleActionHandler {
     /// Params: `{task: {stages: [...]}}`
     /// Returns: summary string or object with stage_name → output mappings
     fn collect_stage_outputs(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let task = params
-            .get("task")
-            .ok_or_else(|| ExecutionError::ActionFailed {
-                action: "collect_stage_outputs".into(),
-                message: "missing 'task'".into(),
-            })?;
+        let task = params.get("task").ok_or_else(|| ExecutionError::ActionFailed {
+            action: "collect_stage_outputs".into(),
+            message: "missing 'task'".into(),
+        })?;
 
         let stages = task
             .get("stages")
@@ -509,10 +501,7 @@ mod tests {
     #[tokio::test]
     async fn get_default_stages_returns_five() {
         let h = handler();
-        let result = h
-            .call("get_default_stages", &json!({"repo": "plures/pares-radix"}))
-            .await
-            .unwrap();
+        let result = h.call("get_default_stages", &json!({"repo": "plures/pares-radix"})).await.unwrap();
         let stages = result.as_array().unwrap();
         assert_eq!(stages.len(), 5);
         assert_eq!(stages[0]["name"], "analyze");
@@ -551,10 +540,7 @@ mod tests {
                 {"name": "verify", "status": "pending", "depends_on": ["deploy"]}
             ]
         });
-        let result = h
-            .call("find_next_stage", &json!({"task": task, "after": "fix"}))
-            .await
-            .unwrap();
+        let result = h.call("find_next_stage", &json!({"task": task, "after": "fix"})).await.unwrap();
         assert_eq!(result, "test");
     }
 
@@ -570,10 +556,7 @@ mod tests {
                 {"name": "verify", "status": "passed", "depends_on": ["deploy"]}
             ]
         });
-        let result = h
-            .call("find_next_stage", &json!({"task": task, "after": "verify"}))
-            .await
-            .unwrap();
+        let result = h.call("find_next_stage", &json!({"task": task, "after": "verify"})).await.unwrap();
         assert_eq!(result, Value::Null);
     }
 
@@ -590,10 +573,7 @@ mod tests {
             ]
         });
         // test depends on fix which failed, so nothing is ready
-        let result = h
-            .call("find_next_stage", &json!({"task": task, "after": "fix"}))
-            .await
-            .unwrap();
+        let result = h.call("find_next_stage", &json!({"task": task, "after": "fix"})).await.unwrap();
         assert_eq!(result, Value::Null);
     }
 
@@ -606,10 +586,7 @@ mod tests {
                 {"name": "fix", "status": "running"}
             ]
         });
-        let result = h
-            .call("get_stage", &json!({"task": task, "name": "fix"}))
-            .await
-            .unwrap();
+        let result = h.call("get_stage", &json!({"task": task, "name": "fix"})).await.unwrap();
         assert_eq!(result["status"], "running");
     }
 
@@ -617,10 +594,7 @@ mod tests {
     async fn get_stage_returns_null_for_missing() {
         let h = handler();
         let task = json!({"stages": [{"name": "analyze", "status": "passed"}]});
-        let result = h
-            .call("get_stage", &json!({"task": task, "name": "nonexistent"}))
-            .await
-            .unwrap();
+        let result = h.call("get_stage", &json!({"task": task, "name": "nonexistent"})).await.unwrap();
         assert_eq!(result, Value::Null);
     }
 
@@ -659,10 +633,7 @@ mod tests {
                 {"name": "test", "status": "pending", "attempts": 0, "output": null}
             ]
         });
-        let result = h
-            .call("collect_stage_outputs", &json!({"task": task}))
-            .await
-            .unwrap();
+        let result = h.call("collect_stage_outputs", &json!({"task": task})).await.unwrap();
         let summary = result.as_str().unwrap();
         assert!(summary.contains("analyze"));
         assert!(summary.contains("Found 3 issues"));
