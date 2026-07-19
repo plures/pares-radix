@@ -598,10 +598,9 @@ mod tests {
                 json!({"description": "Investigate the Telegram timeout"}),
             )
             .await;
-        assert!(
-            created.contains("\"status\":\"created\""),
-            "task_create should be handled by the built-in task registry"
-        );
+        let created_json: Value =
+            serde_json::from_str(&created).expect("task_create should return JSON");
+        assert_eq!(created_json["status"], "created");
         assert_eq!(manager.open_tasks().len(), 1);
     }
 
