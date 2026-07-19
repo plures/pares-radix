@@ -175,6 +175,9 @@ impl AsyncActionHandler for CoreActionHandler {
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
+use crate::spine::task_grounding_actions::{
+    is_task_grounding_action, TaskGroundingActionHandler,
+};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
@@ -197,6 +200,10 @@ pub struct CompositeActionHandler {
     worktask: WorktaskActionHandler,
     run_command: RunCommandActionHandler,
     briefing: BriefingActionHandler,
+    /// Durable task-grounding handler (`read_open_tasks_block`). `None` when the
+    /// runtime was assembled without a task store; the action then returns null
+    /// and `.px` injects no block (honest absence, never a stub).
+    task_grounding: Option<TaskGroundingActionHandler>,
     subagent: Option<Arc<SubagentActor>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
@@ -215,9 +222,25 @@ impl CompositeActionHandler {
             dev_lifecycle: DevLifecycleActionHandler::new(),
             run_command: RunCommandActionHandler::new(),
             briefing: BriefingActionHandler::new(),
+            task_grounding: None,
             subagent: None,
             tool_handler,
         }
+    }
+
+    /// Attach the durable [`TaskGroundingActionHandler`] so the live reactive
+    /// `.px` path (`build_context`) can inject the persisted open-tasks block
+    /// into the model system prompt each inbound turn (pares-radix#467).
+    ///
+    /// The manager must be backed by the SAME PluresDB store as the rest of the
+    /// runtime so tasks written by the task procedures are read here
+    /// (C-PLURES-003/004).
+    pub fn with_task_grounding(
+        mut self,
+        task_manager: Arc<crate::task_manager::TaskManager>,
+    ) -> Self {
+        self.task_grounding = Some(TaskGroundingActionHandler::new(task_manager));
+        self
     }
 
     /// Set the subagent actor after construction (breaks circular dependency).
@@ -247,6 +270,15 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.run_command.call(action, params).await
         } else if is_briefing_action(action) {
             self.briefing.call(action, params).await
+        } else if is_task_grounding_action(action) {
+            if let Some(ref h) = self.task_grounding {
+                h.call(action, params).await
+            } else {
+                // No task store wired — degrade gracefully. If `.px` supplied a base prompt, pass it through.
+                warn!(action = %action, "task grounding not wired — passing through base prompt");
+                let base = params.get("base").and_then(|v| v.as_str());
+                Ok(Value::String(base.unwrap_or("").to_string()))
+            }
         } else if is_subagent_action(action) {
             if let Some(ref actor) = self.subagent {
                 actor.call(action, params).await
@@ -366,5 +398,82 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, Value::Null);
+    }
+
+    /// END-TO-END LIVE-PATH PROOF (pares-radix#467 — task amnesia):
+    ///
+    /// Assemble the [`CompositeActionHandler`] EXACTLY as the shipped serve
+    /// runtime does (`build_reactive_runtime_with_tasks`): a real
+    /// [`TaskManager`](crate::task_manager::TaskManager) over the SAME PluresDB
+    /// `CrdtStore` the task procedures write to, wired via `with_task_grounding`.
+    /// Persist an open task, then invoke the `read_open_tasks_block` action the
+    /// live `praxis/spine/conversation.px::build_context` step calls — passing
+    /// the base system prompt — and assert the durable open-tasks block is
+    /// injected ahead of the base prompt in the string that becomes the inbound
+    /// turn's `system_prompt`. This proves the grounding reaches every inbound
+    /// turn on the live reactive path, NOT via the (test-only) Rust ModelInvoker.
+    #[tokio::test]
+    async fn live_path_injects_open_tasks_block_into_system_prompt() {
+        use crate::model::{ToolDefinition, ToolDispatcher};
+        use crate::px_adapter::ToolDispatchActionHandler;
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, MemoryStorage};
+
+        // A trivial tool dispatcher — the read_open_tasks_block action never
+        // reaches it (it's handled before the tool fallthrough).
+        struct NullDispatcher;
+        #[async_trait]
+        impl ToolDispatcher for NullDispatcher {
+            async fn available_tools(&self) -> Vec<ToolDefinition> {
+                vec![]
+            }
+            async fn call_tool(&self, _name: &str, _args: Value) -> String {
+                "null".to_string()
+            }
+        }
+
+        // Shared store used by BOTH the task manager and (conceptually) state.
+        let storage: Arc<dyn pluresdb::StorageEngine> = Arc::new(MemoryStorage::default());
+        let crdt = Arc::new(CrdtStore::default().with_persistence(storage));
+        let task_manager = Arc::new(TaskManager::new(Arc::clone(&crdt)));
+
+        // Persist a real open task for this chat.
+        task_manager.create_task("finish the praxisbot 467 fix", "tg-chat-1", vec![]);
+
+        // Build the composite exactly like the runtime, with task grounding.
+        let conv: Arc<dyn ConversationStore> = Arc::new(MemoryConversationStore::new());
+        let tool_handler = Arc::new(ToolDispatchActionHandler::new(Arc::new(NullDispatcher)));
+        let composite = CompositeActionHandler::new(conv, test_state(), tool_handler)
+            .with_task_grounding(Arc::clone(&task_manager));
+
+        // Drive the live action the .px build_context step calls.
+        let base = "You are praxisbot, a helpful agent.";
+        let out = composite
+            .call(
+                "read_open_tasks_block",
+                &serde_json::json!({"chat_id": "tg-chat-1", "base": base}),
+            )
+            .await
+            .unwrap();
+        let grounded = out.as_str().expect("action returns a string prompt");
+
+        assert!(
+            grounded.contains("finish the praxisbot 467 fix"),
+            "live system prompt must carry the persisted open task; got: {grounded}"
+        );
+        assert!(
+            grounded.contains("open tasks/commitments"),
+            "live system prompt must carry the grounding header; got: {grounded}"
+        );
+        assert!(
+            grounded.contains(base),
+            "base system prompt must be preserved; got: {grounded}"
+        );
+        // Grounding block precedes the base prompt.
+        assert!(
+            grounded.find("finish the praxisbot 467 fix").unwrap()
+                < grounded.find(base).unwrap(),
+            "grounding block must be prepended before the base prompt"
+        );
     }
 }

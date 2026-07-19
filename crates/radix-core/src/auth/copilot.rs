@@ -772,15 +772,11 @@ impl CopilotAuth {
 
 /// Parse a models response — handles both array-of-objects and {data: [...]} formats.
 fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
-    let arr = if let Some(arr) = body.as_array() {
-        arr.clone()
-    } else if let Some(arr) = body.get("data").and_then(|d| d.as_array()) {
-        arr.clone()
-    } else if let Some(arr) = body.get("models").and_then(|d| d.as_array()) {
-        arr.clone()
-    } else {
-        return None;
-    };
+    let arr = body
+        .as_array()
+        .or_else(|| body.get("data").and_then(|d| d.as_array()))
+        .or_else(|| body.get("models").and_then(|d| d.as_array()))?
+        .clone();
 
     let models: Vec<AvailableModel> = arr
         .iter()

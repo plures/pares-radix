@@ -32,6 +32,7 @@ pub mod pipeline;
 pub mod procedures;
 pub mod reactive;
 pub mod run_command_actions;
+pub mod task_grounding_actions;
 /// Runtime assembly — wires the `.px` engine + state store + handler into the live spine.
 pub mod runtime;
 pub mod shadow;

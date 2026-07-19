@@ -148,6 +148,32 @@ pub async fn build_reactive_runtime(
     praxis_dir: &Path,
     capacity: usize,
 ) -> ReactiveRuntime {
+    build_reactive_runtime_with_tasks(
+        state_store,
+        conversation_store,
+        tool_dispatcher,
+        None,
+        praxis_dir,
+        capacity,
+    )
+    .await
+}
+
+/// Like [`build_reactive_runtime`] but also wires a durable
+/// [`TaskManager`](crate::task_manager::TaskManager) into the composite action
+/// handler so the live reactive `.px` path can inject the persisted open-tasks
+/// grounding block into the model system prompt each inbound turn
+/// (pares-radix#467). Pass `None` to run without task grounding (the
+/// `read_open_tasks_block` action then returns null and `.px` injects no
+/// block).
+pub async fn build_reactive_runtime_with_tasks(
+    state_store: Arc<dyn StateStore>,
+    conversation_store: Arc<dyn ConversationStore>,
+    tool_dispatcher: Arc<dyn ToolDispatcher>,
+    task_manager: Option<Arc<crate::task_manager::TaskManager>>,
+    praxis_dir: &Path,
+    capacity: usize,
+) -> ReactiveRuntime {
     // 1. Tool handler — bridges `.px` action calls that aren't core/lifecycle
     //    into the tool dispatch pipeline.
     let tool_handler = Arc::new(ToolDispatchActionHandler::new(tool_dispatcher));
@@ -155,11 +181,16 @@ pub async fn build_reactive_runtime(
     // 2. The composite handler the procedures invoke. CoreActionHandler is now
     //    backed by the durable state store (read_state/write_state round-trip
     //    through PluresDB, not a stub).
-    let composite = Arc::new(CompositeActionHandler::new(
+    let mut composite = CompositeActionHandler::new(
         Arc::clone(&conversation_store),
         Arc::clone(&state_store),
         tool_handler,
-    ));
+    );
+    if let Some(tm) = task_manager {
+        // Durable open-tasks grounding over the SAME store (C-PLURES-003/004).
+        composite = composite.with_task_grounding(tm);
+    }
+    let composite = Arc::new(composite);
 
     // 3. Build the registry and load every `.px` procedure against it.
     let registry = Arc::new(ReactiveRegistry::new());
@@ -205,12 +236,17 @@ pub async fn build_default_reactive_runtime(
     let conversation_store: Arc<dyn ConversationStore> = Arc::new(
         crate::spine::conversation::PluresConversationStore::new(pdb.crdt_store()),
     );
+    // Durable task manager over the SAME CRDT store (C-PLURES-003/004) so the
+    // live `.px` model path can surface persisted open tasks each turn
+    // (pares-radix#467 — task amnesia).
+    let task_manager = Arc::new(crate::task_manager::TaskManager::new(pdb.crdt_store()));
     let state_store: Arc<dyn StateStore> = Arc::new(pdb);
 
-    Ok(build_reactive_runtime(
+    Ok(build_reactive_runtime_with_tasks(
         state_store,
         conversation_store,
         tool_dispatcher,
+        Some(task_manager),
         &praxis_dir,
         capacity,
     )

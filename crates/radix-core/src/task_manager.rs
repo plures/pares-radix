@@ -277,6 +277,59 @@ impl TaskManager {
     }
 }
 
+/// Render a compact grounding block of the agent's persisted open tasks for the
+/// given chat. Returns `None` when there are no open tasks so callers never
+/// inject an empty/noise block.
+///
+/// Combines chat-scoped open tasks with globally-open tasks (deduped by id) so
+/// obligations survive conversation-history trimming and process restarts.
+///
+/// This is the SINGLE implementation shared by both model-invocation paths:
+/// the Rust `ModelInvoker` SpineProcedure and the live reactive `.px` path
+/// (via the `read_open_tasks_block` action). Keeping one function avoids the
+/// two-file duplication ADR-0010 warns against.
+pub fn render_open_tasks_block(manager: &TaskManager, chat_id: &str) -> Option<String> {
+    // Chat-scoped open tasks first, then any other globally-open tasks.
+    let mut tasks = manager.tasks_for_chat(chat_id, false);
+    let mut seen: std::collections::HashSet<String> =
+        tasks.iter().map(|t| t.id.clone()).collect();
+    for t in manager.open_tasks() {
+        // Only include truly-global tasks (no chat_id) to avoid leaking tasks across chats.
+        if t.chat_id.is_some() {
+            continue;
+        }
+        if seen.insert(t.id.clone()) {
+            tasks.push(t);
+        }
+    }
+
+    if tasks.is_empty() {
+        return None;
+    }
+
+    // Highest priority first (priority 10 = highest), then most recent.
+    tasks.sort_by(|a, b| {
+        b.priority
+            .cmp(&a.priority)
+            .then(b.created_at.cmp(&a.created_at))
+    });
+
+    let mut block = String::from(
+        "## Your open tasks/commitments (durable, from the task store — treat as authoritative)\n",
+    );
+    for t in tasks.iter().take(25) {
+        // Descriptions are user-controlled; keep them single-line and bounded.
+        let desc = t.description.lines().collect::<Vec<_>>().join(" ");
+        let desc: String = desc.chars().take(200).collect();
+        block.push_str(&format!("- [{:?}] (p{}) {}\n", t.status, t.priority, desc));
+    }
+    block.push_str(
+        "\nThese are your actual tracked obligations regardless of chat history length. \
+        When asked what your tasks/commitments are, answer from this list.",
+    );
+    Some(block)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
