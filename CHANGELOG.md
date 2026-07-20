@@ -1,3 +1,7 @@
+## [1.55.32] — 2026-07-20
+
+- fix(core): close task-completion seam - subagent finish drives owning Task terminal (#474) (6d6ec0f)
+
 ## [1.55.31] — 2026-07-20
 
 - test(spine): prove milestone: write drives .px dashboard procedure locally (72f805a)
