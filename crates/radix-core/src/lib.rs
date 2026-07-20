@@ -80,6 +80,7 @@ pub mod lifecycle;
 pub mod renderers;
 /// Tool execution governance — policies, timeouts, blocked-command filtering.
 pub mod tool_governance;
+pub mod approval;
 
 pub mod model_download;
 /// Plugin framework — application platform for schema-driven apps.
