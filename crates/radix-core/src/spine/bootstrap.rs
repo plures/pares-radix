@@ -59,9 +59,23 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("memory_correction", "memory:*");
     m.insert("memory_consolidate", "memory:*");
 
-    // Heartbeat
+    // Heartbeat clock chain (design: praxis/spine/spine.px IO boundary #4).
+    // The heartbeat timer (Rust IO) writes a tick to the "heartbeat_clock"
+    // queue; heartbeat_timer emits it, heartbeat_tick runs the health check,
+    // and evaluate_dispatch (autonomous-dispatch.px) reads the "heartbeat_tick"
+    // queue to decide whether to dispatch an autonomous task this tick.
+    //
+    // NOTE: the legacy "heartbeat:*" glob is retained for the existing
+    // heartbeat_logic/heartbeat_check procedures, but no producer writes a
+    // "heartbeat:*" key today — heartbeats currently arrive as Inbound events.
+    // The authoritative queue keys are "heartbeat_clock" and "heartbeat_tick".
     m.insert("heartbeat_logic", "heartbeat:*");
     m.insert("heartbeat_check", "heartbeat:*");
+    m.insert("heartbeat_timer", "heartbeat_clock:*");
+    m.insert("heartbeat_tick", "heartbeat_clock:*");
+    // Autonomous dispatch: evaluate_dispatch consumes the heartbeat tick and
+    // writes a dispatch_decision consumed by the TaskDispatchDriver (Rust IO).
+    m.insert("evaluate_dispatch", "heartbeat_tick:*");
 
     // Response post-processing (fires on model_response events)
     m.insert("commitment_detection", "model_response:*");

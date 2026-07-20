@@ -190,21 +190,36 @@ pub async fn build_reactive_runtime_with_tasks(
         // Durable open-tasks grounding over the SAME store (C-PLURES-003/004).
         composite = composite.with_task_grounding(tm);
     }
+
+    // 3. Build the registry and the pipeline FIRST so the live pipeline emitter
+    //    exists before we attach the autonomous task-dispatch IO edge. The
+    //    TaskDispatcher injects task prompts as Inbound events through this
+    //    same emitter (spine.px IO boundary #5), so it must be built over the
+    //    real emitter, not a placeholder.
+    let registry = Arc::new(ReactiveRegistry::new());
+    let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
+    let emitter = pipeline.emitter();
+
+    // Build the real TaskDispatcher over the live StateStore + emitter and
+    // attach it so the `.px` `dispatch_task` action can close the task loop.
+    let dispatcher = Arc::new(
+        crate::task_executor::TaskDispatcher::new(Arc::clone(&state_store))
+            .with_pipeline_emitter(emitter.clone()),
+    );
+    composite.set_task_dispatch(Arc::new(
+        crate::spine::task_dispatch_actions::TaskDispatchActionHandler::new(dispatcher),
+    ));
     let composite = Arc::new(composite);
 
-    // 3. Build the registry and load every `.px` procedure against it.
-    let registry = Arc::new(ReactiveRegistry::new());
+    // 4. Load every `.px` procedure against the registry, then give the
+    //    registry the emitter so procedure-emitted events re-enter the pipeline.
     let registered = register_reactive_procedures(praxis_dir, &registry, composite).await;
     info!(
         registered,
         praxis_dir = %praxis_dir.display(),
         "runtime: reactive .px procedures registered against live registry"
     );
-
-    // 4. Wire the pipeline to the registry and give the registry an emitter so
-    //    procedure-emitted events can re-enter the pipeline.
-    let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
-    registry.set_emitter(pipeline.emitter()).await;
+    registry.set_emitter(emitter).await;
 
     ReactiveRuntime {
         registry,
@@ -392,5 +407,72 @@ mod tests {
         );
         assert_eq!(landed["task"], "wire-px-runtime");
         assert_eq!(landed["n"], 42);
+    }
+
+    /// W2 PROOF: the autonomous task-dispatch IO edge is closed end-to-end.
+    ///
+    /// A real `.px` procedure calls the `dispatch_task` action (the same verb
+    /// `evaluate_dispatch`/`build_steered_prompt` now invoke). Through the
+    /// assembled runtime this reaches the real `TaskDispatchActionHandler` →
+    /// `TaskDispatcher` built over the LIVE pipeline emitter. A successful
+    /// dispatch records `task_executor/last_execution` in the durable store,
+    /// which we read back — proving the emitter was wired (dispatch returned
+    /// true) and `record_dispatch` ran. No stub, no mock handler.
+    #[tokio::test]
+    async fn dispatch_task_action_closes_the_loop_and_records_execution() {
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        // Minimal real procedure that invokes the dispatch_task IO edge with a
+        // task id + prompt taken from the triggering write's $value.
+        std::fs::write(
+            praxis.join("dispatch_proof.px"),
+            r#"procedure dispatch_proof:
+  trigger: on_write
+  given: "Invoke the autonomous task-dispatch IO edge"
+  dispatch_task {task_id: "task-w2-proof", prompt: "execute the thing"} -> $res
+  return {ok: true}
+"#,
+        )
+        .unwrap();
+
+        let pdb = PluresDbStateStore::open(tmp.path().join("state")).unwrap();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+
+        let runtime = build_reactive_runtime(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher(),
+            &praxis,
+            16,
+        )
+        .await;
+
+        runtime
+            .registry
+            .on_write("on_write:dispatch-1", &json!({}))
+            .await;
+
+        // TaskDispatcher::record_dispatch writes task_executor/last_execution
+        // only when dispatch succeeded (emitter present). Poll the durable store.
+        let mut recorded: Option<Value> = None;
+        for _ in 0..50 {
+            if let Some(v) = state_store.get("task_executor/last_execution").await {
+                if !v.is_null() {
+                    recorded = Some(v);
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let recorded = recorded.expect(
+            "dispatch_task did not record an execution — the task-dispatch IO edge \
+             (dispatch_task → TaskDispatcher over the live emitter) is not wired",
+        );
+        assert_eq!(recorded["task_id"], "task-w2-proof");
     }
 }
