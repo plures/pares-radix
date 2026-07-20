@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "radix-praxis": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "tsx", "src/index.ts"],
+      "cwd": "${workspaceFolder}/packages/mcp-dev-server",
+      "env": {
+        "RADIX_DEV": "1"
+      },
+      "tools": ["praxis.evaluate", "praxis.listRules", "praxis.addConstraint", "praxis.addRule"]
+    }
+  }
+}

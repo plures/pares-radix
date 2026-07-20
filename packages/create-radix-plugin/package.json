@@ -1,0 +1,21 @@
+{
+  "name": "@plures/create-radix-plugin",
+  "version": "1.55.30",
+  "description": "Scaffolder for canonical Radix plugins (ADR-0024): plugin.toml + procedures/*.px + adapter/*.ts + ui/*.svelte + tests/",
+  "type": "module",
+  "bin": {
+    "create-radix-plugin": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "smol-toml": "^1.3.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "vitest": "^4.1.1"
+  },
+  "license": "BSL-1.1"
+}

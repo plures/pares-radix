@@ -1,3 +1,51 @@
+## [1.55.30] — 2026-07-20
+
+- fix(spine): close autonomous task-execution loop (W1+W2) (#471) (0f21737)
+- ci: migrate Tech Doc Writer to shared reusable (520cbd4)
+
+## [1.55.29] — 2026-07-19
+
+- fix(spine): inject durable open-tasks grounding on live reactive .px path (#467) (#469) (8805792)
+
+## [1.55.24] — 2026-07-14
+
+- fix(build): bump pluresdb deps to d08f88b (carries BOM-free praxis-lang 37be99e) (1456712)
+- docs(adr): accept ADR-0033 — .px as component composition language (view-trees over design-dojo primitives) (3f2ff6a)
+
+## [1.55.23] — 2026-07-12
+
+- fix(strategy): CORRECTION — always-on daemon EXISTS (agens serve), build-verified (c3fa49e)
+- chore(strategy): pin daemon build spec from ground-truth probe (0dc90a3)
+
+## [1.55.22] — 2026-07-12
+
+- fix(strategy): ONE installed app model — radix daemon + agens bundled default (3708c82)
+
+## [1.55.21] — 2026-07-12
+
+- fix(strategy): correct architecture model — radix=app, agens=extension (cb4167f)
+
+## [1.55.20] — 2026-07-12
+
+- Merge: strategy.px — objectives + parity/migration/mobile backlog as .px data (a46d151)
+- feat(strategy): objectives + parity/migration/mobile backlog as .px data (05fea4e)
+- feat(design-dojo): implement GraphView ego-centric graph-flex primitive (ADR-0032) (b8b5cec)
+- feat(design-dojo): add FieldEditor + SchemaDesigner runtime-customization primitives (Phase B) (4be4ba3)
+- docs(roadmap): ADR-0032 GraphView — ego-centric space-adaptive graph navigation primitive (215918d)
+- feat(tooling): add create-radix-plugin scaffolder for canonical ADR-0024 plugins (ea2fb63)
+- feat(design-dojo): add schema-driven DataGrid and SchemaForm primitives (Phase B) (0e3c09a)
+- docs(roadmap): refresh strategic roadmap + ADR-0030 (mobile iOS/Android via Tauri) + ADR-0031 (plugins-as-tools for agens, user/agent-parity customization) (b31f164)
+- fix(spine): collapse identical if/else in run_command test (clippy if-same-then-else) (ebe3341)
+- feat(spine): morning_briefing .px procedure + run_command wiring (157bbd1)
+
+## [1.55.19] — 2026-07-09
+
+- feat(demo): Operations-as-Intent praxis scene (real ontology, no mocks) (#465) (faa0686)
+
+## [1.55.18] — 2026-07-09
+
+- feat(vscode): register radix MCP server for Copilot .px evaluation (#2919091) (#464) (66b14b1)
+
 ## [1.55.17] — 2026-07-08
 
 - feat(spine): morning_briefing .px procedure + run_command wiring (#463) (2d7a4e7)

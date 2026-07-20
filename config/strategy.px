@@ -1,0 +1,232 @@
+# strategy.px — Strategic objectives + parity/migration/mobile backlog as data
+#
+# The single queryable source of "what are we driving toward, and what's the backlog."
+# Consumed by the proactive work-initiation loop: work-prioritization ranks work_items by
+# (strategic objective rank × gap severity × blocks_migration), the scheduled initiator fires
+# the top item, and progress is measured against the CANONICAL parity rubric.
+#
+# GROUND TRUTH sources (2026-07-11 rebuild — supersedes the stale May audit seed):
+#   - memory/radix-parity-rubric.md            → the CANONICAL 10-category rubric (authority)
+#   - memory/recon-radix-agens-2026-07-06.md   → current architecture + the 3 live blockers
+#   - pares-agens/crates/cli/src/{migrate,openclaw}.rs → migration orchestrator ALREADY EXISTS
+#   - pares-radix/docs/transition/migration-plan.md    → the plan (do not reinvent)
+#
+# ARCHITECTURE (kbristol 2026-07-11 — ONE installed application; think installed app, NOT binaries):
+#   There is exactly ONE installed application: RADIX. Not "radix + agens", not "an agens host
+#   linking radix". One app. (Reasoning in binaries/[[bin]] targets was a category error.)
+#
+#   radix ships WITH agens as the DEFAULT AGENT PLUGIN — bundled first-party, in the box, the way
+#   VS Code ships with built-in extensions. agens is the default cognition/agent extension, not a
+#   separate product and not optional-to-exist.
+#
+#   ONE core, THREE faces (a UX axis, NOT a migration gate): the single installed radix can run
+#   HEADLESS, or present a GUI, or present a TUI. These are presentation surfaces / clients over
+#   the same core — not different products.
+#
+#   THE INVARIANT: radix ALWAYS runs a background SERVICE / DAEMON. That daemon is what is always
+#   alive — receiving Telegram, running heartbeats/cron, holding sessions, executing the proactive
+#   loop, agens loaded as its default agent plugin. GUI/TUI ATTACH to the daemon as clients;
+#   headless IS the daemon with no attached UI. THIS is the OpenClaw-replacement shape: OpenClaw
+#   is a persistent gateway daemon reached via Telegram — radix must be the same. The daemon being
+#   solid + always-on is THE migration spine; the three faces are verification surfaces of it.
+#
+#   CURRENT STATE (probe 2026-07-11): radix HAS a plugin/extension host (radix-core/src/plugins/)
+#   and does NOT depend on agens (correct — app must not depend on its extension). BUT: agens is
+#   NOT yet declared as a bundled default plugin inside radix; there is no obvious Serve/Daemon
+#   always-on mode; only src-tauri (GUI) exists in-repo (no headless/TUI surface). So "one app,
+#   agens bundled, always-on daemon, three faces" is substantially BUILD, not verify — real backlog.
+#   radix-core also still self-describes as "extracted from pares-agens-core" (old inverted history).
+#
+# THE CENTRAL INSIGHT: the rubric scores CAPABILITY-EXISTS (it reads 100% across all 10
+# categories as of 2026-05-15) — yet kbristol is STILL on OpenClaw. So "100% parity" on paper
+# is NOT migration-done. The real bar is VERIFIED_RUNNING: the capability proven running in the
+# radix APP (with the agens extension loaded) AND replacing the OpenClaw equivalent for kbristol,
+# on desktop AND phone. Every category below carries verified_running (default false).
+#
+# .px-first (C-DEV-001): objectives + backlog are DATA here; ranking/initiation LOGIC lives in
+# work-prioritization.px + the loop; the radix plugin/agenda crates are only the IO boundary.
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Strategic objectives — top of the priority hierarchy (kbristol 2026-07-11)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+config objective_parity:
+  id: "obj:parity"
+  rank: 1
+  title: "Pares-agens/radix parity with OpenClaw"
+  definition: "the one installed radix app (agens bundled as the default agent plugin) natively does everything OpenClaw does for kbristol"
+  done_when: "every rubric category is verified_running in the radix daemon (agens loaded), reachable via its faces, not merely scored 100% on capability-exists"
+  measured_by: "memory/radix-parity-rubric.md (canonical 10-category weighted rubric)"
+  source: "kbristol 2026-07-11"
+
+config objective_migration:
+  id: "obj:migration"
+  rank: 2
+  title: "Migration to pares-agens/radix"
+  definition: "cut over to the one installed radix app (always-on daemon, agens bundled as default agent plugin) as the daily driver; retire the OpenClaw dependency for kbristol"
+  done_when: "the radix daemon runs always-on as kbristol's assistant (Telegram + memory + cron + tools + proactive loop, agens loaded) reachable headless/GUI/TUI on desktop AND phone, migrated from ~/.openclaw, OpenClaw decommissioned"
+  depends_on: ["obj:parity", "obj:mobile"]
+  prior_art: "pares-agens migrate --from ~/.openclaw (orchestrator EXISTS, dry-run capable) + pares-radix/docs/transition/migration-plan.md — RUN and VERIFY, do not reinvent"
+  note: "slipped past the original June-1-2026 target; this backlog exists to drive it proactively"
+  source: "kbristol 2026-07-11"
+
+config objective_mobile:
+  id: "obj:mobile"
+  rank: 3
+  title: "Pares-radix iOS and Android support"
+  definition: "the radix app runs on kbristol's phone (iOS + Android) — the surface that makes migration real, since OpenClaw reaches kbristol via Telegram on mobile"
+  done_when: "the agent app installs + runs the assistant loop on iOS + Android; device-pairing gap closed"
+  blocks: "obj:migration"
+  source: "kbristol 2026-07-11; .praxis/decisions/ADR-0030-mobile-tauri-targets.md"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LIVE BLOCKERS — concrete, current, actionable (recon-radix-agens-2026-07-06)
+# These are the real top-of-queue: nothing migrates until the host binary builds.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+config blocker_daemon_alwayson:
+  id: "blk:radix-daemon-alwayson"
+  objective: "obj:migration"
+  title: "the always-on daemon EXISTS (agens serve) and BUILDS — the gate is verifying it runs as kbristol's assistant, not building it"
+  detail: "CORRECTION (build-verified 2026-07-11, C-TEST-001): the always-on daemon is NOT greenfield. `pares-agens serve` is a fully-wired headless daemon ('Run the agent as a headless daemon with a channel adapter') that boots Telegram + model/deep-model (Copilot auth) + embeddings + Brave + headroom compression + PluresDB runtime-state + sync, initializes TaskManager+StateStore via ServeSpine, and dispatches through a full ProcedureRegistry. The `pares-agens` bin BUILDS CLEAN (cargo build -p pares-agens-cli --bin pares-agens = Finished, 1m40s) and RUNS (--version = 1.14.0; serve --help works). Earlier 'daemon greenfield/unbuilt' + 'blk:agens-dupe-bin LNK1104' conclusions were WRONG — made by inspecting only the RADIX repo and stale notes; the daemon lives in AGENS' CLI. Bins are unique (cli=pares-agens, agens-plugin=agens-host); NO dup-bin collision. radix's build_default_reactive_runtime (doc: 'what the cognition serve loop calls at startup') is the assembly seam agens serve builds on. THE REAL GATE (verify, not build): run `pares-agens serve` against kbristol's migrated ~/.openclaw state and confirm it replaces the OpenClaw assistant on desktop, then phone."
+  gap: "medium"
+  blocks_migration: true
+  status: "daemon EXISTS + BUILDS + RUNS — remaining work is migration-verify (run against live ~/.openclaw), NOT construction"
+  priority_hint: "highest — verify the existing daemon runs as kbristol's assistant; the three faces are its clients"
+
+config blocker_agens_bundled_default:
+  id: "blk:agens-bundled-default"
+  objective: "obj:parity"
+  title: "agens is not yet declared as radix's bundled DEFAULT agent plugin"
+  detail: "Per the model, radix ships WITH agens as the default agent plugin (in the box, like VS Code built-in extensions). Probe 2026-07-11: agens is NOT declared as a bundled default plugin inside radix's plugin host, and agens still carries old standalone-app scaffolding (dup bin pares-agens) + radix-core still self-describes as 'extracted from pares-agens-core'. Finish it: agens registers/loads as radix's default agent plugin; remove standalone-app remnants."
+  gap: "medium"
+  blocks_migration: true
+  priority_hint: "architectural correctness — one app, agens bundled default"
+
+config blocker_radix_tag_lag:
+  id: "blk:radix-tag-lag"
+  objective: "obj:migration"
+  title: "agens pins radix v1.55.13; radix is at v1.55.14"
+  detail: "one-tag lag in agens' git-pinned radix platform crates; bump when cutting the next release"
+  gap: "trivial"
+  blocks_migration: false
+
+config blocker_migration_unproven:
+  id: "blk:migration-unproven"
+  objective: "obj:migration"
+  title: "migration orchestrator exists but is unproven end-to-end against real ~/.openclaw"
+  detail: "`pares-agens migrate --from ~/.openclaw --dry-run` emits memories/channels/state/procedures.json + MigrationReport. Not yet run against kbristol's live install nor loaded into a running radix daemon. This is the verify gate for obj:migration."
+  gap: "medium"
+  blocks_migration: true
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parity rubric — the CANONICAL 10 categories (memory/radix-parity-rubric.md).
+# rubric_score = capability-exists (per the rubric, 2026-05-15). verified_running = the REAL
+# migration bar (default false until proven running on agens AND replacing OpenClaw for kbristol).
+# NOTE: channel adapters are OUT OF SCOPE per the rubric (Telegram-first cutover); Teams is the
+# only future channel and does not affect the parity score.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+config cat_core_agent_loop:
+  id: "cat:core-agent-loop"
+  objective: "obj:parity"
+  weight: 25
+  category: "Core Agent Loop (model routing, multi-turn, tool dispatch, response gen, session persistence)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: true
+
+config cat_memory:
+  id: "cat:memory"
+  objective: "obj:parity"
+  weight: 15
+  category: "Memory & Knowledge (semantic search, store, embeddings, recall)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: true
+
+config cat_shell_file:
+  id: "cat:shell-file"
+  objective: "obj:parity"
+  weight: 15
+  category: "Shell & File Operations (exec fg/bg/pty, read/write/edit, dir list)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: true
+
+config cat_web:
+  id: "cat:web"
+  objective: "obj:parity"
+  weight: 10
+  category: "Web Tools (web_fetch, web_search)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: false
+
+config cat_subagents:
+  id: "cat:subagents"
+  objective: "obj:parity"
+  weight: 10
+  category: "Sub-agent Delegation (spawn, fan-out, completion events)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: true
+  note: "DelegationBroker + SubAgentManager present (recon-verified) — the loop's initiator relies on this"
+
+config cat_scheduling:
+  id: "cat:scheduling"
+  objective: "obj:parity"
+  weight: 5
+  category: "Scheduling & Heartbeat (cron, heartbeat runner, quiet hours)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: true
+
+config cat_browser:
+  id: "cat:browser"
+  objective: "obj:parity"
+  weight: 5
+  category: "Browser Automation (CDP control, interaction, screenshots)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: false
+
+config cat_media:
+  id: "cat:media"
+  objective: "obj:parity"
+  weight: 5
+  category: "Media Tools (image analyze/gen, TTS, PDF; video/music)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: false
+  note: "C-NOSTUB-001 flag: rubric counts video_generate/music_generate as 100% but they are STUBS in the source — real verified_running must not accept a stub as parity"
+
+config cat_config_runtime:
+  id: "cat:config-runtime"
+  objective: "obj:parity"
+  weight: 5
+  category: "Config & Runtime Management (hot-reload, status, restart)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: false
+
+config cat_remote_node:
+  id: "cat:remote-node"
+  objective: "obj:parity"
+  weight: 5
+  category: "Remote Node Operations (file_fetch/write, dir_list/fetch to paired nodes)"
+  rubric_score: 100
+  verified_running: false
+  blocks_migration: false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parity math (per the canonical rubric): overall = Σ(weight × score).
+# capability_parity is ~100% on paper; verified_parity is what actually gates migration and is
+# recomputed from the verified_running flags by work-prioritization.px, NOT asserted here.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+config parity_math:
+  formula: "overall_parity = sum(category_weight × category_rubric_score) / 100"
+  capability_parity_2026_05_15: 100
+  verified_parity: "computed by work-prioritization.px from verified_running flags — starts near 0 because nothing is proven running-in-the-always-on-radix-daemon-and-replacing-OpenClaw yet"
+  rubric_authority: "memory/radix-parity-rubric.md — the ONLY rubric; no ad-hoc scoring"

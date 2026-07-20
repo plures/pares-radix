@@ -26,6 +26,30 @@ const EDITOR_VERSION: &str = "vscode/1.96.2";
 const USER_AGENT: &str = "GitHubCopilotChat/0.26.7";
 const API_VERSION: &str = "2025-04-01";
 const INTEGRATION_ID: &str = "vscode-chat";
+const COPILOT_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
+#[cfg(not(test))]
+const COPILOT_READ_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const COPILOT_READ_TIMEOUT: Duration = Duration::from_millis(200);
+
+fn copilot_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .http1_only()
+        .pool_max_idle_per_host(0)
+        // Fail fast if the endpoint is unreachable, and abort a stream that
+        // goes silent (server accepted the connection but stops sending SSE
+        // data — a real failure mode that otherwise hangs the whole agentic turn
+        // forever / eternal Telegram hourglass). read_timeout is per-read, so
+        // it does NOT cap legitimately long streams — only a stalled one with no
+        // bytes for the interval.
+        .connect_timeout(COPILOT_CONNECT_TIMEOUT)
+        .read_timeout(COPILOT_READ_TIMEOUT)
+        .build()
+}
+
+fn copilot_http_client_or_panic() -> reqwest::Client {
+    copilot_http_client().expect("failed to build HTTP client")
+}
 
 /// Errors emitted during Copilot authentication or token refresh.
 #[derive(Debug, Error)]
@@ -66,10 +90,7 @@ impl CopilotAuth {
             session_token: None,
             session_expires_at: 0,
             api_base_url: DEFAULT_API_BASE.to_string(),
-            client: reqwest::Client::builder()
-                .http1_only()
-                .build()
-                .expect("failed to build HTTP client"),
+            client: copilot_http_client_or_panic(),
         }
     }
 
@@ -82,10 +103,7 @@ impl CopilotAuth {
             verification_uri: String,
         }
 
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .build()
-            .expect("failed to build HTTP client");
+        let client = copilot_http_client_or_panic();
         let response = client
             .post(DEVICE_CODE_URL)
             .header(ACCEPT, "application/json")
@@ -111,10 +129,7 @@ impl CopilotAuth {
             error_description: Option<String>,
         }
 
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .build()
-            .expect("failed to build HTTP client");
+        let client = copilot_http_client_or_panic();
         let mut interval = Duration::from_secs(5);
         loop {
             let response = client
@@ -170,10 +185,7 @@ impl CopilotAuth {
             expires_at: Value,
         }
 
-        let client = reqwest::Client::builder()
-            .http1_only()
-            .build()
-            .expect("failed to build HTTP client");
+        let client = copilot_http_client_or_panic();
         tracing::info!(
             url = COPILOT_TOKEN_URL,
             "exchanging OAuth token for Copilot session token"
@@ -279,10 +291,7 @@ impl CopilotModelClient {
         Self {
             auth: Arc::new(Mutex::new(auth)),
             model,
-            client: reqwest::Client::builder()
-                .http1_only()
-                .build()
-                .expect("failed to build HTTP client"),
+            client: copilot_http_client_or_panic(),
             fallback_models: vec![],
         }
     }
@@ -417,9 +426,7 @@ impl ModelClient for CopilotModelClient {
                 attempt = 1,
                 "421 Misdirected Request — retrying with fresh connection"
             );
-            let fresh_client = reqwest::Client::builder()
-                .pool_max_idle_per_host(0)
-                .build()
+            let fresh_client = copilot_http_client()
                 .map_err(|e| format!("failed to build fresh HTTP client: {e}"))?;
             let resp = fresh_client
                 .post(&url)
@@ -642,6 +649,24 @@ pub struct AvailableModel {
     pub capabilities: Vec<String>,
 }
 
+impl AvailableModel {
+    /// Context window for this model.
+    ///
+    /// Prefers the real discovered `max_input_tokens` from the provider; falls
+    /// back to a name-based estimate only when the provider did not report it.
+    /// Returns `None` only if there is genuinely no basis for an estimate
+    /// (never a fabricated placeholder).
+    pub fn context_window(&self) -> Option<u64> {
+        self.max_input_tokens
+            .or_else(|| Some(estimate_context_window(&self.id)))
+    }
+
+    /// Tier classification derived from the model id.
+    pub fn tier(&self) -> ModelTier {
+        classify_model_tier(&self.id)
+    }
+}
+
 /// Model tier classification for smart selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ModelTier {
@@ -690,7 +715,7 @@ impl CopilotAuth {
     pub async fn list_models(&mut self) -> Result<Vec<AvailableModel>, CopilotAuthError> {
         let token = self.ensure_fresh_token().await?.to_string();
         let api_base = self.api_base_url().to_string();
-        let client = reqwest::Client::new();
+        let client = copilot_http_client_or_panic();
 
         // Try Copilot API /models endpoint
         let url = format!("{}/models", api_base.trim_end_matches('/'));
@@ -731,7 +756,11 @@ impl CopilotAuth {
         if response.status().is_success() {
             let body: Value = response.json().await?;
             if let Some(models) = parse_models_response(&body) {
-                tracing::info!(count = models.len(), source = "catalog", "discovered models from GitHub catalog");
+                tracing::info!(
+                    count = models.len(),
+                    source = "catalog",
+                    "discovered models from GitHub catalog"
+                );
                 return Ok(models);
             }
         }
@@ -743,15 +772,11 @@ impl CopilotAuth {
 
 /// Parse a models response — handles both array-of-objects and {data: [...]} formats.
 fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
-    let arr = if let Some(arr) = body.as_array() {
-        arr.clone()
-    } else if let Some(arr) = body.get("data").and_then(|d| d.as_array()) {
-        arr.clone()
-    } else if let Some(arr) = body.get("models").and_then(|d| d.as_array()) {
-        arr.clone()
-    } else {
-        return None;
-    };
+    let arr = body
+        .as_array()
+        .or_else(|| body.get("data").and_then(|d| d.as_array()))
+        .or_else(|| body.get("models").and_then(|d| d.as_array()))?
+        .clone();
 
     let models: Vec<AvailableModel> = arr
         .iter()
@@ -801,7 +826,7 @@ fn parse_models_response(body: &Value) -> Option<Vec<AvailableModel>> {
 
 /// Estimate a model's context window from its name.
 /// Returns conservative estimates; discovery-based `max_input_tokens` overrides these.
-fn estimate_context_window(model_id: &str) -> u64 {
+pub fn estimate_context_window(model_id: &str) -> u64 {
     let id = model_id.to_lowercase();
 
     // Premium models — typically largest context windows
@@ -842,7 +867,7 @@ fn estimate_context_window(model_id: &str) -> u64 {
 }
 
 /// Classify a model into a tier based on its identifier.
-fn classify_model_tier(model_id: &str) -> ModelTier {
+pub fn classify_model_tier(model_id: &str) -> ModelTier {
     let id = model_id.to_lowercase();
 
     // Premium tier — large reasoning models
@@ -885,22 +910,46 @@ fn model_preference_score(model_id: &str) -> u32 {
     let id = model_id.to_lowercase();
 
     // Claude models — prefer newer versions
-    if id.contains("claude-opus-4") { return 100; }
-    if id.contains("claude-sonnet-4") { return 95; }
-    if id.contains("claude-4") { return 90; }
-    if id.contains("claude-opus") { return 85; }
-    if id.contains("claude-sonnet") { return 80; }
+    if id.contains("claude-opus-4") {
+        return 100;
+    }
+    if id.contains("claude-sonnet-4") {
+        return 95;
+    }
+    if id.contains("claude-4") {
+        return 90;
+    }
+    if id.contains("claude-opus") {
+        return 85;
+    }
+    if id.contains("claude-sonnet") {
+        return 80;
+    }
 
     // GPT models
-    if id.contains("gpt-5") { return 98; }
-    if id.contains("gpt-4o") { return 75; }
-    if id.contains("gpt-4.1") { return 70; }
-    if id.contains("o3") { return 92; }
-    if id.contains("o1") { return 88; }
+    if id.contains("gpt-5") {
+        return 98;
+    }
+    if id.contains("gpt-4o") {
+        return 75;
+    }
+    if id.contains("gpt-4.1") {
+        return 70;
+    }
+    if id.contains("o3") {
+        return 92;
+    }
+    if id.contains("o1") {
+        return 88;
+    }
 
     // Gemini
-    if id.contains("gemini-2.5") { return 72; }
-    if id.contains("gemini-2") { return 68; }
+    if id.contains("gemini-2.5") {
+        return 72;
+    }
+    if id.contains("gemini-2") {
+        return 68;
+    }
 
     50 // Unknown
 }
@@ -963,9 +1012,7 @@ pub fn select_models(available: &[AvailableModel]) -> ModelSelection {
         .unwrap_or_else(|| primary.clone());
 
     // Fast: best Fast-tier model (cheapest/quickest)
-    let fast_pick = fast
-        .first()
-        .map(|m| m.id.clone());
+    let fast_pick = fast.first().map(|m| m.id.clone());
 
     tracing::info!(
         primary = %primary,
@@ -1026,4 +1073,130 @@ fn extract_api_base_url(token: &str) -> Option<String> {
         .get("vscu")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    fn seeded_auth(api_base_url: String) -> CopilotAuth {
+        CopilotAuth {
+            client_id: COPILOT_CLIENT_ID.to_string(),
+            oauth_token: Some("oauth-token".to_string()),
+            session_token: Some("session-token".to_string()),
+            session_expires_at: u64::MAX,
+            api_base_url,
+            client: copilot_http_client_or_panic(),
+        }
+    }
+
+    async fn read_request(stream: &mut TcpStream) {
+        let mut buf = Vec::new();
+        let mut chunk = [0_u8; 1024];
+        let header_end = loop {
+            let n = stream.read(&mut chunk).await.expect("read request");
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+
+        let headers = String::from_utf8_lossy(&buf[..header_end]);
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().ok())
+                    .flatten()
+            })
+            .unwrap_or(0);
+
+        while buf.len() < header_end + content_length {
+            let n = stream.read(&mut chunk).await.expect("read body");
+            if n == 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+    }
+
+    async fn write_json_response(stream: &mut TcpStream, status: &str, body: &str) {
+        let response = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .expect("write response");
+    }
+
+    async fn spawn_421_then_hang_server() -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = Arc::clone(&attempts);
+
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let attempt = server_attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                tokio::spawn(async move {
+                    read_request(&mut stream).await;
+                    if attempt == 1 {
+                        write_json_response(
+                            &mut stream,
+                            "421 Misdirected Request",
+                            r#"{"error":"misdirected"}"#,
+                        )
+                        .await;
+                    } else {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                });
+
+                if attempt >= 2 {
+                    break;
+                }
+            }
+        });
+
+        (format!("http://{addr}"), attempts)
+    }
+
+    #[tokio::test]
+    async fn copilot_421_retry_is_bounded_by_retry_client_read_timeout() {
+        let (api_base, attempts) = spawn_421_then_hang_server().await;
+        let client = CopilotModelClient::new(seeded_auth(api_base), "test-model");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.complete(&[ChatMessage::user("hello")], &[], &ChatOptions::default()),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "421 retry should be bounded by the shared Copilot HTTP read_timeout"
+        );
+        let err = result
+            .expect("outer timeout checked")
+            .expect_err("hanging retry response should time out");
+        let err_lower = err.to_ascii_lowercase();
+        assert!(
+            err_lower.contains("timed out")
+                || err_lower.contains("operation timed out")
+                || err_lower.contains("error sending request"),
+            "unexpected retry error: {err}"
+        );
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
 }

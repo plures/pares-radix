@@ -17,6 +17,7 @@ use crate::model::{ChatMessage, ChatOptions, ModelClient, StreamDelta, ToolDispa
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
+use crate::task_manager::TaskManager;
 
 /// Invokes the language model for a ModelRequest and emits ModelResponse.
 ///
@@ -32,6 +33,11 @@ pub struct ModelInvoker {
     /// Broadcast sender for streaming deltas to channel handlers.
     /// When set, uses `complete_stream()` for real-time token delivery.
     stream_tx: Option<broadcast::Sender<StreamDelta>>,
+    /// Optional durable task manager. When set, the open task list is injected
+    /// into the model context each turn so the agent always sees its persisted
+    /// obligations (fixes conversational task/commitment amnesia — the tasks
+    /// live in Sled but were never surfaced into the prompt).
+    task_manager: Option<Arc<TaskManager>>,
 }
 
 impl ModelInvoker {
@@ -46,6 +52,7 @@ impl ModelInvoker {
             default_system_prompt: None,
             conversation_store: None,
             stream_tx: None,
+            task_manager: None,
         }
     }
 
@@ -61,7 +68,28 @@ impl ModelInvoker {
             default_system_prompt: Some(system_prompt.into()),
             conversation_store: None,
             stream_tx: None,
+            task_manager: None,
         }
+    }
+
+    /// Attach the durable [`TaskManager`] so persisted open tasks are injected
+    /// into the model context each turn.
+    pub fn with_task_manager(mut self, task_manager: Arc<TaskManager>) -> Self {
+        self.task_manager = Some(task_manager);
+        self
+    }
+
+    /// Render a compact grounding block of the agent's persisted open tasks for
+    /// the given chat. Returns `None` when there are no open tasks so we never
+    /// inject an empty/noise block.
+    ///
+    /// Delegates to the shared [`crate::task_manager::render_open_tasks_block`]
+    /// so the Rust SpineProcedure path and the live reactive `.px` path
+    /// (`read_open_tasks_block` action) render an identical block — one
+    /// implementation, no duplication (ADR-0010).
+    fn render_open_tasks_block(&self, chat_id: &str) -> Option<String> {
+        let manager = self.task_manager.as_ref()?;
+        crate::task_manager::render_open_tasks_block(manager, chat_id)
     }
 
     /// Attach a conversation store for multi-turn history.
@@ -103,12 +131,19 @@ impl ModelInvoker {
         system_prompt: Option<&str>,
         metadata: &serde_json::Value,
         prior_history: &[ChatMessage],
+        chat_id: &str,
     ) -> Vec<ChatMessage> {
         let mut messages = Vec::new();
 
         // System prompt
         if let Some(sp) = system_prompt.or(self.default_system_prompt.as_deref()) {
             messages.push(ChatMessage::system(sp));
+        }
+
+        // Durable task grounding: inject the persisted open task list so the
+        // agent always sees its obligations, independent of trimmed history.
+        if let Some(task_block) = self.render_open_tasks_block(chat_id) {
+            messages.push(ChatMessage::system(task_block));
         }
 
         // Prior conversation history from ConversationStore (multi-turn context)
@@ -209,7 +244,7 @@ impl SpineProcedure for ModelInvoker {
 
         // Build messages
         let messages =
-            self.build_messages(content, system_prompt.as_deref(), metadata, &prior_history);
+            self.build_messages(content, system_prompt.as_deref(), metadata, &prior_history, chat_id);
 
         if messages.is_empty() || (messages.len() == 1 && messages[0].role == "system") {
             error!(event_id = %id, "model_invoker: no user content to send to model");
@@ -759,5 +794,111 @@ mod tests {
         // Verify response was emitted
         let emitted = rx.recv().await.unwrap();
         assert_eq!(emitted.event_type(), "model_response");
+    }
+
+    #[test]
+    fn injects_persisted_open_tasks_into_messages() {
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, MemoryStorage};
+
+        let storage: Arc<dyn pluresdb::StorageEngine> = Arc::new(MemoryStorage::default());
+        let store = CrdtStore::default().with_persistence(storage);
+        let manager = Arc::new(TaskManager::new(Arc::new(store)));
+        manager.create_task("Ship the release binary", "chat-inject", vec![]);
+
+        let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+            .with_task_manager(Arc::clone(&manager));
+
+        let messages = invoker.build_messages(
+            "what are my tasks?",
+            Some("base system prompt"),
+            &json!({}),
+            &[],
+            "chat-inject",
+        );
+
+        // Base system prompt + injected task grounding + user message.
+        let injected = messages
+            .iter()
+            .any(|m| m.role == "system" && m.content.contains("Ship the release binary"));
+        assert!(injected, "expected persisted open task injected into system context");
+        let has_header = messages
+            .iter()
+            .any(|m| m.content.contains("Your open tasks/commitments"));
+        assert!(has_header, "expected task grounding header");
+    }
+
+    #[test]
+    fn no_task_block_when_no_open_tasks() {
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, MemoryStorage};
+
+        let storage: Arc<dyn pluresdb::StorageEngine> = Arc::new(MemoryStorage::default());
+        let store = CrdtStore::default().with_persistence(storage);
+        let manager = Arc::new(TaskManager::new(Arc::new(store)));
+
+        let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+            .with_task_manager(manager);
+
+        let messages =
+            invoker.build_messages("hi", Some("sys"), &json!({}), &[], "empty-chat");
+        assert!(
+            !messages.iter().any(|m| m.content.contains("open tasks/commitments")),
+            "no task block should be injected when there are no open tasks"
+        );
+    }
+
+    /// Defect E, C-NOSTUB-001 / C-TEST-002: prove a persisted open task is
+    /// injected into the model grounding after a FRESH on-disk store handle
+    /// (simulates a process restart — not an in-memory cache). Uses real
+    /// SledStorage on disk, drops the writer handle, reopens fresh, and
+    /// verifies the task text reaches build_messages.
+    #[test]
+    fn injects_open_tasks_after_fresh_process_reload() {
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, SledStorage, StorageEngine};
+
+        let dir = std::env::temp_dir().join(format!("radix-e-reload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // --- Process 1: create + persist a task, then drop everything ---
+        {
+            let storage: Arc<dyn StorageEngine> =
+                Arc::new(SledStorage::open(&dir).expect("open sled (write)"));
+            let store = CrdtStore::default().with_persistence(storage);
+            let manager = Arc::new(TaskManager::new(Arc::new(store)));
+            manager.create_task("Finish the deploy verify", "chat-reload", vec![]);
+            assert_eq!(manager.open_tasks().len(), 1);
+        } // writer handle dropped — sled flushed to disk
+
+        // --- Process 2: fresh handle to the SAME on-disk store ---
+        let storage2: Arc<dyn StorageEngine> =
+            Arc::new(SledStorage::open(&dir).expect("reopen sled (read)"));
+        let store2 = CrdtStore::default().with_persistence(storage2);
+        let manager2 = Arc::new(TaskManager::new(Arc::new(store2)));
+        assert_eq!(
+            manager2.open_tasks().len(),
+            1,
+            "persisted task must survive a fresh store handle (process reload)"
+        );
+
+        let invoker =
+            ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+                .with_task_manager(Arc::clone(&manager2));
+        let messages = invoker.build_messages(
+            "what am I working on?",
+            Some("base system prompt"),
+            &json!({}),
+            &[],
+            "chat-reload",
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.role == "system" && m.content.contains("Finish the deploy verify")),
+            "reloaded persisted task must be injected into model grounding after restart"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
