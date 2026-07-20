@@ -148,10 +148,11 @@ pub async fn build_reactive_runtime(
     praxis_dir: &Path,
     capacity: usize,
 ) -> ReactiveRuntime {
-    build_reactive_runtime_with_tasks(
+    build_reactive_runtime_with_subagent(
         state_store,
         conversation_store,
         tool_dispatcher,
+        None,
         None,
         praxis_dir,
         capacity,
@@ -159,18 +160,28 @@ pub async fn build_reactive_runtime(
     .await
 }
 
-/// Like [`build_reactive_runtime`] but also wires a durable
-/// [`TaskManager`](crate::task_manager::TaskManager) into the composite action
-/// handler so the live reactive `.px` path can inject the persisted open-tasks
-/// grounding block into the model system prompt each inbound turn
-/// (pares-radix#467). Pass `None` to run without task grounding (the
-/// `read_open_tasks_block` action then returns null and `.px` injects no
-/// block).
-pub async fn build_reactive_runtime_with_tasks(
+/// Like [`build_reactive_runtime`] but wires the optional durable
+/// [`TaskManager`](crate::task_manager::TaskManager) grounding (pares-radix#467)
+/// AND the optional [`SubagentActor`] task-completion seam.
+///
+/// * `task_manager` — when `Some`, the composite handler injects the persisted
+///   open-tasks grounding block into the model system prompt each inbound turn.
+///   Pass `None` to run without task grounding (`read_open_tasks_block` returns
+///   null and `.px` injects no block).
+/// * `subagent` — when `Some((spawner, task_manager))`, the runtime constructs
+///   a [`SubagentActor::with_task_manager`] so that (a) `.px` `spawn_subagent`
+///   calls reach a real spawner and (b) on the final stage completing,
+///   `finalize_task` drives the owning [`TaskManager`] `Task` terminal. When
+///   `None`, subagent actions error at call time as before.
+pub async fn build_reactive_runtime_with_subagent(
     state_store: Arc<dyn StateStore>,
     conversation_store: Arc<dyn ConversationStore>,
     tool_dispatcher: Arc<dyn ToolDispatcher>,
     task_manager: Option<Arc<crate::task_manager::TaskManager>>,
+    subagent: Option<(
+        Arc<dyn crate::subagent_spawn::SubAgentSpawner>,
+        Arc<crate::task_manager::TaskManager>,
+    )>,
     praxis_dir: &Path,
     capacity: usize,
 ) -> ReactiveRuntime {
@@ -178,25 +189,37 @@ pub async fn build_reactive_runtime_with_tasks(
     //    into the tool dispatch pipeline.
     let tool_handler = Arc::new(ToolDispatchActionHandler::new(tool_dispatcher));
 
-    // 2. The composite handler the procedures invoke. CoreActionHandler is now
+    // 2. Build the registry first — the SubagentActor needs a handle to it so
+    //    completion writes (`stage_complete:*`) re-enter the reactive system.
+    let registry = Arc::new(ReactiveRegistry::new());
+
+    // 3. The composite handler the procedures invoke. CoreActionHandler is now
     //    backed by the durable state store (read_state/write_state round-trip
-    //    through PluresDB, not a stub).
-    let mut composite = CompositeActionHandler::new(
+    //    through PluresDB, not a stub). If a spawner + task manager are
+    //    supplied, wire the SubagentActor so the task-completion seam is live.
+    let mut composite_inner = CompositeActionHandler::new(
         Arc::clone(&conversation_store),
         Arc::clone(&state_store),
         tool_handler,
     );
     if let Some(tm) = task_manager {
         // Durable open-tasks grounding over the SAME store (C-PLURES-003/004).
-        composite = composite.with_task_grounding(tm);
+        composite_inner = composite_inner.with_task_grounding(tm);
+    }
+    if let Some((spawner, task_manager)) = subagent {
+        let actor = Arc::new(crate::spine::subagent_actor::SubagentActor::with_task_manager(
+            spawner,
+            Arc::clone(&registry),
+            task_manager,
+        ));
+        composite_inner.set_subagent_actor(actor);
+        info!("runtime: SubagentActor wired with TaskManager — task-completion seam live");
     }
 
-    // 3. Build the registry and the pipeline FIRST so the live pipeline emitter
-    //    exists before we attach the autonomous task-dispatch IO edge. The
-    //    TaskDispatcher injects task prompts as Inbound events through this
-    //    same emitter (spine.px IO boundary #5), so it must be built over the
-    //    real emitter, not a placeholder.
-    let registry = Arc::new(ReactiveRegistry::new());
+    // Build the pipeline + emitter BEFORE attaching the autonomous task-dispatch
+    // IO edge: the TaskDispatcher injects task prompts as Inbound events through
+    // this same emitter (spine.px IO boundary #5), so it must be built over the
+    // real emitter, not a placeholder.
     let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
     let emitter = pipeline.emitter();
 
@@ -206,13 +229,14 @@ pub async fn build_reactive_runtime_with_tasks(
         crate::task_executor::TaskDispatcher::new(Arc::clone(&state_store))
             .with_pipeline_emitter(emitter.clone()),
     );
-    composite.set_task_dispatch(Arc::new(
+    composite_inner.set_task_dispatch(Arc::new(
         crate::spine::task_dispatch_actions::TaskDispatchActionHandler::new(dispatcher),
     ));
-    let composite = Arc::new(composite);
+    let composite = Arc::new(composite_inner);
 
-    // 4. Load every `.px` procedure against the registry, then give the
-    //    registry the emitter so procedure-emitted events re-enter the pipeline.
+    // 4. Load every `.px` procedure against the (already-built) registry, then
+    //    give the registry the emitter so procedure-emitted events re-enter the
+    //    pipeline.
     let registered = register_reactive_procedures(praxis_dir, &registry, composite).await;
     info!(
         registered,
@@ -257,11 +281,12 @@ pub async fn build_default_reactive_runtime(
     let task_manager = Arc::new(crate::task_manager::TaskManager::new(pdb.crdt_store()));
     let state_store: Arc<dyn StateStore> = Arc::new(pdb);
 
-    Ok(build_reactive_runtime_with_tasks(
+    Ok(build_reactive_runtime_with_subagent(
         state_store,
         conversation_store,
         tool_dispatcher,
         Some(task_manager),
+        None,
         &praxis_dir,
         capacity,
     )
@@ -466,7 +491,7 @@ mod tests {
         // Give any (erroneous) spawned reaction a chance, then assert nothing.
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert!(
-            state_store.get("dashboard:frozen").await.map_or(true, |v| v.is_null()),
+            state_store.get("dashboard:frozen").await.is_none_or(|v| v.is_null()),
             "progress: write must NOT trigger the milestone dashboard procedure"
         );
 
@@ -655,11 +680,12 @@ mod tests {
             "seeded Open task must register as pending work — the has_pending_work gate"
         );
 
-        let runtime = build_reactive_runtime_with_tasks(
+        let runtime = build_reactive_runtime_with_subagent(
             Arc::clone(&state_store),
             conversation_store,
             dispatcher(),
             Some(Arc::clone(&task_manager)),
+            None,
             &praxis,
             16,
         )
