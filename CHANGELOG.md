@@ -1,3 +1,8 @@
+## [1.55.30] — 2026-07-20
+
+- fix(spine): close autonomous task-execution loop (W1+W2) (#471) (0f21737)
+- ci: migrate Tech Doc Writer to shared reusable (520cbd4)
+
 ## [1.55.29] — 2026-07-19
 
 - fix(spine): inject durable open-tasks grounding on live reactive .px path (#467) (#469) (8805792)
