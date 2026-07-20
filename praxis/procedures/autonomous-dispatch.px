@@ -109,12 +109,6 @@ procedure evaluate_dispatch(tick: int from "heartbeat_tick") -> decision into "d
   add {a: $best.attempts, b: 1} -> $next_attempts
   pluresdb_write {key: "task:{$best.id}:attempts", value: $next_attempts}
 
-  # Rust IO edge (spine.px boundary #5): hand the chosen task + prompt to the
-  # TaskDispatcher, which injects it as an autonomous Inbound event into the
-  # same pipeline as user messages, and records the dispatch timestamp.
-  # Decision logic stayed here in .px; this is the only side-effect call.
-  dispatch_task {task_id: $best.id, prompt: $prompt}
-
   return {
     should_dispatch: true,
     task_id: $best.id,
@@ -141,10 +135,6 @@ procedure build_steered_prompt(steer: SteerResult from "task_dispatch") -> promp
   timestamp_now {} -> $now
   pluresdb_write {key: "task:{steer.task_id}:status", value: "in_progress"}
   pluresdb_write {key: "task:{steer.task_id}:last_evaluated_at", value: $now}
-
-  # Rust IO edge (spine.px boundary #5): dispatch the steered prompt into the
-  # pipeline via the TaskDispatcher (same edge as evaluate_dispatch).
-  dispatch_task {task_id: steer.task_id, prompt: steer.message_to_agent}
 
   return steer.message_to_agent
 
@@ -202,7 +192,7 @@ Attempts: {attempts}
 Conditions:
 {conditions}
 
-Work on this task using available tools. When every condition above is satisfied, you MUST call the `task_complete` tool with this task's ID ({id}) to close the loop; reporting completion in prose alone will NOT terminate the task and it will be re-dispatched on the next tick. If blocked, explain why.",
+Work on this task using available tools. When complete, indicate which conditions are satisfied. If blocked, explain why.",
     vars: {
       description: $task.description,
       id: $task.id,
