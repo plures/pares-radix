@@ -240,6 +240,20 @@ impl TaskManager {
         }
     }
 
+    /// Drive a task to the `Failed` terminal state, recording an error string.
+    ///
+    /// Used by the task-completion seam when a subagent's final stage fails,
+    /// times out, or is killed — the owning Task must not linger non-terminal.
+    pub fn fail_task(&self, task_id: &str, error: Option<&str>) {
+        if let Some(mut task) = self.load_task(task_id) {
+            task.status = TaskStatus::Failed;
+            task.error = error.map(|s| s.to_string());
+            task.updated_at = Self::now_ms();
+            info!(task_id, "Task marked failed");
+            self.store_task(&task);
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Task Registry tool support
     // -----------------------------------------------------------------------
