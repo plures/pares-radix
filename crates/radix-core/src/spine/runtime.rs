@@ -491,7 +491,7 @@ mod tests {
         // Give any (erroneous) spawned reaction a chance, then assert nothing.
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert!(
-            state_store.get("dashboard:frozen").await.map_or(true, |v| v.is_null()),
+            state_store.get("dashboard:frozen").await.is_none_or(|v| v.is_null()),
             "progress: write must NOT trigger the milestone dashboard procedure"
         );
 
