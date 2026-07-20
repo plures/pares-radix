@@ -357,4 +357,94 @@ mod tests {
         assert_eq!(landed["task"], "wire-px-runtime");
         assert_eq!(landed["n"], 42);
     }
-}
+
+    /// MILESTONE REACTIVE PROOF (assembled path, real handler + real store):
+    ///
+    /// A `milestone:<id>` write is the dashboard signal. This dogfoods the
+    /// target architecture: PluresDB is the source of truth, a WRITE drives a
+    /// `.px` procedure (LOGIC), and the procedure performs a durable IO
+    /// side-effect via `write_state` (the pure-praxis analog of the dashboard
+    /// freeze). No cron, no daemon, no mock spine -- the loop is real and
+    /// in-process.
+    ///
+    /// The procedure is named `dashboard_milestone` so the bootstrap name-map
+    /// routes it to the `milestone:*` trigger pattern (see bootstrap.rs). We
+    /// then prove pattern discipline: a `milestone:` write REACTS; a
+    /// `progress:` write (history, not a dashboard signal) does NOT.
+    #[tokio::test]
+    async fn milestone_write_triggers_dashboard_px_procedure_locally() {
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        // REAL procedure: on a milestone write, persist the frozen dashboard
+        // node derived from the triggering write's `$value`. LOGIC in the
+        // procedure; the SIDE EFFECT is a durable state write.
+        std::fs::write(
+            praxis.join("dashboard_milestone.px"),
+            "procedure dashboard_milestone:\n  trigger: on_write\n  given: \"Freeze the dashboard node from a milestone write\"\n  write_state {key: \"dashboard:frozen\", value: $value} -> $frozen\n  return {ok: true}\n",
+        )
+        .unwrap();
+
+        let pdb = PluresDbStateStore::open(tmp.path().join("state")).unwrap();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+
+        let runtime = build_reactive_runtime(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher(),
+            &praxis,
+            16,
+        )
+        .await;
+
+        assert!(
+            runtime.registered >= 1,
+            "expected dashboard_milestone .px to register under milestone:*, got {}",
+            runtime.registered
+        );
+
+        // (1) A NON-milestone write must NOT trigger the procedure.
+        let progress = json!({"task": "some-task", "text": "history entry"});
+        runtime
+            .registry
+            .on_write("progress:p-1", &progress)
+            .await;
+        // Give any (erroneous) spawned reaction a chance, then assert nothing.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(
+            state_store.get("dashboard:frozen").await.map_or(true, |v| v.is_null()),
+            "progress: write must NOT trigger the milestone dashboard procedure"
+        );
+
+        // (2) A milestone write MUST trigger the procedure -> durable IO.
+        let milestone = json!({
+            "task": "radix_milestone_reactive_proof",
+            "text": "milestone reactive flow proven locally",
+            "created_at": "2026-07-20T05:00:00Z"
+        });
+        runtime
+            .registry
+            .on_write("milestone:m-1", &milestone)
+            .await;
+
+        let mut landed: Option<Value> = None;
+        for _ in 0..50 {
+            if let Some(v) = state_store.get("dashboard:frozen").await {
+                if !v.is_null() {
+                    landed = Some(v);
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let landed = landed.expect(
+            "milestone: write did not drive the .px procedure to a durable \
+             dashboard node -- the reactive spine loop is not working",
+        );
+        assert_eq!(landed["task"], "radix_milestone_reactive_proof");
+        assert_eq!(landed["text"], "milestone reactive flow proven locally");
+    }}

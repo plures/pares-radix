@@ -80,6 +80,13 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     // of the noisy `on_write:*` fallback. (TASK-2026-07-08-briefing-px STEP 1.)
     m.insert("morning_briefing", "briefing:request:*");
 
+    // Dashboard milestone freeze — a `milestone:<id>` write is the dashboard
+    // signal; the procedure derives + persists the frozen dashboard node (the
+    // pure-praxis analog of the exec side-effect that froze the dashboard).
+    // `progress:<id>` writes are history, NOT dashboard signals, so they must
+    // NOT match this pattern. (test/milestone-reactive-proof)
+    m.insert("dashboard_milestone", "milestone:*");
+
     // Task management
     m.insert("task_evaluation", "inbound:*");
     m.insert("task_steering", "task:*");
