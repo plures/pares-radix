@@ -202,7 +202,7 @@ Attempts: {attempts}
 Conditions:
 {conditions}
 
-Work on this task using available tools. When complete, indicate which conditions are satisfied. If blocked, explain why.",
+Work on this task using available tools. When every condition above is satisfied, you MUST call the `task_complete` tool with this task's ID ({id}) to close the loop; reporting completion in prose alone will NOT terminate the task and it will be re-dispatched on the next tick. If blocked, explain why.",
     vars: {
       description: $task.description,
       id: $task.id,
