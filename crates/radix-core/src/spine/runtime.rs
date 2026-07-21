@@ -202,6 +202,10 @@ pub async fn build_reactive_runtime_with_subagent(
         Arc::clone(&state_store),
         tool_handler,
     );
+    // Keep one shared durable TaskManager for BOTH task-grounding reads and
+    // autonomous-dispatch writes (read_evaluable_tasks/mark_task_in_progress).
+    // This preserves a single task store (C-PLURES-003/004).
+    let dispatch_task_manager = task_manager.clone();
     if let Some(tm) = task_manager {
         // Durable open-tasks grounding over the SAME store (C-PLURES-003/004).
         composite_inner = composite_inner.with_task_grounding(tm);
@@ -230,7 +234,10 @@ pub async fn build_reactive_runtime_with_subagent(
             .with_pipeline_emitter(emitter.clone()),
     );
     composite_inner.set_task_dispatch(Arc::new(
-        crate::spine::task_dispatch_actions::TaskDispatchActionHandler::new(dispatcher),
+        crate::spine::task_dispatch_actions::TaskDispatchActionHandler::new(
+            dispatcher,
+            dispatch_task_manager,
+        ),
     ));
     let composite = Arc::new(composite_inner);
 
