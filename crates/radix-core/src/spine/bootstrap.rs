@@ -88,6 +88,10 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("plan_task", "task_request:*");
     m.insert("evaluate_gate", "stage_complete:*");
     m.insert("report_result", "task_complete:*");
+    // Task-completion seam: after evaluate_gate persists gate_decision:{task_id},
+    // finalize_task fires and (on the final stage) drives the owning TaskManager
+    // Task terminal. (task-completion-seam.px)
+    m.insert("finalize_task", "gate_decision:*");
 
     // Worktask executor — each command fires only on its own command key
     // (a write to `worktask:cmd:<name>:<reqid>` triggers exactly that procedure).
