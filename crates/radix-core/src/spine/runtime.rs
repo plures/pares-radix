@@ -272,12 +272,6 @@ pub async fn build_reactive_runtime_with_subagent(
         composite_inner.set_subagent_actor(actor);
         info!("runtime: SubagentActor wired with TaskManager — task-completion seam live");
     }
-<<<<<<< HEAD
-    let composite = Arc::new(composite);
-
-    // 3. Build the registry and load every `.px` procedure against it.
-    let registry = Arc::new(ReactiveRegistry::new());
-=======
 
     // Build the pipeline + emitter BEFORE attaching the autonomous task-dispatch
     // IO edge: the TaskDispatcher injects task prompts as Inbound events through
@@ -303,18 +297,13 @@ pub async fn build_reactive_runtime_with_subagent(
     // 4. Load every `.px` procedure against the (already-built) registry, then
     //    give the registry the emitter so procedure-emitted events re-enter the
     //    pipeline.
->>>>>>> origin/main
     let registered = register_reactive_procedures(praxis_dir, &registry, composite).await;
     info!(
         registered,
         praxis_dir = %praxis_dir.display(),
         "runtime: reactive .px procedures registered against live registry"
     );
-
-    // 4. Wire the pipeline to the registry and give the registry an emitter so
-    //    procedure-emitted events can re-enter the pipeline.
-    let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
-    registry.set_emitter(pipeline.emitter()).await;
+    registry.set_emitter(emitter).await;
 
     ReactiveRuntime {
         registry,
@@ -716,14 +705,7 @@ mod tests {
         // Give any (erroneous) spawned reaction a chance, then assert nothing.
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert!(
-<<<<<<< HEAD
-            state_store
-                .get("dashboard:frozen")
-                .await
-                .map_or(true, |v| v.is_null()),
-=======
             state_store.get("dashboard:frozen").await.is_none_or(|v| v.is_null()),
->>>>>>> origin/main
             "progress: write must NOT trigger the milestone dashboard procedure"
         );
 
