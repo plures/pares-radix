@@ -570,7 +570,7 @@ const tools: ToolDef[] = [
         timestamp: new Date().toISOString(),
       };
       timeline.push(entry);
-      db.set('chronos:timeline', timeline);
+      dbPut('chronos:timeline', timeline);
       return { ok: true, id: entry.id };
     },
   },
@@ -606,7 +606,7 @@ const tools: ToolDef[] = [
       required: ['level'],
     },
     handler: ({ level }) => {
-      db.set('chronos:config:level', level);
+      dbPut('chronos:config:level', level);
       return { ok: true, level };
     },
   },
@@ -650,7 +650,7 @@ const tools: ToolDef[] = [
       if (!record) return { error: `Plugin '${name}' not found` };
       record.active = true;
       record.activatedAt = new Date().toISOString();
-      db.set(`plugin:${name}`, record);
+      dbPut(`plugin:${name}`, record);
       return { ok: true, plugin: record };
     },
   },
@@ -663,7 +663,7 @@ const tools: ToolDef[] = [
       if (!record) return { error: `Plugin '${name}' not found` };
       record.active = false;
       record.deactivatedAt = new Date().toISOString();
-      db.set(`plugin:${name}`, record);
+      dbPut(`plugin:${name}`, record);
       return { ok: true, plugin: record };
     },
   },
@@ -707,7 +707,7 @@ const tools: ToolDef[] = [
       if (inlineTask) {
         const existing = db.get(recKey) as any;
         if (!existing) {
-          db.set(recKey, {
+          dbPut(recKey, {
             task: inlineTask,
             custody_state: 'owned',
             owner_agent: source_agent as string,
@@ -730,7 +730,7 @@ const tools: ToolDef[] = [
       }
 
       record.custody_state = 'transfer_pending';
-      db.set(recKey, record);
+      dbPut(recKey, record);
 
       // Build envelope (SHA-256 not available in this JS runtime without crypto;
       // we use a deterministic content string as the digest stand-in).
@@ -814,7 +814,7 @@ const tools: ToolDef[] = [
       record.generation = (record.generation as number) + 1;
       record.locked_by = null;
       record.lock_token = null;
-      db.set(recKey, record);
+      dbPut(recKey, record);
 
       return { task_id: tid, new_owner: target_agent, generation: record.generation, handoff_id };
     },
@@ -856,7 +856,7 @@ const tools: ToolDef[] = [
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
       record.locked_by = worker_id as string;
       record.lock_token = token;
-      db.set(recKey, record);
+      dbPut(recKey, record);
 
       return { task_id: tid, worker_id, token };
     },
