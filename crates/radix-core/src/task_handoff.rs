@@ -299,11 +299,14 @@ impl ConditionalTaskStore {
                 if record.owner_agent_id == agent_id
                     && record.claimed_by_worker.as_deref() == Some(worker_id)
                 {
+                    if record.handoff_generation != generation {
+                        return Err(HandoffError::InvalidTransition("generation mismatch".into()));
+                    }
                     return Ok(Claim {
                         task_id: task_id.into(),
                         worker_id: worker_id.into(),
                         token: record.claim_token.ok_or(HandoffError::InvalidClaimToken)?,
-                        generation,
+                        generation: record.handoff_generation,
                     });
                 }
                 return Err(HandoffError::AlreadyClaimed);
