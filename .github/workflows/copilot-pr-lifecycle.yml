@@ -19,4 +19,4 @@ jobs:
   lifecycle:
     uses: plures/.github/.github/workflows/copilot-pr-lifecycle-reusable.yml@main
     secrets:
-      COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
+      COPILOT_PAT: ${{ secrets.COPILOT_PAT || github.token }}

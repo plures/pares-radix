@@ -99,10 +99,7 @@ impl ThreadCommandExecutor {
                 let threads = self.store.list_threads(chat_id).await;
                 let active = self.store.active_thread(chat_id).await;
                 let active_id = active.map(|t| t.id).unwrap_or_default();
-                ThreadCommandResult::ThreadList {
-                    threads,
-                    active_id,
-                }
+                ThreadCommandResult::ThreadList { threads, active_id }
             }
             ThreadCommand::New { topic } => {
                 let topic_str = topic.as_deref().unwrap_or("untitled");
@@ -168,8 +165,7 @@ impl ThreadCommandExecutor {
                 let active = self.store.active_thread(chat_id).await;
                 match active {
                     Some(thread) => {
-                        let history =
-                            self.store.thread_history(chat_id, &thread.id).await;
+                        let history = self.store.thread_history(chat_id, &thread.id).await;
                         ThreadCommandResult::Context {
                             thread,
                             message_count: history.len(),
@@ -206,9 +202,7 @@ impl ThreadCommandExecutor {
                     let history = self.store.thread_history(chat_id, &thread.id).await;
                     let match_count = history
                         .iter()
-                        .filter(|msg| {
-                            msg.content.to_lowercase().contains(&query.to_lowercase())
-                        })
+                        .filter(|msg| msg.content.to_lowercase().contains(&query.to_lowercase()))
                         .count();
                     if match_count > 0 {
                         results.push(SearchResult {
@@ -280,8 +274,11 @@ impl ThreadCommandResult {
                 }
                 let mut out = String::from("📋 Active Threads:\n");
                 for (i, t) in threads.iter().enumerate() {
-                    let active_marker =
-                        if t.id == *active_id { " ← active" } else { "" };
+                    let active_marker = if t.id == *active_id {
+                        " ← active"
+                    } else {
+                        ""
+                    };
                     let state_icon = match t.state {
                         ThreadState::Active => "",
                         ThreadState::Paused => " ⏸",
@@ -309,16 +306,14 @@ impl ThreadCommandResult {
                 )
             }
             Self::Closed { thread_id } => {
-                let short_id =
-                    &thread_id[..8.min(thread_id.len())];
+                let short_id = &thread_id[..8.min(thread_id.len())];
                 format!("📦 Archived thread {short_id}")
             }
             Self::Context {
                 thread,
                 message_count,
             } => {
-                let short_id =
-                    &thread.id[..8.min(thread.id.len())];
+                let short_id = &thread.id[..8.min(thread.id.len())];
                 format!(
                     "📎 Current thread: \"{}\"\n   ID: {}\n   Messages: {}\n   Created: {}",
                     thread.topic, short_id, message_count, thread.created_at
@@ -571,10 +566,7 @@ mod tests {
         let result = executor.execute("chat-1", &ThreadCommand::List).await;
 
         match result {
-            ThreadCommandResult::ThreadList {
-                threads,
-                active_id,
-            } => {
+            ThreadCommandResult::ThreadList { threads, active_id } => {
                 assert_eq!(threads.len(), 2);
                 // active_id should be the last created thread (topic-b)
                 let active_thread = threads.iter().find(|t| t.id == active_id).unwrap();
@@ -664,12 +656,7 @@ mod tests {
 
         let executor = ThreadCommandExecutor::new(store.clone());
         let result = executor
-            .execute(
-                "chat-1",
-                &ThreadCommand::Switch {
-                    target: id_prefix,
-                },
-            )
+            .execute("chat-1", &ThreadCommand::Switch { target: id_prefix })
             .await;
 
         match result {
@@ -735,9 +722,7 @@ mod tests {
             .await;
 
         let executor = ThreadCommandExecutor::new(store);
-        let result = executor
-            .execute("chat-1", &ThreadCommand::Context)
-            .await;
+        let result = executor.execute("chat-1", &ThreadCommand::Context).await;
 
         match result {
             ThreadCommandResult::Context {
@@ -818,9 +803,7 @@ mod tests {
     async fn execute_help() {
         let store = Arc::new(MemoryThreadStore::new());
         let executor = ThreadCommandExecutor::new(store);
-        let result = executor
-            .execute("chat-1", &ThreadCommand::Help)
-            .await;
+        let result = executor.execute("chat-1", &ThreadCommand::Help).await;
 
         assert!(matches!(result, ThreadCommandResult::Help));
     }

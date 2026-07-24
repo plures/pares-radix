@@ -14,7 +14,7 @@ jobs:
   ui-compliance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check for inline UI primitives
         id: check
@@ -99,7 +99,7 @@ jobs:
 
       - name: Comment on PR
         if: failure() && steps.check.outputs.violations != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const fs = require('fs');

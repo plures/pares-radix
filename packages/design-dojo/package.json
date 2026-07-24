@@ -1,7 +1,7 @@
 {
   "name": "@plures/design-dojo",
   "private": true,
-  "version": "1.55.34",
+  "version": "1.55.39",
   "description": "Local shim — re-exports npm @plures/design-dojo + tracks intentional local additions/overrides per ADR-0035. See UPSTREAM_MAP.json and DRIFT.md; enforced by scripts/check-design-dojo-drift.mjs (CI: design-dojo-drift.yml).",
   "type": "module",
   "svelte": "./src/index.ts",

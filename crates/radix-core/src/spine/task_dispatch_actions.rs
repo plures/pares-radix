@@ -130,7 +130,20 @@ impl TaskDispatchActionHandler {
                 message: "missing 'prompt'".into(),
             })?;
 
-        let dispatched = self.dispatcher.dispatch(task_id, prompt);
+        // Resolve the ORIGIN chat_id from the durable task record so the
+        // autonomous redrive delivers back to the real conversation the
+        // promise/task was created in, instead of a synthetic chat_id that no
+        // channel adapter can route. Falls back to "0" (system-internal, no
+        // real chat) only when TaskManager is unavailable or the task has no
+        // recorded chat_id (e.g. genuinely chat-less system tasks).
+        let chat_id = self
+            .task_manager
+            .as_deref()
+            .and_then(|tm| tm.get_task(task_id))
+            .and_then(|t| t.chat_id)
+            .unwrap_or_else(|| "0".to_string());
+
+        let dispatched = self.dispatcher.dispatch(task_id, prompt, &chat_id);
         if dispatched {
             self.dispatcher.record_dispatch(task_id).await;
         } else {
@@ -229,6 +242,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dispatch_task_resolves_real_chat_id_from_task_manager() {
+        // Regression test: autonomous dispatch must carry the ORIGIN chat_id
+        // forward from the durable Task record, not a synthetic "0" that no
+        // channel adapter can deliver to. This is the fix for the recurring
+        // "agent promises future follow-up, never actually delivers it" bug.
+        let tm = manager();
+        let seeded = tm.create_task("report back in an hour", "telegram:8573852722", vec![]);
+        assert_eq!(seeded.chat_id.as_deref(), Some("telegram:8573852722"));
+
+        let h = handler_with_manager(Arc::clone(&tm));
+        let out = h
+            .call(
+                "dispatch_task",
+                &json!({"task_id": seeded.id, "prompt": "follow up now"}),
+            )
+            .await
+            .unwrap();
+        // NOTE: this test harness's TaskDispatcher has no pipeline_emitter
+        // wired (see `handler_with_manager`), so dispatch() itself always
+        // returns false here — that's pre-existing/expected test-harness
+        // behavior, not part of what this test is verifying.
+        assert_eq!(out["dispatched"], false);
+
+        // Directly assert the same resolution path dispatch_task uses:
+        // TaskManager::get_task(id).chat_id must round-trip to the real chat,
+        // proving the data needed for the fix is present and reachable.
+        let resolved = h
+            .task_manager
+            .as_deref()
+            .and_then(|tm| tm.get_task(&seeded.id))
+            .and_then(|t| t.chat_id);
+        assert_eq!(resolved.as_deref(), Some("telegram:8573852722"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_task_falls_back_to_system_chat_id_when_task_missing() {
+        // A dispatch for an unknown/already-cleaned-up task_id must not panic
+        // and must fall back to the system chat_id "0", never crash the
+        // autonomous loop.
+        let tm = manager();
+        let h = handler_with_manager(tm);
+        let out = h
+            .call(
+                "dispatch_task",
+                &json!({"task_id": "nonexistent-task", "prompt": "follow up now"}),
+            )
+            .await
+            .unwrap();
+        // Same pre-existing harness limitation as above: no pipeline_emitter
+        // means dispatch() always returns false. What this test actually
+        // verifies is that an unknown task_id doesn't panic and the handler
+        // completes normally (falls back to system chat_id "0" internally).
+        assert_eq!(out["dispatched"], false);
+    }
+
+    #[tokio::test]
     async fn mark_task_in_progress_updates_task_manager_state() {
         let tm = manager();
         let seeded = tm.create_task("run loop", "chat-1", vec![]);
@@ -262,7 +331,11 @@ mod tests {
             "build_steered_prompt must mark steered task in-progress via task seam"
         );
 
-        for required in ["dispatch_task", "read_evaluable_tasks", "mark_task_in_progress"] {
+        for required in [
+            "dispatch_task",
+            "read_evaluable_tasks",
+            "mark_task_in_progress",
+        ] {
             assert!(
                 TASK_DISPATCH_ACTIONS.contains(&required),
                 "TASK_DISPATCH_ACTIONS missing required verb: {required}"

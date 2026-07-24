@@ -193,7 +193,9 @@ impl WorktaskActionHandler {
             )
             .await?;
         debug!(repo, wt, branch, "worktask: git_worktree_add");
-        Ok(json!({ "ok": true, "worktree_path": wt, "branch": branch, "stdout": out.stdout.trim() }))
+        Ok(
+            json!({ "ok": true, "worktree_path": wt, "branch": branch, "stdout": out.stdout.trim() }),
+        )
     }
 
     /// `git -C <worktree_path> status --porcelain` → `{dirty, lines}`.
@@ -222,7 +224,10 @@ impl WorktaskActionHandler {
     async fn git_worktree_remove(&self, params: &Value) -> Result<Value, ExecutionError> {
         let repo = require_str(params, "repo_path", "git_worktree_remove")?;
         let wt = require_str(params, "worktree_path", "git_worktree_remove")?;
-        let force = params.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let force = params
+            .get("force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let mut args = vec!["-C", repo, "worktree", "remove", wt];
         if force {
             args.push("--force");
@@ -236,7 +241,10 @@ impl WorktaskActionHandler {
     async fn git_branch_delete(&self, params: &Value) -> Result<Value, ExecutionError> {
         let repo = require_str(params, "repo_path", "git_branch_delete")?;
         let branch = require_str(params, "branch", "git_branch_delete")?;
-        let force = params.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+        let force = params
+            .get("force")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let flag = if force { "-D" } else { "-d" };
         self.git
             .run_checked("git_branch_delete", &["-C", repo, "branch", flag, branch])
@@ -279,7 +287,10 @@ impl WorktaskActionHandler {
         let branch = require_str(params, "branch", "git_merge_branch")?;
         let out = self
             .git
-            .run_checked("git_merge_branch", &["-C", repo, "merge", "--no-ff", branch])
+            .run_checked(
+                "git_merge_branch",
+                &["-C", repo, "merge", "--no-ff", branch],
+            )
             .await?;
         debug!(repo, branch, "worktask: git_merge_branch");
         Ok(json!({ "ok": true, "merged_branch": branch, "stdout": out.stdout.trim() }))
@@ -607,11 +618,7 @@ fn normalize_pr_mode(raw: Option<&str>, task_type: &str) -> Value {
 }
 
 /// Extract a required string param or return a descriptive `ActionFailed`.
-fn require_str<'a>(
-    params: &'a Value,
-    key: &str,
-    action: &str,
-) -> Result<&'a str, ExecutionError> {
+fn require_str<'a>(params: &'a Value, key: &str, action: &str) -> Result<&'a str, ExecutionError> {
     params
         .get(key)
         .and_then(|v| v.as_str())
@@ -818,7 +825,10 @@ mod tests {
         std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap(); // 5 bytes
         std::fs::write(tmp.path().join("b.txt"), b"world!").unwrap(); // 6 bytes
         let v = h
-            .call("fs_dir_size", &json!({ "path": tmp.path().to_string_lossy() }))
+            .call(
+                "fs_dir_size",
+                &json!({ "path": tmp.path().to_string_lossy() }),
+            )
             .await
             .unwrap();
         assert_eq!(v["bytes"], 11);
@@ -826,7 +836,10 @@ mod tests {
 
         // Absent path → 0 bytes, not an error.
         let missing = h
-            .call("fs_dir_size", &json!({ "path": "C:/no/such/path/here/xyz" }))
+            .call(
+                "fs_dir_size",
+                &json!({ "path": "C:/no/such/path/here/xyz" }),
+            )
             .await
             .unwrap();
         assert_eq!(missing["bytes"], 0);
@@ -847,12 +860,22 @@ mod tests {
     /// Initialize a real scratch git repo with one commit at `dir`.
     async fn init_repo(git: &GitEffects, dir: &Path) {
         let d = dir.to_string_lossy();
-        git.run_checked("t", &["-C", &d, "init", "-q"]).await.unwrap();
-        git.run_checked("t", &["-C", &d, "config", "user.email", "t@example.com"]).await.unwrap();
-        git.run_checked("t", &["-C", &d, "config", "user.name", "t"]).await.unwrap();
+        git.run_checked("t", &["-C", &d, "init", "-q"])
+            .await
+            .unwrap();
+        git.run_checked("t", &["-C", &d, "config", "user.email", "t@example.com"])
+            .await
+            .unwrap();
+        git.run_checked("t", &["-C", &d, "config", "user.name", "t"])
+            .await
+            .unwrap();
         std::fs::write(dir.join("seed.txt"), b"seed").unwrap();
-        git.run_checked("t", &["-C", &d, "add", "-A"]).await.unwrap();
-        git.run_checked("t", &["-C", &d, "commit", "-q", "-m", "seed"]).await.unwrap();
+        git.run_checked("t", &["-C", &d, "add", "-A"])
+            .await
+            .unwrap();
+        git.run_checked("t", &["-C", &d, "commit", "-q", "-m", "seed"])
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -869,7 +892,10 @@ mod tests {
 
         // Clean: porcelain empty → dirty == false.
         let clean = h
-            .call("git_worktree_status", &json!({ "worktree_path": repo.to_string_lossy() }))
+            .call(
+                "git_worktree_status",
+                &json!({ "worktree_path": repo.to_string_lossy() }),
+            )
             .await
             .unwrap();
         assert_eq!(clean["dirty"], false, "freshly-committed repo is clean");
@@ -878,7 +904,10 @@ mod tests {
         // Dirty: add an untracked file → dirty == true.
         std::fs::write(repo.join("scratch.txt"), b"uncommitted").unwrap();
         let dirty = h
-            .call("git_worktree_status", &json!({ "worktree_path": repo.to_string_lossy() }))
+            .call(
+                "git_worktree_status",
+                &json!({ "worktree_path": repo.to_string_lossy() }),
+            )
             .await
             .unwrap();
         assert_eq!(dirty["dirty"], true, "untracked file makes it dirty");
@@ -895,7 +924,11 @@ mod tests {
         // A "dirty" worktree with content we must NOT lose.
         let wt = tmp.path().join("dirty-worktree");
         std::fs::create_dir_all(wt.join("src")).unwrap();
-        std::fs::write(wt.join("src").join("keep.txt"), b"precious uncommitted work").unwrap();
+        std::fs::write(
+            wt.join("src").join("keep.txt"),
+            b"precious uncommitted work",
+        )
+        .unwrap();
 
         let qroot = tmp.path().join("quarantine");
         let res = h
@@ -913,14 +946,26 @@ mod tests {
             .unwrap();
 
         // Source is gone (moved, not copied-and-left).
-        assert!(!wt.exists(), "dirty worktree was MOVED out of its original path");
+        assert!(
+            !wt.exists(),
+            "dirty worktree was MOVED out of its original path"
+        );
         // Destination exists and the precious file survived.
         let dest = PathBuf::from(res["quarantined_path"].as_str().unwrap());
         assert!(dest.exists(), "quarantined path exists");
         let kept = dest.join("src").join("keep.txt");
-        assert!(kept.exists(), "the uncommitted work was preserved, not deleted");
-        assert_eq!(std::fs::read_to_string(kept).unwrap(), "precious uncommitted work");
-        assert!(res["bytes"].as_u64().unwrap() > 0, "reported real byte size");
+        assert!(
+            kept.exists(),
+            "the uncommitted work was preserved, not deleted"
+        );
+        assert_eq!(
+            std::fs::read_to_string(kept).unwrap(),
+            "precious uncommitted work"
+        );
+        assert!(
+            res["bytes"].as_u64().unwrap() > 0,
+            "reported real byte size"
+        );
 
         // Durable quarantine node was written.
         let node = state.get("worktask:quarantine:wt_abc123").await.unwrap();
@@ -932,7 +977,10 @@ mod tests {
     #[tokio::test]
     async fn land_none_is_an_honest_noop_not_a_fake_success() {
         let h = handler();
-        let v = h.call("land_none", &json!({ "branch": "feat/x" })).await.unwrap();
+        let v = h
+            .call("land_none", &json!({ "branch": "feat/x" }))
+            .await
+            .unwrap();
         assert_eq!(v["mode"], "none");
         // It does NOT claim a merge happened.
         assert_eq!(v["landed"], false);
@@ -944,19 +992,44 @@ mod tests {
         let state = Arc::new(InMemoryStateStore::new());
         let h = WorktaskActionHandler::new(Arc::clone(&state) as Arc<dyn StateStore>);
         // Seed two features + one chore + an unrelated key.
-        state.set("worktask:task:a", json!({ "task_id": "a", "task_type": "feature" })).await;
-        state.set("worktask:task:b", json!({ "task_id": "b", "task_type": "feature" })).await;
-        state.set("worktask:task:c", json!({ "task_id": "c", "task_type": "chore" })).await;
-        state.set("worktask:lease:a", json!({ "task_id": "a" })).await; // must be ignored
+        state
+            .set(
+                "worktask:task:a",
+                json!({ "task_id": "a", "task_type": "feature" }),
+            )
+            .await;
+        state
+            .set(
+                "worktask:task:b",
+                json!({ "task_id": "b", "task_type": "feature" }),
+            )
+            .await;
+        state
+            .set(
+                "worktask:task:c",
+                json!({ "task_id": "c", "task_type": "chore" }),
+            )
+            .await;
+        state
+            .set("worktask:lease:a", json!({ "task_id": "a" }))
+            .await; // must be ignored
 
         let all = h.call("list_tasks", &json!({})).await.unwrap();
-        assert_eq!(all.as_array().unwrap().len(), 3, "all three tasks, lease excluded");
+        assert_eq!(
+            all.as_array().unwrap().len(),
+            3,
+            "all three tasks, lease excluded"
+        );
 
         let features = h
             .call("list_tasks", &json!({ "task_type": "feature" }))
             .await
             .unwrap();
-        assert_eq!(features.as_array().unwrap().len(), 2, "only the two features");
+        assert_eq!(
+            features.as_array().unwrap().len(),
+            2,
+            "only the two features"
+        );
         for t in features.as_array().unwrap() {
             assert_eq!(t["task_type"], "feature");
         }
@@ -984,7 +1057,10 @@ mod tests {
     async fn identity_echoes_its_v_param_for_px_variable_binding() {
         let h = handler();
         // String value (e.g. a chosen pr_mode) round-trips unchanged.
-        let s = h.call("identity", &json!({ "v": "direct-merge" })).await.unwrap();
+        let s = h
+            .call("identity", &json!({ "v": "direct-merge" }))
+            .await
+            .unwrap();
         assert_eq!(s, json!("direct-merge"));
         // A native number round-trips as a number (type preserved).
         let n = h.call("identity", &json!({ "v": 42 })).await.unwrap();
@@ -1051,10 +1127,7 @@ mod tests {
     #[tokio::test]
     async fn count_counts_arrays_and_handles_absent() {
         let h = handler();
-        let three = h
-            .call("count", &json!({ "arr": [1, 2, 3] }))
-            .await
-            .unwrap();
+        let three = h.call("count", &json!({ "arr": [1, 2, 3] })).await.unwrap();
         assert_eq!(three, json!(3));
         // Absent / non-array → 0 (not an error, not a fake number).
         assert_eq!(h.call("count", &json!({})).await.unwrap(), json!(0));
@@ -1169,15 +1242,25 @@ mod e2e {
     /// to `main` so direct-merge has a deterministic target.
     async fn init_repo(git: &GitEffects, dir: &Path) {
         let d = dir.to_string_lossy();
-        git.run_checked("init", &["-C", &d, "init", "-q"]).await.unwrap();
+        git.run_checked("init", &["-C", &d, "init", "-q"])
+            .await
+            .unwrap();
         git.run_checked("cfg", &["-C", &d, "config", "user.email", "t@example.com"])
             .await
             .unwrap();
-        git.run_checked("cfg", &["-C", &d, "config", "user.name", "t"]).await.unwrap();
-        git.run_checked("br", &["-C", &d, "checkout", "-q", "-b", "main"]).await.ok();
+        git.run_checked("cfg", &["-C", &d, "config", "user.name", "t"])
+            .await
+            .unwrap();
+        git.run_checked("br", &["-C", &d, "checkout", "-q", "-b", "main"])
+            .await
+            .ok();
         std::fs::write(dir.join("seed.txt"), b"seed").unwrap();
-        git.run_checked("add", &["-C", &d, "add", "-A"]).await.unwrap();
-        git.run_checked("commit", &["-C", &d, "commit", "-q", "-m", "seed"]).await.unwrap();
+        git.run_checked("add", &["-C", &d, "add", "-A"])
+            .await
+            .unwrap();
+        git.run_checked("commit", &["-C", &d, "commit", "-q", "-m", "seed"])
+            .await
+            .unwrap();
     }
 
     /// Real `git -C <repo> worktree list --porcelain` → list of worktree paths.
@@ -1185,7 +1268,13 @@ mod e2e {
         let out = git
             .run_checked(
                 "wt-list",
-                &["-C", &repo.to_string_lossy(), "worktree", "list", "--porcelain"],
+                &[
+                    "-C",
+                    &repo.to_string_lossy(),
+                    "worktree",
+                    "list",
+                    "--porcelain",
+                ],
             )
             .await
             .unwrap();
@@ -1344,7 +1433,10 @@ mod e2e {
         assert_eq!(lease["task_id"], task_id);
         assert_eq!(lease["owner_session"], "sess-1");
         assert_eq!(lease["lease_expires_at"], 9_000_000_000u64);
-        assert!(lease["lease_expires_at"].is_number(), "native expiry preserved");
+        assert!(
+            lease["lease_expires_at"].is_number(),
+            "native expiry preserved"
+        );
 
         // The REAL git worktree must exist on disk AND in `git worktree list`.
         await_path(&wt_path).await;
@@ -1375,7 +1467,10 @@ mod e2e {
 
         // GLOBAL = subagent-review, REPO = direct-merge. Repo tier must win.
         store
-            .set("worktask:policy:global", json!({ "pr_mode": "subagent-review" }))
+            .set(
+                "worktask:policy:global",
+                json!({ "pr_mode": "subagent-review" }),
+            )
             .await;
         store
             .set(
@@ -1501,11 +1596,15 @@ mod e2e {
         // Both worktrees present before reclaim.
         let before = worktree_paths(&git, &repo).await;
         assert!(
-            before.iter().any(|p| Path::new(p).file_name() == clean_wt.file_name()),
+            before
+                .iter()
+                .any(|p| Path::new(p).file_name() == clean_wt.file_name()),
             "clean worktree present before reclaim"
         );
         assert!(
-            before.iter().any(|p| Path::new(p).file_name() == dirty_wt.file_name()),
+            before
+                .iter()
+                .any(|p| Path::new(p).file_name() == dirty_wt.file_name()),
             "dirty worktree present before reclaim"
         );
 
@@ -1517,7 +1616,10 @@ mod e2e {
 
         // Telemetry node (run_id generated) must record real per-task outcomes.
         let telemetry = await_first_under(&store, "worktask:reclaim:").await;
-        let outcomes = telemetry["outcomes"].as_array().cloned().unwrap_or_default();
+        let outcomes = telemetry["outcomes"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         assert!(
             outcomes.len() >= 2,
             "telemetry records one outcome per examined task; got {outcomes:?}"
@@ -1570,7 +1672,10 @@ mod e2e {
             !dirty_wt.exists(),
             "DIRTY worktree source path must be absent after a MOVE"
         );
-        assert!(qdir.exists(), "quarantine destination must exist: {quarantined_path}");
+        assert!(
+            qdir.exists(),
+            "quarantine destination must exist: {quarantined_path}"
+        );
         let preserved = qdir.join("uncommitted-precious.txt");
         assert!(
             preserved.exists(),
@@ -1671,7 +1776,10 @@ mod e2e {
             "doctor must not write reclaim telemetry"
         );
         assert!(
-            store.keys_with_prefix("worktask:quarantine:").await.is_empty(),
+            store
+                .keys_with_prefix("worktask:quarantine:")
+                .await
+                .is_empty(),
             "doctor must not quarantine anything"
         );
         let worktrees_after = worktree_paths(&git, &repo).await;
@@ -1680,7 +1788,10 @@ mod e2e {
             worktrees_after.len(),
             "doctor must not remove or add worktrees"
         );
-        assert!(active_wt.exists() && expired_wt.exists(), "both worktrees intact");
+        assert!(
+            active_wt.exists() && expired_wt.exists(),
+            "both worktrees intact"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1703,7 +1814,10 @@ mod e2e {
 
         // Force direct-merge via a global policy, then create a chore worktree.
         store
-            .set("worktask:policy:global", json!({ "pr_mode": "direct-merge" }))
+            .set(
+                "worktask:policy:global",
+                json!({ "pr_mode": "direct-merge" }),
+            )
             .await;
         let wt = tmp.path().join("wt-merge");
         let branch = "chore/e2e-merge";
@@ -1729,7 +1843,9 @@ mod e2e {
         // Commit a real change ON the worktree's branch so the merge has content.
         let wtd = wt.to_string_lossy();
         std::fs::write(wt.join("feature.txt"), b"new feature work").unwrap();
-        git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
+        git.run_checked("add", &["-C", &wtd, "add", "-A"])
+            .await
+            .unwrap();
         git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "feature work"])
             .await
             .unwrap();
@@ -1771,7 +1887,10 @@ mod e2e {
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert!(!wt.exists(), "worktree must be removed after a direct merge");
+        assert!(
+            !wt.exists(),
+            "worktree must be removed after a direct merge"
+        );
         assert!(
             !worktree_listed(&git, &repo, &wt).await,
             "worktree must be gone from git worktree list"
@@ -1843,12 +1962,21 @@ mod e2e {
         let wtd = wt.to_string_lossy();
         git.run_checked(
             "remote-add",
-            &["-C", &wtd, "remote", "add", "origin", &remote.to_string_lossy()],
+            &[
+                "-C",
+                &wtd,
+                "remote",
+                "add",
+                "origin",
+                &remote.to_string_lossy(),
+            ],
         )
         .await
         .unwrap();
         std::fs::write(wt.join("pushme.txt"), b"push this").unwrap();
-        git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
+        git.run_checked("add", &["-C", &wtd, "add", "-A"])
+            .await
+            .unwrap();
         git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "push work"])
             .await
             .unwrap();
@@ -1856,7 +1984,10 @@ mod e2e {
         // Fire new_pr (github-pr mode).
         runtime
             .registry
-            .on_write("worktask:cmd:new_pr:pr-push-1", &json!({ "task_id": task_id }))
+            .on_write(
+                "worktask:cmd:new_pr:pr-push-1",
+                &json!({ "task_id": task_id }),
+            )
             .await;
 
         // Status must be left `in_review` (NOT done, NOT a fake merge). Poll for
@@ -1944,7 +2075,14 @@ mod e2e {
         .unwrap();
         git.run_checked(
             "push-main",
-            &["-C", &repo.to_string_lossy(), "push", "-u", "origin", "main"],
+            &[
+                "-C",
+                &repo.to_string_lossy(),
+                "push",
+                "-u",
+                "origin",
+                "main",
+            ],
         )
         .await
         .unwrap();
@@ -1953,7 +2091,10 @@ mod e2e {
 
         // Force direct-merge for the lifecycle land step.
         store
-            .set("worktask:policy:global", json!({ "pr_mode": "direct-merge" }))
+            .set(
+                "worktask:policy:global",
+                json!({ "pr_mode": "direct-merge" }),
+            )
             .await;
 
         // 1) newFeature (command surface = write worktask:cmd:*).
@@ -2005,7 +2146,14 @@ mod e2e {
             .unwrap();
         git.run_checked(
             "commit",
-            &["-C", &wt_feature_s, "commit", "-q", "-m", "verify lifecycle work"],
+            &[
+                "-C",
+                &wt_feature_s,
+                "commit",
+                "-q",
+                "-m",
+                "verify lifecycle work",
+            ],
         )
         .await
         .unwrap();
@@ -2021,10 +2169,7 @@ mod e2e {
 
         let mut landed_done = false;
         for _ in 0..220 {
-            if let Some(t) = store
-                .get(&format!("worktask:task:{feature_task_id}"))
-                .await
-            {
+            if let Some(t) = store.get(&format!("worktask:task:{feature_task_id}")).await {
                 if t.get("status").and_then(|s| s.as_str()) == Some("done") {
                     landed_done = true;
                     break;
@@ -2104,9 +2249,12 @@ mod e2e {
         // 4) reclaim: second clean task reclaimed, dirty task quarantined.
         let wt_clean = tmp.path().join("wt-verify-clean");
         let wt_dirty = tmp.path().join("wt-verify-dirty");
-        for (i, (branch, wt)) in [("feat/verify-clean", &wt_clean), ("feat/verify-dirty", &wt_dirty)]
-            .iter()
-            .enumerate()
+        for (i, (branch, wt)) in [
+            ("feat/verify-clean", &wt_clean),
+            ("feat/verify-dirty", &wt_dirty),
+        ]
+        .iter()
+        .enumerate()
         {
             runtime
                 .registry
@@ -2149,8 +2297,14 @@ mod e2e {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         assert!(!wt_clean.exists(), "clean expired worktree must be removed");
-        assert!(!wt_dirty.exists(), "dirty expired worktree source must be moved");
-        assert!(preserved.exists(), "dirty quarantined data must be preserved");
+        assert!(
+            !wt_dirty.exists(),
+            "dirty expired worktree source must be moved"
+        );
+        assert!(
+            preserved.exists(),
+            "dirty quarantined data must be preserved"
+        );
         assert_eq!(
             std::fs::read_to_string(&preserved).unwrap(),
             "preserve me",

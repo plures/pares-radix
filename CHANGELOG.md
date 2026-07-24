@@ -1,3 +1,34 @@
+## [1.55.39] — 2026-07-24
+
+- style: apply cargo fmt to workspace (CI auto-format push failed on PR #473) (#483) (87390ba)
+- docs(adr): ADR-0018 radix runtime-as-service (design only) (#554) (165ca05)
+- chore(deps): bump serde_json from 1.0.150 to 1.0.151 (#552) (d0c7109)
+- feat(core): durable task custody store with sled CAS (ADR-0036 M3) (#484) (b9084f5)
+- chore(deps): bump serde from 1.0.228 to 1.0.229 (#551) (00c9ccb)
+- chore(deps): bump async-trait from 0.1.89 to 0.1.91 (#550) (9d5656f)
+- chore(deps): bump libc from 0.2.186 to 0.2.189 (#505) (4c99ee1)
+- chore(deps): bump tokio from 1.52.3 to 1.53.1 (#547) (2314846)
+- chore(deps): bump thiserror from 2.0.18 to 2.0.19 (#542) (9d94c5e)
+- chore(deps): bump futures from 0.3.32 to 0.3.33 (#530) (f46fb2a)
+- chore(deps): bump uuid from 1.23.5 to 1.24.0 (#524) (cd6c6ec)
+- chore(deps): bump cc from 1.2.67 to 1.3.0 (#519) (513569d)
+- chore(deps): bump regex from 1.13.0 to 1.13.1 (#514) (b0d42ae)
+- chore(deps): bump futures-util from 0.3.32 to 0.3.33 (#504) (5a2ed58)
+- chore(deps-dev): bump @tauri-apps/cli from 2.11.1 to 2.11.4 (#493) (37e1829)
+- chore(deps): add dependabot.yml for cargo/npm/github-actions ecosystem (#482) (25c2863)
+
+## [1.55.36] — 2026-07-24
+
+- fix: thread real chat_id through autonomous task dispatch (#481) (af0f634)
+
+## [1.55.35] — 2026-07-24
+
+- fix(spine): resolve clippy::too_many_arguments on build_task_aware_runtime; incorporate PR #468 changes (#473) (0b89ab7)
+- docs(ADR-0035): design-dojo vendored-shim drift audit - ownership boundary + prioritized gaps (design only) (#479) (e06231d)
+- docs: ADR-0019 multiplatform installer packaging design (Phase 4 prep) (#478) (6f14de7)
+- docs(adr): ADR-0018 procedure-native plugin integration plan (Epic A design) (#477) (2856ce3)
+- ci(release): add concurrency guard to release workflow (#476) (56379cf)
+
 ## [1.55.34] — 2026-07-21
 
 - fix(spine): resolve px task-dispatch verbs to real Rust handlers (p0 loop closure) (#475) (002783a)

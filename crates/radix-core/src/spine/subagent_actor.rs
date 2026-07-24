@@ -577,7 +577,10 @@ mod tests {
             .await
             .unwrap();
         let terminal = actor
-            .call("map_gate_to_terminal", &json!({ "gate_status": gate_status }))
+            .call(
+                "map_gate_to_terminal",
+                &json!({ "gate_status": gate_status }),
+            )
             .await
             .unwrap();
         actor
@@ -602,7 +605,10 @@ mod tests {
 
         // Final stage passed: next_stage == null, gate status == passed.
         let res = drive_finalize(&actor, &id, "passed", Value::Null).await;
-        assert_eq!(res["finalized"], true, "finalize must apply on final passed stage");
+        assert_eq!(
+            res["finalized"], true,
+            "finalize must apply on final passed stage"
+        );
 
         // REAL assertion: owning Task is now Completed and absent from open_tasks.
         let task = tm.get_task(&id).expect("task still exists");
@@ -653,10 +659,16 @@ mod tests {
 
         // Non-final: next_stage is a real stage name → must NOT finalize.
         let res = drive_finalize(&actor, &id, "passed", json!("test")).await;
-        assert_eq!(res["finalized"], false, "non-final stage must not terminate the Task");
+        assert_eq!(
+            res["finalized"], false,
+            "non-final stage must not terminate the Task"
+        );
 
         let task = tm.get_task(&id).unwrap();
-        assert!(!task.is_terminal(), "Task must remain non-terminal mid-lifecycle");
+        assert!(
+            !task.is_terminal(),
+            "Task must remain non-terminal mid-lifecycle"
+        );
         assert!(tm.open_tasks().iter().any(|t| t.id == id));
     }
 

@@ -215,7 +215,9 @@ mod tests {
     }
 
     /// Helper: create router + store with a custom config.
-    fn make_test_setup_with_config(config: ThreadConfig) -> (Arc<ThreadRouter>, Arc<MemoryThreadStore>) {
+    fn make_test_setup_with_config(
+        config: ThreadConfig,
+    ) -> (Arc<ThreadRouter>, Arc<MemoryThreadStore>) {
         let store = Arc::new(MemoryThreadStore::new());
         let router = Arc::new(ThreadRouter::new(
             store.clone() as Arc<dyn ThreadStore>,
@@ -228,7 +230,11 @@ mod tests {
     fn make_bridge_and_emitter(
         router: Arc<ThreadRouter>,
         store: Arc<MemoryThreadStore>,
-    ) -> (TopicThreadBridge, PipelineEmitter, mpsc::Receiver<SpineEvent>) {
+    ) -> (
+        TopicThreadBridge,
+        PipelineEmitter,
+        mpsc::Receiver<SpineEvent>,
+    ) {
         let (tx, rx) = mpsc::channel(32);
         let emitter = PipelineEmitter { tx };
         let bridge = TopicThreadBridge::new(router, store as Arc<dyn ThreadStore>);
@@ -264,10 +270,7 @@ mod tests {
         // Should emit ThreadCreated
         let emitted = rx.recv().await.unwrap();
         assert_eq!(emitted.event_type(), "thread_created");
-        if let SpineEvent::ThreadCreated {
-            chat_id, topic, ..
-        } = &emitted
-        {
+        if let SpineEvent::ThreadCreated { chat_id, topic, .. } = &emitted {
             assert_eq!(chat_id, "chat-1");
             assert_eq!(topic, "deployment");
         } else {
@@ -328,10 +331,7 @@ mod tests {
         // Should emit ThreadSwitched
         let emitted = rx.recv().await.unwrap();
         assert_eq!(emitted.event_type(), "thread_switched");
-        if let SpineEvent::ThreadSwitched {
-            to_thread_id, ..
-        } = &emitted
-        {
+        if let SpineEvent::ThreadSwitched { to_thread_id, .. } = &emitted {
             assert_eq!(to_thread_id, &t1.id);
         } else {
             panic!("expected ThreadSwitched, got {:?}", emitted);
@@ -403,7 +403,10 @@ mod tests {
         bridge.handle(&event, &emitter).await;
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        assert!(rx.try_recv().is_err(), "non-TopicClassified events should be ignored");
+        assert!(
+            rx.try_recv().is_err(),
+            "non-TopicClassified events should be ignored"
+        );
     }
 
     #[tokio::test]

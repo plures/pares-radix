@@ -28,10 +28,10 @@ pub mod executor;
 pub mod handlers;
 /// License key validation and Pro feature gates.
 pub mod license;
-/// LLM model client and tool dispatcher abstractions.
-pub mod model;
 /// Handler-facing memory interface (trait + DTOs; impl lives in cognition).
 pub mod memory;
+/// LLM model client and tool dispatcher abstractions.
+pub mod model;
 
 pub mod memory_client;
 
@@ -42,10 +42,10 @@ pub mod optimization;
 pub mod otel;
 #[cfg(feature = "otel")]
 pub mod otel_metrics;
-/// Praxis decision ledger and approval gate procedures.
-pub mod praxis;
 /// Platform bridge to the PluresDB procedure engine (procedure/constraint execution).
 pub mod pluresdb_bridge;
+/// Praxis decision ledger and approval gate procedures.
+pub mod praxis;
 /// Procedure registry and priority-based event dispatch.
 pub mod procedure;
 /// Shipped default PluresLM procedure bundles (JSON library).
@@ -71,6 +71,7 @@ pub use classifier::{
 
 /// Re-export PluresDB primitives for consumers that need the shared CrdtStore.
 pub use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
+pub mod approval;
 /// Channel capability contracts for output rendering.
 pub mod channel_contract;
 /// Event spine — bridges pares-radix to PluresDB's AgensRuntime.
@@ -80,7 +81,6 @@ pub mod lifecycle;
 pub mod renderers;
 /// Tool execution governance — policies, timeouts, blocked-command filtering.
 pub mod tool_governance;
-pub mod approval;
 
 pub mod model_download;
 /// Plugin framework — application platform for schema-driven apps.
@@ -107,5 +107,6 @@ pub mod shell_executor;
 pub mod spine;
 /// Platform-owned sub-agent spawn seam (trait + DTOs implemented by cognition).
 pub mod subagent_spawn;
+pub mod task_handoff;
 /// Thread engine — multi-topic conversation threading.
 pub mod threading;

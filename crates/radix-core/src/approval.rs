@@ -99,7 +99,11 @@ impl ApprovalRegistry {
     /// Returns the [`ApprovalRequest`] (to hand to the adapter for rendering)
     /// and the [`PendingApproval`] the caller awaits. The token is a fresh
     /// UUID, so tokens never collide across concurrent tool calls.
-    pub async fn register(&self, tool_name: &str, summary: &str) -> (ApprovalRequest, PendingApproval) {
+    pub async fn register(
+        &self,
+        tool_name: &str,
+        summary: &str,
+    ) -> (ApprovalRequest, PendingApproval) {
         let token = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
         {
@@ -154,7 +158,11 @@ mod tests {
         let decision = pending.wait().await;
         assert_eq!(decision, ApprovalDecision::Deny);
         assert!(!decision.is_allowed(), "Deny must abort the tool");
-        assert_eq!(registry.pending_count().await, 0, "waiter removed after resolve");
+        assert_eq!(
+            registry.pending_count().await,
+            0,
+            "waiter removed after resolve"
+        );
     }
 
     #[tokio::test]
@@ -165,9 +173,8 @@ mod tests {
         // Resolve concurrently so wait() is genuinely block-and-await.
         let reg2 = registry.clone();
         let token = req.token.clone();
-        let resolver = tokio::spawn(async move {
-            reg2.resolve(&token, ApprovalDecision::Allow).await
-        });
+        let resolver =
+            tokio::spawn(async move { reg2.resolve(&token, ApprovalDecision::Allow).await });
 
         let decision = pending.wait().await;
         assert!(resolver.await.unwrap(), "resolve reported a woken waiter");
@@ -178,7 +185,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_token_is_noop() {
         let registry = ApprovalRegistry::new();
-        let woke = registry.resolve("no-such-token", ApprovalDecision::Allow).await;
+        let woke = registry
+            .resolve("no-such-token", ApprovalDecision::Allow)
+            .await;
         assert!(!woke, "unknown token must not report a woken waiter");
     }
 
@@ -192,7 +201,11 @@ mod tests {
         };
         // No resolve ever happens; the sender is gone.
         let decision = pending.wait().await;
-        assert_eq!(decision, ApprovalDecision::Deny, "fail-closed on dropped sender");
+        assert_eq!(
+            decision,
+            ApprovalDecision::Deny,
+            "fail-closed on dropped sender"
+        );
     }
 
     #[tokio::test]

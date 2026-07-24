@@ -305,8 +305,7 @@ impl TaskManager {
 pub fn render_open_tasks_block(manager: &TaskManager, chat_id: &str) -> Option<String> {
     // Chat-scoped open tasks first, then any other globally-open tasks.
     let mut tasks = manager.tasks_for_chat(chat_id, false);
-    let mut seen: std::collections::HashSet<String> =
-        tasks.iter().map(|t| t.id.clone()).collect();
+    let mut seen: std::collections::HashSet<String> = tasks.iter().map(|t| t.id.clone()).collect();
     for t in manager.open_tasks() {
         // Only include truly-global tasks (no chat_id) to avoid leaking tasks across chats.
         if t.chat_id.is_some() {
