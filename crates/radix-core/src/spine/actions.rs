@@ -172,6 +172,7 @@ use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionH
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::task_dispatch_actions::{is_task_dispatch_action, TaskDispatchActionHandler};
 use crate::spine::task_grounding_actions::{is_task_grounding_action, TaskGroundingActionHandler};
+use crate::spine::task_handoff_actions::{is_task_handoff_action, TaskHandoffActionHandler};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
 /// Composite action handler that delegates to multiple handlers in priority order.
@@ -203,6 +204,10 @@ pub struct CompositeActionHandler {
     /// emitter exists. When absent the action returns a real "not wired" error
     /// (honest absence, never a stub).
     task_dispatch: Option<Arc<TaskDispatchActionHandler>>,
+    /// Durable custody-transfer IO edge (`prepare_task_handoff` et al.). `None`
+    /// when the runtime has no handoff store (e.g. lightweight test setups); the
+    /// action then returns a real "not wired" error (honest absence, C-NOSTUB-001).
+    task_handoff: Option<Arc<TaskHandoffActionHandler>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
 
@@ -223,6 +228,7 @@ impl CompositeActionHandler {
             task_grounding: None,
             subagent: None,
             task_dispatch: None,
+            task_handoff: None,
             tool_handler,
         }
     }
@@ -255,6 +261,16 @@ impl CompositeActionHandler {
     /// constructed — so it is attached post-construction.
     pub fn set_task_dispatch(&mut self, handler: Arc<TaskDispatchActionHandler>) {
         self.task_dispatch = Some(handler);
+    }
+
+    /// Attach the durable task-handoff IO edge.
+    ///
+    /// When wired, `prepare_task_handoff`, `verify_task_handoff_digest`,
+    /// `accept_task_handoff`, and `conditional_claim_task` are dispatched to
+    /// the real [`TaskHandoffActionHandler`] backed by a [`ConditionalTaskStore`].
+    pub fn with_task_handoff(mut self, handler: Arc<TaskHandoffActionHandler>) -> Self {
+        self.task_handoff = Some(handler);
+        self
     }
 }
 
@@ -309,6 +325,16 @@ impl AsyncActionHandler for CompositeActionHandler {
                     message:
                         "task-dispatch not wired — TaskDispatcher/pipeline emitter not available"
                             .into(),
+                })
+            }
+        } else if is_task_handoff_action(action) {
+            if let Some(ref h) = self.task_handoff {
+                h.call(action, params).await
+            } else {
+                warn!(action = %action, "task-handoff not wired — ConditionalTaskStore unavailable");
+                Err(ExecutionError::ActionFailed {
+                    action: action.to_string(),
+                    message: "task-handoff not wired — ConditionalTaskStore not configured".into(),
                 })
             }
         } else {

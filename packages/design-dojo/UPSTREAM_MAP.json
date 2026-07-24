@@ -1,0 +1,104 @@
+{
+  "$schema": "./UPSTREAM_MAP.schema.json",
+  "_comment": "Maps each vendored shim component under packages/design-dojo/src/ to its counterpart in the standalone @plures/design-dojo repo (https://github.com/plures/design-dojo). Populated per ADR-0035. Consumed by scripts/check-design-dojo-drift.mjs.",
+  "npmPackage": "@plures/design-dojo",
+  "npmPinRange": "^0.17.0",
+  "entries": {
+    "SettingsPanel.svelte": {
+      "upstreamPath": "src/lib/app/SettingsPanel.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Founding shim comment said remove at npm v0.13+; npm is at 0.17.1. Stale — flagged by drift check."
+    },
+    "Sidebar.svelte": {
+      "upstreamPath": "src/lib/layout/Sidebar.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "285 differing lines vs standalone (ADR-0035 audit). Reverted twice historically (20acb73, 0eb0734) due to API incompatibility — needs triage before removal, not blind sync."
+    },
+    "Input.svelte": {
+      "upstreamPath": "src/lib/primitives/Input.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "532 differing lines vs standalone (largest primitive diff)."
+    },
+    "Select.svelte": {
+      "upstreamPath": "src/lib/primitives/Select.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "Dialog.svelte": {
+      "upstreamPath": "src/lib/overlays/Dialog.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "342 differing lines vs standalone."
+    },
+    "DashboardGrid.svelte": {
+      "upstreamPath": "src/lib/layout/DashboardGrid.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "223 differing lines vs standalone."
+    },
+    "FirstRunWizard.svelte": {
+      "upstreamPath": "src/lib/app/FirstRunWizard.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "656 differing lines vs standalone (largest diff, needs the most reconciliation care)."
+    },
+    "Heading.svelte": {
+      "upstreamPath": "src/lib/typography/Heading.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "TextArea.svelte": {
+      "upstreamPath": "src/lib/primitives/TextArea.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "Link.svelte": {
+      "upstreamPath": "src/lib/primitives/Link.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "CodeBlock.svelte": {
+      "upstreamPath": "src/lib/primitives/CodeBlock.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "Canvas2D.svelte": {
+      "upstreamPath": "src/lib/canvas/Canvas2D.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "PluginContentArea.svelte": {
+      "upstreamPath": "src/lib/layout/PluginContentArea.svelte",
+      "status": "drifted",
+      "removeAfterNpmVersion": "0.13.0",
+      "notes": "Not yet line-diffed in ADR-0035; flagged for triage."
+    },
+    "GraphView.svelte": {
+      "upstreamPath": "src/lib/app/GraphView.svelte",
+      "status": "reconciled",
+      "removeAfterNpmVersion": "0.18.0",
+      "notes": "ADR-0035 pilot reconciliation: shim now byte-identical to standalone repo HEAD (c0c7667) modulo the local './types-local.js' vs upstream './GraphView.types.js' type-import path, which is an intentional, documented override (see DRIFT.md) required because the shim package does not (yet) ship GraphView.types.ts as a separate module. Everything else — including the upstream doc header — is synced verbatim."
+    },
+    "DataGrid.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream (ADR-0035 §2.1). Reclassified as an upstream contribution owed, not drift. Tracked as a pares-radix -> design-dojo upstreaming task, not a sync target for this check."
+    },
+    "SchemaForm.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream (ADR-0035 §2.1). Same disposition as DataGrid.svelte."
+    }
+  }
+}

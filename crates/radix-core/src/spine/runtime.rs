@@ -60,6 +60,7 @@ use crate::spine::procedures::model_invoker::ModelInvoker;
 use crate::spine::procedures::response_router::ResponseRouter;
 use crate::spine::procedures::tool_executor::ToolExecutor;
 use crate::spine::reactive::ReactiveRegistry;
+use crate::spine::task_handoff_actions::{resolve_handoff_db_path, TaskHandoffActionHandler};
 use crate::state::{PluresDbStateStore, StateStore};
 use crate::task_manager::TaskManager;
 use crate::tools::TaskRegistryTool;
@@ -294,6 +295,28 @@ pub async fn build_reactive_runtime_with_subagent(
             dispatch_task_manager,
         ),
     ));
+
+    // Wire the durable task-handoff IO edge so `.px` procedures can call
+    // `prepare_task_handoff`, `verify_task_handoff_digest`, `accept_task_handoff`,
+    // and `conditional_claim_task` against a real ConditionalTaskStore.
+    let handoff_path = resolve_handoff_db_path(&resolve_state_dir());
+    match TaskHandoffActionHandler::open(&handoff_path) {
+        Ok(h) => {
+            composite_inner = composite_inner.with_task_handoff(Arc::new(h));
+            info!(
+                path = %handoff_path.display(),
+                "runtime: TaskHandoffActionHandler wired — custody-transfer actions live"
+            );
+        }
+        Err(e) => {
+            warn!(
+                path = %handoff_path.display(),
+                error = %e,
+                "runtime: failed to open task-handoff store — handoff actions will return errors"
+            );
+        }
+    }
+
     let composite = Arc::new(composite_inner);
 
     // 4. Load every `.px` procedure against the (already-built) registry, then

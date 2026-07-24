@@ -153,7 +153,7 @@ impl ConditionalTaskStore {
     }
 
     fn read_record(&self, task_id: &str) -> Result<Option<CustodyRecord>, HandoffError> {
-        match self.crdt.get(&Self::node_id(task_id)) {
+        match self.crdt.get(Self::node_id(task_id)) {
             None => Ok(None),
             Some(r) if r.data.is_null() => Ok(None),
             Some(r) => Ok(Some(serde_json::from_value(r.data)?)),
@@ -162,7 +162,7 @@ impl ConditionalTaskStore {
 
     fn write_record(&self, record: &CustodyRecord) -> Result<(), HandoffError> {
         let value = serde_json::to_value(record)?;
-        self.crdt.put(&Self::node_id(&record.task.task_id), ACTOR, value);
+        self.crdt.put(Self::node_id(&record.task.task_id), ACTOR, value);
         Ok(())
     }
 
