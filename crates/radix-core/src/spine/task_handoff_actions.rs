@@ -23,7 +23,7 @@
 //! No stub returns (C-NOSTUB-001): every arm either performs the real operation
 //! or returns a structured [`ExecutionError::ActionFailed`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -270,7 +270,7 @@ fn require_str<'a>(params: &'a Value, key: &str, action: &str) -> Result<&'a str
 ///
 /// Uses `RADIX_HANDOFF_DB_PATH` if set; otherwise places the store in
 /// `<state_dir>/task-handoff` (relative to the runtime state directory).
-pub fn resolve_handoff_db_path(state_dir: &PathBuf) -> PathBuf {
+pub fn resolve_handoff_db_path(state_dir: &Path) -> PathBuf {
     match std::env::var("RADIX_HANDOFF_DB_PATH") {
         Ok(v) if !v.trim().is_empty() => PathBuf::from(v),
         _ => state_dir.join("task-handoff"),
