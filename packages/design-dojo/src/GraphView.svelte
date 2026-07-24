@@ -1,3 +1,21 @@
+<!-- @component
+  GraphView — ego-centric, space-adaptive graph navigation primitive (ADR-0032).
+
+  Renders a focused node in the center surrounded by its edges, each terminating in a
+  linked-neighbor stub. Selecting a stub re-centers it (host-mediated: fires
+  onFocusChange, the host re-queries PluresDB and passes a fresh neighborhood — GraphView
+  never walks the graph or owns persistent state, C-PLURES-003).
+
+  Layout is "graph-flex": a constraint/space-budget pass (no physics engine) that grants
+  the focus priority space + detail, distributes stubs radially weighted by container
+  aspect ratio, and auto-summarizes each node's detail level (icon -> title ->
+  title+keyFields -> full) from the box it is granted. Expanding one node only reflows
+  neighbors that would be forced below `minNodeSize`; unaffected neighbors are untouched.
+  High-degree foci collapse excess stubs into an "N more" affordance.
+
+  Supports GUI (radial) and TUI (focus card + labeled edge list) token sets over the same
+  data contract.
+-->
 <script lang="ts">
 	import type { GraphViewProps, GraphNode, GraphEdge, DetailLevel } from './types-local.js';
 	import {
@@ -111,7 +129,7 @@
 	}
 
 	function initialsOf(node: GraphNode): string {
-		return (node.label || node.id).trim().charAt(0).toUpperCase() || '•';
+		return (node.label || node.id).trim().charAt(0).toUpperCase() || 'ΓÇó';
 	}
 
 	function showTitle(d: DetailLevel): boolean {
@@ -132,7 +150,7 @@
 			{@const focus = placementNode(focusPlacement)}
 			{#if focus}
 				<div class="tui-focus">
-					<div class="tui-focus-head">◉ {focus.label}{#if focus.type}<span class="tui-type"> [{focus.type}]</span>{/if}</div>
+					<div class="tui-focus-head">Γùë {focus.label}{#if focus.type}<span class="tui-type"> [{focus.type}]</span>{/if}</div>
 					{#each keyFields(focus, 6) as [k, v] (k)}
 						<div class="tui-field"><span class="tui-key">{k}:</span> {v}</div>
 					{/each}
@@ -144,12 +162,12 @@
 				{@const otherId = e.from === neighborhood.focusId ? e.to : e.from}
 				<li>
 					<button type="button" class="tui-edge" onclick={() => focusStub(otherId)}>
-						├─ {e.label ?? '—'} → {otherEndLabel(e)}
+						Γö£ΓöÇ {e.label ?? 'ΓÇö'} ΓåÆ {otherEndLabel(e)}
 					</button>
 				</li>
 			{/each}
 			{#if layout.collapsedCount > 0}
-				<li class="tui-more">└─ … {layout.collapsedCount} more</li>
+				<li class="tui-more">ΓööΓöÇ ΓÇª {layout.collapsedCount} more</li>
 			{/if}
 		</ul>
 	</div>
@@ -253,7 +271,7 @@
 							aria-label={expandedId === p.nodeId ? `Collapse ${node.label}` : `Expand ${node.label}`}
 							aria-expanded={expandedId === p.nodeId}
 							onclick={() => toggleExpand(node.id)}
-						>{expandedId === p.nodeId ? '−' : '+'}</button>
+						>{expandedId === p.nodeId ? 'ΓêÆ' : '+'}</button>
 					{/if}
 				</div>
 			{/if}

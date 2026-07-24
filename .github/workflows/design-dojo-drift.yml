@@ -1,0 +1,38 @@
+name: design-dojo drift check
+on:
+  push:
+    branches: [main, "copilot/**", "feature/**", "refactor/**", "fix/**", "design/**"]
+    paths:
+      - 'packages/design-dojo/**'
+      - 'scripts/check-design-dojo-drift.mjs'
+      - 'scripts/check-design-dojo-drift.test.mjs'
+      - '.github/workflows/design-dojo-drift.yml'
+  pull_request:
+    paths:
+      - 'packages/design-dojo/**'
+      - 'scripts/check-design-dojo-drift.mjs'
+      - 'scripts/check-design-dojo-drift.test.mjs'
+      - '.github/workflows/design-dojo-drift.yml'
+  schedule:
+    # Weekly, independent of any PR — catches drift introduced by an npm-side release bump
+    # (a new @plures/design-dojo version publishing without pares-radix touching the shim at all).
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run design-dojo vendored-copy drift check (ADR-0035)
+        run: node scripts/check-design-dojo-drift.mjs
+      - name: Run drift-check unit tests
+        run: npx vitest run scripts/check-design-dojo-drift.test.mjs
