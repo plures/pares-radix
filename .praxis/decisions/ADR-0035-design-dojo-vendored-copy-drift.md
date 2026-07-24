@@ -25,7 +25,7 @@ The shim's `src/index.ts` re-exports most components from the npm package and th
 `Dialog`, `DashboardGrid`, `FirstRunWizard`, `Heading`, `TextArea`, `Link`, `CodeBlock`, `Canvas2D`,
 `PluginContentArea`, `DataGrid`, `SchemaForm`, `GraphView`.
 
-Meanwhile, the **standalone `@plures/design-dojo` source repo** (`C:\Projects\design-dojo`,\nindependently versioned, currently at package.json `1.55.34`, git HEAD `4fa2153`, 2026-07-21) is\nalive, organized (`src/lib/{primitives,layout,overlays,data,surfaces,feedback,app,...}`), and has
+Meanwhile, the **standalone `@plures/design-dojo` source repo** (separate repository; independently versioned; currently at package.json `1.55.34`, git HEAD `4fa2153`, 2026-07-21) is alive, organized (`src/lib/{primitives,layout,overlays,data,surfaces,feedback,app,...}`), and has
 **361 source files** vs. the vendor shim's flat 24.
 
 ### Actual divergence found (not assumed)
@@ -116,11 +116,8 @@ strategy is reviewed and a follow-up implementation ADR/PR is accepted.
   allows.
 - Any component that exists in both places must have **at most one authoritative source**: the
   standalone repo. Vendored copies are transitional bridges, never permanent forks.
-- `DataGrid` and `SchemaForm` are reclassified as **upstream contributions owed**, not vendor
-  drift — they get a dedicated small PR into `C:\Projects\design-dojo` (own review, own semver\n  bump), not a copy-paste reconciliation.\n- Release cadence: design-dojo standalone repo cuts a release for every component it gains from
-  pares-radix contributions or fixes drift-discovered bugs; pares-radix bumps its
-  `@plures/design-dojo-npm` pin promptly after (target: within one sprint) rather than papering
-  over the gap with a local shim edit.
+- `DataGrid` and `SchemaForm` are reclassified as **upstream contributions owed**, not vendor drift — they get a dedicated small PR into the standalone design-dojo repository (own review, own semver bump), not a copy-paste reconciliation.
+- Release cadence: design-dojo standalone repo cuts a release for every component it gains from pares-radix contributions or fixes drift-discovered bugs; pares-radix bumps its `@plures/design-dojo-npm` pin promptly after (target: within one sprint) rather than papering over the gap with a local shim edit.
 
 ### 2.2 Migration approach (for follow-up implementation PR — not this ADR)
 1. **Triage per component** (not bulk): for each of the 13 drifted components, determine whether
@@ -196,5 +193,4 @@ turnaround is fast enough to not be a bigger friction than the shim was.
 ## 6. References
 ADR-0024 §5 (design-dojo canonical UI home, subpath consumption pattern), ADR-0032 (GraphView,
 most recent addition — smallest drift, proof that fast upstream sync prevents divergence);
-`C:\Projects\pares-radix\packages\design-dojo\package.json` (shim description, stale removal\ncriterion); `C:\Projects\design-dojo` git HEAD `4fa2153` (2026-07-21); pares-radix git history\n`20acb73`/`0eb0734` (prior attempted-then-reverted shim removal, evidence of real API drift, not
-just process laziness); C-NOSTUB-001.
+`packages/design-dojo/package.json` (shim description, stale removal criterion); standalone design-dojo repo git HEAD `4fa2153` (2026-07-21); pares-radix git history `20acb73`/`0eb0734` (prior attempted-then-reverted shim removal, evidence of real API drift, not just process laziness); C-NOSTUB-001.
