@@ -104,7 +104,7 @@ forking runtime logic.
 │  │ POST /events │   │   process_due_    │   │ (SystemHealth) │ │
 │  │ GET/POST/DEL │   │     timers()      │   └────────────────┘ │
 │  │  /timers     │   └──────────────────┘                     │
-│  │ POST /procs/ │                                            │
+│  │ POST /procedures/ │                                            │
 │  │   {name}/run │                                            │
 │  └─────────────┘                                             │
 │           │                    │                    │        │
