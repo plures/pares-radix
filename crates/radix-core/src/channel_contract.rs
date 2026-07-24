@@ -57,7 +57,7 @@ impl ChannelContract {
             supports_reactions: true,
             supports_threads: true,
             supports_message_edit: true,
-            initial_response_timeout_ms: 30_000,
+            initial_response_timeout_ms: 120_000,
             edit_throttle_ms: 500,
             typing_indicator: true,
         }
@@ -137,5 +137,6 @@ mod tests {
         assert_eq!(back.channel, "telegram");
         assert_eq!(back.max_message_len, 4096);
         assert_eq!(back.preferred_format, "HTML");
+        assert_eq!(back.initial_response_timeout_ms, 120_000);
     }
 }
