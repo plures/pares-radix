@@ -1,3 +1,7 @@
+## [1.55.43] — 2026-07-24
+
+- feat(praxis): add native task dashboard aggregation (#559) (f35f86b)
+
 ## [1.55.42] — 2026-07-24
 
 - fix(mcp-dev-server): use dbPut wrapper for task-handoff + related db.set call sites (#565) (2117f7d)
