@@ -296,6 +296,16 @@ impl AsyncActionHandler for CompositeActionHandler {
                 let base = params.get("base").and_then(|v| v.as_str());
                 Ok(Value::String(base.unwrap_or("").to_string()))
             }
+        } else if is_subagent_action(action) {
+            if let Some(ref actor) = self.subagent {
+                actor.call(action, params).await
+            } else {
+                warn!(action = %action, "subagent actor not configured");
+                Err(ExecutionError::ActionFailed {
+                    action: action.to_string(),
+                    message: "subagent actor not wired — SubAgentManager not available".into(),
+                })
+            }
         } else if is_task_dispatch_action(action) {
             if let Some(ref h) = self.task_dispatch {
                 h.call(action, params).await
@@ -305,16 +315,6 @@ impl AsyncActionHandler for CompositeActionHandler {
                 Err(ExecutionError::ActionFailed {
                     action: action.to_string(),
                     message: "task-dispatch not wired — TaskDispatcher/pipeline emitter not available".into(),
-                })
-            }
-        } else if is_subagent_action(action) {
-            if let Some(ref actor) = self.subagent {
-                actor.call(action, params).await
-            } else {
-                warn!(action = %action, "subagent actor not configured");
-                Err(ExecutionError::ActionFailed {
-                    action: action.to_string(),
-                    message: "subagent actor not wired — SubAgentManager not available".into(),
                 })
             }
         } else {
