@@ -207,7 +207,14 @@ impl ReactiveRegistry {
                 let waiters_arc = Arc::clone(&self.waiters);
 
                 tokio::spawn(async move {
-                    Self::execute_triggered(adapter, emitter, &key_owned, &value_owned, waiters_arc).await;
+                    Self::execute_triggered(
+                        adapter,
+                        emitter,
+                        &key_owned,
+                        &value_owned,
+                        waiters_arc,
+                    )
+                    .await;
                 });
             }
         }
@@ -264,7 +271,9 @@ impl ReactiveRegistry {
                     // The destination key is derived from the trigger key:
                     //   inbound:msg-123 → route_decision:msg-123
                     // If there's no explicit return, procedures can set `$emit` to forward.
-                    if let Some(return_val) = result.variables.get("result")
+                    if let Some(return_val) = result
+                        .variables
+                        .get("result")
                         .or_else(|| result.variables.get("output"))
                         .or_else(|| result.variables.get("decision"))
                         .or_else(|| result.variables.get("return"))
@@ -371,9 +380,7 @@ impl ReactiveRegistry {
             "classify_and_route" | "unified_router" | "classify_message" => {
                 Some(format!("route_decision:{id}"))
             }
-            "assemble_context" | "dispatch_steered_task" => {
-                Some(format!("model_request:{id}"))
-            }
+            "assemble_context" | "dispatch_steered_task" => Some(format!("model_request:{id}")),
             "route_model_response" => Some(format!("delivery:{id}")),
             _ => None,
         }
@@ -649,14 +656,18 @@ mod tests {
         let registry = ReactiveRegistry::new();
 
         let rx = registry.subscribe_result("test:key").await;
-        registry.on_write("test:key", &Value::String("first".into())).await;
+        registry
+            .on_write("test:key", &Value::String("first".into()))
+            .await;
 
         // Subscriber consumed
         let received = rx.await.unwrap();
         assert_eq!(received, "first");
 
         // Second write has no subscribers
-        registry.on_write("test:key", &Value::String("second".into())).await;
+        registry
+            .on_write("test:key", &Value::String("second".into()))
+            .await;
         // No panic = success
     }
 
@@ -716,11 +727,7 @@ mod tests {
             name: &str,
             _params: &Value,
         ) -> Result<Value, pares_radix_praxis::px::executor::ExecutionError> {
-            Ok(self
-                .responses
-                .get(name)
-                .cloned()
-                .unwrap_or(Value::Null))
+            Ok(self.responses.get(name).cloned().unwrap_or(Value::Null))
         }
     }
 
@@ -761,8 +768,7 @@ mod tests {
             },
         });
 
-        let adapter = PxProcedureAdapter::from_compiled(compiled, handler)
-            .expect("test adapter");
+        let adapter = PxProcedureAdapter::from_compiled(compiled, handler).expect("test adapter");
         registry
             .register_procedure("inbound:*", Arc::new(adapter))
             .await;

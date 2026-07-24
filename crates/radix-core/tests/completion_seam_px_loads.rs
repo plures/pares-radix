@@ -32,8 +32,8 @@ fn seam_px_path() -> PathBuf {
 #[test]
 fn task_completion_seam_px_parses_and_compiles() {
     let path = seam_px_path();
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
     let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoopHandler);
     let adapters = load_px_procedures(&source, handler)

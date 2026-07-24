@@ -25,7 +25,6 @@ use pares_radix_praxis::px::executor::ExecutionError;
 /// when a .px procedure invokes an action like `read_state`, `append_history`, etc.
 pub use crate::px_adapter::AsyncActionHandler as ActionHandler;
 
-
 /// Core action handler that provides conversation/state management to .px procedures.
 ///
 /// This is the minimal set of actions needed for the spine pipeline to function.
@@ -91,10 +90,7 @@ impl CoreActionHandler {
             .and_then(|v| v.as_str())
             .unwrap_or("user");
 
-        let content = params
-            .get("content")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
 
         let msg = match role {
             "assistant" => ChatMessage::assistant(content),
@@ -114,13 +110,12 @@ impl CoreActionHandler {
     /// durable read from the [`StateStore`]; an absent key returns `Value::Null`
     /// (not an error — state may simply not exist yet).
     async fn read_state(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let key = params
-            .get("key")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "read_state".into(),
                 message: "missing key".into(),
-            })?;
+            }
+        })?;
 
         // `chat_history:` is a virtual projection over the conversation store.
         if key.starts_with("chat_history:") {
@@ -141,13 +136,12 @@ impl CoreActionHandler {
     /// Returns the value that was written so `.px` steps can bind it
     /// (e.g. `write_state {...} -> $written`).
     async fn write_state(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let key = params
-            .get("key")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ExecutionError::ActionFailed {
+        let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+            ExecutionError::ActionFailed {
                 action: "write_state".into(),
                 message: "missing key".into(),
-            })?;
+            }
+        })?;
 
         let value = params.get("value").cloned().unwrap_or(Value::Null);
         self.state_store.set(key, value.clone()).await;
@@ -172,14 +166,12 @@ impl AsyncActionHandler for CoreActionHandler {
     }
 }
 
-use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
+use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
-use crate::spine::task_grounding_actions::{
-    is_task_grounding_action, TaskGroundingActionHandler,
-};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::task_dispatch_actions::{is_task_dispatch_action, TaskDispatchActionHandler};
+use crate::spine::task_grounding_actions::{is_task_grounding_action, TaskGroundingActionHandler};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
 /// Composite action handler that delegates to multiple handlers in priority order.
@@ -314,7 +306,9 @@ impl AsyncActionHandler for CompositeActionHandler {
                 warn!(action = %action, "task-dispatch not wired — TaskDispatcher unavailable");
                 Err(ExecutionError::ActionFailed {
                     action: action.to_string(),
-                    message: "task-dispatch not wired — TaskDispatcher/pipeline emitter not available".into(),
+                    message:
+                        "task-dispatch not wired — TaskDispatcher/pipeline emitter not available"
+                            .into(),
                 })
             }
         } else {
@@ -360,10 +354,7 @@ mod tests {
 
         // Read history
         let history = handler
-            .call(
-                "read_history",
-                &serde_json::json!({"chat_id": "test-1"}),
-            )
+            .call("read_history", &serde_json::json!({"chat_id": "test-1"}))
             .await
             .unwrap();
 
@@ -378,7 +369,10 @@ mod tests {
     #[tokio::test]
     async fn read_state_chat_history_prefix() {
         let store = Arc::new(MemoryConversationStore::new());
-        let handler = CoreActionHandler::new(Arc::clone(&store) as Arc<dyn ConversationStore>, test_state());
+        let handler = CoreActionHandler::new(
+            Arc::clone(&store) as Arc<dyn ConversationStore>,
+            test_state(),
+        );
 
         // Add a message directly to store
         store
@@ -405,10 +399,7 @@ mod tests {
         let handler = CoreActionHandler::new(store, test_state());
 
         let result = handler
-            .call(
-                "read_state",
-                &serde_json::json!({"key": "nonexistent_key"}),
-            )
+            .call("read_state", &serde_json::json!({"key": "nonexistent_key"}))
             .await
             .unwrap();
 
@@ -499,8 +490,7 @@ mod tests {
         );
         // Grounding block precedes the base prompt.
         assert!(
-            grounded.find("finish the praxisbot 467 fix").unwrap()
-                < grounded.find(base).unwrap(),
+            grounded.find("finish the praxisbot 467 fix").unwrap() < grounded.find(base).unwrap(),
             "grounding block must be prepended before the base prompt"
         );
     }

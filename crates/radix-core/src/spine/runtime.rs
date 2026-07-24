@@ -264,11 +264,13 @@ pub async fn build_reactive_runtime_with_subagent(
         composite_inner = composite_inner.with_task_grounding(tm);
     }
     if let Some((spawner, task_manager)) = subagent {
-        let actor = Arc::new(crate::spine::subagent_actor::SubagentActor::with_task_manager(
-            spawner,
-            Arc::clone(&registry),
-            task_manager,
-        ));
+        let actor = Arc::new(
+            crate::spine::subagent_actor::SubagentActor::with_task_manager(
+                spawner,
+                Arc::clone(&registry),
+                task_manager,
+            ),
+        );
         composite_inner.set_subagent_actor(actor);
         info!("runtime: SubagentActor wired with TaskManager — task-completion seam live");
     }
@@ -705,7 +707,10 @@ mod tests {
         // Give any (erroneous) spawned reaction a chance, then assert nothing.
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert!(
-            state_store.get("dashboard:frozen").await.is_none_or(|v| v.is_null()),
+            state_store
+                .get("dashboard:frozen")
+                .await
+                .is_none_or(|v| v.is_null()),
             "progress: write must NOT trigger the milestone dashboard procedure"
         );
 

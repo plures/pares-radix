@@ -87,7 +87,11 @@ impl ThreadActionHandler {
         let thread_id = format!(
             "thread_{}_{}",
             chat_id,
-            uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("new")
+            uuid::Uuid::new_v4()
+                .to_string()
+                .split('-')
+                .next()
+                .unwrap_or("new")
         );
 
         let now = std::time::SystemTime::now()
@@ -291,7 +295,10 @@ mod tests {
         assert_eq!(result["chat_id"], "chat_456");
         assert_eq!(result["topic"], "architecture");
         assert_eq!(result["state"], "active");
-        assert!(result["thread_id"].as_str().unwrap().starts_with("thread_chat_456_"));
+        assert!(result["thread_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("thread_chat_456_"));
         assert!(result["created_at"].as_u64().is_some());
     }
 
@@ -392,9 +399,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_action_returns_error() {
         let handler = ThreadActionHandler::new();
-        let result = handler
-            .call("nonexistent_action", &json!({}))
-            .await;
+        let result = handler.call("nonexistent_action", &json!({})).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
