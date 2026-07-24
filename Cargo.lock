@@ -4621,7 +4621,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-agenda"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4636,7 +4636,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-app"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "serde",
  "serde_json",
@@ -4648,7 +4648,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-audit"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4664,14 +4664,14 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-bitnet-sys"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "pares-radix-core"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -4714,7 +4714,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-marketplace"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "serde",
  "serde_json",
@@ -4724,7 +4724,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-mcp-client"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4739,7 +4739,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-praxis"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "async-trait",
  "chrono",
@@ -4756,7 +4756,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-privacy"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "regex",
  "serde",
@@ -4767,7 +4767,7 @@ dependencies = [
 
 [[package]]
 name = "pares-radix-sync"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "chrono",
  "hostname",
@@ -4780,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "pares-rector"
-version = "1.55.36"
+version = "1.55.37"
 dependencies = [
  "hostname",
  "num_cpus",
