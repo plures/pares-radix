@@ -62,7 +62,7 @@ sled.workspace = true
 blake3.workspace = true
 
 # OpenTelemetry (optional, behind "otel" feature)
-opentelemetry = { version = "0.28", optional = true }
+opentelemetry = { version = "0.32", optional = true }
 opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
 opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic", "http-proto", "reqwest-blocking-client"], optional = true }
 opentelemetry-semantic-conventions = { version = "0.28", optional = true }
@@ -73,7 +73,7 @@ tracing-subscriber = { workspace = true, optional = true }
 wiremock = "0.6"
 tempfile = "3"
 opentelemetry_sdk = { version = "0.28", features = ["rt-tokio", "testing"] }
-opentelemetry = { version = "0.28" }
+opentelemetry = { version = "0.32" }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tracing-opentelemetry = "0.29"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
