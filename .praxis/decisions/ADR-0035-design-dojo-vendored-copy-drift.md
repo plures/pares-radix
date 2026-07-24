@@ -25,7 +25,7 @@ The shim's `src/index.ts` re-exports most components from the npm package and th
 `Dialog`, `DashboardGrid`, `FirstRunWizard`, `Heading`, `TextArea`, `Link`, `CodeBlock`, `Canvas2D`,
 `PluginContentArea`, `DataGrid`, `SchemaForm`, `GraphView`.
 
-Meanwhile, the **standalone `@plures/design-dojo` source repo** (`C:\Projects\design-dojo`,\nindependently versioned, currently at package.json `1.55.34`, git HEAD `4fa2153`, 2026-07-21) is\nalive, organized (`src/lib/{primitives,layout,overlays,data,surfaces,feedback,app,...}`), and has
+Meanwhile, the **standalone `@plures/design-dojo` source repo** (separate repository; independently versioned; currently at package.json `1.55.34`, git HEAD `4fa2153`, 2026-07-21) is alive, organized (`src/lib/{primitives,layout,overlays,data,surfaces,feedback,app,...}`), and has
 **361 source files** vs. the vendor shim's flat 24.
 
 ### Actual divergence found (not assumed)
