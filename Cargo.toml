@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.55.36"
+version = "1.55.38"
 edition = "2021"
 license = "BSL-1.1"
 repository = "https://github.com/plures/pares-radix"
