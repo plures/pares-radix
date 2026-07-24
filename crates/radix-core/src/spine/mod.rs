@@ -33,6 +33,7 @@ pub mod run_command_actions;
 pub mod runtime;
 pub mod shadow;
 pub mod subagent_actor;
+pub mod task_dashboard_actions;
 pub mod task_dispatch_actions;
 pub mod task_grounding_actions;
 pub mod thread_actions;
