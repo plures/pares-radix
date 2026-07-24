@@ -10,7 +10,7 @@
 ## Context
 
 pares-radix is a **svelte-Tauri** application (GUI + Svelte-TUI + svelte-ratatui + MCP,
-no traditional CLI — see `PLURES-FOUNDATION.md` → "svelte-Tauri Application Template").
+no traditional CLI — see `development-guide/design/PLURES-FOUNDATION.md` → "svelte-Tauri Application Template").
 ROADMAP Phase 4 calls for "Multi-arch packaging (Linux, Windows, macOS; Android/iOS via
 Tauri where supported)". Today:
 
