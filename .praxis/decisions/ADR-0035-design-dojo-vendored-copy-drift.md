@@ -116,11 +116,8 @@ strategy is reviewed and a follow-up implementation ADR/PR is accepted.
   allows.
 - Any component that exists in both places must have **at most one authoritative source**: the
   standalone repo. Vendored copies are transitional bridges, never permanent forks.
-- `DataGrid` and `SchemaForm` are reclassified as **upstream contributions owed**, not vendor
-  drift — they get a dedicated small PR into `C:\Projects\design-dojo` (own review, own semver\n  bump), not a copy-paste reconciliation.\n- Release cadence: design-dojo standalone repo cuts a release for every component it gains from
-  pares-radix contributions or fixes drift-discovered bugs; pares-radix bumps its
-  `@plures/design-dojo-npm` pin promptly after (target: within one sprint) rather than papering
-  over the gap with a local shim edit.
+- `DataGrid` and `SchemaForm` are reclassified as **upstream contributions owed**, not vendor drift — they get a dedicated small PR into the standalone design-dojo repository (own review, own semver bump), not a copy-paste reconciliation.
+- Release cadence: design-dojo standalone repo cuts a release for every component it gains from pares-radix contributions or fixes drift-discovered bugs; pares-radix bumps its `@plures/design-dojo-npm` pin promptly after (target: within one sprint) rather than papering over the gap with a local shim edit.
 
 ### 2.2 Migration approach (for follow-up implementation PR — not this ADR)
 1. **Triage per component** (not bulk): for each of the 13 drifted components, determine whether
