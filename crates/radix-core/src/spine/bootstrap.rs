@@ -128,6 +128,11 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("reclaim", "worktask:cmd:reclaim:*");
     m.insert("doctor", "worktask:cmd:doctor:*");
 
+    // Native task dashboard — an on-demand, read-only aggregation view over
+    // task/worktask/epic namespaces (ADR-0036). Keep its command key isolated
+    // so ordinary task writes cannot spuriously render a dashboard.
+    m.insert("task_dashboard_get", "task:cmd:dashboard:get:*");
+
     // RSI (recursive self-improvement)
     m.insert("evaluate_performance", "task_complete:*");
     m.insert("identify_improvement", "perf_signal:*");
@@ -349,6 +354,29 @@ procedure some_manual_proc:
             "real_spine_px_files_compile: loaded {} procedures from {}",
             count,
             spine_dir.display()
+        );
+    }
+
+    /// ADR-0036 guard: the native task-dashboard procedure must remain a real
+    /// compilable on-write command and retain its isolated request-key route.
+    #[test]
+    fn task_dashboard_px_compiles_and_routes_get_command() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("could not find project root");
+        let path = project_root.join("praxis/procedures/task-dashboard.px");
+        let src = std::fs::read_to_string(&path).expect("task-dashboard.px must exist");
+        let doc = pares_radix_praxis::px::parse(&src)
+            .expect("task-dashboard.px must parse against the real .px parser");
+        let records = pares_radix_praxis::px::compiler::compile(&doc);
+        assert!(records.iter().any(|record| {
+            record.data.get("name").and_then(|v| v.as_str()) == Some("task_dashboard_get")
+        }));
+        assert_eq!(
+            default_trigger_map().get("task_dashboard_get"),
+            Some(&"task:cmd:dashboard:get:*")
         );
     }
 
