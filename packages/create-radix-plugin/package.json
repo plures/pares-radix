@@ -1,6 +1,6 @@
 {
   "name": "@plures/create-radix-plugin",
-  "version": "1.55.36",
+  "version": "1.55.39",
   "description": "Scaffolder for canonical Radix plugins (ADR-0024): plugin.toml + procedures/*.px + adapter/*.ts + ui/*.svelte + tests/",
   "type": "module",
   "bin": {
