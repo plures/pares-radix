@@ -37,4 +37,5 @@ pub mod task_dispatch_actions;
 pub mod task_grounding_actions;
 pub mod thread_actions;
 pub mod topic_routing_actions;
+pub mod task_handoff_actions;
 pub mod worktask_actions;
