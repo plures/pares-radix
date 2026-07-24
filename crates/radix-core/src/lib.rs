@@ -107,5 +107,6 @@ pub mod shell_executor;
 pub mod spine;
 /// Platform-owned sub-agent spawn seam (trait + DTOs implemented by cognition).
 pub mod subagent_spawn;
+pub mod task_handoff;
 /// Thread engine — multi-topic conversation threading.
 pub mod threading;

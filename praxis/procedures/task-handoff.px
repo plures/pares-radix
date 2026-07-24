@@ -1,0 +1,35 @@
+# Executable orchestration for durable task handoff. Atomicity is provided by the Rust action handlers.
+
+procedure handoff_export(request: HandoffRequest from "handoff_requests") -> HandoffEnvelope into "handoff_envelopes":
+  given: "Prepare source custody and return canonical JSON without using a chat adapter"
+  prepare_task_handoff request -> $prepared
+  canonicalize_handoff_envelope $prepared -> $envelope
+  return $envelope
+
+procedure handoff_import(envelope: HandoffEnvelope from "handoff_envelopes") -> TaskCustody into "task_custody":
+  given: "Verify integrity and atomically accept only on the named target"
+  verify_task_handoff_digest envelope -> $verified
+  accept_task_handoff $verified -> $accepted
+  return $accepted
+
+procedure handoff_claim(request: ClaimRequest from "claim_requests") -> TaskCustody into "task_custody":
+  given: "Claim one owner-filtered open task exactly once"
+  conditional_claim_task request -> $claimed
+  return $claimed
+
+procedure handoff_update(request: ClaimedTaskUpdate from "claimed_updates") -> TaskCustody into "task_custody":
+  given: "Apply blocked or terminal state only with the winning token"
+  conditional_update_claimed_task request -> $updated
+  return $updated
+
+constraint blocked_update_has_reason:
+  scope: task_handoff
+  require: if update.status == "blocked": update.blocked_reason != "" else: true
+  severity: error
+  message: "Blocked task updates require a reason."
+
+constraint claimed_update_has_token:
+  scope: task_handoff
+  require: if update.status == "in_progress" || update.status == "completed" || update.status == "failed" || update.status == "blocked": update.claim_token != "" else: true
+  severity: error
+  message: "Claimed task state updates require the winning claim token."
