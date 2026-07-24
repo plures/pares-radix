@@ -179,6 +179,7 @@ use crate::spine::task_grounding_actions::{
     is_task_grounding_action, TaskGroundingActionHandler,
 };
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
+use crate::spine::task_dispatch_actions::{is_task_dispatch_action, TaskDispatchActionHandler};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
 /// Composite action handler that delegates to multiple handlers in priority order.
@@ -205,6 +206,11 @@ pub struct CompositeActionHandler {
     /// and `.px` injects no block (honest absence, never a stub).
     task_grounding: Option<TaskGroundingActionHandler>,
     subagent: Option<Arc<SubagentActor>>,
+    /// Autonomous task-dispatch IO edge (`dispatch_task`). `None` until wired
+    /// via [`CompositeActionHandler::set_task_dispatch`] after the pipeline
+    /// emitter exists. When absent the action returns a real "not wired" error
+    /// (honest absence, never a stub).
+    task_dispatch: Option<Arc<TaskDispatchActionHandler>>,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
 
@@ -224,6 +230,7 @@ impl CompositeActionHandler {
             briefing: BriefingActionHandler::new(),
             task_grounding: None,
             subagent: None,
+            task_dispatch: None,
             tool_handler,
         }
     }
@@ -246,6 +253,16 @@ impl CompositeActionHandler {
     /// Set the subagent actor after construction (breaks circular dependency).
     pub fn set_subagent_actor(&mut self, actor: Arc<SubagentActor>) {
         self.subagent = Some(actor);
+    }
+
+    /// Attach the autonomous task-dispatch IO edge after construction.
+    ///
+    /// Mirrors [`set_subagent_actor`](Self::set_subagent_actor): the handler
+    /// wraps a [`TaskDispatcher`](crate::task_executor::TaskDispatcher) built
+    /// over the live pipeline emitter, which only exists after the pipeline is
+    /// constructed — so it is attached post-construction.
+    pub fn set_task_dispatch(&mut self, handler: Arc<TaskDispatchActionHandler>) {
+        self.task_dispatch = Some(handler);
     }
 }
 
@@ -287,6 +304,17 @@ impl AsyncActionHandler for CompositeActionHandler {
                 Err(ExecutionError::ActionFailed {
                     action: action.to_string(),
                     message: "subagent actor not wired — SubAgentManager not available".into(),
+                })
+            }
+        } else if is_task_dispatch_action(action) {
+            if let Some(ref h) = self.task_dispatch {
+                h.call(action, params).await
+            } else {
+                // Not wired (no pipeline emitter yet) — honest error, not a stub.
+                warn!(action = %action, "task-dispatch not wired — TaskDispatcher unavailable");
+                Err(ExecutionError::ActionFailed {
+                    action: action.to_string(),
+                    message: "task-dispatch not wired — TaskDispatcher/pipeline emitter not available".into(),
                 })
             }
         } else {
