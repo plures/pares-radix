@@ -1,3 +1,11 @@
+## [1.55.35] — 2026-07-24
+
+- fix(spine): resolve clippy::too_many_arguments on build_task_aware_runtime; incorporate PR #468 changes (#473) (0b89ab7)
+- docs(ADR-0035): design-dojo vendored-shim drift audit - ownership boundary + prioritized gaps (design only) (#479) (e06231d)
+- docs: ADR-0019 multiplatform installer packaging design (Phase 4 prep) (#478) (6f14de7)
+- docs(adr): ADR-0018 procedure-native plugin integration plan (Epic A design) (#477) (2856ce3)
+- ci(release): add concurrency guard to release workflow (#476) (56379cf)
+
 ## [1.55.34] — 2026-07-21
 
 - fix(spine): resolve px task-dispatch verbs to real Rust handlers (p0 loop closure) (#475) (002783a)
