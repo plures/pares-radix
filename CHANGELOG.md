@@ -1,3 +1,7 @@
+## [1.55.36] — 2026-07-24
+
+- fix: thread real chat_id through autonomous task dispatch (#481) (af0f634)
+
 ## [1.55.35] — 2026-07-24
 
 - fix(spine): resolve clippy::too_many_arguments on build_task_aware_runtime; incorporate PR #468 changes (#473) (0b89ab7)
