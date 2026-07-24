@@ -191,9 +191,9 @@ impl ConditionalTaskStore {
             content_digest: None,
         };
         let bytes = serde_json::to_vec(&record)?;
-        if self.cas(&record.task.task_id, None, &bytes)? {
-            Ok(record)
-        } else if self.inspect(&record.task.task_id)?.as_ref() == Some(&record) {
+        if self.cas(&record.task.task_id, None, &bytes)?
+            || self.inspect(&record.task.task_id)?.as_ref() == Some(&record)
+        {
             Ok(record)
         } else {
             Err(HandoffError::Conflict)
