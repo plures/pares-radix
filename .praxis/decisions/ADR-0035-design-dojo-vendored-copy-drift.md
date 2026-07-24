@@ -193,5 +193,4 @@ turnaround is fast enough to not be a bigger friction than the shim was.
 ## 6. References
 ADR-0024 §5 (design-dojo canonical UI home, subpath consumption pattern), ADR-0032 (GraphView,
 most recent addition — smallest drift, proof that fast upstream sync prevents divergence);
-`C:\Projects\pares-radix\packages\design-dojo\package.json` (shim description, stale removal\ncriterion); `C:\Projects\design-dojo` git HEAD `4fa2153` (2026-07-21); pares-radix git history\n`20acb73`/`0eb0734` (prior attempted-then-reverted shim removal, evidence of real API drift, not
-just process laziness); C-NOSTUB-001.
+`packages/design-dojo/package.json` (shim description, stale removal criterion); standalone design-dojo repo git HEAD `4fa2153` (2026-07-21); pares-radix git history `20acb73`/`0eb0734` (prior attempted-then-reverted shim removal, evidence of real API drift, not just process laziness); C-NOSTUB-001.
