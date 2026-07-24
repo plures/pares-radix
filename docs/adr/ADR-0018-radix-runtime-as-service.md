@@ -99,8 +99,8 @@ forking runtime logic.
 │  ┌─────────────┐   ┌──────────────────┐   ┌────────────────┐ │
 │  │ Automation   │   │  Scheduler loop   │   │ Health/Ready   │ │
 │  │ HTTP surface │   │  (tokio interval) │   │ endpoint       │ │
-│  │ (axum, 127.  │   │  every N sec:     │   │ GET /healthz   │ │
-│  │ 0.0.1 default)│  │   poll_events()   │   │ GET /readyz    │ │
+│  │ (axum, bind:  │   │  every N sec:     │   │ GET /healthz   │ │
+│  │ 127.0.0.1)    │  │   poll_events()   │   │ GET /readyz    │ │
 │  │ POST /events │   │   process_due_    │   │ (SystemHealth) │ │
 │  │ GET/POST/DEL │   │     timers()      │   └────────────────┘ │
 │  │  /timers     │   └──────────────────┘                     │
