@@ -1,17 +1,19 @@
-//! Durable, channel-neutral task custody transfer with storage-native CAS.
+//! Durable, channel-neutral task custody transfer with PluresDB-backed CAS.
 //!
-//! This deliberately does not use the CRDT last-writer-wins document API as a lock.
-//! Explicit export/import uses separate host-local stores and sled's compare-and-swap
-//! as the atomic claim boundary.
+//! Uses PluresDB (`CrdtStore` + `SledStorage`) for durable persistence and a
+//! process-local `Mutex` to serialise the read-check-write sequence, giving
+//! compare-and-swap-equivalent guarantees within a single process.
 
+use pluresdb::{CrdtStore, SledStorage, StorageEngine};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
-const TREE: &str = "radix-task-custody-v1";
+const ACTOR: &str = "radix-task-custody-v1";
 const SCHEMA: &str = "plures.task-handoff.v1";
+const TASK_PREFIX: &str = "task-custody:";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -102,7 +104,7 @@ pub struct Claim {
 #[derive(Debug, Error)]
 pub enum HandoffError {
     #[error("storage error: {0}")]
-    Storage(#[from] sled::Error),
+    Storage(String),
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
     #[error("task not found: {0}")]
@@ -121,51 +123,76 @@ pub enum HandoffError {
     InvalidTransition(String),
 }
 
-/// A durable conditional store. `compare_and_swap` is delegated directly to sled;
-/// no process-local mutex or unconditional get-then-put sequence is used.
+/// A durable conditional store backed by PluresDB (`CrdtStore` + `SledStorage`).
+///
+/// Provides compare-and-swap semantics via a process-local `Mutex`: the
+/// read-check-write triple is executed under the lock, giving CAS-equivalent
+/// guarantees within a single process. `SledStorage` ensures data survives
+/// process restarts.
 #[derive(Clone)]
 pub struct ConditionalTaskStore {
-    tree: Arc<sled::Tree>,
+    crdt: Arc<CrdtStore>,
+    cas_lock: Arc<Mutex<()>>,
 }
 
 impl ConditionalTaskStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, HandoffError> {
-        let db = sled::open(path)?;
-        let tree = db.open_tree(TREE)?;
+        let storage: Arc<dyn StorageEngine> = Arc::new(
+            SledStorage::open(path.as_ref())
+                .map_err(|e| HandoffError::Storage(format!("{e}")))?,
+        );
+        let crdt = Arc::new(CrdtStore::default().with_persistence(storage));
         Ok(Self {
-            tree: Arc::new(tree),
+            crdt,
+            cas_lock: Arc::new(Mutex::new(())),
         })
     }
 
-    fn key(task_id: &str) -> Vec<u8> {
-        format!("task-custody:{task_id}").into_bytes()
+    fn node_id(task_id: &str) -> String {
+        format!("{TASK_PREFIX}{task_id}")
     }
 
-    fn read_raw(&self, task_id: &str) -> Result<Option<Vec<u8>>, HandoffError> {
-        Ok(self.tree.get(Self::key(task_id))?.map(|v| v.to_vec()))
+    fn read_record(&self, task_id: &str) -> Result<Option<CustodyRecord>, HandoffError> {
+        match self.crdt.get(&Self::node_id(task_id)) {
+            None => Ok(None),
+            Some(r) if r.data.is_null() => Ok(None),
+            Some(r) => Ok(Some(serde_json::from_value(r.data)?)),
+        }
     }
 
-    pub fn inspect(&self, task_id: &str) -> Result<Option<CustodyRecord>, HandoffError> {
-        self.read_raw(task_id)?
-            .map(|v| serde_json::from_slice(&v).map_err(HandoffError::from))
-            .transpose()
+    fn write_record(&self, record: &CustodyRecord) -> Result<(), HandoffError> {
+        let value = serde_json::to_value(record)?;
+        self.crdt.put(&Self::node_id(&record.task.task_id), ACTOR, value);
+        Ok(())
     }
 
+    /// Execute a compare-and-swap under the process-local lock.
+    ///
+    /// `expected = None` means "no existing record" (insert-only).
+    /// Returns `true` if `next` was written, `false` on mismatch.
     fn cas(
         &self,
         task_id: &str,
-        expected: Option<&[u8]>,
-        next: &[u8],
+        expected: Option<&CustodyRecord>,
+        next: &CustodyRecord,
     ) -> Result<bool, HandoffError> {
-        let result = self
-            .tree
-            .compare_and_swap(Self::key(task_id), expected, Some(next))?;
-        if result.is_ok() {
-            self.tree.flush()?;
+        let _guard = self.cas_lock.lock().expect("cas_lock poisoned");
+        let current = self.read_record(task_id)?;
+        let matches = match (expected, current.as_ref()) {
+            (None, None) => true,
+            (Some(exp), Some(cur)) => exp == cur,
+            _ => false,
+        };
+        if matches {
+            self.write_record(next)?;
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    pub fn inspect(&self, task_id: &str) -> Result<Option<CustodyRecord>, HandoffError> {
+        self.read_record(task_id)
     }
 
     pub fn seed_owned(
@@ -190,10 +217,9 @@ impl ConditionalTaskStore {
             result: None,
             content_digest: None,
         };
-        let bytes = serde_json::to_vec(&record)?;
-        if self.cas(&record.task.task_id, None, &bytes)? {
-            Ok(record)
-        } else if self.inspect(&record.task.task_id)?.as_ref() == Some(&record) {
+        if self.cas(&record.task.task_id, None, &record)?
+            || self.inspect(&record.task.task_id)?.as_ref() == Some(&record)
+        {
             Ok(record)
         } else {
             Err(HandoffError::Conflict)
@@ -216,10 +242,9 @@ impl ConditionalTaskStore {
             ));
         }
         loop {
-            let raw = self
-                .read_raw(task_id)?
+            let record = self
+                .read_record(task_id)?
                 .ok_or_else(|| HandoffError::NotFound(task_id.into()))?;
-            let mut record: CustodyRecord = serde_json::from_slice(&raw)?;
             if record.custody_state == CustodyState::TransferPending {
                 if record.owner_agent_id == source
                     && record.target_agent_id.as_deref() == Some(target)
@@ -239,16 +264,17 @@ impl ConditionalTaskStore {
                     "source, generation, or execution state mismatch".into(),
                 ));
             }
-            record.custody_state = CustodyState::TransferPending;
-            record.target_agent_id = Some(target.to_owned());
-            record.handoff_id = Some(handoff_id);
-            record.handoff_generation += 1;
-            record.content_digest = None;
-            let digest = digest_record(&record)?;
-            record.content_digest = Some(digest);
-            let next = serde_json::to_vec(&record)?;
-            if self.cas(task_id, Some(&raw), &next)? {
-                return envelope(record);
+            let expected = record.clone();
+            let mut next = record;
+            next.custody_state = CustodyState::TransferPending;
+            next.target_agent_id = Some(target.to_owned());
+            next.handoff_id = Some(handoff_id);
+            next.handoff_generation += 1;
+            next.content_digest = None;
+            let digest = digest_record(&next)?;
+            next.content_digest = Some(digest);
+            if self.cas(task_id, Some(&expected), &next)? {
+                return envelope(next);
             }
         }
     }
@@ -268,13 +294,12 @@ impl ConditionalTaskStore {
         accepted.owner_agent_id = target.to_owned();
         accepted.target_agent_id = None;
         accepted.custody_state = CustodyState::Owned;
-        let next = serde_json::to_vec(&accepted)?;
-        let id = &accepted.task.task_id;
-        if self.cas(id, None, &next)? {
+        let id = accepted.task.task_id.clone();
+        if self.cas(&id, None, &accepted)? {
             return Ok(accepted);
         }
         let existing = self
-            .inspect(id)?
+            .inspect(&id)?
             .ok_or_else(|| HandoffError::NotFound(id.clone()))?;
         if existing == accepted {
             Ok(existing)
@@ -291,10 +316,9 @@ impl ConditionalTaskStore {
         generation: u64,
     ) -> Result<Claim, HandoffError> {
         loop {
-            let raw = self
-                .read_raw(task_id)?
+            let record = self
+                .read_record(task_id)?
                 .ok_or_else(|| HandoffError::NotFound(task_id.into()))?;
-            let mut record: CustodyRecord = serde_json::from_slice(&raw)?;
             if record.execution_state == ExecutionState::InProgress {
                 if record.owner_agent_id == agent_id
                     && record.claimed_by_worker.as_deref() == Some(worker_id)
@@ -320,12 +344,13 @@ impl ConditionalTaskStore {
                     "task is not evaluable by this owner/generation".into(),
                 ));
             }
+            let expected = record.clone();
+            let mut next = record;
             let token = Uuid::new_v4();
-            record.execution_state = ExecutionState::InProgress;
-            record.claimed_by_worker = Some(worker_id.to_owned());
-            record.claim_token = Some(token);
-            let next = serde_json::to_vec(&record)?;
-            if self.cas(task_id, Some(&raw), &next)? {
+            next.execution_state = ExecutionState::InProgress;
+            next.claimed_by_worker = Some(worker_id.to_owned());
+            next.claim_token = Some(token);
+            if self.cas(task_id, Some(&expected), &next)? {
                 return Ok(Claim {
                     task_id: task_id.into(),
                     worker_id: worker_id.into(),
@@ -385,10 +410,9 @@ impl ConditionalTaskStore {
         result: Option<String>,
     ) -> Result<CustodyRecord, HandoffError> {
         loop {
-            let raw = self
-                .read_raw(task_id)?
+            let record = self
+                .read_record(task_id)?
                 .ok_or_else(|| HandoffError::NotFound(task_id.into()))?;
-            let mut record: CustodyRecord = serde_json::from_slice(&raw)?;
             if record.claim_token != Some(token) {
                 return Err(HandoffError::InvalidClaimToken);
             }
@@ -408,21 +432,27 @@ impl ConditionalTaskStore {
                     "only an in-progress claim may be updated".into(),
                 ));
             }
-            record.execution_state = next_state.clone();
-            record.blocked_reason = blocked_reason.clone();
-            record.result = result.clone();
-            let next = serde_json::to_vec(&record)?;
-            if self.cas(task_id, Some(&raw), &next)? {
-                return Ok(record);
+            let expected = record.clone();
+            let mut next = record;
+            next.execution_state = next_state.clone();
+            next.blocked_reason = blocked_reason.clone();
+            next.result = result.clone();
+            if self.cas(task_id, Some(&expected), &next)? {
+                return Ok(next);
             }
         }
     }
 
     pub fn evaluable_tasks(&self, agent_id: &str) -> Result<Vec<CustodyRecord>, HandoffError> {
         let mut out = Vec::new();
-        for entry in self.tree.scan_prefix(b"task-custody:") {
-            let (_, value) = entry?;
-            let record: CustodyRecord = serde_json::from_slice(&value)?;
+        for r in self.crdt.list() {
+            if !r.id.starts_with(TASK_PREFIX) || r.data.is_null() {
+                continue;
+            }
+            let record: CustodyRecord = match serde_json::from_value(r.data) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
             if record.owner_agent_id == agent_id
                 && record.custody_state == CustodyState::Owned
                 && record.execution_state == ExecutionState::Open
@@ -434,6 +464,7 @@ impl ConditionalTaskStore {
         Ok(out)
     }
 }
+
 
 fn validate_nonempty(field: &str, value: &str) -> Result<(), HandoffError> {
     if value.trim().is_empty() {

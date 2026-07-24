@@ -331,7 +331,11 @@ mod tests {
             "build_steered_prompt must mark steered task in-progress via task seam"
         );
 
-        for required in ["dispatch_task", "read_evaluable_tasks", "mark_task_in_progress"] {
+        for required in [
+            "dispatch_task",
+            "read_evaluable_tasks",
+            "mark_task_in_progress",
+        ] {
             assert!(
                 TASK_DISPATCH_ACTIONS.contains(&required),
                 "TASK_DISPATCH_ACTIONS missing required verb: {required}"
