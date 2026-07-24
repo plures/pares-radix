@@ -170,6 +170,7 @@ use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
+use crate::spine::task_dashboard_actions::{is_task_dashboard_action, TaskDashboardActionHandler};
 use crate::spine::task_dispatch_actions::{is_task_dispatch_action, TaskDispatchActionHandler};
 use crate::spine::task_grounding_actions::{is_task_grounding_action, TaskGroundingActionHandler};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
@@ -193,6 +194,10 @@ pub struct CompositeActionHandler {
     worktask: WorktaskActionHandler,
     run_command: RunCommandActionHandler,
     briefing: BriefingActionHandler,
+    /// Native task dashboard aggregation + write-cache guard (ADR-0036).
+    /// Shares the SAME durable state store as Core/Worktask so it reads the
+    /// live `task:*`/`worktask:*`/`epic:*` namespaces those writers use.
+    task_dashboard: TaskDashboardActionHandler,
     /// Durable task-grounding handler (`read_open_tasks_block`). `None` when the
     /// runtime was assembled without a task store; the action then returns null
     /// and `.px` injects no block (honest absence, never a stub).
@@ -216,6 +221,7 @@ impl CompositeActionHandler {
             // Worktask shares the SAME durable state store as Core so worktask
             // records and general `.px` state co-locate in one PluresDB.
             worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
+            task_dashboard: TaskDashboardActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
             run_command: RunCommandActionHandler::new(),
@@ -279,6 +285,8 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.run_command.call(action, params).await
         } else if is_briefing_action(action) {
             self.briefing.call(action, params).await
+        } else if is_task_dashboard_action(action) {
+            self.task_dashboard.call(action, params).await
         } else if is_task_grounding_action(action) {
             if let Some(ref h) = self.task_grounding {
                 h.call(action, params).await
