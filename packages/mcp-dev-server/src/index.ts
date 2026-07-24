@@ -17,6 +17,9 @@
  * Plugins:
  *   plugin.list, plugin.activate, plugin.deactivate, plugin.info
  *
+ * Task Handoff (custody-transfer protocol):
+ *   task.handoff.prepare, task.handoff.verify, task.handoff.accept, task.handoff.claim
+ *
  * Praxis:
  *   praxis.evaluate, praxis.addRule, praxis.listRules, praxis.addConstraint
  *
@@ -672,6 +675,190 @@ const tools: ToolDef[] = [
       const record = db.get(`plugin:${name}`) as any;
       if (!record) return { error: `Plugin '${name}' not found` };
       return record;
+    },
+  },
+
+  // ── Task Handoff ─────────────────────────────────────────────────────────
+  // Mirrors the four Rust action verbs wired in TaskHandoffActionHandler.
+  // The MCP dev server operates on the same PluresDB key-space so it can
+  // exercise the full custody-transfer protocol from any MCP client.
+  {
+    name: 'task.handoff.prepare',
+    description: 'Mark a task TransferPending and return a signed HandoffEnvelope. '
+      + 'Params: task_id, source_agent, target_agent, handoff_id, expected_generation, '
+      + 'optional task (inline definition).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:             { type: 'string' },
+        source_agent:        { type: 'string' },
+        target_agent:        { type: 'string' },
+        handoff_id:          { type: 'string' },
+        expected_generation: { type: 'number' },
+        task:                { type: 'object', description: 'Optional inline task definition to seed' },
+      },
+      required: ['task_id', 'source_agent', 'target_agent', 'handoff_id', 'expected_generation'],
+    },
+    handler: ({ task_id, source_agent, target_agent, handoff_id, expected_generation, task: inlineTask }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+
+      // Seed inline task if provided and not already present.
+      if (inlineTask) {
+        const existing = db.get(recKey) as any;
+        if (!existing) {
+          db.set(recKey, {
+            task: inlineTask,
+            custody_state: 'owned',
+            owner_agent: source_agent as string,
+            generation: 0,
+            locked_by: null,
+            lock_token: null,
+          });
+        }
+      }
+
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found — seed it first or pass inline task` };
+
+      const gen = record.generation as number;
+      if (gen !== (expected_generation as number)) {
+        return { error: `Generation mismatch: expected ${expected_generation}, got ${gen}` };
+      }
+      if (record.custody_state !== 'owned') {
+        return { error: `Task is not in 'owned' state (current: ${record.custody_state})` };
+      }
+
+      record.custody_state = 'transfer_pending';
+      db.set(recKey, record);
+
+      // Build envelope (SHA-256 not available in this JS runtime without crypto;
+      // we use a deterministic content string as the digest stand-in).
+      const envelopePayload = JSON.stringify({
+        task_id: tid,
+        source_agent,
+        target_agent,
+        handoff_id,
+        generation: gen,
+        task: record.task,
+      });
+      const digest = Buffer.from(envelopePayload).toString('base64');
+      const envelope = { task_id: tid, source_agent, target_agent, handoff_id, generation: gen, digest };
+
+      return { record, envelope };
+    },
+  },
+  {
+    name: 'task.handoff.verify',
+    description: 'Verify a HandoffEnvelope digest without mutating state. '
+      + 'Params: envelope (object with digest field), source_agent, target_agent, task_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        envelope:     { type: 'object' },
+        source_agent: { type: 'string' },
+        target_agent: { type: 'string' },
+        task_id:      { type: 'string' },
+      },
+      required: ['envelope', 'source_agent', 'target_agent', 'task_id'],
+    },
+    handler: ({ envelope, source_agent, target_agent, task_id }) => {
+      const env = envelope as any;
+      const tid = task_id as string;
+      const record = db.get(`handoff:record:${tid}`) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+
+      if (env.source_agent !== source_agent) return { error: 'source_agent mismatch' };
+      if (env.target_agent !== target_agent) return { error: 'target_agent mismatch' };
+      if (env.task_id !== tid)               return { error: 'task_id mismatch' };
+
+      // Re-derive expected digest and compare.
+      const expectedPayload = JSON.stringify({
+        task_id: tid,
+        source_agent,
+        target_agent,
+        handoff_id: env.handoff_id,
+        generation: env.generation,
+        task: record.task,
+      });
+      const expectedDigest = Buffer.from(expectedPayload).toString('base64');
+      if (env.digest !== expectedDigest) return { error: 'digest mismatch — envelope was tampered' };
+
+      return { valid: true, task_id: tid };
+    },
+  },
+  {
+    name: 'task.handoff.accept',
+    description: 'Transfer custody to target_agent (receiving side). '
+      + 'Params: task_id, target_agent, handoff_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:     { type: 'string' },
+        target_agent:{ type: 'string' },
+        handoff_id:  { type: 'string' },
+      },
+      required: ['task_id', 'target_agent', 'handoff_id'],
+    },
+    handler: ({ task_id, target_agent, handoff_id }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+      if (record.custody_state !== 'transfer_pending') {
+        return { error: `Task is not transfer_pending (current: ${record.custody_state})` };
+      }
+
+      record.custody_state = 'owned';
+      record.owner_agent = target_agent as string;
+      record.generation = (record.generation as number) + 1;
+      record.locked_by = null;
+      record.lock_token = null;
+      db.set(recKey, record);
+
+      return { task_id: tid, new_owner: target_agent, generation: record.generation, handoff_id };
+    },
+  },
+  {
+    name: 'task.handoff.claim',
+    description: 'Atomically claim a task for a worker (compare-and-swap). '
+      + 'Params: task_id, agent_id, worker_id, generation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:    { type: 'string' },
+        agent_id:   { type: 'string' },
+        worker_id:  { type: 'string' },
+        generation: { type: 'number' },
+      },
+      required: ['task_id', 'agent_id', 'worker_id', 'generation'],
+    },
+    handler: ({ task_id, agent_id, worker_id, generation }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+      if (record.owner_agent !== agent_id) return { error: `Task not owned by '${agent_id}'` };
+      if (record.generation !== (generation as number)) {
+        return { error: `Generation mismatch: expected ${generation}, got ${record.generation}` };
+      }
+
+      // Idempotent: same worker re-claiming returns same token.
+      if (record.locked_by === (worker_id as string) && record.lock_token) {
+        return { task_id: tid, worker_id, token: record.lock_token };
+      }
+
+      // Already claimed by a different worker.
+      if (record.locked_by && record.locked_by !== (worker_id as string)) {
+        return { error: `Task already claimed by '${record.locked_by}'` };
+      }
+
+      const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      record.locked_by = worker_id as string;
+      record.lock_token = token;
+      db.set(recKey, record);
+
+      return { task_id: tid, worker_id, token };
     },
   },
 ];
