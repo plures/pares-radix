@@ -58,6 +58,8 @@ pares-radix-audit = { path = "../audit" }
 regex = "1"
 regex-lite = "0.1"
 futures-util = "0.3"
+sled.workspace = true
+blake3.workspace = true
 
 # OpenTelemetry (optional, behind "otel" feature)
 opentelemetry = { version = "0.28", optional = true }
