@@ -1,3 +1,14 @@
+## [1.55.40] — 2026-07-24
+
+- feat(design-dojo): ADR-0035 drift enforcement + GraphView reconciliation pilot (#558) (904de50)
+- docs(decisions): ADR-0037 MVD OpenClaw-parity scope freeze (#556) (3bda586)
+- chore(deps): bump actions/create-github-app-token from 1 to 3 (#486) (4c73126)
+- chore(deps): bump actions/checkout from 4 to 7 (#489) (15c8e7f)
+- chore(deps): bump opentelemetry_sdk from 0.28.0 to 0.32.1 (#522) (2552cc8)
+- chore(deps): bump opentelemetry-semantic-conventions from 0.28.0 to 0.32.1 (#535) (7f899af)
+- chore(deps): bump tracing-opentelemetry from 0.29.0 to 0.33.0 (#538) (d402fee)
+- chore(deps): bump actions/github-script from 7 to 9 (#488) (becf794)
+
 ## [1.55.39] — 2026-07-24
 
 - style: apply cargo fmt to workspace (CI auto-format push failed on PR #473) (#483) (87390ba)
