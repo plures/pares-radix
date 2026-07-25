@@ -94,6 +94,11 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     // of the noisy `on_write:*` fallback. (TASK-2026-07-08-briefing-px STEP 1.)
     m.insert("morning_briefing", "briefing:request:*");
 
+    // Repo health sweep (epic:ci-org-health-monitor-implementation, slice 1) -
+    // a write to `health:sweep:<repo>` triggers a single-repo CI/PR sweep that
+    // persists health_anomaly:* rows. Mirrors the morning_briefing wiring.
+    m.insert("repo_health_sweep", "health:sweep:*");
+
     // Dashboard milestone freeze — a `milestone:<id>` write is the dashboard
     // signal; the procedure derives + persists the frozen dashboard node (the
     // pure-praxis analog of the exec side-effect that froze the dashboard).

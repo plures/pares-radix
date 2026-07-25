@@ -27,6 +27,7 @@ pub mod model_selection_actions;
 pub mod pipeline;
 pub mod procedures;
 pub mod reactive;
+pub mod repo_health_actions;
 pub mod rsi_actions;
 pub mod run_command_actions;
 /// Runtime assembly — wires the `.px` engine + state store + handler into the live spine.
