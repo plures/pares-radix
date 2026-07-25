@@ -167,6 +167,7 @@ impl AsyncActionHandler for CoreActionHandler {
 }
 
 use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
+use crate::spine::repo_health_actions::{self, RepoHealthActionHandler};
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
@@ -199,6 +200,7 @@ pub struct CompositeActionHandler {
     /// Shares the SAME durable state store as Core/Worktask so it reads the
     /// live `task:*`/`worktask:*`/`epic:*` namespaces those writers use.
     task_dashboard: TaskDashboardActionHandler,
+    repo_health: RepoHealthActionHandler,
     /// Durable task-grounding handler (`read_open_tasks_block`). `None` when the
     /// runtime was assembled without a task store; the action then returns null
     /// and `.px` injects no block (honest absence, never a stub).
@@ -227,6 +229,7 @@ impl CompositeActionHandler {
             // records and general `.px` state co-locate in one PluresDB.
             worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
             task_dashboard: TaskDashboardActionHandler::new(Arc::clone(&state_store)),
+            repo_health: RepoHealthActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
             run_command: RunCommandActionHandler::new(),
@@ -303,6 +306,8 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.briefing.call(action, params).await
         } else if is_task_dashboard_action(action) {
             self.task_dashboard.call(action, params).await
+        } else if repo_health_actions::is_repo_health_action(action) {
+            self.repo_health.call(action, params).await
         } else if is_task_grounding_action(action) {
             if let Some(ref h) = self.task_grounding {
                 h.call(action, params).await
