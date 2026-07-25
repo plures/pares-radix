@@ -37,6 +37,15 @@ pub trait PoolControl: Send + Sync {
 
     /// Legacy compat: return (primary, deep) strings for old status display.
     async fn legacy_model_pair(&self) -> (String, String);
+
+    /// Structured, paginated catalog snapshot. Triggers a discovery refresh
+    /// before slicing so the snapshot reflects live provider state.
+    /// `page` is 0-indexed; `page_size` of 0 is treated as "all in one page".
+    async fn catalog(&self, page: usize, page_size: usize) -> ModelCatalogPage;
+
+    /// Select a model by its exact provider/model key ("provider/model_id")
+    /// or by bare model_id when unambiguous across providers.
+    async fn select_by_key(&self, key: &str) -> Result<ModelCatalogEntry, String>;
 }
 
 /// Adapter: wraps a `ModelPool` to implement `PoolControl`.
@@ -287,5 +296,158 @@ impl PoolControl for PoolControlAdapter {
             .map(|m| m.id.clone())
             .unwrap_or_else(|| "none".into());
         (primary, deep)
+    }
+
+    async fn catalog(&self, page: usize, page_size: usize) -> ModelCatalogPage {
+        // Refresh discovery so the snapshot reflects live provider state.
+        self.pool.discover_all().await;
+
+        let models = self.pool.all_models().await;
+        build_catalog_page(&models, page, page_size)
+    }
+
+    async fn select_by_key(&self, key: &str) -> Result<ModelCatalogEntry, String> {
+        let models = self.pool.all_models().await;
+        select_entry_by_key(&models, key)
+    }
+}
+
+/// Build a paginated catalog snapshot from an already-discovered model list.
+/// Extracted as a pure function so pagination/ordering logic is unit-testable
+/// without requiring live provider discovery.
+fn build_catalog_page(models: &[DiscoveredModel], page: usize, page_size: usize) -> ModelCatalogPage {
+    let mut sorted: Vec<&DiscoveredModel> = models.iter().collect();
+    sorted.sort_by(|a, b| a.provider.cmp(&b.provider).then_with(|| a.id.cmp(&b.id)));
+    let total = sorted.len();
+
+    let (start, end) = if page_size == 0 {
+        (0, total)
+    } else {
+        let start = (page * page_size).min(total);
+        let end = (start + page_size).min(total);
+        (start, end)
+    };
+
+    let entries: Vec<ModelCatalogEntry> = sorted[start..end].iter().map(|m| ModelCatalogEntry::from(*m)).collect();
+    let has_more = end < total;
+
+    ModelCatalogPage {
+        entries,
+        total,
+        page,
+        page_size: if page_size == 0 { total } else { page_size },
+        has_more,
+        snapshot_at: std::time::SystemTime::now(),
+    }
+}
+
+/// Select a catalog entry by exact "provider/model_id" key, or by bare
+/// model_id when unambiguous across providers. Pure function, unit-testable.
+fn select_entry_by_key(models: &[DiscoveredModel], key: &str) -> Result<ModelCatalogEntry, String> {
+    if let Some(m) = models.iter().find(|m| m.key() == key) {
+        return Ok(ModelCatalogEntry::from(m));
+    }
+
+    let matches: Vec<&DiscoveredModel> = models.iter().filter(|m| m.id == key).collect();
+    match matches.len() {
+        0 => Err(format!("No model found for key '{key}'.")),
+        1 => Ok(ModelCatalogEntry::from(matches[0])),
+        n => Err(format!(
+            "Model id '{key}' is ambiguous across {n} providers; use 'provider/{key}'."
+        )),
+    }
+}
+
+#[cfg(test)]
+mod catalog_tests {
+    use super::*;
+
+    fn model(provider: &str, id: &str, enabled: bool) -> DiscoveredModel {
+        DiscoveredModel {
+            id: id.to_string(),
+            name: format!("{id} display"),
+            provider: provider.to_string(),
+            vendor: None,
+            category: None,
+            api: None,
+            context_window: 0,
+            max_output: 0,
+            input_types: vec![],
+            reasoning: false,
+            reasoning_levels: vec![],
+            cost: ModelCost::default(),
+            preview: false,
+            enabled,
+        }
+    }
+
+    #[test]
+    fn catalog_page_all_in_one_page_when_page_size_zero() {
+        let models = vec![
+            model("openai", "gpt-5", true),
+            model("anthropic", "claude-opus", true),
+        ];
+        let page = build_catalog_page(&models, 0, 0);
+        assert_eq!(page.total, 2);
+        assert_eq!(page.entries.len(), 2);
+        assert!(!page.has_more);
+        // Sorted by provider then id: anthropic before openai
+        assert_eq!(page.entries[0].provider, "anthropic");
+        assert_eq!(page.entries[1].provider, "openai");
+    }
+
+    #[test]
+    fn catalog_page_paginates_and_flags_has_more() {
+        let models = vec![
+            model("a", "m1", true),
+            model("a", "m2", true),
+            model("a", "m3", true),
+        ];
+        let page0 = build_catalog_page(&models, 0, 2);
+        assert_eq!(page0.entries.len(), 2);
+        assert_eq!(page0.total, 3);
+        assert!(page0.has_more);
+
+        let page1 = build_catalog_page(&models, 1, 2);
+        assert_eq!(page1.entries.len(), 1);
+        assert_eq!(page1.entries[0].model_id, "m3");
+        assert!(!page1.has_more);
+    }
+
+    #[test]
+    fn catalog_page_out_of_range_returns_empty() {
+        let models = vec![model("a", "m1", true)];
+        let page = build_catalog_page(&models, 5, 2);
+        assert_eq!(page.entries.len(), 0);
+        assert!(!page.has_more);
+    }
+
+    #[test]
+    fn select_by_composite_key_exact_match() {
+        let models = vec![model("openai", "gpt-5", true), model("anthropic", "gpt-5", true)];
+        let entry = select_entry_by_key(&models, "openai/gpt-5").unwrap();
+        assert_eq!(entry.provider, "openai");
+        assert_eq!(entry.model_id, "gpt-5");
+    }
+
+    #[test]
+    fn select_by_bare_id_unambiguous() {
+        let models = vec![model("openai", "gpt-5", true), model("anthropic", "claude-opus", true)];
+        let entry = select_entry_by_key(&models, "claude-opus").unwrap();
+        assert_eq!(entry.provider, "anthropic");
+    }
+
+    #[test]
+    fn select_by_bare_id_ambiguous_errors() {
+        let models = vec![model("openai", "gpt-5", true), model("anthropic", "gpt-5", true)];
+        let err = select_entry_by_key(&models, "gpt-5").unwrap_err();
+        assert!(err.contains("ambiguous"));
+    }
+
+    #[test]
+    fn select_by_key_not_found_errors() {
+        let models = vec![model("openai", "gpt-5", true)];
+        let err = select_entry_by_key(&models, "nonexistent").unwrap_err();
+        assert!(err.contains("No model found"));
     }
 }
