@@ -23,6 +23,10 @@ name: Dependabot Auto-Merge
 # 0.<minor> patches (0.10.3 -> 0.10.4) and 1.x+ patch/minor still auto-merge. Security
 # (ghsa-id) still overrides everything.
 #
+# Pinned to v3.1.0 (SHA 25dd0e34f4fe68f24cc83900b1fe3fe149efef98) to guard against
+# unvetted changes introduced by future v3.x patch/minor releases. Update the pin when
+# a new v3 release has been reviewed and approved.
+#
 # Ref: development-guide/practices/automation-first.md ("auto-merge patch updates"),
 #      zero-manual-dependency.md, merge-sweeps.md (green -> squash merge).
 
@@ -41,7 +45,7 @@ jobs:
     steps:
       - name: Fetch Dependabot metadata
         id: meta
-        uses: dependabot/fetch-metadata@v3
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
