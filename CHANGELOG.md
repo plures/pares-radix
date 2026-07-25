@@ -1,3 +1,7 @@
+## [1.55.45] — 2026-07-25
+
+- feat(radix-core): repo_health_sweep procedure - CI/PR anomaly detection (slice 1) (#570) (1f2fd76)
+
 ## [1.55.44] — 2026-07-25
 
 - feat(model_pool): structured PoolControl catalog + select-by-key API (#569) (afa6a0c)
