@@ -1,3 +1,14 @@
+## [1.55.44] — 2026-07-25
+
+- feat(model_pool): structured PoolControl catalog + select-by-key API (#569) (afa6a0c)
+- chore: delegate dependabot-auto-merge.yml to plures/.github reusable template (#567) (6364a5a)
+- Initial plan (#566) (a36b414)
+- chore(deps): bump peter-evans/repository-dispatch from 3 to 4 (#561) (bd07dcb)
+- chore(deps): bump dependabot/fetch-metadata from 2 to 3 (#560) (d23e103)
+- Initial plan (#555) (8598212)
+- chore(deps): bump actions/cache from 4 to 6 (#562) (d51cb45)
+- chore(deps): bump actions/upload-artifact from 4 to 7 (#563) (42de4be)
+
 ## [1.55.43] — 2026-07-24
 
 - feat(praxis): add native task dashboard aggregation (#559) (f35f86b)
