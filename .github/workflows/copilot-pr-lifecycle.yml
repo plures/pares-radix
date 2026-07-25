@@ -17,7 +17,14 @@ on:
 
 jobs:
   lifecycle:
-    if: github.actor != 'dependabot[bot]'
+    # Skip for any event related to Dependabot branches.
+    # check_suite and pull_request_review events have a non-dependabot actor even on
+    # Dependabot PRs, so we guard with branch-name checks in addition to the actor check.
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      !startsWith(github.head_ref, 'dependabot/') &&
+      !startsWith(github.event.check_suite.head_branch, 'dependabot/') &&
+      !startsWith(github.event.pull_request.head.ref, 'dependabot/')
     uses: plures/.github/.github/workflows/copilot-pr-lifecycle-reusable.yml@main
     secrets:
-      COPILOT_PAT: ${{ secrets.COPILOT_PAT || secrets.GITHUB_TOKEN }}
+      COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
