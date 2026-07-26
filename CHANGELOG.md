@@ -1,3 +1,7 @@
+## [1.55.46] — 2026-07-26
+
+- fix(ci): skip lifecycle job for all Dependabot-branch events (#568) (e6923e8)
+
 ## [1.55.45] — 2026-07-25
 
 - feat(radix-core): repo_health_sweep procedure - CI/PR anomaly detection (slice 1) (#570) (1f2fd76)
