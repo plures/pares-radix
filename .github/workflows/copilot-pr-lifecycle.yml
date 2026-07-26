@@ -24,7 +24,11 @@ jobs:
       github.actor != 'dependabot[bot]' &&
       !startsWith(github.head_ref, 'dependabot/') &&
       !startsWith(github.event.check_suite.head_branch, 'dependabot/') &&
-      !startsWith(github.event.pull_request.head.ref, 'dependabot/')
+      !startsWith(github.event.pull_request.head.ref, 'dependabot/') &&
+      (
+        (github.event_name != 'pull_request' && github.event_name != 'pull_request_review') ||
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     uses: plures/.github/.github/workflows/copilot-pr-lifecycle-reusable.yml@main
     secrets:
       COPILOT_PAT: ${{ secrets.COPILOT_PAT }}
