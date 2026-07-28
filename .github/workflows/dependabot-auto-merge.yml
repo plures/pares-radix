@@ -6,5 +6,6 @@ on:
 
 jobs:
   auto-merge:
+    continue-on-error: true
     uses: plures/.github/.github/workflows/dependabot-auto-merge.yml@main
     secrets: inherit
