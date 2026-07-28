@@ -1,3 +1,7 @@
+## [1.55.47] — 2026-07-28
+
+- feat(pares-radix-svc): implement DEV stage of ADR-0018 runtime-as-service (#571) (60bb623)
+
 ## [1.55.46] — 2026-07-26
 
 - fix(ci): skip lifecycle job for all Dependabot-branch events (#568) (e6923e8)
