@@ -1,0 +1,105 @@
+# model-fallback-selection.px — Live-availability-aware fallback selection
+#
+# Closes a real .px-first gap found 2026-07-28: CopilotModelClient::complete()
+# (crates/radix-core/src/auth/copilot.rs) retried a static fallback_models list
+# on a 4xx error with no cross-check against the live model_pool discovery/
+# scoring system, and no dedupe against the model that just failed. Config
+# even listed the primary model as its own fallback in one deployed instance,
+# causing an infinite retry loop (praxisbot logs, 2026-07-28).
+#
+# The Rust-side fix (HashSet dedupe in the retry loop) was the correct
+# IO-boundary patch, but it does not answer "which model should we try next,
+# given what's ACTUALLY available right now" — that decision already has a
+# real home: model_pool's live discovery + scoring (discovery.rs,
+# selection.rs, provider.rs). This procedure is the .px-first wiring that
+# should have existed from the start, per model-selection.px's own
+# architecture note:
+#   "The router is not a config. It's a procedure."
+#
+# Relationship to model-selection.px:
+#   model-selection.px       -> selects the model for a NEW request
+#   model-fallback-selection.px -> selects the NEXT model when the CURRENT
+#                                  one just failed mid-flight (a narrower,
+#                                  hot-path variant of the same decision)
+#
+# Queue topology:
+#   model_call_failed -> [select_fallback_model] -> fallback_selected
+#
+# Rust side (IO boundary only, per C-DEV-001):
+#   CopilotModelClient::complete() on a 4xx MUST call this procedure to get
+#   the next candidate instead of iterating self.fallback_models directly.
+#   Rust's only remaining job: track which models were tried THIS call chain
+#   (still done as a HashSet at the IO boundary — that part is legitimately
+#   Rust state, not a decision) and execute the HTTP call. The decision of
+#   WHICH model is the right next try belongs here.
+
+# ═══════════════════════════════════════════════════════════════════════
+# Facts
+# ═══════════════════════════════════════════════════════════════════════
+
+# [parser-skip] fact FallbackRequest:
+# [parser-skip]   failed_model: string        # the model that just returned 4xx
+# [parser-skip]   already_tried: list[string]  # models tried earlier in this same call chain
+# [parser-skip]   error_status: int            # the HTTP status that triggered fallback
+# [parser-skip]   task_context: object         # same TaskRequirements shape as model-selection.px
+# [parser-skip]
+# [parser-skip] fact FallbackSelection:
+# [parser-skip]   model: string                # nil/empty if no viable candidate remains
+# [parser-skip]   reason: string               # why this model was chosen
+# [parser-skip]   exhausted: bool              # true if no fallback candidates remain
+
+# ═══════════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════════
+
+constraint fallback_never_repeats_failed_model:
+  scope: fallback_selection
+  when: candidate.id == request.failed_model
+  require: false
+  severity: error
+  message: "A fallback candidate must never be the model that just failed in this same call chain. This is the exact bug found 2026-07-28 (claude-3.5-sonnet falling back to itself)."
+
+constraint fallback_never_repeats_tried_model:
+  scope: fallback_selection
+  when: request.already_tried.includes(candidate.id)
+  require: false
+  severity: error
+  message: "A fallback candidate must never be a model already tried earlier in this chain, even if it isn't the immediately-preceding failure."
+
+constraint fallback_checks_live_availability:
+  scope: fallback_selection
+  require: candidate.available == true AND candidate.provider_status != "offline"
+  severity: error
+  message: "Fallback selection MUST consult live model_pool availability (discovery.rs), never a static list disconnected from real provider state."
+
+# ═══════════════════════════════════════════════════════════════════════
+# Procedure
+# ═══════════════════════════════════════════════════════════════════════
+
+procedure select_fallback_model(request: FallbackRequest from "model_call_failed") -> FallbackSelection into "fallback_selected":
+  given: "Given a model that just failed mid-call, pick the best REAL next candidate — live-available, never the failed model, never one already tried in this chain."
+
+  # Reuse the same live provider state model-selection.px already reads —
+  # single source of truth, not a second copy of "what's available."
+  read_state {key: "providers:active"} -> $providers
+  list_available_models {providers: $providers} -> $all_models
+
+  # Exclude anything already tried in this call chain (failed model + history)
+  exclude_models {
+    models: $all_models,
+    exclude_ids: append($request.already_tried, $request.failed_model)
+  } -> $candidates
+
+  if length($candidates) == 0:
+    return {model: null, reason: "no live-available candidates remain outside the already-tried set", exhausted: true}
+  end
+
+  # Score remaining candidates against the same task requirements used for
+  # primary selection — a fallback should still fit the task, not just be
+  # "any model that responds."
+  classify_task_requirements {task: $request.task_context, history_key: "model_selection:history"} -> $requirements
+  score_models_against_requirements {models: $candidates, requirements: $requirements} -> $scored
+
+  select_top_with_fallback {scored: $scored, fallback_count: 0} -> $top
+
+  return {model: $top.id, reason: "highest-scoring live-available model excluding failed/already-tried set", exhausted: false}
