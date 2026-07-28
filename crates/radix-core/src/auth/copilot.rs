@@ -535,7 +535,23 @@ impl ModelClient for CopilotModelClient {
                     status = %status,
                     "primary model failed with client error, trying fallbacks"
                 );
+                // Never retry a model that has already failed in this chain — a
+                // fallback list that (mis)includes the primary, or repeats a model
+                // that already 400'd, must not loop back to it. Real bug found
+                // 2026-07-28: praxisbot's fallback list named its own primary
+                // ("model_not_supported") as its own fallback, looping forever.
+                let mut already_tried: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                already_tried.insert(primary_model.clone());
                 for fallback in &self.fallback_models {
+                    if already_tried.contains(fallback) {
+                        tracing::warn!(
+                            model = %fallback,
+                            "skipping fallback: already tried/failed in this chain (self-fallback or duplicate)"
+                        );
+                        continue;
+                    }
+                    already_tried.insert(fallback.clone());
                     tracing::info!(model = %fallback, "trying fallback model");
                     *self.model.write().await = fallback.clone();
                     let result = self.complete(messages, tools, options).await;
