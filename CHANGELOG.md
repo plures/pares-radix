@@ -1,3 +1,8 @@
+## [1.55.48] — 2026-07-28
+
+- fix(copilot): stop fallback chain from looping on a model that already failed (94f8660)
+- ci: make Dependabot auto-merge non-fatal when repository auto-merge is disabled (#572) (57f4509)
+
 ## [1.55.47] — 2026-07-28
 
 - feat(pares-radix-svc): implement DEV stage of ADR-0018 runtime-as-service (#571) (60bb623)
