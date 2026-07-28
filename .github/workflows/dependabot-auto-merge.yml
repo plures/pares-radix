@@ -6,39 +6,5 @@ on:
 
 jobs:
   auto-merge:
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Fetch Dependabot metadata
-        id: metadata
-        uses: dependabot/fetch-metadata@v2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Enable auto-merge for patch/minor updates
-        if: >-
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-          steps.metadata.outputs.update-type == 'version-update:semver-minor'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          set +e
-          output=$(gh pr merge --auto --squash "$PR_URL" 2>&1)
-          status=$?
-          set -e
-
-          if [ "$status" -eq 0 ]; then
-            exit 0
-          fi
-
-          if printf '%s' "$output" | grep -q "Auto merge is not allowed for this repository"; then
-            echo "::notice::Auto-merge is disabled for this repository; skipping."
-            exit 0
-          fi
-
-          printf '%s\n' "$output"
-          exit "$status"
+    uses: plures/.github/.github/workflows/dependabot-auto-merge.yml@main
+    secrets: inherit
