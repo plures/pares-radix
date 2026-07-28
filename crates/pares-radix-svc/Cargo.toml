@@ -1,0 +1,33 @@
+[package]
+name = "pares-radix-svc"
+description = "Headless service runtime for pares-radix: drives the AgensRuntime timer/event loop with a loopback HTTP automation surface, PluresDB-only persistence, no Tauri/Hyperswarm/LLM dependency"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pares-radix-svc"
+path = "src/main.rs"
+
+[lib]
+name = "pares_radix_svc"
+path = "src/lib.rs"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum.workspace = true
+uuid.workspace = true
+anyhow = "1"
+pluresdb = { git = "https://github.com/plures/pluresdb", rev = "d08f88b5410384235f586320bafb89c4be3aa7a1", features = ["embeddings"] }
+pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "d08f88b5410384235f586320bafb89c4be3aa7a1" }
+pares-radix-core = { path = "../radix-core" }
+
+[dev-dependencies]
+tempfile.workspace = true
+reqwest = { workspace = true, features = ["json"] }
