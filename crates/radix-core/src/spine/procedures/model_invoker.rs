@@ -457,13 +457,14 @@ impl ModelInvoker {
             let decision: Value = match serde_json::from_str(&raw) {
                 Ok(v) => v,
                 Err(_) => {
+                    let raw_preview: String = raw.chars().take(500).collect();
                     // Non-JSON / unparseable response from the selector is treated
                     // as "no candidate" — fail closed rather than guess.
                     return Err(ModelClientError::ProviderFailure {
                         status: Some(needs_fallback_ctx.error_status),
                         model: needs_fallback_ctx.failed_model.clone(),
                         message: format!(
-                            "fallback selection returned an unparseable response: {raw}"
+                            "fallback selection returned an unparseable response (preview): {raw_preview}"
                         ),
                     });
                 }
