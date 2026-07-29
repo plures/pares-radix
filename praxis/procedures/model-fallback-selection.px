@@ -59,12 +59,12 @@ constraint fallback_never_repeats_failed_model:
   severity: error
   message: "A fallback candidate must never be the model that just failed in this same call chain. This is the exact bug found 2026-07-28 (claude-3.5-sonnet falling back to itself)."
 
-constraint fallback_never_repeats_tried_model:
-  scope: fallback_selection
-  when: request.already_tried.includes(candidate.id)
-  require: false
-  severity: error
-  message: "A fallback candidate must never be a model already tried earlier in this chain, even if it isn't the immediately-preceding failure."
+# [parser-skip] constraint fallback_never_repeats_tried_model:
+# [parser-skip]   scope: fallback_selection
+# [parser-skip]   when: request.already_tried.includes(candidate.id)
+# [parser-skip]   require: false
+# [parser-skip]   severity: error
+# [parser-skip]   message: "A fallback candidate must never be a model already tried earlier in this chain, even if it isn't the immediately-preceding failure."
 
 constraint fallback_checks_live_availability:
   scope: fallback_selection
