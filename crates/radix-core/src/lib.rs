@@ -10,6 +10,13 @@
 //! prompt_builder, model_chain, features, heartbeat) remain in
 //! `pares-agens-core`, which depends on this crate.
 
+/// The `pares-radix-core` crate's own package version (i.e. the Radix platform
+/// version), independent of whatever downstream crate (pares-agens, etc.) is
+/// consuming it. Downstream hosts should use this — not their own
+/// `CARGO_PKG_VERSION` — when reporting "which Radix platform am I running on",
+/// so status output can distinguish platform version from host-app version.
+pub const RADIX_CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Authentication helpers for external providers.
 pub mod auth;
 /// Chronos version timeline — causal audit trail for every data mutation.
