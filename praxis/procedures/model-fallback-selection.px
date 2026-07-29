@@ -59,6 +59,19 @@ constraint fallback_never_repeats_failed_model:
   severity: error
   message: "A fallback candidate must never be the model that just failed in this same call chain. This is the exact bug found 2026-07-28 (claude-3.5-sonnet falling back to itself)."
 
+# [parser-skip] constraint fallback_never_repeats_tried_model:
+# [parser-skip]   scope: fallback_selection
+# [parser-skip]   when: request.already_tried.includes(candidate.id)
+# [parser-skip]   require: false
+# [parser-skip]   severity: error
+# [parser-skip]   message: "A fallback candidate must never be a model already tried earlier in this chain, even if it isn't the immediately-preceding failure."
+# [parser-skip]   # NOTE: .includes() is a method-call expression not yet supported by the
+# [parser-skip]   # praxis parser (expects logic_op/comp_op/add_op/mul_op in when: clauses).
+# [parser-skip]   # The procedural equivalent is already enforced by exclude_models{} in the
+# [parser-skip]   # procedure body (line ~88). This constraint is documentation-only until
+# [parser-skip]   # the parser gains method-call support in when: expressions.
+
+
 constraint fallback_checks_live_availability:
   scope: fallback_selection
   require: candidate.available == true AND candidate.provider_status != "offline"
