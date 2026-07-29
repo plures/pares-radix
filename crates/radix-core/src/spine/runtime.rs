@@ -515,7 +515,9 @@ pub async fn build_default_task_aware_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition, ToolDispatcher};
+    use crate::model::{
+        ChatMessage, ChatOptions, ModelClientError, ModelCompletion, ToolDefinition, ToolDispatcher,
+    };
     use crate::spine::conversation::MemoryConversationStore;
     use crate::spine::event::SpineEvent;
     use crate::task_manager::TaskManager;
@@ -555,7 +557,7 @@ mod tests {
             messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             *self.seen_messages.lock().await = messages.to_vec();
             Ok(ModelCompletion {
                 content: Some("ok".into()),

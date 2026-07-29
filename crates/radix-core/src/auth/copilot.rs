@@ -14,7 +14,8 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 
 use crate::model::{
-    ChatMessage, ChatOptions, ModelClient, ModelCompletion, ToolCall, ToolDefinition,
+    ChatMessage, ChatOptions, FallbackRequestContext, ModelClient, ModelClientError,
+    ModelCompletion, ToolCall, ToolDefinition,
 };
 
 const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
@@ -276,8 +277,6 @@ pub struct CopilotModelClient {
     auth: Arc<Mutex<CopilotAuth>>,
     model: Arc<RwLock<String>>,
     client: reqwest::Client,
-    /// Ordered list of fallback models to try when the primary returns a 4xx error.
-    fallback_models: Vec<String>,
 }
 
 impl CopilotModelClient {
@@ -292,14 +291,7 @@ impl CopilotModelClient {
             auth: Arc::new(Mutex::new(auth)),
             model,
             client: copilot_http_client_or_panic(),
-            fallback_models: vec![],
         }
-    }
-
-    /// Set fallback models to try when the primary model fails with a 4xx error.
-    pub fn with_fallbacks(mut self, models: Vec<String>) -> Self {
-        self.fallback_models = models;
-        self
     }
 }
 
@@ -310,10 +302,13 @@ impl ModelClient for CopilotModelClient {
         messages: &[ChatMessage],
         tools: &[ToolDefinition],
         options: &ChatOptions,
-    ) -> Result<ModelCompletion, String> {
+    ) -> Result<ModelCompletion, ModelClientError> {
         let (token, api_base) = {
             let mut auth = self.auth.lock().await;
-            let token = auth.ensure_fresh_token().await.map_err(|e| e.to_string())?;
+            let token = auth
+                .ensure_fresh_token()
+                .await
+                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
             (token.to_string(), auth.api_base_url().to_string())
         };
 
@@ -344,7 +339,10 @@ impl ModelClient for CopilotModelClient {
             rendered_messages.push(Value::Object(obj));
         }
 
-        let model = self.model.read().await.clone();
+        let model = match &options.model {
+            Some(m) => m.clone(),
+            None => self.model.read().await.clone(),
+        };
         let mut body = serde_json::json!({
             "model": model,
             "messages": rendered_messages,
@@ -390,7 +388,8 @@ impl ModelClient for CopilotModelClient {
         let mut headers = HeaderMap::new();
         headers.insert(
             AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| e.to_string())?,
+            HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|e| ModelClientError::Transport(e.to_string()))?,
         );
         headers.insert("Editor-Version", HeaderValue::from_static(EDITOR_VERSION));
         headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
@@ -411,13 +410,13 @@ impl ModelClient for CopilotModelClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| ModelClientError::Transport(e.to_string()))?;
 
         let status = response.status();
         let body_text = response
             .text()
             .await
-            .map_err(|e| format!("response body read error: {e}"))?;
+            .map_err(|e| ModelClientError::Transport(format!("response body read error: {e}")))?;
 
         // Retry logic for transient failures.
         let (status, body_text) = if status == reqwest::StatusCode::MISDIRECTED_REQUEST {
@@ -426,20 +425,20 @@ impl ModelClient for CopilotModelClient {
                 attempt = 1,
                 "421 Misdirected Request — retrying with fresh connection"
             );
-            let fresh_client = copilot_http_client()
-                .map_err(|e| format!("failed to build fresh HTTP client: {e}"))?;
+            let fresh_client = copilot_http_client().map_err(|e| {
+                ModelClientError::Transport(format!("failed to build fresh HTTP client: {e}"))
+            })?;
             let resp = fresh_client
                 .post(&url)
                 .headers(headers.clone())
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
             let s = resp.status();
-            let t = resp
-                .text()
-                .await
-                .map_err(|e| format!("response body read error: {e}"))?;
+            let t = resp.text().await.map_err(|e| {
+                ModelClientError::Transport(format!("response body read error: {e}"))
+            })?;
             (s, t)
         } else if status == reqwest::StatusCode::UNAUTHORIZED {
             // 401: token may have expired — refresh and retry once.
@@ -451,13 +450,14 @@ impl ModelClient for CopilotModelClient {
                 let mut auth = self.auth.lock().await;
                 auth.ensure_fresh_token()
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| ModelClientError::Transport(e.to_string()))?
                     .to_string()
             };
             let mut retry_headers = headers.clone();
             retry_headers.insert(
                 AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {new_token}")).map_err(|e| e.to_string())?,
+                HeaderValue::from_str(&format!("Bearer {new_token}"))
+                    .map_err(|e| ModelClientError::Transport(e.to_string()))?,
             );
             let resp = self
                 .client
@@ -466,12 +466,11 @@ impl ModelClient for CopilotModelClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
             let s = resp.status();
-            let t = resp
-                .text()
-                .await
-                .map_err(|e| format!("response body read error: {e}"))?;
+            let t = resp.text().await.map_err(|e| {
+                ModelClientError::Transport(format!("response body read error: {e}"))
+            })?;
             (s, t)
         } else if status.is_server_error() {
             // 5xx: retry up to 2 times with exponential backoff.
@@ -488,12 +487,11 @@ impl ModelClient for CopilotModelClient {
                     .json(&body)
                     .send()
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| ModelClientError::Transport(e.to_string()))?;
                 last_status = resp.status();
-                last_body = resp
-                    .text()
-                    .await
-                    .map_err(|e| format!("response body read error: {e}"))?;
+                last_body = resp.text().await.map_err(|e| {
+                    ModelClientError::Transport(format!("response body read error: {e}"))
+                })?;
                 if !last_status.is_server_error() {
                     break;
                 }
@@ -512,74 +510,53 @@ impl ModelClient for CopilotModelClient {
         );
 
         let payload: Value = serde_json::from_str(&body_text).map_err(|e| {
-            format!(
+            ModelClientError::Transport(format!(
                 "error decoding response body: {e}\nBody: {}",
                 &body_text[..body_text.len().min(500)]
-            )
+            ))
         })?;
         if !status.is_success() {
             let is_client_error = status.is_client_error();
             let err_msg = format!("copilot error ({status}): {payload}");
 
-            // On 4xx errors, try fallback models before giving up.
-            // Only attempt fallbacks from the primary call (check if current
-            // model matches the configured primary to avoid recursion).
-            let primary_model = {
-                // Re-read in case it was swapped — but since we hold no
-                // lock across the HTTP call this is fine.
-                self.model.read().await.clone()
-            };
-            if is_client_error && !self.fallback_models.is_empty() && model == primary_model {
-                tracing::warn!(
-                    model = %model,
-                    status = %status,
-                    "primary model failed with client error, trying fallbacks"
-                );
-                // Never retry a model that has already failed in this chain — a
-                // fallback list that (mis)includes the primary, or repeats a model
-                // that already 400'd, must not loop back to it. Real bug found
-                // 2026-07-28: praxisbot's fallback list named its own primary
-                // ("model_not_supported") as its own fallback, looping forever.
-                let mut already_tried: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
-                already_tried.insert(primary_model.clone());
-                for fallback in &self.fallback_models {
-                    if already_tried.contains(fallback) {
-                        tracing::warn!(
-                            model = %fallback,
-                            "skipping fallback: already tried/failed in this chain (self-fallback or duplicate)"
-                        );
-                        continue;
-                    }
-                    already_tried.insert(fallback.clone());
-                    tracing::info!(model = %fallback, "trying fallback model");
-                    *self.model.write().await = fallback.clone();
-                    let result = self.complete(messages, tools, options).await;
-                    *self.model.write().await = primary_model.clone();
-                    match result {
-                        Ok(completion) => {
-                            tracing::info!(model = %fallback, "fallback model succeeded");
-                            return Ok(completion);
-                        }
-                        Err(e) => {
-                            tracing::warn!(model = %fallback, error = %e, "fallback model also failed");
-                        }
-                    }
-                }
+            // Fallback-eligible: a 4xx client error against the model we were
+            // asked to use. We no longer select or retry a fallback ourselves —
+            // that decision belongs to the `select_fallback_model` `.px`
+            // procedure, invoked by the orchestrator (`ModelInvoker`). We only
+            // report the failure as fallback-eligible so the caller can act.
+            if is_client_error {
+                return Err(ModelClientError::NeedsFallback(FallbackRequestContext {
+                    failed_model: model.clone(),
+                    already_tried: vec![model.clone()],
+                    error_status: status.as_u16(),
+                    task_context: serde_json::json!({ "error": err_msg }),
+                }));
             }
 
-            return Err(err_msg);
+            return Err(ModelClientError::ProviderFailure {
+                status: Some(status.as_u16()),
+                model: model.clone(),
+                message: err_msg,
+            });
         }
 
         let choice = payload
             .get("choices")
             .and_then(|v| v.as_array())
             .and_then(|arr| arr.first())
-            .ok_or_else(|| "model returned no choices".to_string())?;
+            .ok_or_else(|| ModelClientError::ProviderFailure {
+                status: Some(status.as_u16()),
+                model: model.clone(),
+                message: "model returned no choices".to_string(),
+            })?;
 
         let message = choice
             .get("message")
-            .ok_or_else(|| "model returned no message".to_string())?;
+            .ok_or_else(|| ModelClientError::ProviderFailure {
+                status: Some(status.as_u16()),
+                model: model.clone(),
+                message: "model returned no message".to_string(),
+            })?;
 
         let content = message
             .get("content")
@@ -1189,6 +1166,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn client_error_returns_typed_fallback_request_for_override_model() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept request");
+            read_request(&mut stream).await;
+            write_json_response(
+                &mut stream,
+                "400 Bad Request",
+                r#"{"error":"model_not_supported"}"#,
+            )
+            .await;
+        });
+
+        let client =
+            CopilotModelClient::new(seeded_auth(format!("http://{addr}")), "default-model");
+        let result = client
+            .complete(
+                &[ChatMessage::user("hello")],
+                &[],
+                &ChatOptions {
+                    model: Some("request-override".into()),
+                    ..ChatOptions::default()
+                },
+            )
+            .await;
+
+        match result.expect_err("400 must be surfaced for Praxis fallback selection") {
+            ModelClientError::NeedsFallback(context) => {
+                assert_eq!(context.failed_model, "request-override");
+                assert_eq!(context.already_tried, vec!["request-override"]);
+                assert_eq!(context.error_status, 400);
+            }
+            other => panic!("expected NeedsFallback, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn copilot_421_retry_is_bounded_by_retry_client_read_timeout() {
         let (api_base, attempts) = spawn_421_then_hang_server().await;
         let client = CopilotModelClient::new(seeded_auth(api_base), "test-model");
@@ -1206,7 +1223,7 @@ mod tests {
         let err = result
             .expect("outer timeout checked")
             .expect_err("hanging retry response should time out");
-        let err_lower = err.to_ascii_lowercase();
+        let err_lower = err.to_string().to_ascii_lowercase();
         assert!(
             err_lower.contains("timed out")
                 || err_lower.contains("operation timed out")

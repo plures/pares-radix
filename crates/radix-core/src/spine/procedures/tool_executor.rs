@@ -10,11 +10,11 @@
 //! Safety: A per-chat iteration counter prevents infinite tool loops.
 //! Conversation history is threaded through metadata for full context.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::model::{ChatMessage, ToolDispatcher};
 use crate::spine::event::SpineEvent;
@@ -167,10 +167,45 @@ impl SpineProcedure for ToolExecutor {
             tool_calls.len(), iteration, self.max_iterations
         );
 
+        // Build an allowlist of tools that were explicitly advertised to the model.
+        // Only tools in this set may be dispatched from model responses — internal
+        // procedures (e.g. select_fallback_model) must never be reachable via
+        // model-generated tool calls.
+        let advertised: HashSet<String> = self
+            .dispatcher
+            .available_tools()
+            .await
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+
         // Execute each tool call and collect results
         let mut tool_results: Vec<ChatMessage> = Vec::with_capacity(tool_calls.len());
 
         for tc in tool_calls {
+            // Allowlist check: reject any tool the model was not shown.
+            if !advertised.contains(&tc.name) {
+                warn!(
+                    tool_name = %tc.name,
+                    tool_call_id = %tc.id,
+                    "tool_executor: model requested unadvertised tool, rejecting"
+                );
+                let result =
+                    format!("Error: tool '{}' is not available", tc.name);
+                emitter
+                    .emit(SpineEvent::ToolResult {
+                        id: SpineEvent::new_id(),
+                        chat_id: chat_id.clone(),
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        content: result.clone(),
+                        metadata: serde_json::json!({}),
+                    })
+                    .await;
+                tool_results.push(ChatMessage::tool_result(tc.id.clone(), result));
+                continue;
+            }
+
             debug!(
                 tool_name = %tc.name,
                 tool_call_id = %tc.id,
@@ -256,7 +291,18 @@ mod tests {
     #[async_trait]
     impl ToolDispatcher for MockDispatcher {
         async fn available_tools(&self) -> Vec<ToolDefinition> {
-            vec![]
+            vec![
+                ToolDefinition {
+                    name: "web_search".into(),
+                    description: "Search the web".into(),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+                ToolDefinition {
+                    name: "read".into(),
+                    description: "Read a file".into(),
+                    parameters: serde_json::json!({"type": "object"}),
+                },
+            ]
         }
 
         async fn call_tool(&self, name: &str, arguments: Value) -> String {
@@ -279,7 +325,11 @@ mod tests {
     #[async_trait]
     impl ToolDispatcher for InfiniteLoopDispatcher {
         async fn available_tools(&self) -> Vec<ToolDefinition> {
-            vec![]
+            vec![ToolDefinition {
+                name: "web_search".into(),
+                description: "Search the web".into(),
+                parameters: serde_json::json!({"type": "object"}),
+            }]
         }
 
         async fn call_tool(&self, _name: &str, _arguments: Value) -> String {
@@ -724,5 +774,50 @@ mod tests {
         } else {
             panic!("expected ModelRequest");
         }
+    }
+
+    #[tokio::test]
+    async fn rejects_unadvertised_tool_calls() {
+        let (emitter, mut rx) = make_emitter();
+        let executor = ToolExecutor::new(Arc::new(MockDispatcher));
+
+        // Attempt to call an internal tool that was never advertised to the model.
+        let event = SpineEvent::ModelResponse {
+            source: "test".into(),
+            id: "resp-reject".into(),
+            chat_id: "chat-reject".into(),
+            content: String::new(),
+            model: "gpt-4".into(),
+            tool_calls: vec![ToolCall {
+                id: "tc-internal".into(),
+                name: "select_fallback_model".into(),
+                arguments: serde_json::json!({"failed_model": "gpt-4"}),
+            }],
+            metadata: serde_json::json!({}),
+        };
+
+        executor.handle(&event, &emitter).await;
+
+        // ToolResult with rejection error
+        let tool_result = rx.recv().await.unwrap();
+        assert_eq!(tool_result.event_type(), "tool_result");
+        if let SpineEvent::ToolResult {
+            tool_name,
+            content,
+            ..
+        } = tool_result
+        {
+            assert_eq!(tool_name, "select_fallback_model");
+            assert!(
+                content.contains("not available"),
+                "expected rejection message, got: {content}"
+            );
+        } else {
+            panic!("expected ToolResult");
+        }
+
+        // ModelRequest still emitted so the model sees the rejection
+        let model_req = rx.recv().await.unwrap();
+        assert_eq!(model_req.event_type(), "model_request");
     }
 }
