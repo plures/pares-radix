@@ -1,3 +1,9 @@
+## [1.55.51] — 2026-07-29
+
+- fix(mcp-dev-server): classify tool arg validation as tool-result errors, not JSON-RPC errors (#581) (aafae14)
+- Initial plan (#580) (9a207bc)
+- px-first: wire Copilot 4xx fallback through select_fallback_model procedure (#578) (7140154)
+
 ## [1.55.50] — 2026-07-29
 
 - fix(ci): guard lifecycle job against Dependabot triggering_actor (#579) (4ffc14e)
