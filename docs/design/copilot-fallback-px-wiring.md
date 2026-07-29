@@ -4,8 +4,7 @@ Date: 2026-07-28
 Epic: `pares-radix:copilot-fallback-px-wiring`
 
 ## Scope
-Design only. No production code changes in this commit.
-
+Design + implementation: this PR documents and implements `.px`-driven Copilot fallback selection wiring.
 ## Evidence from current code
 
 1. `crates/radix-core/src/auth/copilot.rs` currently owns the full fallback loop inside `CopilotModelClient::complete()`:
