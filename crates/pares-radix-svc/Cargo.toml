@@ -24,8 +24,8 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 uuid.workspace = true
 anyhow = "1"
-pluresdb = { git = "https://github.com/plures/pluresdb", rev = "d08f88b5410384235f586320bafb89c4be3aa7a1", features = ["embeddings"] }
-pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "d08f88b5410384235f586320bafb89c4be3aa7a1" }
+pluresdb = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6", features = ["embeddings"] }
+pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6" }
 pares-radix-core = { path = "../radix-core" }
 
 [dev-dependencies]

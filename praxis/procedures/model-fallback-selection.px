@@ -71,6 +71,7 @@ constraint fallback_never_repeats_failed_model:
 # [parser-skip]   # procedure body (line ~88). This constraint is documentation-only until
 # [parser-skip]   # the parser gains method-call support in when: expressions.
 
+
 constraint fallback_checks_live_availability:
   scope: fallback_selection
   require: candidate.available == true AND candidate.provider_status != "offline"
