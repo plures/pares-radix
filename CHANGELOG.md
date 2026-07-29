@@ -1,3 +1,8 @@
+## [1.55.52] — 2026-07-29
+
+- feat(mcp-dev-server): add MCP outputSchema typing to tool registry and tools/call (#584) (69b0787)
+- docs(mcp-dev-server): ADR-0020 - Canvas elicitation feasibility (design stage, blocked on SDK adoption) (#583) (de94e82)
+
 ## [1.55.51] — 2026-07-29
 
 - fix(mcp-dev-server): classify tool arg validation as tool-result errors, not JSON-RPC errors (#581) (aafae14)
