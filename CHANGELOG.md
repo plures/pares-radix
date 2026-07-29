@@ -1,3 +1,7 @@
+## [1.55.50] — 2026-07-29
+
+- fix(ci): guard lifecycle job against Dependabot triggering_actor (#579) (4ffc14e)
+
 ## [1.55.49] — 2026-07-29
 
 - feat(radix-core): expose RADIX_CORE_VERSION const for host apps (#575) (185f22b)
