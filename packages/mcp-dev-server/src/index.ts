@@ -66,6 +66,7 @@ if (!process.env.RADIX_DEV) {
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import Ajv, { type ValidateFunction } from 'ajv';
 
 // Determine storage path: RADIX_DB_PATH env or default ~/.radix/pluresdb.json
 const RADIX_DB_PATH = process.env.RADIX_DB_PATH
@@ -1016,6 +1017,63 @@ function resolveNumeric(expr: string, context: Record<string, unknown>): number 
 
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
+// Per MCP spec 2025-11-25 (SEP-1303): argument/input validation errors MUST be
+// reported as Tool Execution Errors (CallToolResult.isError = true), NOT as
+// JSON-RPC protocol-level errors. Protocol errors (-32601 unknown method/tool,
+// -32700 parse error, -32602 malformed request shape) are reserved for cases
+// the *calling model* cannot self-correct from within the conversation — a
+// validation failure on tool arguments is exactly the kind of recoverable
+// mistake a model should see and retry, so it must travel back as tool-result
+// content, never as a transport-level error the harness treats as fatal.
+const ajv = new Ajv({ allErrors: true, strict: false });
+const validatorCache = new Map<string, ValidateFunction>();
+
+function getValidator(tool: ToolDef): ValidateFunction {
+  let validate = validatorCache.get(tool.name);
+  if (!validate) {
+    validate = ajv.compile(tool.inputSchema);
+    validatorCache.set(tool.name, validate);
+  }
+  return validate;
+}
+
+function toolErrorResult(message: string): { content: Array<{ type: 'text'; text: string }>; isError: true } {
+  return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+function formatAjvErrors(validate: ValidateFunction): string {
+  const errors = validate.errors ?? [];
+  const lines = errors.map((e) => {
+    const path = e.instancePath || (e.params as any)?.missingProperty
+      ? `${e.instancePath}${e.instancePath ? ' ' : ''}${e.message}${(e.params as any)?.missingProperty ? ` '${(e.params as any).missingProperty}'` : ''}`
+      : e.message;
+    return `- ${path}`;
+  });
+  return `Invalid arguments:\n${lines.join('\n')}`;
+}
+
+/**
+ * Runs a tool call end-to-end: schema-validate arguments, then invoke the
+ * handler, catching BOTH validation failures and handler exceptions and
+ * returning them as a tool-result error (isError: true), never throwing up
+ * to the JSON-RPC layer. This is the single shared dispatch path so every
+ * tool gets consistent MCP-2025-11-25-compliant error classification without
+ * needing per-tool fixes.
+ */
+function callTool(tool: ToolDef, toolArgs: Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; isError?: true } {
+  const validate = getValidator(tool);
+  if (!validate(toolArgs)) {
+    return toolErrorResult(formatAjvErrors(validate));
+  }
+
+  try {
+    const result = tool.handler(toolArgs);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  } catch (err: any) {
+    return toolErrorResult(`Error: ${err?.message ?? String(err)}`);
+  }
+}
+
 function handleRequest(req: { method: string; params?: Record<string, unknown>; id?: number | string }): object {
   const { method, params, id } = req;
 
@@ -1048,31 +1106,21 @@ function handleRequest(req: { method: string; params?: Record<string, unknown>; 
       };
 
     case 'tools/call': {
-      const toolName = (params as any)?.name as string;
-      const toolArgs = (params as any)?.arguments ?? {};
+      // Malformed request shape (missing/non-string tool name) is a genuine
+      // protocol-level failure — the client sent a request the server cannot
+      // even dispatch, not a tool that rejected valid-looking arguments.
+      const toolName = (params as any)?.name;
+      if (typeof toolName !== 'string' || toolName.length === 0) {
+        return { jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params: "name" must be a non-empty string' } };
+      }
+      const toolArgs = ((params as any)?.arguments ?? {}) as Record<string, unknown>;
       const tool = toolMap.get(toolName);
+      // Unknown tool name is likewise a protocol-level failure: there is no
+      // handler/schema to run against, so this cannot be a tool-execution error.
       if (!tool) {
         return { jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
       }
-      try {
-        const result = tool.handler(toolArgs);
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          },
-        };
-      } catch (err: any) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: `Error: ${err.message}` }],
-            isError: true,
-          },
-        };
-      }
+      return { jsonrpc: '2.0', id, result: callTool(tool, toolArgs) };
     }
 
     default:
