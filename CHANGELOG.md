@@ -1,3 +1,12 @@
+## [1.55.49] — 2026-07-29
+
+- feat(radix-core): expose RADIX_CORE_VERSION const for host apps (#575) (185f22b)
+- Initial plan (#577) (e86250f)
+- ci: make Dependabot auto-merge non-blocking when repo auto-merge is disabled (#576) (5cc00ad)
+- chore(deps): bump PluresDB to 2af92b1 (PxTimerDispatcher, PR #1088) (#573) (6ec1ae7)
+- Initial plan (#574) (c6e1502)
+- px-first: add model-fallback-selection.px closing the fallback-decision gap (58e8a0b)
+
 ## [1.55.48] — 2026-07-28
 
 - fix(copilot): stop fallback chain from looping on a model that already failed (94f8660)
