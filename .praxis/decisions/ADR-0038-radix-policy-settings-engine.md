@@ -1,6 +1,6 @@
 # ADR-0038: Radix policy + settings engine (design stage)
 
-- Status: Proposed (design stage only — no implementation, no PR)
+- Status: Proposed (design stage only — no implementation code)
 - Date: 2026-07-29
 
 ## Context
