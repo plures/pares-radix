@@ -29,6 +29,7 @@ pub mod commands;
 pub mod content_store;
 /// Event types consumed and emitted by the reactive event loop.
 pub mod event;
+pub mod git_projection;
 /// Reactive event loop executor with optimization safety enforcement.
 pub mod executor;
 /// Built-in event handler procedures.
