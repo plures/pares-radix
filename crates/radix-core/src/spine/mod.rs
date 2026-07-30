@@ -22,6 +22,7 @@ pub mod chronos_watcher;
 pub mod conversation;
 pub mod dev_lifecycle_actions;
 pub mod dispatcher;
+pub mod epic_registry_actions;
 pub mod event;
 pub mod model_selection_actions;
 pub mod pipeline;
