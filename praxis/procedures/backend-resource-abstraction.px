@@ -1,0 +1,82 @@
+# backend-resource-abstraction.px — local-synchronous-resource abstraction decisions (DESIGN-STAGE DRAFT)
+#
+# Resolves ADR-0037 OQ-3 (backend/GUI/TUI may run on separate machines; abstract
+# the backend as a local synchronous resource to the frontend rather than async-
+# fetch plumbing, with an explicit abandon-the-abstraction escape hatch if it
+# leaks) and OQ-4 (PluresDB is the heart of everything incl. secrets; backend-only
+# secret access — GUI/TUI are never direct secret-file readers).
+#
+# This file captures the DECISION logic for resource-call resolution and leak
+# detection as pure dataflow. It does NOT implement the actual RPC/IPC transport,
+# the secrets vault read, or the local-vs-remote connection setup — those are
+# Rust side-effect handlers, dev-stage work per ADR-0037 §6.
+#
+# Status: DRAFT. No Rust side-effect handler exists yet for the actions below
+# (backend_resource_call, backend_leak_detected, secret_access_via_backend).
+#
+# Queue topology (proposed):
+#
+#   resource_call_request ─→ [resolve_backend_call] ─→ resource_call_result
+#   resource_call_result ─→ [detect_abstraction_leak] ─→ leak_assessment
+#   leak_assessment ─→ [escalate_or_continue] ─→ abstraction_decision (terminal)
+#
+
+# [parser-skip] fact BackendTopology:
+# [parser-skip]   same_machine: "default — backend co-located with GUI/TUI (praxisbot today)"
+# [parser-skip]   remote: "backend on a different machine; frontend still treats it as a
+# [parser-skip]           local synchronous resource per OQ-3's abstraction goal"
+# [parser-skip]
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint frontend_never_reads_secrets_directly:
+# [parser-skip]   given: "GUI/TUI must never read secret files or PluresDB secret collections
+# [parser-skip]           directly — all secret-backed operations route through the backend's
+# [parser-skip]           resource interface (OQ-4, backend-only secret access)."
+# [parser-skip]   check: resource_call_request.caller_type in ["gui", "tui"] implies resource_call_request.touches_secrets == false
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint leak_triggers_explicit_reassessment:
+# [parser-skip]   given: "If the synchronous-local abstraction leaks (retries, partial
+# [parser-skip]           failure, or cache-invalidation surface to the caller), that must
+# [parser-skip]           be explicitly flagged, not silently absorbed — kbristol decided in
+# [parser-skip]           advance (OQ-3) that the abstraction is abandoned in favor of
+# [parser-skip]           traditional local-first design rather than compromising the
+# [parser-skip]           local-first guarantee to preserve appearance-of-synchronicity."
+# [parser-skip]   check: leak_assessment.leak_detected == true implies abstraction_decision.action == "abandon_abstraction_prefer_local_first"
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint same_machine_is_default_topology:
+# [parser-skip]   given: "Same-machine backend/GUI/TUI colocation remains the default
+# [parser-skip]           deployment shape; remote topology is an explicit configuration,
+# [parser-skip]           not the assumed default."
+# [parser-skip]   check: config.backend_topology == "same_machine" or config.backend_topology_explicitly_set == true
+# [parser-skip]   severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Resolve a frontend resource call against the backend, whether local or remote,
+# presenting a uniform synchronous-looking result to the caller.
+procedure resolve_backend_call(request: string from "resource_call_request") -> result into "resource_call_result":
+  given: "Resolve a GUI/TUI resource call as a local-synchronous-looking operation regardless of actual topology (OQ-3)"
+  pluresdb_read {key: "config:backend_topology"} -> $topology
+  secret_access_via_backend {request: $request, touches_secrets: $touches_secrets} -> $secret_gate
+  backend_resource_call {request: $request, topology: $topology, secret_gate: $secret_gate} -> $result
+  return $result
+
+# Detect whether the abstraction is leaking (surfacing async concerns to the caller).
+procedure detect_abstraction_leak(result: string from "resource_call_result") -> assessment into "leak_assessment":
+  given: "Detect whether retries/partial-failure/cache-invalidation are surfacing through the abstraction (OQ-3 escape hatch trigger)"
+  backend_leak_detected {result: $result} -> $leak_detected
+  pluresdb_write {key: "backend:leak_assessment", value: $leak_detected}
+  return $leak_detected
+
+# Decide whether to continue with the abstraction or abandon it per the pre-agreed escape hatch.
+procedure escalate_or_continue(assessment: string from "leak_assessment") -> decision into "abstraction_decision":
+  given: "If leak detected, abandon the synchronous-local abstraction in favor of traditional local-first design (OQ-3 pre-decided escape hatch)"
+  resolve_abstraction_action {leak_detected: $leak_detected} -> $action
+  pluresdb_write {key: "backend:abstraction_decision", value: $action}
+  return $action

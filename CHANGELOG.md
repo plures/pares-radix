@@ -1,3 +1,13 @@
+## [1.55.53] — 2026-07-30
+
+- feat(radix-core): ADR-0038 first slice - deterministic blob/tree git projection (#591) (8acccc1)
+- radix-core: add epic-registry claim/resume/orphan-detect IO boundary (#590) (46fe790)
+- docs: px-first spine audit for pares-radix + pares-agens (epic px-first-spine-refactor-radix-agens) (#589) (e903fbf)
+- ADR-0025 revision: procedure-graph-canonical model (#587) (d5d90a6)
+- Initial plan (#582) (27f9c08)
+- docs(mcp-dev-server): ADR-0022 - Tasks extension feasibility (design stage, blocked on SDK support) (#586) (e900a56)
+- docs(mcp): record cache-hints feasibility (#585) (80ec089)
+
 ## [1.55.52] — 2026-07-29
 
 - feat(mcp-dev-server): add MCP outputSchema typing to tool registry and tools/call (#584) (69b0787)
