@@ -167,6 +167,7 @@ impl AsyncActionHandler for CoreActionHandler {
 }
 
 use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
+use crate::spine::epic_registry_actions::{is_epic_registry_action, EpicRegistryActionHandler};
 use crate::spine::repo_health_actions::{self, RepoHealthActionHandler};
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
@@ -215,6 +216,12 @@ pub struct CompositeActionHandler {
     /// when the runtime has no handoff store (e.g. lightweight test setups); the
     /// action then returns a real "not wired" error (honest absence, C-NOSTUB-001).
     task_handoff: Option<Arc<TaskHandoffActionHandler>>,
+    /// Durable epic-registry IO edge (`register_epic`/`update_epic`/
+    /// `claim_epic`/`epic_registry_sweep`). Shares the SAME state store as
+    /// Core/Worktask/TaskDashboard so `epic:registry:` rows are visible to
+    /// the dashboard aggregation (ADR-0036) immediately after being written
+    /// here (C-PLURES-003/004).
+    epic_registry: EpicRegistryActionHandler,
     tool_handler: Arc<crate::px_adapter::ToolDispatchActionHandler>,
 }
 
@@ -230,6 +237,7 @@ impl CompositeActionHandler {
             worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
             task_dashboard: TaskDashboardActionHandler::new(Arc::clone(&state_store)),
             repo_health: RepoHealthActionHandler::new(Arc::clone(&state_store)),
+            epic_registry: EpicRegistryActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
             run_command: RunCommandActionHandler::new(),
@@ -350,6 +358,8 @@ impl AsyncActionHandler for CompositeActionHandler {
                     message: "task-handoff not wired — ConditionalTaskStore not configured".into(),
                 })
             }
+        } else if is_epic_registry_action(action) {
+            self.epic_registry.call(action, params).await
         } else {
             // Delegate to tool dispatcher for unknown actions (tool calls)
             self.tool_handler.call(action, params).await
