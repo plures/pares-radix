@@ -1,3 +1,7 @@
+## [1.55.56] — 2026-07-31
+
+- feat(graph): persist procedure graph in PluresDB (#601) (20fd08d)
+
 ## [1.55.55] — 2026-07-31
 
 - feat(px-adapter-exact): M1 exact filesystem importer and materializer (#600) (df4aeb1)
