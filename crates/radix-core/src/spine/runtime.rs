@@ -98,6 +98,8 @@ impl ToolDispatcher for TaskAwareToolDispatcher {
         for tool in self.inner.available_tools().await {
             if seen.insert(tool.name.clone()) {
                 tools.push(tool);
+            } else {
+                warn!(tool = %tool.name, "task-aware dispatcher: duplicate tool name; keeping first definition");
             }
         }
 
