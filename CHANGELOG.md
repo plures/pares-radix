@@ -1,3 +1,7 @@
+## [1.55.55] — 2026-07-31
+
+- feat(px-adapter-exact): M1 exact filesystem importer and materializer (#600) (df4aeb1)
+
 ## [1.55.54] — 2026-07-31
 
 - feat(px-repo-model): add canonical graph identity scaffold (#599) (7a3c376)
