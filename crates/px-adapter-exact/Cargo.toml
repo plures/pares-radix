@@ -1,0 +1,17 @@
+[package]
+name = "px-adapter-exact"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "M1 exact-artifact adapter: recursive filesystem importer and deterministic materializer over px-repo-model (ADR-0040, exact-artifact-procedure.md)."
+
+[dependencies]
+px-repo-model = { path = "../px-repo-model" }
+walkdir = { workspace = true }
+thiserror = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+
+[dev-dependencies]
+tempfile = { workspace = true }

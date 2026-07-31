@@ -5589,6 +5589,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d8f70e07b9c3962945a74e59ca1c511bba65b6419468acc217c457d93f3c740"
 
 [[package]]
+name = "px-adapter-exact"
+version = "0.1.0"
+dependencies = [
+ "px-repo-model",
+ "tempfile",
+ "thiserror 2.0.19",
+ "walkdir",
+]
+
+[[package]]
 name = "px-ast"
 version = "0.0.0"
 source = "git+https://github.com/plures/praxis-lang.git?rev=37be99e95f2db8e530ea7dd24ec2d0b01113ceeb#37be99e95f2db8e530ea7dd24ec2d0b01113ceeb"
