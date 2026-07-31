@@ -5638,6 +5638,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "px-graph-store"
+version = "0.1.0"
+dependencies = [
+ "pluresdb 3.10.3",
+ "px-repo-model",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "px-repo-model"
 version = "0.1.0"
 dependencies = [

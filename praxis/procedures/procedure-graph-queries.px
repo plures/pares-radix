@@ -1,0 +1,31 @@
+# procedure-graph-queries.px
+#
+# Pure query semantics for M2's PluresDB-backed procedure graph. The Rust
+# GraphStore is the IO adapter: it fetches Typed Node and Edge records from
+# PluresDB, while this procedure defines which records comprise a query result.
+
+fact graph_query:
+  from: string
+  edge_kind: string
+
+constraint graph_query_requires_typed_edge:
+  require: graph_query.edge_kind != ""
+  severity: error
+  message: "Graph traversal must select a declared EdgeKind; untyped edges are not graph relationships."
+
+# Direct-children semantics: select edges of the requested kind that originate
+# at `from`, return their destination NodeKeys, sorted lexicographically. Rust
+# applies this exact rule after its PluresDB edge scan.
+procedure get_children:
+  trigger: manual
+  load_graph_edges {from: graph_query.from, kind: graph_query.edge_kind} -> $edges
+  sort_node_keys {edges: $edges} -> $children
+  return {children: $children}
+
+# Historical-root semantics: the root at a revision is the immutable
+# `RevisionContent.procedure_root` recorded under that RevisionId. It is not a
+# live recomputation over whatever procedures happen to be stored now.
+procedure get_merkle_root_at_revision:
+  trigger: manual
+  read_revision {revision_id: graph_query.from} -> $revision
+  return {procedure_root: $revision.procedure_root}
