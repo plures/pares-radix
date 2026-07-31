@@ -13,6 +13,12 @@ pub enum EdgeKind {
     RepositoryContainsProcedure,
     RevisionParentOf,
     RevisionIncludesProcedureRevision,
+    RepositoryHasRef,
+    RefPointsToRevision,
+    ProcedureProducesArtifact,
+    ArtifactUsesBlob,
+    RevisionRecordsLogicalChange,
+    RepositoryContainsEmptyDirectory,
 }
 
 impl EdgeKind {
@@ -21,6 +27,12 @@ impl EdgeKind {
             Self::RepositoryContainsProcedure => "repository_contains_procedure",
             Self::RevisionParentOf => "revision_parent_of",
             Self::RevisionIncludesProcedureRevision => "revision_includes_procedure_revision",
+            Self::RepositoryHasRef => "repository_has_ref",
+            Self::RefPointsToRevision => "ref_points_to_revision",
+            Self::ProcedureProducesArtifact => "procedure_produces_artifact",
+            Self::ArtifactUsesBlob => "artifact_uses_blob",
+            Self::RevisionRecordsLogicalChange => "revision_records_logical_change",
+            Self::RepositoryContainsEmptyDirectory => "repository_contains_empty_directory",
         }
     }
 }

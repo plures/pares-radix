@@ -12,5 +12,5 @@ mod store;
 
 pub use edge::{EdgeKind, EdgeRecord};
 pub use error::GraphStoreError;
-pub use node::{GraphNode, GraphNodeKind, NodeKey};
+pub use node::{BlobRecord, EmptyDirectoryRecord, GraphNode, GraphNodeKind, NodeKey};
 pub use store::GraphStore;

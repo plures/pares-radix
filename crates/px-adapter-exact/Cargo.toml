@@ -8,6 +8,7 @@ description = "M1 exact-artifact adapter: recursive filesystem importer and dete
 
 [dependencies]
 px-repo-model = { path = "../px-repo-model" }
+px-graph-store = { path = "../px-graph-store" }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
 

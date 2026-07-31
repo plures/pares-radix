@@ -23,8 +23,10 @@
 
 pub mod importer;
 pub mod materializer;
+pub mod persistence;
 pub mod tree;
 
 pub use importer::{import_tree, ImportError};
 pub use materializer::{materialize_tree, MaterializeError};
+pub use persistence::{materialize_from_store, persist_imported_tree, PersistError};
 pub use tree::{ImportedDirectory, ImportedFile, ImportedTree};
