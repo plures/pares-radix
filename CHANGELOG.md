@@ -1,3 +1,7 @@
+## [1.55.57] — 2026-07-31
+
+- feat(px-graph-store,px-adapter-exact): M3 - persist procedure graph nodes and wire import/materialize through PluresDB (#602) (186b89a)
+
 ## [1.55.56] — 2026-07-31
 
 - feat(graph): persist procedure graph in PluresDB (#601) (20fd08d)
