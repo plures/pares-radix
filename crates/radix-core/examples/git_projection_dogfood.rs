@@ -46,27 +46,49 @@ fn git_blob_content(repo: &str, oid: &str) -> Vec<u8> {
     git_stdout(repo, &["cat-file", "-p", oid])
 }
 
-fn parse_tree_entries(raw: &str) -> Vec<(String, String, String, String)> {
-    // Each line: "<mode> <type> <oid>\t<name>"
+/// Map a raw git tree-entry mode string to a known `'static` str.
+///
+/// Git tree entry modes are a small fixed set. Mapping to known literals
+/// avoids leaking memory for every entry and fails fast on unexpected modes.
+fn mode_to_static(mode: &str) -> &'static str {
+    match mode {
+        "100644" => "100644",
+        "100755" => "100755",
+        "100664" => "100664",
+        "120000" => "120000",
+        "160000" => "160000",
+        "40000" => "40000",
+        other => panic!("unexpected git tree entry mode: {other}"),
+    }
+}
+
+fn parse_tree_entries(raw: &[u8]) -> Vec<(String, String, String, String)> {
+    // `git ls-tree -z` separates entries with NUL, which is safe for
+    // filenames that contain newlines.  Each entry: "<mode> <type> <oid>\t<name>"
     let mut out = Vec::new();
-    for line in raw.lines() {
-        if line.is_empty() {
+    for entry in raw.split(|&b| b == 0) {
+        if entry.is_empty() {
             continue;
         }
-        let (meta, name) = line.split_once('\t').expect("malformed tree line");
+        let tab_pos = match entry.iter().position(|&b| b == b'\t') {
+            Some(pos) => pos,
+            None => continue,
+        };
+        let meta = String::from_utf8_lossy(&entry[..tab_pos]);
+        let name = String::from_utf8_lossy(&entry[tab_pos + 1..]).into_owned();
         let mut parts = meta.splitn(3, ' ');
-        let mut mode = parts.next().unwrap().to_string();
-        let kind = parts.next().unwrap().to_string();
-        let oid = parts.next().unwrap().to_string();
-        // `git cat-file -p`/`ls-tree` DISPLAYS directory mode as 6-digit
-        // "040000", but the real git tree OBJECT BYTES store it as 5-digit
-        // "40000" (no leading zero) -- this is a documented git display
-        // quirk, not a git_projection.rs bug. Normalize here so the harness
-        // feeds project_tree() the exact on-disk mode string it expects.
+        let mut mode = parts.next().unwrap_or("").to_string();
+        let kind = parts.next().unwrap_or("").to_string();
+        let oid = parts.next().unwrap_or("").to_string();
+        // `git ls-tree` DISPLAYS directory mode as 6-digit "040000", but the
+        // real git tree OBJECT BYTES store it as 5-digit "40000" (no leading
+        // zero) -- this is a documented git display quirk, not a
+        // git_projection.rs bug. Normalize so project_tree() gets the exact
+        // on-disk mode string it expects.
         if mode == "040000" {
             mode = "40000".to_string();
         }
-        out.push((mode, kind, oid, name.to_string()));
+        out.push((mode, kind, oid, name));
     }
     out
 }
@@ -84,13 +106,16 @@ struct Stats {
 /// Recursively verify every blob/tree under `git_tree_oid` re-derives to the
 /// same object id via the pure projection functions.
 fn verify_tree(repo: &str, git_tree_oid: &str, path: &str, stats: &mut Stats) -> [u8; 20] {
-    let raw = String::from_utf8(git_stdout(repo, &["cat-file", "-p", git_tree_oid]))
-        .expect("tree listing not utf8");
+    let raw = git_stdout(repo, &["ls-tree", "-z", git_tree_oid]);
     let entries = parse_tree_entries(&raw);
 
     let mut projected_entries = Vec::new();
     for (mode, kind, oid, name) in &entries {
-        let child_path = format!("{path}/{name}");
+        let child_path = if path.is_empty() {
+            name.clone()
+        } else {
+            format!("{path}/{name}")
+        };
         let projected_oid: [u8; 20] = match kind.as_str() {
             "blob" => {
                 let content = git_blob_content(repo, oid);
@@ -118,9 +143,8 @@ fn verify_tree(repo: &str, git_tree_oid: &str, path: &str, stats: &mut Stats) ->
                 continue;
             }
         };
-        let leaked_mode: &'static str = Box::leak(mode.clone().into_boxed_str());
         projected_entries.push(TreeEntry {
-            mode: leaked_mode,
+            mode: mode_to_static(mode),
             name: name.clone(),
             oid: projected_oid,
         });
@@ -145,7 +169,13 @@ fn verify_tree(repo: &str, git_tree_oid: &str, path: &str, stats: &mut Stats) ->
 /// This proves the projected bytes are not just oid-compatible in theory but
 /// are literally ingestible as real git objects.
 fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
-    std::fs::create_dir_all(target_repo).unwrap();
+    // Ensure a truly fresh bare repo — remove any pre-existing directory so
+    // stale objects cannot invalidate the freshness assumption.
+    let target_path = std::path::Path::new(target_repo);
+    if target_path.exists() {
+        std::fs::remove_dir_all(target_path).unwrap();
+    }
+    std::fs::create_dir_all(target_path).unwrap();
     let init = Command::new("git")
         .args(["init", "--bare", target_repo])
         .output()
@@ -158,8 +188,7 @@ fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
         .to_string();
 
     fn rebuild_into(target_repo: &str, source_repo: &str, git_tree_oid: &str) -> String {
-        let raw = String::from_utf8(git_stdout(source_repo, &["cat-file", "-p", git_tree_oid]))
-            .unwrap();
+        let raw = git_stdout(source_repo, &["ls-tree", "-z", git_tree_oid]);
         let entries = parse_tree_entries(&raw);
         let mut mktree_input = String::new();
         for (mode, kind, oid, name) in &entries {
@@ -178,6 +207,7 @@ fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
                         .args(["hash-object", "-w", "--stdin"])
                         .stdin(Stdio::piped())
                         .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
                         .spawn()
                         .unwrap();
                     child
@@ -187,6 +217,12 @@ fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
                         .write_all(&content)
                         .unwrap();
                     let out = child.wait_with_output().unwrap();
+                    if !out.status.success() {
+                        panic!(
+                            "git hash-object failed for blob {name}: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        );
+                    }
                     let written_oid = String::from_utf8(out.stdout).unwrap().trim().to_string();
                     assert_eq!(
                         written_oid, projected_hex,
@@ -207,6 +243,7 @@ fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
             .arg("mktree")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .unwrap();
         child
@@ -216,6 +253,12 @@ fn project_back_smoke_test(source_repo: &str, rev: &str, target_repo: &str) {
             .write_all(mktree_input.as_bytes())
             .unwrap();
         let out = child.wait_with_output().unwrap();
+        if !out.status.success() {
+            panic!(
+                "git mktree failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
         String::from_utf8(out.stdout).unwrap().trim().to_string()
     }
 
