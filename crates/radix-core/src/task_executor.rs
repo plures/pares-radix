@@ -52,24 +52,34 @@ impl TaskDispatcher {
     /// Called by the heartbeat after determining there's pending work.
     /// The prompt is injected as a SpineEvent::Inbound with source "task_executor",
     /// which flows through the same pipeline as user messages (model invoke → delivery).
-    pub fn dispatch(&self, task_id: &str, prompt: &str) -> bool {
+    /// `chat_id`: the ORIGIN chat the task/promise was created in (from
+    /// `Task.chat_id`, set at `TaskManager::create_task`). Autonomous redrives
+    /// MUST carry this forward so the reply reaches the real conversation the
+    /// promise was made in, instead of being injected with a synthetic
+    /// `chat_id` that no channel adapter can deliver to. Pass `"0"` only for
+    /// genuinely chat-less/system-internal tasks. Resolution from `task_id` to
+    /// the real `chat_id` is the caller's responsibility (see
+    /// `TaskDispatchActionHandler::dispatch_task`, which resolves it via
+    /// `TaskManager::get_task`).
+    pub fn dispatch(&self, task_id: &str, prompt: &str, chat_id: &str) -> bool {
         let Some(emitter) = &self.pipeline_emitter else {
             warn!("task_dispatcher: no pipeline emitter — cannot dispatch");
             return false;
         };
 
-        info!(task_id = %task_id, "task_dispatcher: emitting task to pipeline");
+        info!(task_id = %task_id, chat_id = %chat_id, "task_dispatcher: emitting task to pipeline");
 
         // Spawn the emit as a background task since PipelineEmitter::emit is async
         let emitter = emitter.clone();
         let task_id_owned = task_id.to_string();
         let prompt_owned = prompt.to_string();
+        let chat_id_owned = chat_id.to_string();
         tokio::spawn(async move {
             emitter
                 .emit(SpineEvent::Inbound {
                     id: SpineEvent::new_id(),
                     source: "task_executor".into(),
-                    chat_id: "0".into(), // internal task, no real chat
+                    chat_id: chat_id_owned,
                     sender: format!("task:{}", task_id_owned),
                     content: prompt_owned,
                     metadata: serde_json::json!({

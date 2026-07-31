@@ -1,0 +1,74 @@
+# gui-launch-policy.px — GUI launch mode + startup sequencing decisions (DESIGN-STAGE DRAFT)
+#
+# Resolves ADR-0037 OQ-2 (launch-on-demand by default, user-configurable) and
+# OQ-3's sequencing recommendation (§3.6: GUI polls /readyz rather than relying
+# on strict systemd system/user service ordering across the login boundary).
+#
+# This file captures the DECISION of when/how the GUI starts and how it waits
+# for the backend to be ready, as pure dataflow. It does NOT implement the
+# Tauri process launch, the systemd unit, or the actual HTTP poll — those are
+# Rust/nixos-config side-effect handlers, dev-stage work per ADR-0037 §6.
+#
+# Status: DRAFT. No Rust side-effect handler exists yet for the actions below
+# (gui_resolve_launch_mode, gui_launch_process, gui_poll_backend_ready).
+#
+# Queue topology (proposed):
+#
+#   gui_launch_trigger ─→ [resolve_launch_mode] ─→ launch_mode_decision
+#   launch_mode_decision ─→ [start_gui_if_applicable] ─→ gui_started (Rust IO, terminal)
+#   gui_started ─→ [await_backend_ready] ─→ gui_ready (Rust IO, terminal)
+#
+
+# [parser-skip] fact GuiLaunchMode:
+# [parser-skip]   on_demand: "default — user opens manually, or plugin is pinned in desktop dock"
+# [parser-skip]   autostart: "opt-in via config — starts at login (Cosmic autostart / systemd user service)"
+# [parser-skip]
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint on_demand_is_default:
+# [parser-skip]   given: "GUI launch mode defaults to on-demand unless the user has explicitly
+# [parser-skip]           set config:gui_launch_mode = autostart (OQ-2)."
+# [parser-skip]   check: launch_mode_decision.mode == "on_demand" or config.gui_launch_mode_explicitly_set == true
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint gui_never_assumes_backend_ready:
+# [parser-skip]   given: "The GUI must never assume the backend is up at launch — it always
+# [parser-skip]           polls /readyz rather than relying on systemd ordering across the
+# [parser-skip]           system/user service boundary (OQ-3, ADR-0037 §3.6)."
+# [parser-skip]   check: gui_ready.confirmed_via == "readyz_poll"
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint backend_readiness_poll_has_timeout:
+# [parser-skip]   given: "Polling for backend readiness must bound retries — no infinite
+# [parser-skip]           silent wait; the GUI shows a 'connecting' state and eventually
+# [parser-skip]           surfaces a real error."
+# [parser-skip]   check: gui_ready.poll_attempts <= config.max_readyz_poll_attempts
+# [parser-skip]   severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Resolve whether the GUI should launch and under what mode.
+procedure resolve_launch_mode(trigger: string from "gui_launch_trigger") -> mode into "launch_mode_decision":
+  given: "Resolve GUI launch mode per OQ-2 — on-demand default, autostart opt-in"
+  pluresdb_read {key: "config:gui_launch_mode"} -> $configured_mode
+  gui_resolve_launch_mode {trigger: $trigger, configured_mode: $configured_mode} -> $mode
+  pluresdb_write {key: "gui:launch_mode_decision", value: $mode}
+  return $mode
+
+# Start the GUI process if the resolved mode calls for it.
+procedure start_gui_if_applicable(mode: string from "launch_mode_decision") -> started into "gui_started":
+  given: "Start the GUI process only when launch_mode calls for it (autostart trigger, or explicit on-demand invocation)"
+  gui_launch_process {mode: $mode} -> $started
+  return $started
+
+# Wait for the backend to report readiness before declaring the GUI usable.
+procedure await_backend_ready(started: string from "gui_started") -> ready into "gui_ready":
+  given: "Poll backend /readyz per OQ-3's recommended sequencing — never assume systemd ordering"
+  pluresdb_read {key: "config:max_readyz_poll_attempts"} -> $max_attempts
+  gui_poll_backend_ready {max_attempts: $max_attempts} -> $ready
+  pluresdb_write {key: "gui:ready_state", value: $ready}
+  return $ready

@@ -85,7 +85,13 @@ impl PluginRuntime {
     pub async fn install_batch_resolving(
         &self,
         manifests: Vec<PluginManifest>,
-    ) -> Result<(Vec<String>, Vec<crate::plugins::capability::CapabilityBinding>), PluginError> {
+    ) -> Result<
+        (
+            Vec<String>,
+            Vec<crate::plugins::capability::CapabilityBinding>,
+        ),
+        PluginError,
+    > {
         let ordered = topological_sort(&manifests)?;
         // Resolve bindings from the full batch (same policy the topo-sort used).
         let bindings = resolve_capabilities(&manifests)?;
@@ -690,7 +696,11 @@ notify = "^1.0"
         assert_eq!(order.len(), 2);
 
         let bindings = executor.load_bindings().unwrap();
-        assert_eq!(bindings.len(), 1, "exactly one capability binding persisted");
+        assert_eq!(
+            bindings.len(),
+            1,
+            "exactly one capability binding persisted"
+        );
         let b = &bindings[0];
         assert_eq!(b.consumer, "shop");
         assert_eq!(b.capability, "commerce");

@@ -133,9 +133,12 @@ impl ModelSelectionActionHandler {
             .and_then(|v| v.as_array())
             .ok_or_else(|| err("model_selection", "score_models requires 'models' array"))?;
 
-        let requirements = params
-            .get("requirements")
-            .ok_or_else(|| err("model_selection", "score_models requires 'requirements' object"))?;
+        let requirements = params.get("requirements").ok_or_else(|| {
+            err(
+                "model_selection",
+                "score_models requires 'requirements' object",
+            )
+        })?;
 
         let needs_reasoning = requirements
             .get("needs_reasoning")
@@ -160,11 +163,7 @@ impl ModelSelectionActionHandler {
                 let capabilities = model
                     .get("capabilities")
                     .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect::<Vec<&str>>()
-                    })
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<&str>>())
                     .unwrap_or_default();
 
                 let speed = model
@@ -234,7 +233,12 @@ impl ModelSelectionActionHandler {
         let scored = params
             .get("scored_models")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| err("model_selection", "select_top requires 'scored_models' array"))?;
+            .ok_or_else(|| {
+                err(
+                    "model_selection",
+                    "select_top requires 'scored_models' array",
+                )
+            })?;
 
         let fallback_count = params
             .get("fallback_count")
@@ -261,9 +265,12 @@ impl ModelSelectionActionHandler {
 
     /// Format model config for use by the generation pipeline.
     fn format_model_config(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let selected = params
-            .get("selected")
-            .ok_or_else(|| err("model_selection", "format_model_config requires 'selected' model"))?;
+        let selected = params.get("selected").ok_or_else(|| {
+            err(
+                "model_selection",
+                "format_model_config requires 'selected' model",
+            )
+        })?;
 
         let fallbacks = params
             .get("fallbacks")
@@ -296,11 +303,7 @@ impl ModelSelectionActionHandler {
 
 #[async_trait::async_trait]
 impl AsyncActionHandler for ModelSelectionActionHandler {
-    async fn call(
-        &self,
-        name: &str,
-        params: &Value,
-    ) -> Result<Value, ExecutionError> {
+    async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
         match name {
             "list_available_models" => self.list_available_models(params),
             "classify_task_requirements" => self.classify_task_requirements(params),

@@ -25,8 +25,7 @@
 /// capability taxonomy is owned by the host. Adding a new platform capability is
 /// a deliberate host change, not something a plugin can declare into existence.
 /// Anything not in this set is, by definition, a **provider** capability.
-pub const PLATFORM_CAPABILITIES: &[&str] =
-    &["network", "storage", "ui", "notify", "llm", "system"];
+pub const PLATFORM_CAPABILITIES: &[&str] = &["network", "storage", "ui", "notify", "llm", "system"];
 
 /// Returns `true` if `name` is a host-owned platform capability (permission
 /// axis, ADR-0011) rather than a provider capability (interface axis, ADR-0022).

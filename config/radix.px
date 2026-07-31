@@ -15,7 +15,10 @@ config telegram:
 
 config model:
   url: "https://models.inference.ai.azure.com"
-  fallbacks: ["gpt-4o", "claude-sonnet-4.5"]
+  # Fallbacks must never include the primary model above — the client will
+  # now skip any fallback that duplicates an already-failed model in the
+  # chain, but a config-level dedupe is the honest first line of defense.
+  fallbacks: ["gpt-4o", "gpt-4o-mini"]
   temperature: 0.7
   max_tokens: 4096
 

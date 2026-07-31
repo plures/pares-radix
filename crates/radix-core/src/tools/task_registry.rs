@@ -200,7 +200,9 @@ impl TaskRegistryTool {
             ));
         }
         block.push_str("</pending_tasks>\n");
-        block.push_str("Use task_get(task_id) for details. Use task_complete(task_id, reason) when done.\n");
+        block.push_str(
+            "Use task_get(task_id) for details. Use task_complete(task_id, reason) when done.\n",
+        );
         block
     }
 
@@ -209,7 +211,10 @@ impl TaskRegistryTool {
     async fn handle_create(&self, args: Value) -> String {
         let description = match args.get("description").and_then(|v| v.as_str()) {
             Some(d) => d.to_string(),
-            None => return json!({"status": "error", "message": "'description' is required"}).to_string(),
+            None => {
+                return json!({"status": "error", "message": "'description' is required"})
+                    .to_string()
+            }
         };
 
         let priority = args
@@ -234,7 +239,9 @@ impl TaskRegistryTool {
             .unwrap_or_default();
 
         // Create via TaskManager — uses "self" as chat_id for agent-created tasks
-        let mut task = self.task_manager.create_task(&description, "self", conditions);
+        let mut task = self
+            .task_manager
+            .create_task(&description, "self", conditions);
 
         // Update priority if non-default (create_task sets priority=5)
         if priority != 5 {
@@ -261,7 +268,9 @@ impl TaskRegistryTool {
     async fn handle_complete(&self, args: Value) -> String {
         let task_id = match args.get("task_id").and_then(|v| v.as_str()) {
             Some(id) => id,
-            None => return json!({"status": "error", "message": "'task_id' is required"}).to_string(),
+            None => {
+                return json!({"status": "error", "message": "'task_id' is required"}).to_string()
+            }
         };
 
         let reason = args
@@ -278,7 +287,8 @@ impl TaskRegistryTool {
                 return json!({
                     "status": "error",
                     "message": format!("Task '{}' not found", task_id),
-                }).to_string();
+                })
+                .to_string();
             }
         };
 
@@ -299,13 +309,11 @@ impl TaskRegistryTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(20) as usize;
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
         let tasks = if include_completed {
-            self.task_manager.open_tasks()
+            self.task_manager
+                .open_tasks()
                 .into_iter()
                 .chain(self.task_manager.tasks_for_chat("self", true))
                 .collect::<Vec<_>>()
@@ -339,7 +347,9 @@ impl TaskRegistryTool {
     async fn handle_get(&self, args: Value) -> String {
         let task_id = match args.get("task_id").and_then(|v| v.as_str()) {
             Some(id) => id,
-            None => return json!({"status": "error", "message": "'task_id' is required"}).to_string(),
+            None => {
+                return json!({"status": "error", "message": "'task_id' is required"}).to_string()
+            }
         };
 
         let resolved_id = self.resolve_task_id(task_id);
@@ -349,7 +359,8 @@ impl TaskRegistryTool {
                 return json!({
                     "status": "error",
                     "message": format!("Task '{}' not found", task_id),
-                }).to_string();
+                })
+                .to_string();
             }
         };
 
@@ -381,20 +392,20 @@ impl TaskRegistryTool {
                 })
                 .to_string()
             }
-            None => {
-                json!({
-                    "status": "error",
-                    "message": format!("Task '{}' not found", resolved_id),
-                })
-                .to_string()
-            }
+            None => json!({
+                "status": "error",
+                "message": format!("Task '{}' not found", resolved_id),
+            })
+            .to_string(),
         }
     }
 
     async fn handle_update(&self, args: Value) -> String {
         let task_id = match args.get("task_id").and_then(|v| v.as_str()) {
             Some(id) => id,
-            None => return json!({"status": "error", "message": "'task_id' is required"}).to_string(),
+            None => {
+                return json!({"status": "error", "message": "'task_id' is required"}).to_string()
+            }
         };
 
         let resolved_id = match self.resolve_task_id(task_id) {
@@ -403,7 +414,8 @@ impl TaskRegistryTool {
                 return json!({
                     "status": "error",
                     "message": format!("Task '{}' not found", task_id),
-                }).to_string();
+                })
+                .to_string();
             }
         };
 
@@ -525,9 +537,7 @@ mod tests {
         let short_id = &task_id[..8];
 
         // Get by short ID
-        let get_result = registry
-            .handle_get(json!({"task_id": short_id}))
-            .await;
+        let get_result = registry.handle_get(json!({"task_id": short_id})).await;
         let got: Value = serde_json::from_str(&get_result).unwrap();
         assert_eq!(got["id"], task_id);
     }

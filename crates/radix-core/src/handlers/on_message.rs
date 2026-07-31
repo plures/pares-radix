@@ -199,7 +199,7 @@ impl Procedure for OnMessage {
 mod tests {
     use super::*;
     use crate::memory_client::Memory;
-    use crate::model::{ChatOptions, ModelCompletion, ToolCall, ToolDefinition};
+    use crate::model::{ChatOptions, ModelClientError, ModelCompletion, ToolCall, ToolDefinition};
     use serde_json::json;
     use std::sync::Mutex;
 
@@ -261,7 +261,7 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             Ok(ModelCompletion {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
@@ -294,7 +294,7 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
             if *count == 1 {

@@ -75,7 +75,7 @@ procedure evaluate_dispatch(tick: int from "heartbeat_tick") -> decision into "d
   given: "Decide whether to dispatch an autonomous task on this heartbeat tick"
 
   # Load all evaluable tasks
-  db_query {prefix: "task:", filter: {status: "pending"}} -> $all_tasks
+  read_evaluable_tasks {} -> $all_tasks
 
   when length($all_tasks) == 0:
     return {should_dispatch: false, task_id: null, reason: "no_pending_tasks", prompt: null}
@@ -103,11 +103,15 @@ procedure evaluate_dispatch(tick: int from "heartbeat_tick") -> decision into "d
   # Build the execution prompt
   build_task_prompt {task: $best} -> $prompt
 
-  # Mark as in-progress
-  pluresdb_write {key: "task:{$best.id}:status", value: "in_progress"}
-  pluresdb_write {key: "task:{$best.id}:last_evaluated_at", value: $now}
-  add {a: $best.attempts, b: 1} -> $next_attempts
-  pluresdb_write {key: "task:{$best.id}:attempts", value: $next_attempts}
+  # Mark as in-progress through the Rust IO seam (TaskManager mapping:
+  # pending->Open at read boundary, in_progress->InProgress on write boundary).
+  mark_task_in_progress {task_id: $best.id}
+
+  # Rust IO edge (spine.px boundary #5): hand the chosen task + prompt to the
+  # TaskDispatcher, which injects it as an autonomous Inbound event into the
+  # same pipeline as user messages, and records the dispatch timestamp.
+  # Decision logic stayed here in .px; this is the only side-effect call.
+  dispatch_task {task_id: $best.id, prompt: $prompt}
 
   return {
     should_dispatch: true,
@@ -131,10 +135,13 @@ procedure build_steered_prompt(steer: SteerResult from "task_dispatch") -> promp
     return null
   end
 
-  # Mark dispatched
-  timestamp_now {} -> $now
-  pluresdb_write {key: "task:{steer.task_id}:status", value: "in_progress"}
-  pluresdb_write {key: "task:{steer.task_id}:last_evaluated_at", value: $now}
+  # Mark dispatched/in-progress through the same TaskManager seam used by
+  # heartbeat dispatch (status vocab bridge: in_progress <-> InProgress).
+  mark_task_in_progress {task_id: steer.task_id}
+
+  # Rust IO edge (spine.px boundary #5): dispatch the steered prompt into the
+  # pipeline via the TaskDispatcher (same edge as evaluate_dispatch).
+  dispatch_task {task_id: steer.task_id, prompt: steer.message_to_agent}
 
   return steer.message_to_agent
 
@@ -192,7 +199,7 @@ Attempts: {attempts}
 Conditions:
 {conditions}
 
-Work on this task using available tools. When complete, indicate which conditions are satisfied. If blocked, explain why.",
+Work on this task using available tools. When every condition above is satisfied, you MUST call the `task_complete` tool with this task's ID ({id}) to close the loop; reporting completion in prose alone will NOT terminate the task and it will be re-dispatched on the next tick. If blocked, explain why.",
     vars: {
       description: $task.description,
       id: $task.id,

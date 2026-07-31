@@ -1,0 +1,44 @@
+# task-dashboard.px — native, PluresDB-backed task dashboard (ADR-0036).
+#
+# This is a VIEW, not a fifth ledger. `aggregate_task_dashboard` is the sole
+# Rust read-boundary action: it scans task:*, worktask:task:*, epic:registry:*,
+# and epic:gate:* from the shared StateStore and applies ADR-0036's one status
+# translation table. The only durable dashboard state is the render cache below.
+#
+# The first shipped command is on-demand (`task:cmd:dashboard:get:*`). A periodic
+# Telegram tick remains intentionally absent until the ADR's open presentation
+# decision (separate message vs section of the existing dashboard) is resolved;
+# declaring an exec actor with no real delivery implementation would be a stub.
+
+entity task_dashboard_view:
+  prefix: "dashboard:tasks:"
+  fields:
+    surface_id: String
+    message_id: u64
+    frozen: bool
+    created_at: String
+    rendered_at: String
+    open_count: u64
+    waiting_count: u64
+    done_count: u64
+    stopped_count: u64
+
+# Read-only command. The request key is routed in spine/bootstrap.rs; no source
+# namespace is modified. Response delivery follows the existing reactive command
+# envelope rather than creating a parallel persistent ledger.
+procedure task_dashboard_get:
+  trigger: on_write
+  given: "Read the unified task dashboard across all durable task namespaces"
+
+  aggregate_task_dashboard {} -> $dashboard
+  return $dashboard
+
+# Structural declaration paired with TaskDashboardActionHandler's hard prefix
+# guard. The dashboard may only write its own derived render-cache nodes.
+constraint task_dashboard_never_writes_source_namespaces:
+  scope: task_dashboard
+  phase: pre_write
+  when: procedure.name == "task_dashboard_get"
+  require: procedure.writes_prefix == "dashboard:tasks:" OR procedure.writes_prefix == ""
+  severity: error
+  message: "Task dashboard procedures may only write derived dashboard cache nodes."

@@ -59,9 +59,23 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("memory_correction", "memory:*");
     m.insert("memory_consolidate", "memory:*");
 
-    // Heartbeat
+    // Heartbeat clock chain (design: praxis/spine/spine.px IO boundary #4).
+    // The heartbeat timer (Rust IO) writes a tick to the "heartbeat_clock"
+    // queue; heartbeat_timer emits it, heartbeat_tick runs the health check,
+    // and evaluate_dispatch (autonomous-dispatch.px) reads the "heartbeat_tick"
+    // queue to decide whether to dispatch an autonomous task this tick.
+    //
+    // NOTE: the legacy "heartbeat:*" glob is retained for the existing
+    // heartbeat_logic/heartbeat_check procedures, but no producer writes a
+    // "heartbeat:*" key today — heartbeats currently arrive as Inbound events.
+    // The authoritative queue keys are "heartbeat_clock" and "heartbeat_tick".
     m.insert("heartbeat_logic", "heartbeat:*");
     m.insert("heartbeat_check", "heartbeat:*");
+    m.insert("heartbeat_timer", "heartbeat_clock:*");
+    m.insert("heartbeat_tick", "heartbeat_clock:*");
+    // Autonomous dispatch: evaluate_dispatch consumes the heartbeat tick and
+    // writes a dispatch_decision consumed by the TaskDispatchDriver (Rust IO).
+    m.insert("evaluate_dispatch", "heartbeat_tick:*");
 
     // Response post-processing (fires on model_response events)
     m.insert("commitment_detection", "model_response:*");
@@ -80,6 +94,18 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     // of the noisy `on_write:*` fallback. (TASK-2026-07-08-briefing-px STEP 1.)
     m.insert("morning_briefing", "briefing:request:*");
 
+    // Repo health sweep (epic:ci-org-health-monitor-implementation, slice 1) -
+    // a write to `health:sweep:<repo>` triggers a single-repo CI/PR sweep that
+    // persists health_anomaly:* rows. Mirrors the morning_briefing wiring.
+    m.insert("repo_health_sweep", "health:sweep:*");
+
+    // Dashboard milestone freeze — a `milestone:<id>` write is the dashboard
+    // signal; the procedure derives + persists the frozen dashboard node (the
+    // pure-praxis analog of the exec side-effect that froze the dashboard).
+    // `progress:<id>` writes are history, NOT dashboard signals, so they must
+    // NOT match this pattern. (test/milestone-reactive-proof)
+    m.insert("dashboard_milestone", "milestone:*");
+
     // Task management
     m.insert("task_evaluation", "inbound:*");
     m.insert("task_steering", "task:*");
@@ -88,6 +114,10 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("plan_task", "task_request:*");
     m.insert("evaluate_gate", "stage_complete:*");
     m.insert("report_result", "task_complete:*");
+    // Task-completion seam: after evaluate_gate persists gate_decision:{task_id},
+    // finalize_task fires and (on the final stage) drives the owning TaskManager
+    // Task terminal. (task-completion-seam.px)
+    m.insert("finalize_task", "gate_decision:*");
 
     // Worktask executor — each command fires only on its own command key
     // (a write to `worktask:cmd:<name>:<reqid>` triggers exactly that procedure).
@@ -102,6 +132,11 @@ fn default_trigger_map() -> HashMap<&'static str, &'static str> {
     m.insert("new_pr", "worktask:cmd:new_pr:*");
     m.insert("reclaim", "worktask:cmd:reclaim:*");
     m.insert("doctor", "worktask:cmd:doctor:*");
+
+    // Native task dashboard — an on-demand, read-only aggregation view over
+    // task/worktask/epic namespaces (ADR-0036). Keep its command key isolated
+    // so ordinary task writes cannot spuriously render a dashboard.
+    m.insert("task_dashboard_get", "task:cmd:dashboard:get:*");
 
     // RSI (recursive self-improvement)
     m.insert("evaluate_performance", "task_complete:*");
@@ -324,6 +359,29 @@ procedure some_manual_proc:
             "real_spine_px_files_compile: loaded {} procedures from {}",
             count,
             spine_dir.display()
+        );
+    }
+
+    /// ADR-0036 guard: the native task-dashboard procedure must remain a real
+    /// compilable on-write command and retain its isolated request-key route.
+    #[test]
+    fn task_dashboard_px_compiles_and_routes_get_command() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project_root = manifest_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("could not find project root");
+        let path = project_root.join("praxis/procedures/task-dashboard.px");
+        let src = std::fs::read_to_string(&path).expect("task-dashboard.px must exist");
+        let doc = pares_radix_praxis::px::parse(&src)
+            .expect("task-dashboard.px must parse against the real .px parser");
+        let records = pares_radix_praxis::px::compiler::compile(&doc);
+        assert!(records.iter().any(|record| {
+            record.data.get("name").and_then(|v| v.as_str()) == Some("task_dashboard_get")
+        }));
+        assert_eq!(
+            default_trigger_map().get("task_dashboard_get"),
+            Some(&"task:cmd:dashboard:get:*")
         );
     }
 

@@ -282,7 +282,10 @@ mod tests {
         // (manual procedures are skipped).
         let registry = ReactiveRegistry::new();
         let registered = register_reactive_procedures(tmp.path(), &registry, handler()).await;
-        assert_eq!(registered, 0, "shadow procedures must not register reactively");
+        assert_eq!(
+            registered, 0,
+            "shadow procedures must not register reactively"
+        );
         assert_eq!(
             registry.trigger_count().await,
             0,

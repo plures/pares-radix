@@ -122,6 +122,18 @@ procedure evaluate_gate:
   # Find the next stage to run (returns null if all done)
   find_next_stage {task: $updated_task, after: $new_value.stage_name} -> $next
 
+  # Persist the gate decision so the reactive `finalize_task` procedure fires.
+  # This closes the task-completion seam: when next_stage == null (final stage),
+  # finalize_task drives the owning TaskManager Task terminal. (See
+  # task-completion-seam.px.) Without this write the decision would only be a
+  # return value and never re-enter the reactive registry.
+  write_state {key: "gate_decision:{$new_value.task_id}", value: {
+    task_id: $new_value.task_id,
+    completed_stage: $new_value.stage_name,
+    status: $new_value.status,
+    next_stage: $next
+  }} -> $decision_written
+
   # Return the gate decision
   return {task_id: $new_value.task_id, completed_stage: $new_value.stage_name, status: $new_value.status, next_stage: $next}
 

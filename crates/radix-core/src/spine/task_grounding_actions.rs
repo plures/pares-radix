@@ -62,10 +62,7 @@ impl AsyncActionHandler for TaskGroundingActionHandler {
 
         // chat_id is optional: absent/empty falls back to global open tasks
         // (render_open_tasks_block already unions chat-scoped + global).
-        let chat_id = params
-            .get("chat_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let chat_id = params.get("chat_id").and_then(|v| v.as_str()).unwrap_or("");
 
         // Optional base system prompt. When provided, we return the combined
         // prompt (grounding block prepended) so the `.px` `build_context` step
@@ -125,7 +122,10 @@ mod tests {
             .unwrap();
         let s = out.as_str().unwrap();
         assert!(s.contains("ship the 467 fix"), "block missing task: {s}");
-        assert!(s.contains("open tasks/commitments"), "block missing header: {s}");
+        assert!(
+            s.contains("open tasks/commitments"),
+            "block missing header: {s}"
+        );
     }
 
     #[tokio::test]
@@ -146,7 +146,10 @@ mod tests {
         // Block comes first, base prompt after.
         let task_pos = s.find("finish 467").unwrap();
         let base_pos = s.find("You are praxisbot.").unwrap();
-        assert!(task_pos < base_pos, "grounding block must precede base prompt");
+        assert!(
+            task_pos < base_pos,
+            "grounding block must precede base prompt"
+        );
     }
 
     #[tokio::test]

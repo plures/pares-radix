@@ -1,0 +1,83 @@
+# agens-plugin-lifecycle.px — special-privilege plugin decision logic (DESIGN-STAGE DRAFT)
+#
+# Resolves ADR-0037 OQ-1: pares-agens is a special-privilege plugin, analogous to
+# GitHub Copilot inside VS Code — deeply integrated, granted elevated platform
+# access, but still registered through the plugin mechanism, NOT a standalone
+# app/systemd-unit composition.
+#
+# This file captures the DECISION of what "special-privilege" means and what it
+# authorizes, as pure dataflow. It does NOT implement plugin loading, manifest
+# parsing, or RadixPlugin TypeScript wiring (docs/architecture/plugin-system.md) —
+# that is Rust/TS plumbing that consumes this procedure's decisions.
+#
+# Status: DRAFT. No Rust side-effect handler exists yet for the actions below
+# (plugin_check_privilege, plugin_grant_channel_ownership,
+# plugin_grant_model_invocation). Writing those handlers is dev-stage work,
+# tracked in ADR-0037 §6.
+#
+# Queue topology (proposed):
+#
+#   plugin_activation_request ─→ [evaluate_plugin_privilege] ─→ plugin_privilege_decision
+#   plugin_privilege_decision ─→ [apply_privilege_grant] ─→ plugin_grants (terminal — Rust IO)
+#
+
+# [parser-skip] fact PluginPrivilegeTier:
+# [parser-skip]   ordinary: "standard RadixPlugin — routes/nav/settings/dashboardWidgets only"
+# [parser-skip]   special: "elevated — may own a channel, invoke models directly, bypass
+# [parser-skip]             standard llm.available()/budget gating subject to constraints below"
+# [parser-skip]
+# ═══════════════════════════════════════════════════════════════════
+# Constraints
+# ═══════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint special_privilege_requires_explicit_grant:
+# [parser-skip]   given: "A plugin must never receive special-privilege capabilities (channel
+# [parser-skip]           ownership, direct model invocation) by default — only pares-agens,
+# [parser-skip]           by explicit allowlist entry, may be granted this tier."
+# [parser-skip]   check: plugin_id in special_privilege_allowlist
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint channel_ownership_is_exclusive:
+# [parser-skip]   given: "Only one plugin may own a given external channel (e.g. Telegram) at
+# [parser-skip]           a time — no two plugins racing to read the same inbound stream."
+# [parser-skip]   check: count(plugins_owning(channel_id)) <= 1
+# [parser-skip]   severity: error
+
+# [parser-skip] constraint model_invocation_authority_is_logged:
+# [parser-skip]   given: "Every direct model invocation by a special-privilege plugin must be
+# [parser-skip]           traceable back to this decision (audit trail, not silent bypass)."
+# [parser-skip]   check: model_invocation_event.granted_by_decision_id != null
+# [parser-skip]   severity: error
+
+# ═══════════════════════════════════════════════════════════════════
+# Dataflow Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# Evaluate whether a plugin activation request qualifies for special-privilege tier.
+procedure evaluate_plugin_privilege(request: string from "plugin_activation_request") -> decision into "plugin_privilege_decision":
+  given: "Decide the privilege tier for a plugin activation, per OQ-1 (agens = special-privilege plugin)"
+  pluresdb_read {key: "config:special_privilege_allowlist"} -> $allowlist
+  plugin_check_privilege {plugin_id: $plugin_id, allowlist: $allowlist} -> $tier
+  pluresdb_write {key: "plugin:$plugin_id:privilege_tier", value: $tier}
+  return $tier
+
+# Apply the privilege grant — the ONLY place channel ownership / model invocation
+# authority is actually wired to Rust IO. Everything upstream is pure decision logic.
+procedure apply_privilege_grant(decision: string from "plugin_privilege_decision") -> grant into "plugin_grants":
+  given: "Apply a privilege decision as an actual capability grant (Rust IO boundary)"
+  pluresdb_read {key: "plugin:$plugin_id:privilege_tier"} -> $tier
+  plugin_grant_channel_ownership {plugin_id: $plugin_id, tier: $tier, channel_id: $channel_id} -> $channel_grant
+  plugin_grant_model_invocation {plugin_id: $plugin_id, tier: $tier} -> $model_grant
+  pluresdb_write {key: "plugin:$plugin_id:grants", value: {channel: $channel_grant, model: $model_grant}}
+  return {channel: $channel_grant, model: $model_grant}
+
+# ═══════════════════════════════════════════════════════════════════
+# Utility Procedures
+# ═══════════════════════════════════════════════════════════════════
+
+# utility: called by evaluate_plugin_privilege
+procedure plugin_check_privilege(plugin_id: string, allowlist: string) -> tier:
+  given: "Determine privilege tier for a plugin from the explicit allowlist — no implicit elevation"
+  membership_check {value: $plugin_id, set: $allowlist} -> $is_allowlisted
+  resolve_tier {is_allowlisted: $is_allowlisted} -> $tier
+  return $tier

@@ -125,10 +125,7 @@ impl TopicRoutingActionHandler {
     /// Extract topic signals from message content.
     /// This is a heuristic pre-filter before LLM classification.
     fn extract_topic_signals(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let message = params
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let message = params.get("message").and_then(|v| v.as_str()).unwrap_or("");
 
         let mut signals: Vec<Value> = Vec::new();
 
@@ -222,11 +219,7 @@ impl TopicRoutingActionHandler {
 
 #[async_trait::async_trait]
 impl AsyncActionHandler for TopicRoutingActionHandler {
-    async fn call(
-        &self,
-        name: &str,
-        params: &Value,
-    ) -> Result<Value, ExecutionError> {
+    async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
         match name {
             "evaluate_topic_confidence" => self.evaluate_topic_confidence(params),
             "build_steering_context" => self.build_steering_context(params),

@@ -1,3 +1,135 @@
+## [1.55.53] — 2026-07-30
+
+- feat(radix-core): ADR-0038 first slice - deterministic blob/tree git projection (#591) (8acccc1)
+- radix-core: add epic-registry claim/resume/orphan-detect IO boundary (#590) (46fe790)
+- docs: px-first spine audit for pares-radix + pares-agens (epic px-first-spine-refactor-radix-agens) (#589) (e903fbf)
+- ADR-0025 revision: procedure-graph-canonical model (#587) (d5d90a6)
+- Initial plan (#582) (27f9c08)
+- docs(mcp-dev-server): ADR-0022 - Tasks extension feasibility (design stage, blocked on SDK support) (#586) (e900a56)
+- docs(mcp): record cache-hints feasibility (#585) (80ec089)
+
+## [1.55.52] — 2026-07-29
+
+- feat(mcp-dev-server): add MCP outputSchema typing to tool registry and tools/call (#584) (69b0787)
+- docs(mcp-dev-server): ADR-0020 - Canvas elicitation feasibility (design stage, blocked on SDK adoption) (#583) (de94e82)
+
+## [1.55.51] — 2026-07-29
+
+- fix(mcp-dev-server): classify tool arg validation as tool-result errors, not JSON-RPC errors (#581) (aafae14)
+- Initial plan (#580) (9a207bc)
+- px-first: wire Copilot 4xx fallback through select_fallback_model procedure (#578) (7140154)
+
+## [1.55.50] — 2026-07-29
+
+- fix(ci): guard lifecycle job against Dependabot triggering_actor (#579) (4ffc14e)
+
+## [1.55.49] — 2026-07-29
+
+- feat(radix-core): expose RADIX_CORE_VERSION const for host apps (#575) (185f22b)
+- Initial plan (#577) (e86250f)
+- ci: make Dependabot auto-merge non-blocking when repo auto-merge is disabled (#576) (5cc00ad)
+- chore(deps): bump PluresDB to 2af92b1 (PxTimerDispatcher, PR #1088) (#573) (6ec1ae7)
+- Initial plan (#574) (c6e1502)
+- px-first: add model-fallback-selection.px closing the fallback-decision gap (58e8a0b)
+
+## [1.55.48] — 2026-07-28
+
+- fix(copilot): stop fallback chain from looping on a model that already failed (94f8660)
+- ci: make Dependabot auto-merge non-fatal when repository auto-merge is disabled (#572) (57f4509)
+
+## [1.55.47] — 2026-07-28
+
+- feat(pares-radix-svc): implement DEV stage of ADR-0018 runtime-as-service (#571) (60bb623)
+
+## [1.55.46] — 2026-07-26
+
+- fix(ci): skip lifecycle job for all Dependabot-branch events (#568) (e6923e8)
+
+## [1.55.45] — 2026-07-25
+
+- feat(radix-core): repo_health_sweep procedure - CI/PR anomaly detection (slice 1) (#570) (1f2fd76)
+
+## [1.55.44] — 2026-07-25
+
+- feat(model_pool): structured PoolControl catalog + select-by-key API (#569) (afa6a0c)
+- chore: delegate dependabot-auto-merge.yml to plures/.github reusable template (#567) (6364a5a)
+- Initial plan (#566) (a36b414)
+- chore(deps): bump peter-evans/repository-dispatch from 3 to 4 (#561) (bd07dcb)
+- chore(deps): bump dependabot/fetch-metadata from 2 to 3 (#560) (d23e103)
+- Initial plan (#555) (8598212)
+- chore(deps): bump actions/cache from 4 to 6 (#562) (d51cb45)
+- chore(deps): bump actions/upload-artifact from 4 to 7 (#563) (42de4be)
+
+## [1.55.43] — 2026-07-24
+
+- feat(praxis): add native task dashboard aggregation (#559) (f35f86b)
+
+## [1.55.42] — 2026-07-24
+
+- fix(mcp-dev-server): use dbPut wrapper for task-handoff + related db.set call sites (#565) (2117f7d)
+- chore(deps): bump cc from 1.3.0 to 1.4.0 (#564) (a0c84fe)
+- feat(task-handoff): wire action-dispatch + MCP caller surface + real tests (#557) (f7082e2)
+- feat(design-dojo): ADR-0035 drift enforcement + GraphView reconciliation pilot (#558) (904de50)
+- docs(decisions): ADR-0037 MVD OpenClaw-parity scope freeze (#556) (3bda586)
+- chore(deps): bump actions/create-github-app-token from 1 to 3 (#486) (4c73126)
+- chore(deps): bump actions/checkout from 4 to 7 (#489) (15c8e7f)
+- chore(deps): bump opentelemetry_sdk from 0.28.0 to 0.32.1 (#522) (2552cc8)
+- chore(deps): bump opentelemetry-semantic-conventions from 0.28.0 to 0.32.1 (#535) (7f899af)
+- chore(deps): bump tracing-opentelemetry from 0.29.0 to 0.33.0 (#538) (d402fee)
+- chore(deps): bump actions/github-script from 7 to 9 (#488) (becf794)
+
+## [1.55.39] — 2026-07-24
+
+- style: apply cargo fmt to workspace (CI auto-format push failed on PR #473) (#483) (87390ba)
+- docs(adr): ADR-0018 radix runtime-as-service (design only) (#554) (165ca05)
+- chore(deps): bump serde_json from 1.0.150 to 1.0.151 (#552) (d0c7109)
+- feat(core): durable task custody store with sled CAS (ADR-0036 M3) (#484) (b9084f5)
+- chore(deps): bump serde from 1.0.228 to 1.0.229 (#551) (00c9ccb)
+- chore(deps): bump async-trait from 0.1.89 to 0.1.91 (#550) (9d5656f)
+- chore(deps): bump libc from 0.2.186 to 0.2.189 (#505) (4c99ee1)
+- chore(deps): bump tokio from 1.52.3 to 1.53.1 (#547) (2314846)
+- chore(deps): bump thiserror from 2.0.18 to 2.0.19 (#542) (9d94c5e)
+- chore(deps): bump futures from 0.3.32 to 0.3.33 (#530) (f46fb2a)
+- chore(deps): bump uuid from 1.23.5 to 1.24.0 (#524) (cd6c6ec)
+- chore(deps): bump cc from 1.2.67 to 1.3.0 (#519) (513569d)
+- chore(deps): bump regex from 1.13.0 to 1.13.1 (#514) (b0d42ae)
+- chore(deps): bump futures-util from 0.3.32 to 0.3.33 (#504) (5a2ed58)
+- chore(deps-dev): bump @tauri-apps/cli from 2.11.1 to 2.11.4 (#493) (37e1829)
+- chore(deps): add dependabot.yml for cargo/npm/github-actions ecosystem (#482) (25c2863)
+
+## [1.55.36] — 2026-07-24
+
+- fix: thread real chat_id through autonomous task dispatch (#481) (af0f634)
+
+## [1.55.35] — 2026-07-24
+
+- fix(spine): resolve clippy::too_many_arguments on build_task_aware_runtime; incorporate PR #468 changes (#473) (0b89ab7)
+- docs(ADR-0035): design-dojo vendored-shim drift audit - ownership boundary + prioritized gaps (design only) (#479) (e06231d)
+- docs: ADR-0019 multiplatform installer packaging design (Phase 4 prep) (#478) (6f14de7)
+- docs(adr): ADR-0018 procedure-native plugin integration plan (Epic A design) (#477) (2856ce3)
+- ci(release): add concurrency guard to release workflow (#476) (56379cf)
+
+## [1.55.34] — 2026-07-21
+
+- fix(spine): resolve px task-dispatch verbs to real Rust handlers (p0 loop closure) (#475) (002783a)
+
+## [1.55.33] — 2026-07-20
+
+- feat(core): interactive approval-card block-and-await seam (#472) (5a7a0f3)
+
+## [1.55.32] — 2026-07-20
+
+- fix(core): close task-completion seam - subagent finish drives owning Task terminal (#474) (6d6ec0f)
+
+## [1.55.31] — 2026-07-20
+
+- test(spine): prove milestone: write drives .px dashboard procedure locally (72f805a)
+
+## [1.55.30] — 2026-07-20
+
+- fix(spine): close autonomous task-execution loop (W1+W2) (#471) (0f21737)
+- ci: migrate Tech Doc Writer to shared reusable (520cbd4)
+
 ## [1.55.29] — 2026-07-19
 
 - fix(spine): inject durable open-tasks grounding on live reactive .px path (#467) (#469) (8805792)

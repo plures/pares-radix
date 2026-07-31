@@ -1,0 +1,61 @@
+# task-completion-seam.px — S0 model: subagent finish → owning Task terminal transition
+#
+# ROOT CAUSE (verified 2026-07-20, kbristol Q "why show in_progress when no subagent working"):
+# Two disjoint task worlds that never connect —
+#   World A: TaskManager (radix-core/task_manager.rs) — durable CrdtStore `Task` with
+#            TaskStatus{Open,InProgress,Completed,Failed,Cancelled}. This is what task
+#            listings/dashboard show.
+#   World B: devtask: dataflow (dev-lifecycle.px + subagent_actor.rs) — a PluresDB
+#            `devtask:{id}` record driven by stage_complete:* → evaluate_gate.
+# subagent_actor.rs (poll loop, terminal arms) writes ONLY stage_complete:{tid}:{stage}
+# into World B; it holds NO Arc<TaskManager> and NEVER terminates the World-A Task.
+# Result: a Task never leaves its non-terminal state on subagent finish → stale "in_progress"
+# (in practice created Open and never transitioned at all — InProgress has no prod producer).
+#
+# CORRELATION GAP: devtask id and Task.id are minted independently (generate_id vs Uuid).
+# evaluate_gate already carries $new_value.task_id; the seam reuses THAT id as the Task.id
+# correlation key so finalize_task can resolve the owning Task.
+#
+# Queue topology:
+#   stage_complete:*  → [evaluate_gate]  (existing, dev-lifecycle.px) → computes next_stage
+#   evaluate_gate result → [finalize_task]  (THIS FILE) when next_stage == null:
+#       gate.status == "passed"                       → Task → Completed
+#       gate.status in {failed, timed_out, killed}    → Task → Failed
+#
+# S1 wires the Rust side-effect boundary: give the finalize handler an Arc<TaskManager>
+# and ensure devtask.task_id == owning Task.id. S2 = MockSpawner test: spawn → finish →
+# assert Task.status terminal AND task absent from open_tasks() (no stale InProgress).
+# Channel-agnostic (C-TEST-002), no stubs (C-NOSTUB-001).
+
+# ═══════════════════════════════════════════════════════════════════
+# Constraint: a finished subagent MUST leave its owning Task terminal
+# ═══════════════════════════════════════════════════════════════════
+
+# [parser-skip] constraint subagent_finish_terminates_owning_task:
+# [parser-skip]   given: "When a task's final stage completes, the owning TaskManager Task must reach a terminal status"
+# [parser-skip]   check: (gate.next_stage != null) or (task.status in {complete, failed})
+# [parser-skip]   severity: error
+# [parser-skip]
+
+# ═══════════════════════════════════════════════════════════════════
+# Procedure: finalize_task — the missing terminal transition
+# ═══════════════════════════════════════════════════════════════════
+
+# Triggered by evaluate_gate emitting a decision with next_stage == null (all stages done).
+# Resolves the owning TaskManager Task by id (== devtask task_id) and drives it terminal.
+procedure finalize_task:
+  trigger: on_write
+  given: "When the final stage of a dev task completes, terminate the owning TaskManager Task (Completed on pass, Failed on fail/timeout/killed) so it no longer shows as in-progress"
+
+  # Only act when the lifecycle has no next stage (task is truly done)
+  is_final_stage {next_stage: $new_value.next_stage} -> $final
+
+  # Map the gate's stage status onto a terminal Task status
+  # passed → completed ; failed|timed_out|killed → failed
+  map_gate_to_terminal {gate_status: $new_value.status} -> $terminal
+
+  # Resolve + terminate the owning Task (side-effect boundary implemented in Rust S1).
+  # task_id here is the correlation key: devtask.task_id == owning Task.id.
+  finalize_owning_task {task_id: $new_value.task_id, terminal_status: $terminal, when: $final, result: $new_value.completed_stage} -> $result
+
+  return {task_id: $new_value.task_id, terminal_status: $terminal, finalized: $final}

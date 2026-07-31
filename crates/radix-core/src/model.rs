@@ -181,6 +181,83 @@ pub struct ChatOptions {
     pub model: Option<String>,
 }
 
+/// Context describing a failed model call that is eligible for a fallback
+/// model to be selected by the `.px` `select_fallback_model` procedure.
+///
+/// This is a data record, not a decision — the *choice* of which fallback
+/// model to try next is owned by praxis (see
+/// `praxis/procedures/model-fallback-selection.px`), not by the model client
+/// itself. The client only reports "I failed and this looks fallback-eligible";
+/// the orchestrator (`ModelInvoker`) is responsible for calling the procedure
+/// and re-issuing the request with the selected model.
+#[derive(Debug, Clone)]
+pub struct FallbackRequestContext {
+    /// The model that just failed.
+    pub failed_model: String,
+    /// Every model already attempted in this request chain (including
+    /// `failed_model`), so the selector never loops back to one.
+    pub already_tried: Vec<String>,
+    /// The HTTP status code that triggered the fallback-eligible failure.
+    pub error_status: u16,
+    /// Arbitrary task/request context the selection procedure may use to
+    /// pick an appropriate replacement model (e.g. tier, tool usage).
+    pub task_context: serde_json::Value,
+}
+
+/// Typed error returned by [`ModelClient::complete`] / [`ModelClient::complete_stream`].
+///
+/// Replaces the previous `Result<_, String>` contract so that fallback-eligible
+/// failures can be distinguished from terminal ones without string matching,
+/// and so that model clients no longer own fallback *selection* logic
+/// themselves (see `docs/design/copilot-fallback-px-wiring.md`, Option B).
+#[derive(Debug, Clone)]
+pub enum ModelClientError {
+    /// The call failed with a fallback-eligible error (e.g. a 4xx the
+    /// provider returned for an unsupported/unavailable model). The caller
+    /// (orchestrator) should select a fallback model via praxis and retry.
+    NeedsFallback(FallbackRequestContext),
+    /// The provider returned a terminal failure that is not fallback-eligible
+    /// (e.g. exhausted retries, malformed response, non-fallback-eligible
+    /// status code).
+    ProviderFailure {
+        /// HTTP status code, when the failure originated from an HTTP response.
+        status: Option<u16>,
+        /// The model that was in use when the failure occurred.
+        model: String,
+        /// Human-readable failure detail.
+        message: String,
+    },
+    /// The request was cancelled; no fallback should be attempted.
+    Cancelled,
+    /// A transport-level failure (connection, timeout, serialization, etc.)
+    /// that is not itself fallback-eligible.
+    Transport(String),
+}
+
+impl std::fmt::Display for ModelClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModelClientError::NeedsFallback(ctx) => write!(
+                f,
+                "model '{}' failed with fallback-eligible error (status {}); already tried: {:?}",
+                ctx.failed_model, ctx.error_status, ctx.already_tried
+            ),
+            ModelClientError::ProviderFailure {
+                status,
+                model,
+                message,
+            } => write!(
+                f,
+                "model '{model}' provider failure (status {status:?}): {message}"
+            ),
+            ModelClientError::Cancelled => write!(f, "model request cancelled"),
+            ModelClientError::Transport(msg) => write!(f, "transport error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ModelClientError {}
+
 // ── Traits ───────────────────────────────────────────────────────────────────
 
 /// Abstraction over an OpenAI-compatible language model endpoint.
@@ -198,7 +275,7 @@ pub trait ModelClient: Send + Sync {
         messages: &[ChatMessage],
         tools: &[ToolDefinition],
         options: &ChatOptions,
-    ) -> Result<ModelCompletion, String>;
+    ) -> Result<ModelCompletion, ModelClientError>;
 
     /// Request a streaming chat completion.
     ///
@@ -213,7 +290,7 @@ pub trait ModelClient: Send + Sync {
         tools: &[ToolDefinition],
         options: &ChatOptions,
         tx: StreamSender,
-    ) -> Result<ModelCompletion, String> {
+    ) -> Result<ModelCompletion, ModelClientError> {
         let result = self.complete(messages, tools, options).await?;
         if let Some(content) = &result.content {
             let _ = tx.send(StreamDelta::Content(content.clone()));
@@ -261,7 +338,7 @@ mod tests {
             messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             let content = messages.last().map(|m| m.content.clone());
             Ok(ModelCompletion {
                 content,
@@ -309,7 +386,7 @@ mod tests {
                 _messages: &[ChatMessage],
                 _tools: &[ToolDefinition],
                 _options: &ChatOptions,
-            ) -> Result<ModelCompletion, String> {
+            ) -> Result<ModelCompletion, ModelClientError> {
                 Ok(ModelCompletion {
                     content: None,
                     tool_calls: vec![ToolCall {

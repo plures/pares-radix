@@ -1,0 +1,59 @@
+# repo-health-sweep.px - CI/PR health sweep for one repo (org-health-monitor slice 1)
+#
+# epic:ci-org-health-monitor-implementation. First real slice: sweep ONE repo's
+# recent CI runs + open PRs, classify anomalies (failing/timed-out CI, stale
+# open PRs), and persist each anomaly as a durable `health_anomaly:*` row in
+# PluresDB (C-PLURES-004 / C-DEV-001: side effects at the Rust boundary, logic
+# here). Org-wide coverage is NOT built yet - it is the honest next slice: a
+# cron (or caller) writes `health:sweep:<repo>` once per tracked repo. That
+# multi-repo driver does not exist yet; this procedure only does the real,
+# single-repo sweep end to end (gather -> classify -> persist).
+#
+# Lifecycle:
+#   1. A write to `health:sweep:<repo>` (value: {repo: "<owner>/<name>"}) is the
+#      trigger - the clock lives outside this procedure, same pattern as
+#      morning-briefing.px.
+#   2. GATHER (read-only, governed `run_command`): recent CI runs for the repo,
+#      and open PRs for the repo.
+#   3. `classify_repo_health` (pure Rust, mirrors `assemble_briefing_report`)
+#      parses the gathered JSON and turns it into a list of anomaly records:
+#      {kind, severity, detail}. A gather failure becomes an explicit gap
+#      anomaly (never faked, C-NOSTUB-001) - it is still recorded, not skipped.
+#   4. PERSIST each anomaly as a real PluresDB row via `record_health_anomaly`
+#      (Rust IO boundary, `RepoHealthActionHandler`), keyed
+#      `health_anomaly:<repo>:<anomaly_id>` so `keys_with_prefix` can enumerate
+#      the whole table.
+#
+# Queue topology:
+#   health:sweep:*   [repo_health_sweep]   writes health_anomaly:<repo>:<id>
+
+# [parser-skip] fact HealthAnomaly:
+# [parser-skip]   repo: string
+# [parser-skip]   kind: string           # ci_failing | ci_timeout | stale_pr | gap
+# [parser-skip]   severity: string       # error | warning
+# [parser-skip]   detail: string
+# [parser-skip]   detected_at: int
+
+# [parser-skip] constraint anomaly_requires_detail:
+# [parser-skip]   given: "Every recorded anomaly must carry a non-empty detail string"
+# [parser-skip]   check: HealthAnomaly.detail != ""
+# [parser-skip]   severity: error
+
+procedure repo_health_sweep:
+  trigger: on_write {pattern: "health:sweep:*"}
+  given: "Gather CI run health and open-PR staleness for one repo, classify anomalies, and persist each as a durable health_anomaly row."
+
+  # ── GATHER (read-only; each returns {available, exit_code, stdout, stderr}) ──
+  run_command {command: "gh run list --repo ${value.repo} --limit 20 --json databaseId,name,status,conclusion,workflowName,headBranch,createdAt", timeout_secs: 45} -> $ci
+
+  run_command {command: "gh pr list --repo ${value.repo} --state open --limit 30 --json number,title,createdAt,isDraft", timeout_secs: 45} -> $prs
+
+  # ── CLASSIFY (pure Rust, parses gathered JSON into anomaly records) ──────────
+  classify_repo_health {repo: "${value.repo}", ci_health: $ci, open_prs: $prs} -> $anomalies
+
+  # ── PERSIST (real PluresDB write per anomaly, Rust IO boundary) ─────────────
+  loop over $anomalies as anomaly:
+    record_health_anomaly {repo: "${value.repo}", anomaly: anomaly} -> $written
+  end
+
+  return {repo: "${value.repo}", anomaly_count: $anomalies.length, anomalies: $anomalies}

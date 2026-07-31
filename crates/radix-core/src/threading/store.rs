@@ -26,7 +26,11 @@ pub trait ThreadStore: Send + Sync {
     async fn active_thread(&self, chat_id: &str) -> Option<Thread>;
 
     /// Switch the active thread for a chat.
-    async fn switch_thread(&self, chat_id: &str, thread_id: &str) -> Result<Thread, ThreadStoreError>;
+    async fn switch_thread(
+        &self,
+        chat_id: &str,
+        thread_id: &str,
+    ) -> Result<Thread, ThreadStoreError>;
 
     /// Create a new thread in a chat.
     async fn create_thread(&self, chat_id: &str, topic: &str) -> Thread;
@@ -295,7 +299,11 @@ impl ThreadStore for PluresThreadStore {
         self.get_thread_meta(chat_id, &thread_id)
     }
 
-    async fn switch_thread(&self, chat_id: &str, thread_id: &str) -> Result<Thread, ThreadStoreError> {
+    async fn switch_thread(
+        &self,
+        chat_id: &str,
+        thread_id: &str,
+    ) -> Result<Thread, ThreadStoreError> {
         self.ensure_initialized(chat_id);
         let thread = self
             .get_thread_meta(chat_id, thread_id)
@@ -334,7 +342,9 @@ impl ThreadStore for PluresThreadStore {
             None => return,
         };
 
-        let _ = self.add_message_to_thread(chat_id, &thread_id, message).await;
+        let _ = self
+            .add_message_to_thread(chat_id, &thread_id, message)
+            .await;
     }
 
     async fn add_message_to_thread(
@@ -447,10 +457,16 @@ impl ThreadStore for MemoryThreadStore {
         let active = self.active.read().await;
         let thread_id = active.get(chat_id)?;
         let threads = self.threads.read().await;
-        threads.get(&Self::composite_key(chat_id, thread_id)).cloned()
+        threads
+            .get(&Self::composite_key(chat_id, thread_id))
+            .cloned()
     }
 
-    async fn switch_thread(&self, chat_id: &str, thread_id: &str) -> Result<Thread, ThreadStoreError> {
+    async fn switch_thread(
+        &self,
+        chat_id: &str,
+        thread_id: &str,
+    ) -> Result<Thread, ThreadStoreError> {
         let threads = self.threads.read().await;
         let key = Self::composite_key(chat_id, thread_id);
         let thread = threads
@@ -500,7 +516,9 @@ impl ThreadStore for MemoryThreadStore {
         };
         drop(active);
 
-        let _ = self.add_message_to_thread(chat_id, &thread_id, message).await;
+        let _ = self
+            .add_message_to_thread(chat_id, &thread_id, message)
+            .await;
     }
 
     async fn add_message_to_thread(
@@ -633,7 +651,10 @@ mod tests {
         let store = MemoryThreadStore::new();
         store.create_thread("chat-1", "topic-a").await;
 
-        let err = store.switch_thread("chat-1", "nonexistent").await.unwrap_err();
+        let err = store
+            .switch_thread("chat-1", "nonexistent")
+            .await
+            .unwrap_err();
         assert_eq!(err, ThreadStoreError::NotFound("nonexistent".to_string()));
     }
 
@@ -642,8 +663,12 @@ mod tests {
         let store = MemoryThreadStore::new();
         let thread = store.create_thread("chat-1", "testing").await;
 
-        store.add_message("chat-1", ChatMessage::user("Hello")).await;
-        store.add_message("chat-1", ChatMessage::assistant("Hi")).await;
+        store
+            .add_message("chat-1", ChatMessage::user("Hello"))
+            .await;
+        store
+            .add_message("chat-1", ChatMessage::assistant("Hi"))
+            .await;
 
         let history = store.thread_history("chat-1", &thread.id).await;
         assert_eq!(history.len(), 2);
@@ -657,11 +682,23 @@ mod tests {
         let t1 = store.create_thread("chat-1", "topic-a").await;
         let t2 = store.create_thread("chat-1", "topic-b").await;
 
-        store.add_message_to_thread("chat-1", &t1.id, ChatMessage::user("for t1")).await.unwrap();
-        store.add_message_to_thread("chat-1", &t2.id, ChatMessage::user("for t2")).await.unwrap();
+        store
+            .add_message_to_thread("chat-1", &t1.id, ChatMessage::user("for t1"))
+            .await
+            .unwrap();
+        store
+            .add_message_to_thread("chat-1", &t2.id, ChatMessage::user("for t2"))
+            .await
+            .unwrap();
 
-        assert_eq!(store.thread_history("chat-1", &t1.id).await[0].content, "for t1");
-        assert_eq!(store.thread_history("chat-1", &t2.id).await[0].content, "for t2");
+        assert_eq!(
+            store.thread_history("chat-1", &t1.id).await[0].content,
+            "for t1"
+        );
+        assert_eq!(
+            store.thread_history("chat-1", &t2.id).await[0].content,
+            "for t2"
+        );
     }
 
     #[tokio::test]
@@ -701,7 +738,10 @@ mod tests {
         assert!(found.is_some());
         assert_eq!(found.unwrap().topic, "debugging rust");
 
-        assert!(store.find_matching_thread("chat-1", "python").await.is_none());
+        assert!(store
+            .find_matching_thread("chat-1", "python")
+            .await
+            .is_none());
     }
 
     #[tokio::test]
@@ -753,8 +793,12 @@ mod tests {
         let store = PluresThreadStore::in_memory();
         let thread = store.create_thread("chat-1", "testing").await;
 
-        store.add_message("chat-1", ChatMessage::user("Hello")).await;
-        store.add_message("chat-1", ChatMessage::assistant("Hi")).await;
+        store
+            .add_message("chat-1", ChatMessage::user("Hello"))
+            .await;
+        store
+            .add_message("chat-1", ChatMessage::assistant("Hi"))
+            .await;
 
         let history = store.thread_history("chat-1", &thread.id).await;
         assert_eq!(history.len(), 2);

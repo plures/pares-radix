@@ -10,6 +10,13 @@
 //! prompt_builder, model_chain, features, heartbeat) remain in
 //! `pares-agens-core`, which depends on this crate.
 
+/// The `pares-radix-core` crate's own package version (i.e. the Radix platform
+/// version), independent of whatever downstream crate (pares-agens, etc.) is
+/// consuming it. Downstream hosts should use this — not their own
+/// `CARGO_PKG_VERSION` — when reporting "which Radix platform am I running on",
+/// so status output can distinguish platform version from host-app version.
+pub const RADIX_CORE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Authentication helpers for external providers.
 pub mod auth;
 /// Chronos version timeline — causal audit trail for every data mutation.
@@ -22,16 +29,17 @@ pub mod commands;
 pub mod content_store;
 /// Event types consumed and emitted by the reactive event loop.
 pub mod event;
+pub mod git_projection;
 /// Reactive event loop executor with optimization safety enforcement.
 pub mod executor;
 /// Built-in event handler procedures.
 pub mod handlers;
 /// License key validation and Pro feature gates.
 pub mod license;
-/// LLM model client and tool dispatcher abstractions.
-pub mod model;
 /// Handler-facing memory interface (trait + DTOs; impl lives in cognition).
 pub mod memory;
+/// LLM model client and tool dispatcher abstractions.
+pub mod model;
 
 pub mod memory_client;
 
@@ -42,10 +50,10 @@ pub mod optimization;
 pub mod otel;
 #[cfg(feature = "otel")]
 pub mod otel_metrics;
-/// Praxis decision ledger and approval gate procedures.
-pub mod praxis;
 /// Platform bridge to the PluresDB procedure engine (procedure/constraint execution).
 pub mod pluresdb_bridge;
+/// Praxis decision ledger and approval gate procedures.
+pub mod praxis;
 /// Procedure registry and priority-based event dispatch.
 pub mod procedure;
 /// Shipped default PluresLM procedure bundles (JSON library).
@@ -71,6 +79,7 @@ pub use classifier::{
 
 /// Re-export PluresDB primitives for consumers that need the shared CrdtStore.
 pub use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
+pub mod approval;
 /// Channel capability contracts for output rendering.
 pub mod channel_contract;
 /// Event spine — bridges pares-radix to PluresDB's AgensRuntime.
@@ -106,5 +115,6 @@ pub mod shell_executor;
 pub mod spine;
 /// Platform-owned sub-agent spawn seam (trait + DTOs implemented by cognition).
 pub mod subagent_spawn;
+pub mod task_handoff;
 /// Thread engine — multi-topic conversation threading.
 pub mod threading;

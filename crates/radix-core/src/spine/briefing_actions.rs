@@ -135,8 +135,7 @@ impl BriefingActionHandler {
                                 .get("title")
                                 .and_then(Value::as_str)
                                 .unwrap_or("(untitled)");
-                            let draft =
-                                pr.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
+                            let draft = pr.get("isDraft").and_then(Value::as_bool).unwrap_or(false);
                             let review = pr
                                 .get("reviewDecision")
                                 .and_then(Value::as_str)
@@ -175,23 +174,15 @@ impl BriefingActionHandler {
                 Ok(arr) => {
                     let mut failing = 0usize;
                     for run in &arr {
-                        let status = run
-                            .get("status")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        let conclusion = run
-                            .get("conclusion")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
+                        let status = run.get("status").and_then(Value::as_str).unwrap_or("");
+                        let conclusion =
+                            run.get("conclusion").and_then(Value::as_str).unwrap_or("");
                         let wf = run
                             .get("workflowName")
                             .and_then(Value::as_str)
                             .or_else(|| run.get("name").and_then(Value::as_str))
                             .unwrap_or("(workflow)");
-                        let branch = run
-                            .get("headBranch")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
+                        let branch = run.get("headBranch").and_then(Value::as_str).unwrap_or("");
                         // Only completed runs carry a conclusion. A failure/
                         // timed_out/cancelled conclusion on a recent run is
                         // urgent; in-progress runs are watch; success is healthy.
@@ -200,9 +191,7 @@ impl BriefingActionHandler {
                                 "failure" | "timed_out" | "startup_failure" => {
                                     failing += 1;
                                     urgent.push(Line {
-                                        text: format!(
-                                            "🔴 CI FAILING: {wf} on {branch}"
-                                        ),
+                                        text: format!("🔴 CI FAILING: {wf} on {branch}"),
                                     });
                                 }
                                 "cancelled" | "action_required" => watch.push(Line {
@@ -216,9 +205,11 @@ impl BriefingActionHandler {
                             });
                         }
                     }
-                    if failing == 0 && arr.iter().any(|r| {
-                        r.get("conclusion").and_then(Value::as_str) == Some("success")
-                    }) {
+                    if failing == 0
+                        && arr
+                            .iter()
+                            .any(|r| r.get("conclusion").and_then(Value::as_str) == Some("success"))
+                    {
                         healthy.push(Line {
                             text: "CI: recent runs green".to_string(),
                         });
@@ -234,10 +225,8 @@ impl BriefingActionHandler {
 
         // ── Compose report text ─────────────────────────────────────────────
         let report_text = compose_report(scope, &urgent, &watch, &healthy, &gaps);
-        let has_content = !urgent.is_empty()
-            || !watch.is_empty()
-            || !healthy.is_empty()
-            || !gaps.is_empty();
+        let has_content =
+            !urgent.is_empty() || !watch.is_empty() || !healthy.is_empty() || !gaps.is_empty();
 
         Ok(json!({
             "urgent": urgent.iter().map(|l| l.text.clone()).collect::<Vec<_>>(),
@@ -286,7 +275,10 @@ fn gather_stdout(v: Option<&Value>) -> GatherOutcome {
         return GatherOutcome::Unavailable("not gathered".to_string());
     };
     // Absent/false availability → gap with the provided error if any.
-    let available = obj.get("available").and_then(Value::as_bool).unwrap_or(false);
+    let available = obj
+        .get("available")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     if !available {
         let err = obj
             .get("error")
@@ -480,7 +472,9 @@ mod tests {
             }))
             .unwrap();
         let gaps = out["gaps"].as_array().unwrap();
-        assert!(gaps.iter().any(|g| g.as_str().unwrap().contains("az login required")));
+        assert!(gaps
+            .iter()
+            .any(|g| g.as_str().unwrap().contains("az login required")));
         // has_content true because there are gaps → report still delivered.
         assert_eq!(out["has_content"], json!(true));
         assert!(out["report_text"].as_str().unwrap().contains("GAPS"));
@@ -490,7 +484,9 @@ mod tests {
     fn nonzero_exit_is_a_gap_with_stderr() {
         let h = BriefingActionHandler::new();
         let bad = json!({"available": true, "exit_code": 1, "stdout": "", "stderr": "boom\nmore"});
-        let out = h.assemble_briefing_report(&json!({"github_prs": bad})).unwrap();
+        let out = h
+            .assemble_briefing_report(&json!({"github_prs": bad}))
+            .unwrap();
         assert!(out["gaps"]
             .as_array()
             .unwrap()
@@ -501,8 +497,12 @@ mod tests {
     #[test]
     fn parses_open_prs_json_awaiting_review_as_watch() {
         let h = BriefingActionHandler::new();
-        let prs = ok(r#"[{"number":42,"title":"Add feature","isDraft":false,"reviewDecision":"REVIEW_REQUIRED","mergeable":"MERGEABLE","createdAt":"2026-07-01T00:00:00Z"}]"#);
-        let out = h.assemble_briefing_report(&json!({"github_prs": prs})).unwrap();
+        let prs = ok(
+            r#"[{"number":42,"title":"Add feature","isDraft":false,"reviewDecision":"REVIEW_REQUIRED","mergeable":"MERGEABLE","createdAt":"2026-07-01T00:00:00Z"}]"#,
+        );
+        let out = h
+            .assemble_briefing_report(&json!({"github_prs": prs}))
+            .unwrap();
         assert!(out["watch"]
             .as_array()
             .unwrap()
@@ -513,8 +513,12 @@ mod tests {
     #[test]
     fn ci_failure_is_urgent_success_is_healthy() {
         let h = BriefingActionHandler::new();
-        let runs = ok(r#"[{"status":"completed","conclusion":"failure","workflowName":"CI","headBranch":"main"},{"status":"completed","conclusion":"success","workflowName":"CI","headBranch":"main"}]"#);
-        let out = h.assemble_briefing_report(&json!({"ci_health": runs})).unwrap();
+        let runs = ok(
+            r#"[{"status":"completed","conclusion":"failure","workflowName":"CI","headBranch":"main"},{"status":"completed","conclusion":"success","workflowName":"CI","headBranch":"main"}]"#,
+        );
+        let out = h
+            .assemble_briefing_report(&json!({"ci_health": runs}))
+            .unwrap();
         assert!(out["urgent"]
             .as_array()
             .unwrap()

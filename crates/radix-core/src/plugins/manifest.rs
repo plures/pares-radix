@@ -1064,7 +1064,10 @@ spec = "capabilities/commerce.cid.toml"
             .get("commerce")
             .expect("commerce interface ref present");
         assert_eq!(iface.cid, "commerce@1.x");
-        assert_eq!(iface.spec.as_deref(), Some("capabilities/commerce.cid.toml"));
+        assert_eq!(
+            iface.spec.as_deref(),
+            Some("capabilities/commerce.cid.toml")
+        );
 
         // Declared ranges are valid semver (uses the `semver` crate, no
         // hand-rolled parsing).
@@ -1109,7 +1112,10 @@ spec = "capabilities/commerce.cid.toml"
         let back: PluginManifest = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back.capabilities, m.capabilities);
         assert_eq!(
-            back.capabilities.provided.get("commerce").map(String::as_str),
+            back.capabilities
+                .provided
+                .get("commerce")
+                .map(String::as_str),
             Some("1.2.0")
         );
     }
@@ -1152,8 +1158,10 @@ scene = "also-bad"
         let errors = m.capabilities.validate_versions();
         assert_eq!(errors.len(), 2, "both malformed versions should be flagged");
 
-        let by_cap: std::collections::BTreeMap<_, _> =
-            errors.iter().map(|e| (e.capability.as_str(), e.kind)).collect();
+        let by_cap: std::collections::BTreeMap<_, _> = errors
+            .iter()
+            .map(|e| (e.capability.as_str(), e.kind))
+            .collect();
         assert_eq!(by_cap.get("commerce"), Some(&CapabilityVersionKind::Range));
         assert_eq!(by_cap.get("scene"), Some(&CapabilityVersionKind::Version));
     }

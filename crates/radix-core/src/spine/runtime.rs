@@ -60,6 +60,7 @@ use crate::spine::procedures::model_invoker::ModelInvoker;
 use crate::spine::procedures::response_router::ResponseRouter;
 use crate::spine::procedures::tool_executor::ToolExecutor;
 use crate::spine::reactive::ReactiveRegistry;
+use crate::spine::task_handoff_actions::{resolve_handoff_db_path, TaskHandoffActionHandler};
 use crate::state::{PluresDbStateStore, StateStore};
 use crate::task_manager::TaskManager;
 use crate::tools::TaskRegistryTool;
@@ -203,10 +204,11 @@ pub async fn build_reactive_runtime(
     praxis_dir: &Path,
     capacity: usize,
 ) -> ReactiveRuntime {
-    build_reactive_runtime_with_tasks(
+    build_reactive_runtime_with_subagent(
         state_store,
         conversation_store,
         tool_dispatcher,
+        None,
         None,
         praxis_dir,
         capacity,
@@ -214,18 +216,28 @@ pub async fn build_reactive_runtime(
     .await
 }
 
-/// Like [`build_reactive_runtime`] but also wires a durable
-/// [`TaskManager`](crate::task_manager::TaskManager) into the composite action
-/// handler so the live reactive `.px` path can inject the persisted open-tasks
-/// grounding block into the model system prompt each inbound turn
-/// (pares-radix#467). Pass `None` to run without task grounding (the
-/// `read_open_tasks_block` action then returns null and `.px` injects no
-/// block).
-pub async fn build_reactive_runtime_with_tasks(
+/// Like [`build_reactive_runtime`] but wires the optional durable
+/// [`TaskManager`](crate::task_manager::TaskManager) grounding (pares-radix#467)
+/// AND the optional [`SubagentActor`] task-completion seam.
+///
+/// * `task_manager` — when `Some`, the composite handler injects the persisted
+///   open-tasks grounding block into the model system prompt each inbound turn.
+///   Pass `None` to run without task grounding (`read_open_tasks_block` returns
+///   null and `.px` injects no block).
+/// * `subagent` — when `Some((spawner, task_manager))`, the runtime constructs
+///   a [`SubagentActor::with_task_manager`] so that (a) `.px` `spawn_subagent`
+///   calls reach a real spawner and (b) on the final stage completing,
+///   `finalize_task` drives the owning [`TaskManager`] `Task` terminal. When
+///   `None`, subagent actions error at call time as before.
+pub async fn build_reactive_runtime_with_subagent(
     state_store: Arc<dyn StateStore>,
     conversation_store: Arc<dyn ConversationStore>,
     tool_dispatcher: Arc<dyn ToolDispatcher>,
     task_manager: Option<Arc<crate::task_manager::TaskManager>>,
+    subagent: Option<(
+        Arc<dyn crate::subagent_spawn::SubAgentSpawner>,
+        Arc<crate::task_manager::TaskManager>,
+    )>,
     praxis_dir: &Path,
     capacity: usize,
 ) -> ReactiveRuntime {
@@ -233,33 +245,92 @@ pub async fn build_reactive_runtime_with_tasks(
     //    into the tool dispatch pipeline.
     let tool_handler = Arc::new(ToolDispatchActionHandler::new(tool_dispatcher));
 
-    // 2. The composite handler the procedures invoke. CoreActionHandler is now
+    // 2. Build the registry first — the SubagentActor needs a handle to it so
+    //    completion writes (`stage_complete:*`) re-enter the reactive system.
+    let registry = Arc::new(ReactiveRegistry::new());
+
+    // 3. The composite handler the procedures invoke. CoreActionHandler is now
     //    backed by the durable state store (read_state/write_state round-trip
-    //    through PluresDB, not a stub).
-    let mut composite = CompositeActionHandler::new(
+    //    through PluresDB, not a stub). If a spawner + task manager are
+    //    supplied, wire the SubagentActor so the task-completion seam is live.
+    let mut composite_inner = CompositeActionHandler::new(
         Arc::clone(&conversation_store),
         Arc::clone(&state_store),
         tool_handler,
     );
+    // Keep one shared durable TaskManager for BOTH task-grounding reads and
+    // autonomous-dispatch writes (read_evaluable_tasks/mark_task_in_progress).
+    // This preserves a single task store (C-PLURES-003/004).
+    let dispatch_task_manager = task_manager.clone();
     if let Some(tm) = task_manager {
         // Durable open-tasks grounding over the SAME store (C-PLURES-003/004).
-        composite = composite.with_task_grounding(tm);
+        composite_inner = composite_inner.with_task_grounding(tm);
     }
-    let composite = Arc::new(composite);
+    if let Some((spawner, task_manager)) = subagent {
+        let actor = Arc::new(
+            crate::spine::subagent_actor::SubagentActor::with_task_manager(
+                spawner,
+                Arc::clone(&registry),
+                task_manager,
+            ),
+        );
+        composite_inner.set_subagent_actor(actor);
+        info!("runtime: SubagentActor wired with TaskManager — task-completion seam live");
+    }
 
-    // 3. Build the registry and load every `.px` procedure against it.
-    let registry = Arc::new(ReactiveRegistry::new());
+    // Build the pipeline + emitter BEFORE attaching the autonomous task-dispatch
+    // IO edge: the TaskDispatcher injects task prompts as Inbound events through
+    // this same emitter (spine.px IO boundary #5), so it must be built over the
+    // real emitter, not a placeholder.
+    let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
+    let emitter = pipeline.emitter();
+
+    // Build the real TaskDispatcher over the live StateStore + emitter and
+    // attach it so the `.px` `dispatch_task` action can close the task loop.
+    let dispatcher = Arc::new(
+        crate::task_executor::TaskDispatcher::new(Arc::clone(&state_store))
+            .with_pipeline_emitter(emitter.clone()),
+    );
+    composite_inner.set_task_dispatch(Arc::new(
+        crate::spine::task_dispatch_actions::TaskDispatchActionHandler::new(
+            dispatcher,
+            dispatch_task_manager,
+        ),
+    ));
+
+    // Wire the durable task-handoff IO edge so `.px` procedures can call
+    // `prepare_task_handoff`, `verify_task_handoff_digest`, `accept_task_handoff`,
+    // and `conditional_claim_task` against a real ConditionalTaskStore.
+    let handoff_path = resolve_handoff_db_path(&resolve_state_dir());
+    match TaskHandoffActionHandler::open(&handoff_path) {
+        Ok(h) => {
+            composite_inner = composite_inner.with_task_handoff(Arc::new(h));
+            info!(
+                path = %handoff_path.display(),
+                "runtime: TaskHandoffActionHandler wired — custody-transfer actions live"
+            );
+        }
+        Err(e) => {
+            warn!(
+                path = %handoff_path.display(),
+                error = %e,
+                "runtime: failed to open task-handoff store — handoff actions will return errors"
+            );
+        }
+    }
+
+    let composite = Arc::new(composite_inner);
+
+    // 4. Load every `.px` procedure against the (already-built) registry, then
+    //    give the registry the emitter so procedure-emitted events re-enter the
+    //    pipeline.
     let registered = register_reactive_procedures(praxis_dir, &registry, composite).await;
     info!(
         registered,
         praxis_dir = %praxis_dir.display(),
         "runtime: reactive .px procedures registered against live registry"
     );
-
-    // 4. Wire the pipeline to the registry and give the registry an emitter so
-    //    procedure-emitted events can re-enter the pipeline.
-    let (pipeline, rx) = Pipeline::with_reactive(capacity, Arc::clone(&registry));
-    registry.set_emitter(pipeline.emitter()).await;
+    registry.set_emitter(emitter).await;
 
     ReactiveRuntime {
         registry,
@@ -298,15 +369,39 @@ pub async fn build_default_reactive_runtime(
     let task_manager = Arc::new(crate::task_manager::TaskManager::new(pdb.crdt_store()));
     let state_store: Arc<dyn StateStore> = Arc::new(pdb);
 
-    Ok(build_reactive_runtime_with_tasks(
+    Ok(build_reactive_runtime_with_subagent(
         state_store,
         conversation_store,
         tool_dispatcher,
         Some(task_manager),
+        None,
         &praxis_dir,
         capacity,
     )
     .await)
+}
+
+/// Configuration for [`build_task_aware_runtime`].
+///
+/// Groups the assembly inputs to keep the constructor within the argument-count
+/// lint limit while remaining explicit at call sites.
+pub struct TaskAwareRuntimeConfig {
+    /// Durable state store (PluresDB-backed in production).
+    pub state_store: Arc<dyn StateStore>,
+    /// Conversation history store.
+    pub conversation_store: Arc<dyn ConversationStore>,
+    /// Language model client used for inference.
+    pub model_client: Arc<dyn ModelClient>,
+    /// Outer tool dispatcher; `task_*` built-ins are layered on top.
+    pub tool_dispatcher: Arc<dyn ToolDispatcher>,
+    /// CRDT store used to persist durable tasks.
+    pub task_store: Arc<CrdtStore>,
+    /// Optional system prompt injected at the start of every model turn.
+    pub system_prompt: Option<String>,
+    /// Directory containing `.px` procedure files.
+    pub praxis_dir: PathBuf,
+    /// Event-channel capacity for the pipeline.
+    pub capacity: usize,
 }
 
 /// Assemble a full task-aware spine runtime.
@@ -323,16 +418,17 @@ pub async fn build_default_reactive_runtime(
 /// Open tasks are injected into every model turn and `task_*` tools are exposed
 /// through a built-in dispatcher wrapper, so obligations survive vague follow-up
 /// turns and process restarts.
-pub async fn build_task_aware_runtime(
-    state_store: Arc<dyn StateStore>,
-    conversation_store: Arc<dyn ConversationStore>,
-    model_client: Arc<dyn ModelClient>,
-    tool_dispatcher: Arc<dyn ToolDispatcher>,
-    task_store: Arc<CrdtStore>,
-    system_prompt: Option<String>,
-    praxis_dir: &Path,
-    capacity: usize,
-) -> ReactiveRuntime {
+pub async fn build_task_aware_runtime(config: TaskAwareRuntimeConfig) -> ReactiveRuntime {
+    let TaskAwareRuntimeConfig {
+        state_store,
+        conversation_store,
+        model_client,
+        tool_dispatcher,
+        task_store,
+        system_prompt,
+        praxis_dir,
+        capacity,
+    } = config;
     let task_manager = Arc::new(TaskManager::new(task_store));
     let task_dispatcher: Arc<dyn ToolDispatcher> = Arc::new(TaskAwareToolDispatcher::new(
         tool_dispatcher,
@@ -343,7 +439,7 @@ pub async fn build_task_aware_runtime(
         state_store,
         Arc::clone(&conversation_store),
         Arc::clone(&task_dispatcher),
-        praxis_dir,
+        &praxis_dir,
         capacity,
     )
     .await;
@@ -403,16 +499,16 @@ pub async fn build_default_task_aware_runtime(
     );
     let state_store: Arc<dyn StateStore> = Arc::new(pdb);
 
-    Ok(build_task_aware_runtime(
+    Ok(build_task_aware_runtime(TaskAwareRuntimeConfig {
         state_store,
         conversation_store,
         model_client,
         tool_dispatcher,
         task_store,
         system_prompt,
-        &praxis_dir,
+        praxis_dir,
         capacity,
-    )
+    })
     .await)
 }
 
@@ -421,7 +517,9 @@ pub async fn build_default_task_aware_runtime(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ChatMessage, ChatOptions, ModelCompletion, ToolDefinition, ToolDispatcher};
+    use crate::model::{
+        ChatMessage, ChatOptions, ModelClientError, ModelCompletion, ToolDefinition, ToolDispatcher,
+    };
     use crate::spine::conversation::MemoryConversationStore;
     use crate::spine::event::SpineEvent;
     use crate::task_manager::TaskManager;
@@ -461,7 +559,7 @@ mod tests {
             messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             *self.seen_messages.lock().await = messages.to_vec();
             Ok(ModelCompletion {
                 content: Some("ok".into()),
@@ -582,6 +680,347 @@ mod tests {
         assert_eq!(landed["n"], 42);
     }
 
+    /// MILESTONE REACTIVE PROOF (assembled path, real handler + real store):
+    ///
+    /// A `milestone:<id>` write is the dashboard signal. This dogfoods the
+    /// target architecture: PluresDB is the source of truth, a WRITE drives a
+    /// `.px` procedure (LOGIC), and the procedure performs a durable IO
+    /// side-effect via `write_state` (the pure-praxis analog of the dashboard
+    /// freeze). No cron, no daemon, no mock spine -- the loop is real and
+    /// in-process.
+    ///
+    /// The procedure is named `dashboard_milestone` so the bootstrap name-map
+    /// routes it to the `milestone:*` trigger pattern (see bootstrap.rs). We
+    /// then prove pattern discipline: a `milestone:` write REACTS; a
+    /// `progress:` write (history, not a dashboard signal) does NOT.
+    #[tokio::test]
+    async fn milestone_write_triggers_dashboard_px_procedure_locally() {
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        // REAL procedure: on a milestone write, persist the frozen dashboard
+        // node derived from the triggering write's `$value`. LOGIC in the
+        // procedure; the SIDE EFFECT is a durable state write.
+        std::fs::write(
+            praxis.join("dashboard_milestone.px"),
+            "procedure dashboard_milestone:\n  trigger: on_write\n  given: \"Freeze the dashboard node from a milestone write\"\n  write_state {key: \"dashboard:frozen\", value: $value} -> $frozen\n  return {ok: true}\n",
+        )
+        .unwrap();
+
+        let pdb = PluresDbStateStore::open(tmp.path().join("state")).unwrap();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+
+        let runtime = build_reactive_runtime(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher(),
+            &praxis,
+            16,
+        )
+        .await;
+
+        assert!(
+            runtime.registered >= 1,
+            "expected dashboard_milestone .px to register under milestone:*, got {}",
+            runtime.registered
+        );
+
+        // (1) A NON-milestone write must NOT trigger the procedure.
+        let progress = json!({"task": "some-task", "text": "history entry"});
+        runtime.registry.on_write("progress:p-1", &progress).await;
+        // Give any (erroneous) spawned reaction a chance, then assert nothing.
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert!(
+            state_store
+                .get("dashboard:frozen")
+                .await
+                .is_none_or(|v| v.is_null()),
+            "progress: write must NOT trigger the milestone dashboard procedure"
+        );
+
+        // (2) A milestone write MUST trigger the procedure -> durable IO.
+        let milestone = json!({
+            "task": "radix_milestone_reactive_proof",
+            "text": "milestone reactive flow proven locally",
+            "created_at": "2026-07-20T05:00:00Z"
+        });
+        runtime.registry.on_write("milestone:m-1", &milestone).await;
+
+        let mut landed: Option<Value> = None;
+        for _ in 0..50 {
+            if let Some(v) = state_store.get("dashboard:frozen").await {
+                if !v.is_null() {
+                    landed = Some(v);
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let landed = landed.expect(
+            "milestone: write did not drive the .px procedure to a durable \
+             dashboard node -- the reactive spine loop is not working",
+        );
+        assert_eq!(landed["task"], "radix_milestone_reactive_proof");
+        assert_eq!(landed["text"], "milestone reactive flow proven locally");
+    }
+
+    /// W2 PROOF: the autonomous task-dispatch IO edge is closed end-to-end.
+    ///
+    /// A real `.px` procedure calls the `dispatch_task` action (the same verb
+    /// `evaluate_dispatch`/`build_steered_prompt` now invoke). Through the
+    /// assembled runtime this reaches the real `TaskDispatchActionHandler` →
+    /// `TaskDispatcher` built over the LIVE pipeline emitter. A successful
+    /// dispatch records `task_executor/last_execution` in the durable store,
+    /// which we read back — proving the emitter was wired (dispatch returned
+    /// true) and `record_dispatch` ran. No stub, no mock handler.
+    #[tokio::test]
+    async fn dispatch_task_action_closes_the_loop_and_records_execution() {
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        // Minimal real procedure that invokes the dispatch_task IO edge with a
+        // task id + prompt taken from the triggering write's $value.
+        std::fs::write(
+            praxis.join("dispatch_proof.px"),
+            r#"procedure dispatch_proof:
+  trigger: on_write
+  given: "Invoke the autonomous task-dispatch IO edge"
+  dispatch_task {task_id: "task-w2-proof", prompt: "execute the thing"} -> $res
+  return {ok: true}
+"#,
+        )
+        .unwrap();
+
+        let pdb = PluresDbStateStore::open(tmp.path().join("state")).unwrap();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+
+        let runtime = build_reactive_runtime(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher(),
+            &praxis,
+            16,
+        )
+        .await;
+
+        runtime
+            .registry
+            .on_write("on_write:dispatch-1", &json!({}))
+            .await;
+
+        // TaskDispatcher::record_dispatch writes task_executor/last_execution
+        // only when dispatch succeeded (emitter present). Poll the durable store.
+        let mut recorded: Option<Value> = None;
+        for _ in 0..50 {
+            if let Some(v) = state_store.get("task_executor/last_execution").await {
+                if !v.is_null() {
+                    recorded = Some(v);
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let recorded = recorded.expect(
+            "dispatch_task did not record an execution — the task-dispatch IO edge \
+             (dispatch_task → TaskDispatcher over the live emitter) is not wired",
+        );
+        assert_eq!(recorded["task_id"], "task-w2-proof");
+    }
+
+    /// W5 PROOF — the autonomous task LOOP closes end-to-end, locally,
+    /// channel-agnostic (C-TEST-002). This is the "turned on" test: it exercises
+    /// the NEW `heartbeat_tick` producer edge (W3) that was previously missing.
+    ///
+    /// What it drives, all real (no Telegram, no adapter, no model call):
+    ///  1. A `SpineEvent::HeartbeatTick` is emitted through the LIVE pipeline
+    ///     emitter (exactly what the pares-agens heartbeat runner now does each
+    ///     tick). The pipeline loop turns it into `heartbeat_tick:<id>` and
+    ///     fires the reactive registry — proving the producer edge reaches the
+    ///     same reactive engine `evaluate_dispatch` listens on.
+    ///  2. A real `.px` procedure registered on the `heartbeat_tick` queue
+    ///     invokes the real `dispatch_task` IO action (the same verb
+    ///     `evaluate_dispatch` calls after it selects a task), which hands off
+    ///     to the real `TaskDispatcher` over the live emitter → injects a
+    ///     `SpineEvent::Inbound{autonomous}` re-drive and records the dispatch.
+    ///  3. The dispatch record (`task_executor/last_execution`) is read back
+    ///     from the durable store — proving the re-drive fired.
+    ///  4. A real `TaskManager::complete_task` flips the seeded task to
+    ///     `Completed` — proving the `task_complete` terminal path (W4) works.
+    ///
+    /// If this passes, the loop runs end-to-end locally: tick → decision edge
+    /// → dispatch (re-drive) → completion.
+    #[tokio::test]
+    async fn w5_heartbeat_tick_drives_dispatch_and_completion_closes_the_loop() {
+        use crate::spine::event::SpineEvent;
+        use crate::task::{CompletionCondition, ConditionType, TaskStatus};
+        use crate::task_manager::TaskManager;
+        use pluresdb::{CrdtStore, MemoryStorage, StorageEngine};
+
+        let tmp = TempDir::new().unwrap();
+        let praxis = tmp.path().join("procedures");
+        std::fs::create_dir_all(&praxis).unwrap();
+
+        // Real .px that fires on the heartbeat_tick queue (the W3 edge) and
+        // invokes the real dispatch IO. We use the name `evaluate_dispatch` so
+        // the bootstrap trigger-map registers it on `heartbeat_tick:*` (exactly
+        // as the shipped autonomous-dispatch.px is registered) — this test
+        // targets the tick PRODUCER edge; task-selection internals are W1/W2-tested.
+        std::fs::write(
+            praxis.join("tick_dispatch_proof.px"),
+            r#"procedure evaluate_dispatch(tick: int from "heartbeat_tick"):
+  given: "On a heartbeat tick, dispatch the selected autonomous task (W3 edge proof)"
+  dispatch_task {task_id: "task-w5-loop", prompt: "execute the seeded task"} -> $res
+  return {dispatched: true}
+"#,
+        )
+        .unwrap();
+
+        // Observer: fires on the pipeline's `inbound:*` writes and records a
+        // durable marker when it sees the AUTONOMOUS re-drive (source=task_executor).
+        // This directly observes the loop RE-ENTERING the same pipeline that
+        // handles user messages — the whole point of "closing the loop".
+        std::fs::write(
+            praxis.join("redrive_observer.px"),
+            r#"procedure classify_message(text: string from "inbound"):
+  given: "Observe the autonomous re-drive re-entering the pipeline (W5 loop proof)"
+  write_state {key: "w5/redrive_observed", value: true} -> $ok
+  return {seen: true}
+"#,
+        )
+        .unwrap();
+
+        let pdb = PluresDbStateStore::open(tmp.path().join("state")).unwrap();
+        let state_store: Arc<dyn StateStore> = Arc::new(pdb);
+        let conversation_store: Arc<dyn ConversationStore> =
+            Arc::new(MemoryConversationStore::new());
+
+        // Real TaskManager over an in-memory CRDT store, seeded with an Open task
+        // that has a completion condition — this is the task the loop closes on.
+        let storage: Arc<dyn StorageEngine> = Arc::new(MemoryStorage::default());
+        let crdt = Arc::new(CrdtStore::default().with_persistence(storage));
+        let task_manager = Arc::new(TaskManager::new(Arc::clone(&crdt)));
+        let seeded = task_manager.create_task(
+            "W5 loop task",
+            "local-test",
+            vec![CompletionCondition {
+                description: "the loop drives it to completion".into(),
+                condition_type: ConditionType::RequesterAck,
+                satisfied: false,
+            }],
+        );
+        // Gate precondition: has_pending_work must be true (the gate the agens
+        // heartbeat runner checks before emitting the tick).
+        assert!(
+            crate::task_executor::TaskDispatcher::has_pending_work(&task_manager),
+            "seeded Open task must register as pending work — the has_pending_work gate"
+        );
+
+        let runtime = build_reactive_runtime_with_subagent(
+            Arc::clone(&state_store),
+            conversation_store,
+            dispatcher(),
+            Some(Arc::clone(&task_manager)),
+            None,
+            &praxis,
+            16,
+        )
+        .await;
+
+        // Subscribe to the pipeline's outbound stream so we can OBSERVE the
+        // autonomous Inbound re-drive the dispatcher injects.
+        let events_rx = runtime.pipeline.subscribe_deliveries();
+        let emitter = runtime.pipeline.emitter();
+
+        // Spawn the real pipeline loop (this is what run(rx) does in serve).
+        let mut runtime = runtime;
+        let rx = runtime.rx.take().expect("runtime rx");
+        let pipeline = Arc::clone(&runtime.pipeline);
+        let loop_handle = tokio::spawn(async move { pipeline.run(rx).await });
+
+        // W3 EDGE: emit N synthetic heartbeat_tick events through the LIVE
+        // emitter — exactly what the pares-agens heartbeat runner now does.
+        let mut dispatched = false;
+        for tick in 0..5i64 {
+            emitter
+                .emit(SpineEvent::HeartbeatTick {
+                    id: SpineEvent::new_id(),
+                    tick,
+                })
+                .await;
+
+            // Poll for the dispatch record: record_dispatch writes
+            // task_executor/last_execution ONLY when dispatch succeeded (the
+            // real emitter injected the Inbound re-drive).
+            for _ in 0..25 {
+                if let Some(v) = state_store.get("task_executor/last_execution").await {
+                    if !v.is_null() {
+                        assert_eq!(v["task_id"], "task-w5-loop");
+                        dispatched = true;
+                        break;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            if dispatched {
+                break;
+            }
+        }
+
+        assert!(
+            dispatched,
+            "heartbeat_tick did NOT drive a dispatch — the W3 producer edge \
+             (HeartbeatTick SpineEvent → pipeline on_write → heartbeat_tick:* → \
+             .px → dispatch_task → TaskDispatcher) is not closed"
+        );
+
+        // Prove the re-drive actually RE-ENTERED the pipeline: the dispatcher
+        // injected a SpineEvent::Inbound{source:task_executor}, which flows back
+        // through the same pipeline loop and fires the inbound observer above,
+        // landing a durable marker. (subscribe_deliveries only broadcasts
+        // DeliveryRequest, so we observe re-entry via the reactive inbound path,
+        // which is the real loop closure.)
+        let mut redrive_observed = false;
+        for _ in 0..50 {
+            if let Some(v) = state_store.get("w5/redrive_observed").await {
+                if v == json!(true) {
+                    redrive_observed = true;
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            redrive_observed,
+            "the autonomous Inbound re-drive did not re-enter the pipeline — \
+             the loop does not actually close (dispatch emitted, but the injected \
+             Inbound never flowed back through the pipeline)"
+        );
+        let _ = &events_rx; // delivery stream is not the re-drive channel; kept for clarity
+        loop_handle.abort();
+
+        // W4 TERMINAL PATH: the task_complete path flips the task to Completed,
+        // which is what stops re-dispatch on subsequent ticks.
+        task_manager.complete_task(&seeded.id, Some("done by loop"));
+        let after = task_manager.get_task(&seeded.id).expect("task exists");
+        assert_eq!(
+            after.status,
+            TaskStatus::Completed,
+            "complete_task did not flip the task to Completed — the terminal path is broken"
+        );
+        assert!(
+            !crate::task_executor::TaskDispatcher::has_pending_work(&task_manager),
+            "a Completed task must NOT register as pending work — the loop would re-dispatch forever"
+        );
+    }
+
     #[tokio::test]
     async fn task_aware_dispatcher_exposes_and_executes_task_tools() {
         let pdb = PluresDbStateStore::in_memory();
@@ -622,16 +1061,16 @@ mod tests {
             seen_messages: Arc::clone(&seen_messages),
         });
 
-        let mut runtime = build_task_aware_runtime(
+        let mut runtime = build_task_aware_runtime(TaskAwareRuntimeConfig {
             state_store,
             conversation_store,
-            model,
-            dispatcher(),
-            Arc::clone(&task_store),
-            Some("system prompt".into()),
-            &praxis,
-            16,
-        )
+            model_client: model,
+            tool_dispatcher: dispatcher(),
+            task_store: Arc::clone(&task_store),
+            system_prompt: Some("system prompt".into()),
+            praxis_dir: praxis.to_path_buf(),
+            capacity: 16,
+        })
         .await;
 
         // Create a second TaskManager over the same durable store to simulate an

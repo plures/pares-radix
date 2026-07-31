@@ -75,22 +75,38 @@ async fn build_runtime(state_dir: &Path) -> (ReactiveRuntime, Arc<dyn StateStore
 
 async fn init_repo(git: &GitEffects, dir: &Path) {
     let d = dir.to_string_lossy();
-    git.run_checked("init", &["-C", &d, "init", "-q"]).await.unwrap();
+    git.run_checked("init", &["-C", &d, "init", "-q"])
+        .await
+        .unwrap();
     git.run_checked("cfg", &["-C", &d, "config", "user.email", "t@example.com"])
         .await
         .unwrap();
-    git.run_checked("cfg", &["-C", &d, "config", "user.name", "t"]).await.unwrap();
-    git.run_checked("br", &["-C", &d, "checkout", "-q", "-b", "main"]).await.ok();
+    git.run_checked("cfg", &["-C", &d, "config", "user.name", "t"])
+        .await
+        .unwrap();
+    git.run_checked("br", &["-C", &d, "checkout", "-q", "-b", "main"])
+        .await
+        .ok();
     std::fs::write(dir.join("seed.txt"), b"seed").unwrap();
-    git.run_checked("add", &["-C", &d, "add", "-A"]).await.unwrap();
-    git.run_checked("commit", &["-C", &d, "commit", "-q", "-m", "seed"]).await.unwrap();
+    git.run_checked("add", &["-C", &d, "add", "-A"])
+        .await
+        .unwrap();
+    git.run_checked("commit", &["-C", &d, "commit", "-q", "-m", "seed"])
+        .await
+        .unwrap();
 }
 
 async fn worktree_paths(git: &GitEffects, repo: &Path) -> Vec<String> {
     let out = git
         .run_checked(
             "wt-list",
-            &["-C", &repo.to_string_lossy(), "worktree", "list", "--porcelain"],
+            &[
+                "-C",
+                &repo.to_string_lossy(),
+                "worktree",
+                "list",
+                "--porcelain",
+            ],
         )
         .await
         .unwrap();
@@ -213,7 +229,10 @@ async fn assert_quarantined_intact(
         .expect("quarantine must succeed (move, never fail-by-delete)");
 
     // Source no longer a live path (it was MOVED, not copied-and-left).
-    assert!(!wt.exists(), "dirty worktree source MUST be gone after a move");
+    assert!(
+        !wt.exists(),
+        "dirty worktree source MUST be gone after a move"
+    );
 
     let dest = PathBuf::from(res["quarantined_path"].as_str().unwrap());
     assert!(dest.exists(), "quarantine destination must exist");
@@ -226,7 +245,11 @@ async fn assert_quarantined_intact(
     // Every expected file survived byte-exact at the same relative path.
     for (rel, bytes) in expected {
         let p = dest.join(rel);
-        assert!(p.exists(), "preserved file missing at quarantine: {}", rel.display());
+        assert!(
+            p.exists(),
+            "preserved file missing at quarantine: {}",
+            rel.display()
+        );
         assert_eq!(
             &std::fs::read(&p).unwrap(),
             bytes,
@@ -269,13 +292,19 @@ async fn qa_quarantine_preserves_every_dirty_variant() {
     std::fs::write(wt.join("untracked.txt"), b"untracked new work").unwrap();
     // (c) staged-but-uncommitted new file.
     std::fs::write(wt.join("staged.txt"), b"staged work").unwrap();
-    git.run_checked("add", &["-C", &d, "add", "staged.txt"]).await.unwrap();
+    git.run_checked("add", &["-C", &d, "add", "staged.txt"])
+        .await
+        .unwrap();
     // (d) Unicode / odd filename with spaces + emoji + accents.
     let odd_name = "é—nöte 🔥 שלום.txt";
     std::fs::write(wt.join(odd_name), b"unicode-named precious work").unwrap();
     // (e) nested subdir changes.
     std::fs::create_dir_all(wt.join("nested").join("deep")).unwrap();
-    std::fs::write(wt.join("nested").join("deep").join("buried.txt"), b"deeply nested work").unwrap();
+    std::fs::write(
+        wt.join("nested").join("deep").join("buried.txt"),
+        b"deeply nested work",
+    )
+    .unwrap();
 
     // Sanity: git agrees this tree is dirty (the .px gate that selects
     // quarantine over remove).
@@ -293,10 +322,19 @@ async fn qa_quarantine_preserves_every_dirty_variant() {
         &qroot,
         "wt_variants",
         &[
-            (PathBuf::from("seed.txt"), b"MODIFIED tracked content".to_vec()),
-            (PathBuf::from("untracked.txt"), b"untracked new work".to_vec()),
+            (
+                PathBuf::from("seed.txt"),
+                b"MODIFIED tracked content".to_vec(),
+            ),
+            (
+                PathBuf::from("untracked.txt"),
+                b"untracked new work".to_vec(),
+            ),
             (PathBuf::from("staged.txt"), b"staged work".to_vec()),
-            (PathBuf::from(odd_name), b"unicode-named precious work".to_vec()),
+            (
+                PathBuf::from(odd_name),
+                b"unicode-named precious work".to_vec(),
+            ),
             (
                 PathBuf::from("nested").join("deep").join("buried.txt"),
                 b"deeply nested work".to_vec(),
@@ -306,7 +344,10 @@ async fn qa_quarantine_preserves_every_dirty_variant() {
     )
     .await;
     // The .git metadata of the worktree moved too (nothing deleted).
-    assert!(dest.join(".git").exists(), "worktree .git linkage moved, not deleted");
+    assert!(
+        dest.join(".git").exists(),
+        "worktree .git linkage moved, not deleted"
+    );
     let _ = std::fs::remove_dir_all(&dest);
 }
 
@@ -372,11 +413,17 @@ async fn qa_quarantine_same_task_id_collision_loses_no_data() {
         if entry.file_type().is_file() {
             match entry.file_name().to_string_lossy().as_ref() {
                 "A.txt" => {
-                    assert_eq!(std::fs::read(entry.path()).unwrap(), b"first batch precious");
+                    assert_eq!(
+                        std::fs::read(entry.path()).unwrap(),
+                        b"first batch precious"
+                    );
                     found_a = true;
                 }
                 "B.txt" => {
-                    assert_eq!(std::fs::read(entry.path()).unwrap(), b"second batch precious");
+                    assert_eq!(
+                        std::fs::read(entry.path()).unwrap(),
+                        b"second batch precious"
+                    );
                     found_b = true;
                 }
                 _ => {}
@@ -417,7 +464,11 @@ async fn qa_quarantine_rename_failure_falls_back_to_copy_no_loss() {
 
     let wt = tmp.path().join("wt-xvol");
     std::fs::create_dir_all(wt.join("sub")).unwrap();
-    std::fs::write(wt.join("sub").join("precious.bin"), vec![0u8, 1, 2, 3, 255, 254]).unwrap();
+    std::fs::write(
+        wt.join("sub").join("precious.bin"),
+        vec![0u8, 1, 2, 3, 255, 254],
+    )
+    .unwrap();
 
     let res = h
         .call(
@@ -500,18 +551,35 @@ async fn qa_reclaim_expiry_boundary_is_inclusive_and_not_off_by_one() {
     }
     await_tasks_and_leases_persisted(&store, 3).await;
 
-    runtime.registry.on_write("worktask:cmd:reclaim:bnd-run", &json!({})).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:reclaim:bnd-run", &json!({}))
+        .await;
     let telemetry = await_first_under(&store, "worktask:reclaim:").await;
-    let outcomes = telemetry["outcomes"].as_array().cloned().unwrap_or_default();
+    let outcomes = telemetry["outcomes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
 
     // Map branch → action by joining outcomes (keyed by task_id) back to each
     // task's branch.
     let mut action_by_branch = std::collections::HashMap::new();
     for o in &outcomes {
-        let tid = o.get("task_id").and_then(|v| v.as_str()).unwrap_or_default();
+        let tid = o
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         if let Some(task) = store.get(&format!("worktask:task:{tid}")).await {
-            let br = task.get("branch").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-            let act = o.get("action").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+            let br = task
+                .get("branch")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let act = o
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
             action_by_branch.insert(br, act);
         }
     }
@@ -604,11 +672,31 @@ async fn qa_required_string_actions_reject_missing_and_wrong_type() {
 
     // (action, params object with EVERYTHING present, the key to corrupt).
     let probes: [(&str, Value, &str); 6] = [
-        ("git_worktree_add", json!({ "repo_path": "r", "worktree_path": "w", "branch": "b" }), "repo_path"),
-        ("git_worktree_status", json!({ "worktree_path": "w" }), "worktree_path"),
-        ("git_branch_delete", json!({ "repo_path": "r", "branch": "b" }), "branch"),
-        ("git_push_branch", json!({ "worktree_path": "w", "branch": "b" }), "worktree_path"),
-        ("quarantine_worktree", json!({ "worktree_path": "w", "task_id": "t" }), "task_id"),
+        (
+            "git_worktree_add",
+            json!({ "repo_path": "r", "worktree_path": "w", "branch": "b" }),
+            "repo_path",
+        ),
+        (
+            "git_worktree_status",
+            json!({ "worktree_path": "w" }),
+            "worktree_path",
+        ),
+        (
+            "git_branch_delete",
+            json!({ "repo_path": "r", "branch": "b" }),
+            "branch",
+        ),
+        (
+            "git_push_branch",
+            json!({ "worktree_path": "w", "branch": "b" }),
+            "worktree_path",
+        ),
+        (
+            "quarantine_worktree",
+            json!({ "worktree_path": "w", "task_id": "t" }),
+            "task_id",
+        ),
         ("fs_dir_size", json!({ "path": "p" }), "path"),
     ];
 
@@ -629,7 +717,10 @@ async fn qa_required_string_actions_reject_missing_and_wrong_type() {
 
         // (b) WRONG TYPE (number instead of string).
         let mut wrong = full.clone();
-        wrong.as_object_mut().unwrap().insert(key.to_string(), json!(12345));
+        wrong
+            .as_object_mut()
+            .unwrap()
+            .insert(key.to_string(), json!(12345));
         let err2 = h
             .call(action, &wrong)
             .await
@@ -647,12 +738,18 @@ async fn qa_required_string_actions_reject_missing_and_wrong_type() {
 async fn qa_set_task_status_rejects_non_object_task() {
     let h = handler_with(&Arc::new(InMemoryStateStore::new()));
     let err = h
-        .call("set_task_status", &json!({ "task": "not-an-object", "status": "done" }))
+        .call(
+            "set_task_status",
+            &json!({ "task": "not-an-object", "status": "done" }),
+        )
         .await
         .expect_err("non-object task must error");
     assert!(matches!(err, ExecutionError::ActionFailed { .. }));
     let err2 = h
-        .call("set_task_status", &json!({ "task": [1, 2, 3], "status": "done" }))
+        .call(
+            "set_task_status",
+            &json!({ "task": [1, 2, 3], "status": "done" }),
+        )
         .await
         .expect_err("array task must error");
     assert!(matches!(err2, ExecutionError::ActionFailed { .. }));
@@ -676,8 +773,19 @@ async fn qa_make_task_record_with_empty_payload_is_honest_nulls_not_fabrication(
     assert_eq!(rec["task_type"], "feature");
     assert_eq!(rec["pr_mode"], "github-pr");
     assert!(rec["created_at"].is_number());
-    for f in ["org", "repo", "branch", "worktree_path", "owner_session", "owner_agent"] {
-        assert!(rec[f].is_null(), "absent `{f}` must be honest JSON null, got {:?}", rec[f]);
+    for f in [
+        "org",
+        "repo",
+        "branch",
+        "worktree_path",
+        "owner_session",
+        "owner_agent",
+    ] {
+        assert!(
+            rec[f].is_null(),
+            "absent `{f}` must be honest JSON null, got {:?}",
+            rec[f]
+        );
     }
 }
 
@@ -702,7 +810,10 @@ async fn qa_new_feature_missing_repo_creates_no_task_or_lease() {
         "owner_agent": "a",
         "lease_expires_at": 9_000_000_000u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:broken-1", &payload).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:broken-1", &payload)
+        .await;
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -712,7 +823,10 @@ async fn qa_new_feature_missing_repo_creates_no_task_or_lease() {
         "a new_feature whose worktree creation fails must NOT persist a task node; got {task_keys:?}"
     );
     let lease_keys = store.keys_with_prefix("worktask:lease:").await;
-    assert!(lease_keys.is_empty(), "...and must NOT persist a lease node; got {lease_keys:?}");
+    assert!(
+        lease_keys.is_empty(),
+        "...and must NOT persist a lease node; got {lease_keys:?}"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -741,9 +855,14 @@ async fn qa_pr_mode_orgtype_beats_global() {
     init_repo(&git, &repo).await;
     let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
 
-    store.set("worktask:policy:global", json!({ "pr_mode": "github-pr" })).await;
     store
-        .set("worktask:policy:orgtype:plures:feature", json!({ "pr_mode": "subagent-review" }))
+        .set("worktask:policy:global", json!({ "pr_mode": "github-pr" }))
+        .await;
+    store
+        .set(
+            "worktask:policy:orgtype:plures:feature",
+            json!({ "pr_mode": "subagent-review" }),
+        )
         .await;
 
     let payload = json!({
@@ -751,9 +870,15 @@ async fn qa_pr_mode_orgtype_beats_global() {
         "worktree_path": tmp.path().join("wt-ot").to_string_lossy(),
         "owner_session": "s", "owner_agent": "a", "lease_expires_at": 9_000_000_000u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:ot-1", &payload).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:ot-1", &payload)
+        .await;
     let (_id, task) = await_task_of_type(&store, "feature").await;
-    assert_eq!(task["pr_mode"], "subagent-review", "org+type tier must beat global tier");
+    assert_eq!(
+        task["pr_mode"], "subagent-review",
+        "org+type tier must beat global tier"
+    );
 }
 
 /// repo policy must beat both org+type and global (higher tier wins).
@@ -770,9 +895,14 @@ async fn qa_pr_mode_repo_beats_orgtype_and_global() {
     init_repo(&git, &repo).await;
     let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
 
-    store.set("worktask:policy:global", json!({ "pr_mode": "none" })).await;
     store
-        .set("worktask:policy:orgtype:plures:feature", json!({ "pr_mode": "subagent-review" }))
+        .set("worktask:policy:global", json!({ "pr_mode": "none" }))
+        .await;
+    store
+        .set(
+            "worktask:policy:orgtype:plures:feature",
+            json!({ "pr_mode": "subagent-review" }),
+        )
         .await;
     store
         .set(
@@ -786,9 +916,15 @@ async fn qa_pr_mode_repo_beats_orgtype_and_global() {
         "worktree_path": tmp.path().join("wt-ovr").to_string_lossy(),
         "owner_session": "s", "owner_agent": "a", "lease_expires_at": 9_000_000_000u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:ovr-1", &payload).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:ovr-1", &payload)
+        .await;
     let (_id, task) = await_task_of_type(&store, "feature").await;
-    assert_eq!(task["pr_mode"], "direct-merge", "repo tier must beat both orgtype and global");
+    assert_eq!(
+        task["pr_mode"], "direct-merge",
+        "repo tier must beat both orgtype and global"
+    );
 }
 
 /// NOTHING set → documented per-type default. feature defaults to github-pr,
@@ -819,9 +955,16 @@ async fn qa_pr_mode_no_policy_uses_documented_type_default() {
             "worktree_path": tmp.path().join(wt).to_string_lossy(),
             "owner_session": "s", "owner_agent": "a", "lease_expires_at": 9_000_000_000u64,
         });
-        runtime.registry.on_write(&format!("worktask:cmd:{cmd}:def-{i}"), &payload).await;
+        runtime
+            .registry
+            .on_write(&format!("worktask:cmd:{cmd}:def-{i}"), &payload)
+            .await;
         let (_id, task) = await_task_of_type(&store, ttype).await;
-        let expected = if *ttype == "feature" { "github-pr" } else { "direct-merge" };
+        let expected = if *ttype == "feature" {
+            "github-pr"
+        } else {
+            "direct-merge"
+        };
         assert_eq!(
             task["pr_mode"], expected,
             "{ttype} with no policy must default to {expected} (fail-safe), not empty/garbage"
@@ -851,14 +994,22 @@ async fn qa_pr_mode_malformed_policy_node_does_not_panic_and_is_handled() {
     let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
 
     // Malformed: present, non-null, but no pr_mode field.
-    store.set("worktask:policy:global", json!({ "oops_wrong_field": "github-pr" })).await;
+    store
+        .set(
+            "worktask:policy:global",
+            json!({ "oops_wrong_field": "github-pr" }),
+        )
+        .await;
 
     let payload = json!({
         "org": "plures", "repo": repo.to_string_lossy(), "branch": "feat/malformed",
         "worktree_path": tmp.path().join("wt-malformed").to_string_lossy(),
         "owner_session": "s", "owner_agent": "a", "lease_expires_at": 9_000_000_000u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:malformed-1", &payload).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:malformed-1", &payload)
+        .await;
 
     // No panic: the feature task must still be created.
     let (_id, task) = await_task_of_type(&store, "feature").await;
@@ -943,7 +1094,10 @@ async fn qa_double_claim_same_worktree_path_does_not_stomp_first() {
         "worktree_path": wt.to_string_lossy(),
         "owner_session": "OWNER-ONE", "owner_agent": "a1", "lease_expires_at": 9_000_000_000u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:claim-1", &p1).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:claim-1", &p1)
+        .await;
     let (first_id, _t1) = await_task_of_type(&store, "feature").await;
     await_path(&wt).await;
     let first_lease = store
@@ -959,7 +1113,10 @@ async fn qa_double_claim_same_worktree_path_does_not_stomp_first() {
         "worktree_path": wt.to_string_lossy(),
         "owner_session": "OWNER-TWO", "owner_agent": "a2", "lease_expires_at": 1u64,
     });
-    runtime.registry.on_write("worktask:cmd:new_feature:claim-2", &p2).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:new_feature:claim-2", &p2)
+        .await;
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // Still exactly ONE task and ONE lease, and the first owner is intact.
@@ -1040,14 +1197,20 @@ async fn qa_doctor_is_readonly_under_orphan_expired_and_dirty_state() {
         for k in store.keys_with_prefix("worktask:task:").await {
             if let Some(v) = store.get(&k).await {
                 if v.get("branch").and_then(|b| b.as_str()) == Some("feat/orphan") {
-                    id = v.get("task_id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+                    id = v
+                        .get("task_id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or_default()
+                        .to_string();
                 }
             }
         }
         id
     };
     assert!(!orphan_id.is_empty(), "found orphan task id");
-    store.set(&format!("worktask:lease:{orphan_id}"), Value::Null).await;
+    store
+        .set(&format!("worktask:lease:{orphan_id}"), Value::Null)
+        .await;
 
     // Snapshot ALL worktask state + the worktree set BEFORE doctor.
     let snap = |store: Arc<dyn StateStore>| async move {
@@ -1062,7 +1225,10 @@ async fn qa_doctor_is_readonly_under_orphan_expired_and_dirty_state() {
     let worktrees_before = worktree_paths(&git, &repo).await;
 
     // Fire doctor; give it ample time to run all read steps.
-    runtime.registry.on_write("worktask:cmd:doctor:adv-run", &json!({})).await;
+    runtime
+        .registry
+        .on_write("worktask:cmd:doctor:adv-run", &json!({}))
+        .await;
     tokio::time::sleep(Duration::from_millis(800)).await;
 
     // ZERO mutations: identical state nodes + identical worktree set.
@@ -1076,14 +1242,26 @@ async fn qa_doctor_is_readonly_under_orphan_expired_and_dirty_state() {
         "doctor must not write reclaim telemetry"
     );
     assert!(
-        store.keys_with_prefix("worktask:quarantine:").await.is_empty(),
+        store
+            .keys_with_prefix("worktask:quarantine:")
+            .await
+            .is_empty(),
         "doctor must not quarantine anything (no MOVE of the dirty tree)"
     );
     let worktrees_after = worktree_paths(&git, &repo).await;
-    assert_eq!(worktrees_before, worktrees_after, "doctor must not add/remove worktrees");
-    assert!(expired_wt.exists(), "dirty+expired worktree must remain (doctor never reclaims)");
+    assert_eq!(
+        worktrees_before, worktrees_after,
+        "doctor must not add/remove worktrees"
+    );
+    assert!(
+        expired_wt.exists(),
+        "dirty+expired worktree must remain (doctor never reclaims)"
+    );
     assert!(orphan_wt.exists(), "orphaned worktree must remain");
-    assert!(expired_wt.join("wip.txt").exists(), "the dirty wip file must be untouched by doctor");
+    assert!(
+        expired_wt.join("wip.txt").exists(),
+        "the dirty wip file must be untouched by doctor"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1109,7 +1287,12 @@ async fn qa_new_pr_direct_merge_conflict_preserves_worktree_and_not_done() {
     init_repo(&git, &repo).await;
     let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
 
-    store.set("worktask:policy:global", json!({ "pr_mode": "direct-merge" })).await;
+    store
+        .set(
+            "worktask:policy:global",
+            json!({ "pr_mode": "direct-merge" }),
+        )
+        .await;
 
     let wt = tmp.path().join("wt-conflict");
     let branch = "chore/conflict";
@@ -1131,21 +1314,35 @@ async fn qa_new_pr_direct_merge_conflict_preserves_worktree_and_not_done() {
     // different content so `git merge --no-ff` cannot auto-resolve.
     let wtd = wt.to_string_lossy();
     std::fs::write(wt.join("seed.txt"), b"BRANCH SIDE change\n").unwrap();
-    git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
-    git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "branch change"]).await.unwrap();
+    git.run_checked("add", &["-C", &wtd, "add", "-A"])
+        .await
+        .unwrap();
+    git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "branch change"])
+        .await
+        .unwrap();
     let rd = repo.to_string_lossy();
     std::fs::write(repo.join("seed.txt"), b"MAIN SIDE change\n").unwrap();
-    git.run_checked("add", &["-C", &rd, "add", "-A"]).await.unwrap();
-    git.run_checked("ci", &["-C", &rd, "commit", "-q", "-m", "main change"]).await.unwrap();
+    git.run_checked("add", &["-C", &rd, "add", "-A"])
+        .await
+        .unwrap();
+    git.run_checked("ci", &["-C", &rd, "commit", "-q", "-m", "main change"])
+        .await
+        .unwrap();
 
     runtime
         .registry
-        .on_write("worktask:cmd:new_pr:conf-pr", &json!({ "task_id": task_id }))
+        .on_write(
+            "worktask:cmd:new_pr:conf-pr",
+            &json!({ "task_id": task_id }),
+        )
         .await;
     tokio::time::sleep(Duration::from_millis(700)).await;
 
     // 1. The task must NOT be `done`.
-    let task = store.get(&format!("worktask:task:{task_id}")).await.unwrap();
+    let task = store
+        .get(&format!("worktask:task:{task_id}"))
+        .await
+        .unwrap();
     assert_ne!(
         task["status"].as_str(),
         Some("done"),
@@ -1153,13 +1350,19 @@ async fn qa_new_pr_direct_merge_conflict_preserves_worktree_and_not_done() {
         task["status"]
     );
     // 2. The worktree must still exist (not torn down on failure).
-    assert!(wt.exists(), "a conflicting merge must NOT remove the worktree (work would be lost)");
+    assert!(
+        wt.exists(),
+        "a conflicting merge must NOT remove the worktree (work would be lost)"
+    );
     assert!(
         worktree_listed(&git, &repo, &wt).await,
         "worktree must still be registered after a failed merge"
     );
     // 3. The branch must NOT be deleted.
-    let branches = git.run_checked("br", &["-C", &rd, "branch", "--list"]).await.unwrap();
+    let branches = git
+        .run_checked("br", &["-C", &rd, "branch", "--list"])
+        .await
+        .unwrap();
     assert!(
         branches.stdout.contains(branch),
         "the feature branch must NOT be deleted after a failed merge; branches=\n{}",
@@ -1184,7 +1387,9 @@ async fn qa_new_pr_github_unreachable_remote_errors_and_preserves_worktree() {
     init_repo(&git, &repo).await;
     let (runtime, store) = build_runtime(&tmp.path().join("state")).await;
 
-    store.set("worktask:policy:global", json!({ "pr_mode": "github-pr" })).await;
+    store
+        .set("worktask:policy:global", json!({ "pr_mode": "github-pr" }))
+        .await;
 
     let wt = tmp.path().join("wt-unreachable");
     let branch = "feat/unreachable";
@@ -1207,13 +1412,24 @@ async fn qa_new_pr_github_unreachable_remote_errors_and_preserves_worktree() {
     let dead_remote = tmp.path().join("does-not-exist.git");
     git.run_checked(
         "remote-add",
-        &["-C", &wtd, "remote", "add", "origin", &dead_remote.to_string_lossy()],
+        &[
+            "-C",
+            &wtd,
+            "remote",
+            "add",
+            "origin",
+            &dead_remote.to_string_lossy(),
+        ],
     )
     .await
     .unwrap();
     std::fs::write(wt.join("x.txt"), b"work").unwrap();
-    git.run_checked("add", &["-C", &wtd, "add", "-A"]).await.unwrap();
-    git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "work"]).await.unwrap();
+    git.run_checked("add", &["-C", &wtd, "add", "-A"])
+        .await
+        .unwrap();
+    git.run_checked("ci", &["-C", &wtd, "commit", "-q", "-m", "work"])
+        .await
+        .unwrap();
 
     runtime
         .registry
@@ -1224,7 +1440,10 @@ async fn qa_new_pr_github_unreachable_remote_errors_and_preserves_worktree() {
     // Task must NOT be done (the push failed). It may remain `merging` (set
     // before the push) — the key invariant is: NOT done, and the worktree is
     // preserved.
-    let task = store.get(&format!("worktask:task:{task_id}")).await.unwrap();
+    let task = store
+        .get(&format!("worktask:task:{task_id}"))
+        .await
+        .unwrap();
     assert_ne!(
         task["status"].as_str(),
         Some("done"),
@@ -1237,8 +1456,14 @@ async fn qa_new_pr_github_unreachable_remote_errors_and_preserves_worktree() {
     );
     // The dead remote of course has no branch.
     let ls = git
-        .run("ls-remote", &["ls-remote", "--heads", &dead_remote.to_string_lossy()])
+        .run(
+            "ls-remote",
+            &["ls-remote", "--heads", &dead_remote.to_string_lossy()],
+        )
         .await
         .unwrap();
-    assert!(!ls.stdout.contains(branch), "branch must not exist on an unreachable remote");
+    assert!(
+        !ls.stdout.contains(branch),
+        "branch must not exist on an unreachable remote"
+    );
 }

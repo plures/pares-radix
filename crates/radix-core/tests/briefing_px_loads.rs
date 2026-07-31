@@ -51,8 +51,8 @@ fn briefing_px_path() -> PathBuf {
 #[test]
 fn morning_briefing_px_parses_and_compiles() {
     let path = briefing_px_path();
-    let source = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let source =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
 
     let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoopHandler);
     let adapters = load_px_procedures(&source, handler)
@@ -123,11 +123,16 @@ fn delivery_request_is_externally_tagged() {
     let round: SpineEvent =
         serde_json::from_value(serialized).expect("DeliveryRequest round-trips");
     match round {
-        SpineEvent::DeliveryRequest { channel, chat_id, .. } => {
+        SpineEvent::DeliveryRequest {
+            channel, chat_id, ..
+        } => {
             assert_eq!(channel, "telegram");
             assert_eq!(chat_id, "8573852722");
         }
-        other => panic!("expected DeliveryRequest variant, got a different SpineEvent ({})", other.event_type()),
+        other => panic!(
+            "expected DeliveryRequest variant, got a different SpineEvent ({})",
+            other.event_type()
+        ),
     }
 }
 

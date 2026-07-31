@@ -99,6 +99,18 @@ pub enum SpineEvent {
         name: String,
     },
 
+    /// A periodic heartbeat tick emitted by the heartbeat runner (Rust IO,
+    /// design: praxis/spine/spine.px IO boundary #4). The pipeline loop turns
+    /// this into a `heartbeat_tick:<id>` reactive write, which
+    /// `autonomous-dispatch.px::evaluate_dispatch` consumes to decide whether
+    /// to dispatch an autonomous task this tick. Decision logic lives in `.px`;
+    /// this event only carries the tick counter.
+    HeartbeatTick {
+        id: String,
+        /// Monotonic tick counter (payload consumed by evaluate_dispatch as `tick: int`).
+        tick: i64,
+    },
+
     /// A new conversation thread was created.
     ThreadCreated {
         id: String,
@@ -153,6 +165,7 @@ impl SpineEvent {
             | Self::ToolRequest { id, .. }
             | Self::ToolResult { id, .. }
             | Self::Timer { id, .. }
+            | Self::HeartbeatTick { id, .. }
             | Self::ThreadCreated { id, .. }
             | Self::ThreadSwitched { id, .. }
             | Self::ThreadArchived { id, .. }
@@ -172,6 +185,7 @@ impl SpineEvent {
             Self::ToolRequest { .. } => "tool_request",
             Self::ToolResult { .. } => "tool_result",
             Self::Timer { .. } => "timer",
+            Self::HeartbeatTick { .. } => "heartbeat_tick",
             Self::ThreadCreated { .. } => "thread_created",
             Self::ThreadSwitched { .. } => "thread_switched",
             Self::ThreadArchived { .. } => "thread_archived",

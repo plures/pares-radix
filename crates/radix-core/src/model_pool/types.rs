@@ -333,3 +333,63 @@ pub struct ProviderSummary {
     pub model_count: usize,
     pub enabled: bool,
 }
+
+// ── Structured Catalog ───────────────────────────────────────────────────────
+
+/// A single structured catalog entry — the minimal, channel-agnostic
+/// representation of a discovered model for programmatic (non-string) consumers
+/// (e.g. Telegram `/model` slash-command autocompletion, other channel bots).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCatalogEntry {
+    /// Provider name (e.g. "github-copilot", "openai").
+    pub provider: String,
+    /// Model identifier as used in selection (e.g. "claude-opus-4.8").
+    pub model_id: String,
+    /// Human-readable display name.
+    pub display_name: String,
+    /// Composite selection key: "provider/model_id".
+    pub key: String,
+    /// Whether the model is currently enabled for selection.
+    pub enabled: bool,
+    /// Whether this is a preview/experimental model.
+    pub preview: bool,
+    /// Whether the model supports reasoning/chain-of-thought.
+    pub reasoning: bool,
+    /// Cost per 1M tokens.
+    pub cost: ModelCost,
+}
+
+impl From<&DiscoveredModel> for ModelCatalogEntry {
+    fn from(m: &DiscoveredModel) -> Self {
+        Self {
+            provider: m.provider.clone(),
+            model_id: m.id.clone(),
+            display_name: m.name.clone(),
+            key: m.key(),
+            enabled: m.enabled,
+            preview: m.preview,
+            reasoning: m.reasoning,
+            cost: m.cost.clone(),
+        }
+    }
+}
+
+/// A paginated, refreshed snapshot of the model catalog.
+///
+/// Produced by `PoolControl::catalog()`, which triggers a discovery refresh
+/// before slicing the page so callers always see up-to-date data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelCatalogPage {
+    /// Entries for this page, in stable order (provider, then model_id).
+    pub entries: Vec<ModelCatalogEntry>,
+    /// Total number of entries across all pages (post-refresh).
+    pub total: usize,
+    /// The page number returned (0-indexed).
+    pub page: usize,
+    /// The page size used.
+    pub page_size: usize,
+    /// Whether a subsequent page exists.
+    pub has_more: bool,
+    /// When this snapshot was produced.
+    pub snapshot_at: SystemTime,
+}

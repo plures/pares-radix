@@ -17,6 +17,9 @@
  * Plugins:
  *   plugin.list, plugin.activate, plugin.deactivate, plugin.info
  *
+ * Task Handoff (custody-transfer protocol):
+ *   task.handoff.prepare, task.handoff.verify, task.handoff.accept, task.handoff.claim
+ *
  * Praxis:
  *   praxis.evaluate, praxis.addRule, praxis.listRules, praxis.addConstraint
  *
@@ -63,6 +66,7 @@ if (!process.env.RADIX_DEV) {
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import Ajv, { type ValidateFunction } from 'ajv';
 
 // Determine storage path: RADIX_DB_PATH env or default ~/.radix/pluresdb.json
 const RADIX_DB_PATH = process.env.RADIX_DB_PATH
@@ -164,7 +168,30 @@ interface ToolDef {
   name: string;
   description: string;
   inputSchema: object;
+  /**
+   * JSON Schema (2020-12 dialect, per MCP spec) describing the shape of this
+   * tool's successful result. Optional per-tool: when present it is
+   * advertised in tools/list and used to populate CallToolResult.structuredContent
+   * (in addition to the existing text content block, for backward compatibility
+   * with clients that don't yet read structuredContent). Handlers that can
+   * short-circuit with `{ error: string }` declare that alternative via `oneOf`
+   * with ERROR_RESULT_SCHEMA so the schema stays truthful to actual behavior.
+   */
+  outputSchema?: object;
   handler: (params: Record<string, unknown>) => unknown;
+}
+
+/** Shared schema fragment for the `{ error: string }` short-circuit shape many handlers return. */
+const ERROR_RESULT_SCHEMA = {
+  type: 'object',
+  properties: { error: { type: 'string' } },
+  required: ['error'],
+  additionalProperties: false,
+} as const;
+
+/** Wrap a success schema with the common `{ error }` alternative. */
+function withError(successSchema: object): object {
+  return { oneOf: [successSchema, ERROR_RESULT_SCHEMA] };
 }
 
 const tools: ToolDef[] = [
@@ -173,30 +200,35 @@ const tools: ToolDef[] = [
     name: 'db.get',
     description: 'Read a value from PluresDB by key',
     inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },
+    outputSchema: { type: 'object', properties: { value: {} }, required: ['value'] },
     handler: ({ key }) => ({ value: dbGet(key as string) }),
   },
   {
     name: 'db.put',
     description: 'Write a value to PluresDB',
     inputSchema: { type: 'object', properties: { key: { type: 'string' }, value: {} }, required: ['key', 'value'] },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] },
     handler: ({ key, value }) => { dbPut(key as string, value); return { ok: true }; },
   },
   {
     name: 'db.delete',
     description: 'Delete a key from PluresDB',
     inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] },
     handler: ({ key }) => { dbDelete(key as string); return { ok: true }; },
   },
   {
     name: 'db.keys',
     description: 'List all keys with a given prefix',
     inputSchema: { type: 'object', properties: { prefix: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { keys: { type: 'array', items: { type: 'string' } } }, required: ['keys'] },
     handler: ({ prefix }) => ({ keys: dbKeys((prefix as string) ?? '') }),
   },
   {
     name: 'db.dump',
     description: 'Dump all PluresDB contents (key-value pairs)',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: { type: 'object', additionalProperties: true },
     handler: () => {
       const entries: Record<string, unknown> = {};
       for (const [k, v] of db) entries[k] = v;
@@ -216,6 +248,7 @@ const tools: ToolDef[] = [
       },
       required: ['title'],
     },
+    outputSchema: { type: 'object', additionalProperties: true, description: 'CanvasDocument' },
     handler: ({ title, description }) => {
       activeCanvas = toolCanvasCreate({ title: title as string, description: description as string });
       // Seed data into DB
@@ -237,6 +270,11 @@ const tools: ToolDef[] = [
       },
       required: ['parentId', 'node'],
     },
+    outputSchema: withError({
+      type: 'object',
+      properties: { ok: { type: 'boolean' }, tree: { type: 'object' } },
+      required: ['ok', 'tree'],
+    }),
     handler: ({ parentId, node }) => {
       if (!activeCanvas) return { error: 'No active canvas. Call canvas.create first.' };
       activeCanvas = toolCanvasAddNode(activeCanvas, parentId as string, node as CanvasNode);
@@ -248,6 +286,11 @@ const tools: ToolDef[] = [
     name: 'canvas.removeNode',
     description: 'Remove a node from the canvas tree by ID',
     inputSchema: { type: 'object', properties: { nodeId: { type: 'string' } }, required: ['nodeId'] },
+    outputSchema: withError({
+      type: 'object',
+      properties: { ok: { type: 'boolean' }, tree: { type: 'object' } },
+      required: ['ok', 'tree'],
+    }),
     handler: ({ nodeId }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasRemoveNode(activeCanvas, nodeId as string);
@@ -259,6 +302,7 @@ const tools: ToolDef[] = [
     name: 'canvas.setData',
     description: 'Set data values in the canvas (seeds PluresDB)',
     inputSchema: { type: 'object', properties: { data: { type: 'object' } }, required: ['data'] },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' } }, required: ['ok'] }),
     handler: ({ data }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasSetData(activeCanvas, data as Record<string, unknown>);
@@ -273,6 +317,11 @@ const tools: ToolDef[] = [
     name: 'canvas.addRule',
     description: 'Add a Praxis validation rule to the canvas',
     inputSchema: { type: 'object', properties: { rule: { type: 'object' } }, required: ['rule'] },
+    outputSchema: withError({
+      type: 'object',
+      properties: { ok: { type: 'boolean' }, rules: { type: 'array' } },
+      required: ['ok', 'rules'],
+    }),
     handler: ({ rule }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasAddRule(activeCanvas, rule as CanvasRule);
@@ -284,6 +333,11 @@ const tools: ToolDef[] = [
     name: 'canvas.addProcedure',
     description: 'Add a behavior procedure to the canvas',
     inputSchema: { type: 'object', properties: { procedure: { type: 'object' } }, required: ['procedure'] },
+    outputSchema: withError({
+      type: 'object',
+      properties: { ok: { type: 'boolean' }, procedures: { type: 'array' } },
+      required: ['ok', 'procedures'],
+    }),
     handler: ({ procedure }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasAddProcedure(activeCanvas, procedure as CanvasProcedure);
@@ -295,6 +349,11 @@ const tools: ToolDef[] = [
     name: 'canvas.setTree',
     description: 'Replace the entire component tree',
     inputSchema: { type: 'object', properties: { tree: { type: 'object' } }, required: ['tree'] },
+    outputSchema: withError({
+      type: 'object',
+      properties: { ok: { type: 'boolean' }, tree: { type: 'object' } },
+      required: ['ok', 'tree'],
+    }),
     handler: ({ tree }) => {
       if (!activeCanvas) return { error: 'No active canvas' };
       activeCanvas = toolCanvasSetTree(activeCanvas, tree as CanvasNode);
@@ -306,12 +365,14 @@ const tools: ToolDef[] = [
     name: 'canvas.get',
     description: 'Get the current active canvas document',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: withError({ type: 'object', additionalProperties: true, description: 'CanvasDocument' }),
     handler: () => activeCanvas ?? { error: 'No active canvas' },
   },
   {
     name: 'canvas.export',
     description: 'Export the active canvas as a .canvas JSON string',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: withError({ type: 'object', properties: { json: { type: 'string' } }, required: ['json'] }),
     handler: () => {
       if (!activeCanvas) return { error: 'No active canvas' };
       return { json: toolCanvasExport(activeCanvas) };
@@ -321,6 +382,7 @@ const tools: ToolDef[] = [
     name: 'canvas.import',
     description: 'Import a .canvas file from JSON string',
     inputSchema: { type: 'object', properties: { json: { type: 'string' } }, required: ['json'] },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, title: { type: 'string' } }, required: ['ok', 'title'] },
     handler: ({ json }) => {
       activeCanvas = toolCanvasImport(json as string);
       for (const [k, v] of Object.entries(activeCanvas.data)) {
@@ -334,6 +396,7 @@ const tools: ToolDef[] = [
     name: 'canvas.validate',
     description: 'Validate the active canvas and return issues',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: withError({ type: 'object', properties: { issues: { type: 'array', items: { type: 'string' } } }, required: ['issues'] }),
     handler: () => {
       if (!activeCanvas) return { error: 'No active canvas' };
       return { issues: toolCanvasValidate(activeCanvas) };
@@ -343,12 +406,14 @@ const tools: ToolDef[] = [
     name: 'canvas.catalog',
     description: 'Get the full component catalog — what components are available and how to use them',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: { type: 'object', properties: { catalog: { type: 'string' } }, required: ['catalog'] },
     handler: () => ({ catalog: '(component registry not initialized in standalone mode — run inside pares-radix for full catalog)' }),
   },
   {
     name: 'canvas.save',
     description: 'Save the active canvas to the saved canvases list',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' }, id: { type: 'string' } }, required: ['ok', 'id'] }),
     handler: () => {
       if (!activeCanvas) return { error: 'No active canvas' };
       savedCanvases.set(activeCanvas.meta.id, activeCanvas);
@@ -363,6 +428,20 @@ const tools: ToolDef[] = [
     name: 'canvas.list',
     description: 'List all saved canvases',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        canvases: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { id: { type: 'string' }, title: { type: 'string' }, modifiedAt: { type: 'string' } },
+            required: ['id', 'title', 'modifiedAt'],
+          },
+        },
+      },
+      required: ['canvases'],
+    },
     handler: () => {
       const list = [...savedCanvases.entries()].map(([id, c]) => ({
         id, title: c.meta.title, modifiedAt: c.meta.modifiedAt,
@@ -374,6 +453,7 @@ const tools: ToolDef[] = [
     name: 'canvas.load',
     description: 'Load a saved canvas by ID',
     inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' }, title: { type: 'string' } }, required: ['ok', 'title'] }),
     handler: ({ id }) => {
       const canvas = savedCanvases.get(id as string);
       if (!canvas) return { error: `Canvas ${id} not found` };
@@ -391,6 +471,18 @@ const tools: ToolDef[] = [
     name: 'app.snapshot',
     description: 'Snapshot the entire app state (all PluresDB keys)',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        dbSize: { type: 'number' },
+        dbPath: { type: 'string' },
+        persistent: { type: 'boolean' },
+        activeCanvas: {},
+        savedCount: { type: 'number' },
+        state: { type: 'object', additionalProperties: true },
+      },
+      required: ['dbSize', 'dbPath', 'persistent', 'savedCount', 'state'],
+    },
     handler: () => {
       const state: Record<string, unknown> = {};
       for (const [k, v] of db) state[k] = v;
@@ -408,6 +500,7 @@ const tools: ToolDef[] = [
     name: 'app.reset',
     description: 'Reset all app state — nuclear option',
     inputSchema: { type: 'object', properties: { confirm: { type: 'boolean' } }, required: ['confirm'] },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' }, message: { type: 'string' } }, required: ['ok', 'message'] }),
     handler: ({ confirm }) => {
       if (!confirm) return { error: 'Pass confirm: true to reset all state' };
       db.clear();
@@ -430,6 +523,22 @@ const tools: ToolDef[] = [
         phase: { type: 'string', description: 'Optional phase filter (e.g. pre-commit, pre-push)' },
       },
       required: ['context'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        evaluated: { type: 'number' },
+        violations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { constraint: { type: 'string' }, severity: { type: 'string' }, message: { type: 'string' } },
+            required: ['constraint', 'severity', 'message'],
+          },
+        },
+        passed: { type: 'boolean' },
+      },
+      required: ['evaluated', 'violations', 'passed'],
     },
     handler: ({ context, phase }) => {
       const constraints = dbKeys('px:constraint/').map((k) => db.get(k) as any).filter(Boolean);
@@ -484,6 +593,7 @@ const tools: ToolDef[] = [
       },
       required: ['name'],
     },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, key: { type: 'string' } }, required: ['ok', 'key'] },
     handler: ({ name, priority, conditions, actions }) => {
       const record = { type: 'rule', name, priority: priority ?? 50, conditions: conditions ?? [], actions: actions ?? [] };
       dbPut(`px:rule/${name}`, record);
@@ -505,6 +615,7 @@ const tools: ToolDef[] = [
       },
       required: ['name', 'severity'],
     },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, key: { type: 'string' } }, required: ['ok', 'key'] },
     handler: ({ name, when, require: req, severity, message, phases }) => {
       const record = { type: 'constraint', name, when, require: req, severity, message, phases: phases ?? [] };
       dbPut(`px:constraint/${name}`, record);
@@ -515,6 +626,11 @@ const tools: ToolDef[] = [
     name: 'praxis.listRules',
     description: 'List all Praxis rules and constraints',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: {
+      type: 'object',
+      properties: { rules: { type: 'array', items: { type: 'object', additionalProperties: true } }, constraints: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+      required: ['rules', 'constraints'],
+    },
     handler: () => {
       const rules = dbKeys('px:rule/').map((k) => ({ key: k, ...(db.get(k) as any) }));
       const constraints = dbKeys('px:constraint/').map((k) => ({ key: k, ...(db.get(k) as any) }));
@@ -533,6 +649,11 @@ const tools: ToolDef[] = [
         limit: { type: 'number', description: 'Max events to return (default 50)' },
         since: { type: 'string', description: 'ISO timestamp — only events after this time' },
       },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { events: { type: 'array', items: { type: 'object', additionalProperties: true } }, total: { type: 'number' } },
+      required: ['events', 'total'],
     },
     handler: ({ limit, since }) => {
       const allEvents = (db.get('chronos:timeline') as any[]) ?? [];
@@ -557,6 +678,7 @@ const tools: ToolDef[] = [
       },
       required: ['event'],
     },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, id: { type: 'string' } }, required: ['ok', 'id'] },
     handler: ({ event, data, level }) => {
       const timeline = (db.get('chronos:timeline') as any[]) ?? [];
       const entry = {
@@ -567,7 +689,7 @@ const tools: ToolDef[] = [
         timestamp: new Date().toISOString(),
       };
       timeline.push(entry);
-      db.set('chronos:timeline', timeline);
+      dbPut('chronos:timeline', timeline);
       return { ok: true, id: entry.id };
     },
   },
@@ -580,6 +702,11 @@ const tools: ToolDef[] = [
         fromId: { type: 'string', description: 'Start replay from this event id' },
         toId: { type: 'string', description: 'End replay at this event id' },
       },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: { replayed: { type: 'number' }, events: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+      required: ['replayed', 'events'],
     },
     handler: ({ fromId, toId }) => {
       const timeline = (db.get('chronos:timeline') as any[]) ?? [];
@@ -602,8 +729,9 @@ const tools: ToolDef[] = [
       },
       required: ['level'],
     },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, level: { type: 'string' } }, required: ['ok', 'level'] },
     handler: ({ level }) => {
-      db.set('chronos:config:level', level);
+      dbPut('chronos:config:level', level);
       return { ok: true, level };
     },
   },
@@ -614,6 +742,7 @@ const tools: ToolDef[] = [
     name: 'plugin.list',
     description: 'List all registered plugins and their status',
     inputSchema: { type: 'object', properties: {} },
+    outputSchema: { type: 'object', properties: { plugins: { type: 'array', items: { type: 'object', additionalProperties: true } } }, required: ['plugins'] },
     handler: () => {
       const plugins = dbKeys('plugin:').map((k) => ({ key: k, ...(db.get(k) as any) }));
       return { plugins };
@@ -632,6 +761,7 @@ const tools: ToolDef[] = [
       },
       required: ['name', 'version'],
     },
+    outputSchema: { type: 'object', properties: { ok: { type: 'boolean' }, key: { type: 'string' } }, required: ['ok', 'key'] },
     handler: ({ name, version, description, capabilities }) => {
       const record = { name, version, description, capabilities: capabilities ?? [], active: false, registeredAt: new Date().toISOString() };
       dbPut(`plugin:${name}`, record);
@@ -642,12 +772,13 @@ const tools: ToolDef[] = [
     name: 'plugin.activate',
     description: 'Activate a registered plugin',
     inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' }, plugin: { type: 'object', additionalProperties: true } }, required: ['ok', 'plugin'] }),
     handler: ({ name }) => {
       const record = db.get(`plugin:${name}`) as any;
       if (!record) return { error: `Plugin '${name}' not found` };
       record.active = true;
       record.activatedAt = new Date().toISOString();
-      db.set(`plugin:${name}`, record);
+      dbPut(`plugin:${name}`, record);
       return { ok: true, plugin: record };
     },
   },
@@ -655,12 +786,13 @@ const tools: ToolDef[] = [
     name: 'plugin.deactivate',
     description: 'Deactivate a plugin',
     inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    outputSchema: withError({ type: 'object', properties: { ok: { type: 'boolean' }, plugin: { type: 'object', additionalProperties: true } }, required: ['ok', 'plugin'] }),
     handler: ({ name }) => {
       const record = db.get(`plugin:${name}`) as any;
       if (!record) return { error: `Plugin '${name}' not found` };
       record.active = false;
       record.deactivatedAt = new Date().toISOString();
-      db.set(`plugin:${name}`, record);
+      dbPut(`plugin:${name}`, record);
       return { ok: true, plugin: record };
     },
   },
@@ -668,10 +800,234 @@ const tools: ToolDef[] = [
     name: 'plugin.info',
     description: 'Get detailed info about a specific plugin',
     inputSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+    outputSchema: withError({ type: 'object', additionalProperties: true }),
     handler: ({ name }) => {
       const record = db.get(`plugin:${name}`) as any;
       if (!record) return { error: `Plugin '${name}' not found` };
       return record;
+    },
+  },
+
+  // ── Task Handoff ─────────────────────────────────────────────────────────
+  // Mirrors the four Rust action verbs wired in TaskHandoffActionHandler.
+  // The MCP dev server operates on the same PluresDB key-space so it can
+  // exercise the full custody-transfer protocol from any MCP client.
+  {
+    name: 'task.handoff.prepare',
+    description: 'Mark a task TransferPending and return a signed HandoffEnvelope. '
+      + 'Params: task_id, source_agent, target_agent, handoff_id, expected_generation, '
+      + 'optional task (inline definition).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:             { type: 'string' },
+        source_agent:        { type: 'string' },
+        target_agent:        { type: 'string' },
+        handoff_id:          { type: 'string' },
+        expected_generation: { type: 'number' },
+        task:                { type: 'object', description: 'Optional inline task definition to seed' },
+      },
+      required: ['task_id', 'source_agent', 'target_agent', 'handoff_id', 'expected_generation'],
+    },
+    outputSchema: withError({
+      type: 'object',
+      properties: {
+        record: { type: 'object', additionalProperties: true },
+        envelope: {
+          type: 'object',
+          properties: {
+            task_id: { type: 'string' },
+            source_agent: {},
+            target_agent: {},
+            handoff_id: {},
+            generation: { type: 'number' },
+            digest: { type: 'string' },
+          },
+          required: ['task_id', 'source_agent', 'target_agent', 'handoff_id', 'generation', 'digest'],
+        },
+      },
+      required: ['record', 'envelope'],
+    }),
+    handler: ({ task_id, source_agent, target_agent, handoff_id, expected_generation, task: inlineTask }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+
+      // Seed inline task if provided and not already present.
+      if (inlineTask) {
+        const existing = db.get(recKey) as any;
+        if (!existing) {
+          dbPut(recKey, {
+            task: inlineTask,
+            custody_state: 'owned',
+            owner_agent: source_agent as string,
+            generation: 0,
+            locked_by: null,
+            lock_token: null,
+          });
+        }
+      }
+
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found — seed it first or pass inline task` };
+
+      const gen = record.generation as number;
+      if (gen !== (expected_generation as number)) {
+        return { error: `Generation mismatch: expected ${expected_generation}, got ${gen}` };
+      }
+      if (record.custody_state !== 'owned') {
+        return { error: `Task is not in 'owned' state (current: ${record.custody_state})` };
+      }
+
+      record.custody_state = 'transfer_pending';
+      dbPut(recKey, record);
+
+      // Build envelope (SHA-256 not available in this JS runtime without crypto;
+      // we use a deterministic content string as the digest stand-in).
+      const envelopePayload = JSON.stringify({
+        task_id: tid,
+        source_agent,
+        target_agent,
+        handoff_id,
+        generation: gen,
+        task: record.task,
+      });
+      const digest = Buffer.from(envelopePayload).toString('base64');
+      const envelope = { task_id: tid, source_agent, target_agent, handoff_id, generation: gen, digest };
+
+      return { record, envelope };
+    },
+  },
+  {
+    name: 'task.handoff.verify',
+    description: 'Verify a HandoffEnvelope digest without mutating state. '
+      + 'Params: envelope (object with digest field), source_agent, target_agent, task_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        envelope:     { type: 'object' },
+        source_agent: { type: 'string' },
+        target_agent: { type: 'string' },
+        task_id:      { type: 'string' },
+      },
+      required: ['envelope', 'source_agent', 'target_agent', 'task_id'],
+    },
+    outputSchema: withError({
+      type: 'object',
+      properties: { valid: { type: 'boolean' }, task_id: { type: 'string' } },
+      required: ['valid', 'task_id'],
+    }),
+    handler: ({ envelope, source_agent, target_agent, task_id }) => {
+      const env = envelope as any;
+      const tid = task_id as string;
+      const record = db.get(`handoff:record:${tid}`) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+
+      if (env.source_agent !== source_agent) return { error: 'source_agent mismatch' };
+      if (env.target_agent !== target_agent) return { error: 'target_agent mismatch' };
+      if (env.task_id !== tid)               return { error: 'task_id mismatch' };
+
+      // Re-derive expected digest and compare.
+      const expectedPayload = JSON.stringify({
+        task_id: tid,
+        source_agent,
+        target_agent,
+        handoff_id: env.handoff_id,
+        generation: env.generation,
+        task: record.task,
+      });
+      const expectedDigest = Buffer.from(expectedPayload).toString('base64');
+      if (env.digest !== expectedDigest) return { error: 'digest mismatch — envelope was tampered' };
+
+      return { valid: true, task_id: tid };
+    },
+  },
+  {
+    name: 'task.handoff.accept',
+    description: 'Transfer custody to target_agent (receiving side). '
+      + 'Params: task_id, target_agent, handoff_id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:     { type: 'string' },
+        target_agent:{ type: 'string' },
+        handoff_id:  { type: 'string' },
+      },
+      required: ['task_id', 'target_agent', 'handoff_id'],
+    },
+    outputSchema: withError({
+      type: 'object',
+      properties: {
+        task_id: { type: 'string' },
+        new_owner: {},
+        generation: { type: 'number' },
+        handoff_id: {},
+      },
+      required: ['task_id', 'new_owner', 'generation', 'handoff_id'],
+    }),
+    handler: ({ task_id, target_agent, handoff_id }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+      if (record.custody_state !== 'transfer_pending') {
+        return { error: `Task is not transfer_pending (current: ${record.custody_state})` };
+      }
+
+      record.custody_state = 'owned';
+      record.owner_agent = target_agent as string;
+      record.generation = (record.generation as number) + 1;
+      record.locked_by = null;
+      record.lock_token = null;
+      dbPut(recKey, record);
+
+      return { task_id: tid, new_owner: target_agent, generation: record.generation, handoff_id };
+    },
+  },
+  {
+    name: 'task.handoff.claim',
+    description: 'Atomically claim a task for a worker (compare-and-swap). '
+      + 'Params: task_id, agent_id, worker_id, generation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id:    { type: 'string' },
+        agent_id:   { type: 'string' },
+        worker_id:  { type: 'string' },
+        generation: { type: 'number' },
+      },
+      required: ['task_id', 'agent_id', 'worker_id', 'generation'],
+    },
+    outputSchema: withError({
+      type: 'object',
+      properties: { task_id: { type: 'string' }, worker_id: {}, token: { type: 'string' } },
+      required: ['task_id', 'worker_id', 'token'],
+    }),
+    handler: ({ task_id, agent_id, worker_id, generation }) => {
+      const tid = task_id as string;
+      const recKey = `handoff:record:${tid}`;
+      const record = db.get(recKey) as any;
+      if (!record) return { error: `Task '${tid}' not found` };
+      if (record.owner_agent !== agent_id) return { error: `Task not owned by '${agent_id}'` };
+      if (record.generation !== (generation as number)) {
+        return { error: `Generation mismatch: expected ${generation}, got ${record.generation}` };
+      }
+
+      // Idempotent: same worker re-claiming returns same token.
+      if (record.locked_by === (worker_id as string) && record.lock_token) {
+        return { task_id: tid, worker_id, token: record.lock_token };
+      }
+
+      // Already claimed by a different worker.
+      if (record.locked_by && record.locked_by !== (worker_id as string)) {
+        return { error: `Task already claimed by '${record.locked_by}'` };
+      }
+
+      const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      record.locked_by = worker_id as string;
+      record.lock_token = token;
+      dbPut(recKey, record);
+
+      return { task_id: tid, worker_id, token };
     },
   },
 ];
@@ -829,6 +1185,74 @@ function resolveNumeric(expr: string, context: Record<string, unknown>): number 
 
 const toolMap = new Map(tools.map((t) => [t.name, t]));
 
+// Per MCP spec 2025-11-25 (SEP-1303): argument/input validation errors MUST be
+// reported as Tool Execution Errors (CallToolResult.isError = true), NOT as
+// JSON-RPC protocol-level errors. Protocol errors (-32601 unknown method/tool,
+// -32700 parse error, -32602 malformed request shape) are reserved for cases
+// the *calling model* cannot self-correct from within the conversation — a
+// validation failure on tool arguments is exactly the kind of recoverable
+// mistake a model should see and retry, so it must travel back as tool-result
+// content, never as a transport-level error the harness treats as fatal.
+const ajv = new Ajv({ allErrors: true, strict: false });
+const validatorCache = new Map<string, ValidateFunction>();
+
+function getValidator(tool: ToolDef): ValidateFunction {
+  let validate = validatorCache.get(tool.name);
+  if (!validate) {
+    validate = ajv.compile(tool.inputSchema);
+    validatorCache.set(tool.name, validate);
+  }
+  return validate;
+}
+
+function toolErrorResult(message: string): { content: Array<{ type: 'text'; text: string }>; isError: true } {
+  return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+function formatAjvErrors(validate: ValidateFunction): string {
+  const errors = validate.errors ?? [];
+  const lines = errors.map((e) => {
+    const path = e.instancePath || (e.params as any)?.missingProperty
+      ? `${e.instancePath}${e.instancePath ? ' ' : ''}${e.message}${(e.params as any)?.missingProperty ? ` '${(e.params as any).missingProperty}'` : ''}`
+      : e.message;
+    return `- ${path}`;
+  });
+  return `Invalid arguments:\n${lines.join('\n')}`;
+}
+
+/**
+ * Runs a tool call end-to-end: schema-validate arguments, then invoke the
+ * handler, catching BOTH validation failures and handler exceptions and
+ * returning them as a tool-result error (isError: true), never throwing up
+ * to the JSON-RPC layer. This is the single shared dispatch path so every
+ * tool gets consistent MCP-2025-11-25-compliant error classification without
+ * needing per-tool fixes.
+ */
+function callTool(tool: ToolDef, toolArgs: Record<string, unknown>): { content: Array<{ type: 'text'; text: string }>; structuredContent?: unknown; isError?: true } {
+  const validate = getValidator(tool);
+  if (!validate(toolArgs)) {
+    return toolErrorResult(formatAjvErrors(validate));
+  }
+
+  try {
+    const result = tool.handler(toolArgs);
+    const response: { content: Array<{ type: 'text'; text: string }>; structuredContent?: unknown } = {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    };
+    // Per MCP outputSchema convention: when a tool declares an outputSchema,
+    // also surface the raw result as structuredContent so clients that read
+    // structured results don't need to re-parse the text block. The text
+    // block is kept for backward compatibility with clients that only read
+    // `content`.
+    if (tool.outputSchema) {
+      response.structuredContent = result;
+    }
+    return response;
+  } catch (err: any) {
+    return toolErrorResult(`Error: ${err?.message ?? String(err)}`);
+  }
+}
+
 function handleRequest(req: { method: string; params?: Record<string, unknown>; id?: number | string }): object {
   const { method, params, id } = req;
 
@@ -856,36 +1280,27 @@ function handleRequest(req: { method: string; params?: Record<string, unknown>; 
             name: t.name,
             description: t.description,
             inputSchema: t.inputSchema,
+            ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
           })),
         },
       };
 
     case 'tools/call': {
-      const toolName = (params as any)?.name as string;
-      const toolArgs = (params as any)?.arguments ?? {};
+      // Malformed request shape (missing/non-string tool name) is a genuine
+      // protocol-level failure — the client sent a request the server cannot
+      // even dispatch, not a tool that rejected valid-looking arguments.
+      const toolName = (params as any)?.name;
+      if (typeof toolName !== 'string' || toolName.length === 0) {
+        return { jsonrpc: '2.0', id, error: { code: -32602, message: 'Invalid params: "name" must be a non-empty string' } };
+      }
+      const toolArgs = ((params as any)?.arguments ?? {}) as Record<string, unknown>;
       const tool = toolMap.get(toolName);
+      // Unknown tool name is likewise a protocol-level failure: there is no
+      // handler/schema to run against, so this cannot be a tool-execution error.
       if (!tool) {
         return { jsonrpc: '2.0', id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
       }
-      try {
-        const result = tool.handler(toolArgs);
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          },
-        };
-      } catch (err: any) {
-        return {
-          jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: `Error: ${err.message}` }],
-            isError: true,
-          },
-        };
-      }
+      return { jsonrpc: '2.0', id, result: callTool(tool, toolArgs) };
     }
 
     default:

@@ -11,13 +11,16 @@
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-use crate::model::{ChatMessage, ChatOptions, ModelClient, StreamDelta, ToolDispatcher};
+use crate::model::{
+    ChatMessage, ChatOptions, ModelClient, ModelClientError, StreamDelta, ToolDispatcher,
+};
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
 use crate::task_manager::TaskManager;
+use serde_json::Value;
 
 /// Invokes the language model for a ModelRequest and emits ModelResponse.
 ///
@@ -224,6 +227,7 @@ impl SpineProcedure for ModelInvoker {
             id,
             source,
             chat_id,
+            sender,
             content,
             system_prompt,
             metadata,
@@ -243,8 +247,13 @@ impl SpineProcedure for ModelInvoker {
         };
 
         // Build messages
-        let messages =
-            self.build_messages(content, system_prompt.as_deref(), metadata, &prior_history, chat_id);
+        let messages = self.build_messages(
+            content,
+            system_prompt.as_deref(),
+            metadata,
+            &prior_history,
+            chat_id,
+        );
 
         if messages.is_empty() || (messages.len() == 1 && messages[0].role == "system") {
             error!(event_id = %id, "model_invoker: no user content to send to model");
@@ -256,10 +265,7 @@ impl SpineProcedure for ModelInvoker {
             .get("model_tier")
             .and_then(|v| v.as_str())
             .unwrap_or("standard");
-        let routed_by_px = metadata
-            .get("routed_by")
-            .and_then(|v| v.as_str())
-            == Some("px");
+        let routed_by_px = metadata.get("routed_by").and_then(|v| v.as_str()) == Some("px");
 
         if routed_by_px {
             debug!(
@@ -279,29 +285,25 @@ impl SpineProcedure for ModelInvoker {
             ..ChatOptions::default()
         };
 
-        // Call the model — use streaming when a broadcast sender is configured
-        let result = if let Some(broadcast_tx) = &self.stream_tx {
-            // Streaming path: bridge mpsc (what ModelClient expects) to broadcast (what channels subscribe to)
-            debug!(event_id = %id, "model_invoker: using streaming completion");
-            let (mpsc_tx, mut mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<StreamDelta>();
-            let broadcast_tx_clone = broadcast_tx.clone();
-
-            // Forward deltas from mpsc to broadcast in background
-            tokio::spawn(async move {
-                while let Some(delta) = mpsc_rx.recv().await {
-                    let _ = broadcast_tx_clone.send(delta);
-                }
-            });
-
-            self.model_client
-                .complete_stream(&messages, &tool_defs, &options, mpsc_tx)
-                .await
-        } else {
-            // Non-streaming path: full completion returned at once
-            self.model_client
-                .complete(&messages, &tool_defs, &options)
-                .await
-        };
+        let request_context = serde_json::json!({
+            "event_id": id,
+            "source": source,
+            "chat_id": chat_id,
+            "sender": sender,
+            "metadata": metadata,
+            "message_count": messages.len(),
+            "tool_count": tool_defs.len(),
+        });
+        let result = self
+            .complete_with_fallback(
+                id,
+                chat_id,
+                &messages,
+                &tool_defs,
+                options,
+                &request_context,
+            )
+            .await;
 
         match result {
             Ok(completion) => {
@@ -354,6 +356,178 @@ impl SpineProcedure for ModelInvoker {
     }
 }
 
+impl ModelInvoker {
+    /// Maximum total model-call attempts for a single request, including the
+    /// initial call. Bounds fallback retries so a misbehaving `.px` selection
+    /// (or a selector that keeps returning fresh-looking but ultimately
+    /// unusable models) cannot loop forever.
+    const MAX_FALLBACK_ATTEMPTS: usize = 4;
+
+    /// Call the model client, and on a fallback-eligible failure, ask the
+    /// `select_fallback_model` `.px` procedure (via the existing
+    /// [`ToolDispatcher`] seam) which model to retry with. Loops up to
+    /// [`Self::MAX_FALLBACK_ATTEMPTS`] total attempts.
+    ///
+    /// Fallback *selection* is owned entirely by praxis — this method never
+    /// hardcodes or infers a replacement model itself; it only orchestrates
+    /// the retry loop and enforces the already-tried/attempt-cap safety net
+    /// (Option B in `docs/design/copilot-fallback-px-wiring.md`).
+    async fn complete_with_fallback(
+        &self,
+        event_id: &str,
+        chat_id: &str,
+        messages: &[ChatMessage],
+        tool_defs: &[crate::model::ToolDefinition],
+        mut options: ChatOptions,
+        request_context: &Value,
+    ) -> Result<crate::model::ModelCompletion, ModelClientError> {
+        let mut already_tried: Vec<String> = Vec::new();
+        if let Some(model) = &options.model {
+            already_tried.push(model.clone());
+        }
+
+        for attempt in 0..Self::MAX_FALLBACK_ATTEMPTS {
+            let call_result = if let Some(broadcast_tx) = &self.stream_tx {
+                let (mpsc_tx, mut mpsc_rx) = tokio::sync::mpsc::unbounded_channel::<StreamDelta>();
+                let broadcast_tx_clone = broadcast_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(delta) = mpsc_rx.recv().await {
+                        let _ = broadcast_tx_clone.send(delta);
+                    }
+                });
+                self.model_client
+                    .complete_stream(messages, tool_defs, &options, mpsc_tx)
+                    .await
+            } else {
+                self.model_client
+                    .complete(messages, tool_defs, &options)
+                    .await
+            };
+
+            let needs_fallback_ctx = match call_result {
+                Ok(completion) => return Ok(completion),
+                Err(ModelClientError::NeedsFallback(ctx)) => ctx,
+                Err(other) => return Err(other),
+            };
+
+            for model in &needs_fallback_ctx.already_tried {
+                if !already_tried.contains(model) {
+                    already_tried.push(model.clone());
+                }
+            }
+            if !already_tried.contains(&needs_fallback_ctx.failed_model) {
+                already_tried.push(needs_fallback_ctx.failed_model.clone());
+            }
+
+            if attempt + 1 >= Self::MAX_FALLBACK_ATTEMPTS {
+                return Err(ModelClientError::ProviderFailure {
+                    status: Some(needs_fallback_ctx.error_status),
+                    model: needs_fallback_ctx.failed_model.clone(),
+                    message: format!(
+                        "fallback exhausted: hit max attempts ({})",
+                        Self::MAX_FALLBACK_ATTEMPTS
+                    ),
+                });
+            }
+
+            debug!(
+                event_id = %event_id,
+                chat_id = %chat_id,
+                attempt,
+                failed_model = %needs_fallback_ctx.failed_model,
+                already_tried = ?already_tried,
+                "model_invoker: model call needs fallback, consulting praxis selection"
+            );
+
+            // Praxis owns the decision; the invoker only asks and applies it.
+            let selector_args = serde_json::json!({
+                "failed_model": needs_fallback_ctx.failed_model,
+                "already_tried": already_tried,
+                "error_status": needs_fallback_ctx.error_status,
+                "task_context": {
+                    "provider_context": needs_fallback_ctx.task_context,
+                    "request": request_context,
+                },
+            });
+            let raw = self
+                .tool_dispatcher
+                .call_tool("select_fallback_model", selector_args)
+                .await;
+
+            let decision: Value = match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(_) => {
+                    let raw_preview: String = raw.chars().take(500).collect();
+                    // Non-JSON / unparseable response from the selector is treated
+                    // as "no candidate" — fail closed rather than guess.
+                    return Err(ModelClientError::ProviderFailure {
+                        status: Some(needs_fallback_ctx.error_status),
+                        model: needs_fallback_ctx.failed_model.clone(),
+                        message: format!(
+                            "fallback selection returned an unparseable response (preview): {raw_preview}"
+                        ),
+                    });
+                }
+            };
+
+            let candidate = decision
+                .get("model")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+
+            let candidate = match candidate {
+                Some(c) if !already_tried.contains(&c) => c,
+                Some(c) => {
+                    warn!(
+                        event_id = %event_id,
+                        chat_id = %chat_id,
+                        candidate = %c,
+                        "model_invoker: fallback selector returned an already-tried model, stopping"
+                    );
+                    return Err(ModelClientError::ProviderFailure {
+                        status: Some(needs_fallback_ctx.error_status),
+                        model: needs_fallback_ctx.failed_model.clone(),
+                        message: format!(
+                            "fallback exhausted: selector re-suggested already-tried model '{c}'"
+                        ),
+                    });
+                }
+                None => {
+                    warn!(
+                        event_id = %event_id,
+                        chat_id = %chat_id,
+                        "model_invoker: fallback selection exhausted, no further candidate"
+                    );
+                    return Err(ModelClientError::ProviderFailure {
+                        status: Some(needs_fallback_ctx.error_status),
+                        model: needs_fallback_ctx.failed_model.clone(),
+                        message: "fallback exhausted: no candidate model available".to_string(),
+                    });
+                }
+            };
+
+            info!(
+                event_id = %event_id,
+                chat_id = %chat_id,
+                candidate = %candidate,
+                attempt,
+                "model_invoker: retrying with praxis-selected fallback model"
+            );
+            already_tried.push(candidate.clone());
+            options.model = Some(candidate);
+        }
+
+        Err(ModelClientError::ProviderFailure {
+            status: None,
+            model: options.model.unwrap_or_else(|| "unknown".into()),
+            message: format!(
+                "fallback exhausted: hit max attempts ({})",
+                Self::MAX_FALLBACK_ATTEMPTS
+            ),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -384,7 +558,7 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             Ok(ModelCompletion {
                 content: Some(self.response.clone()),
                 tool_calls: vec![],
@@ -404,7 +578,7 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             Ok(ModelCompletion {
                 content: None,
                 tool_calls: vec![ToolCall {
@@ -428,8 +602,8 @@ mod tests {
             _messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
-            Err("connection timeout".into())
+        ) -> Result<ModelCompletion, ModelClientError> {
+            Err(ModelClientError::Transport("connection timeout".into()))
         }
     }
 
@@ -458,7 +632,7 @@ mod tests {
             messages: &[ChatMessage],
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
-        ) -> Result<ModelCompletion, String> {
+        ) -> Result<ModelCompletion, ModelClientError> {
             self.captured.lock().await.push(messages.to_vec());
             Ok(ModelCompletion {
                 content: Some("captured".into()),
@@ -498,6 +672,121 @@ mod tests {
 
         async fn call_tool(&self, _name: &str, _arguments: serde_json::Value) -> String {
             String::new()
+        }
+    }
+
+    /// Scripted client for fallback orchestration tests. It records the model
+    /// supplied on each call so tests prove the invoker, rather than the
+    /// provider client, applies the Praxis-selected override.
+    struct ScriptedModelClient {
+        responses: tokio::sync::Mutex<
+            std::collections::VecDeque<Result<ModelCompletion, ModelClientError>>,
+        >,
+        models: tokio::sync::Mutex<Vec<Option<String>>>,
+    }
+
+    impl ScriptedModelClient {
+        fn new(responses: Vec<Result<ModelCompletion, ModelClientError>>) -> Self {
+            Self {
+                responses: tokio::sync::Mutex::new(responses.into()),
+                models: tokio::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ModelClient for ScriptedModelClient {
+        async fn complete(
+            &self,
+            _messages: &[ChatMessage],
+            _tools: &[ToolDefinition],
+            options: &ChatOptions,
+        ) -> Result<ModelCompletion, ModelClientError> {
+            self.models.lock().await.push(options.model.clone());
+            self.responses
+                .lock()
+                .await
+                .pop_front()
+                .expect("scripted model client received an unexpected extra call")
+        }
+    }
+
+    struct FallbackTools {
+        response: String,
+        calls: tokio::sync::Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl FallbackTools {
+        fn new(response: impl Into<String>) -> Self {
+            Self {
+                response: response.into(),
+                calls: tokio::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolDispatcher for FallbackTools {
+        async fn available_tools(&self) -> Vec<ToolDefinition> {
+            vec![]
+        }
+
+        async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> String {
+            self.calls.lock().await.push((name.to_owned(), arguments));
+            self.response.clone()
+        }
+    }
+
+    struct SequencedFallbackTools {
+        responses: tokio::sync::Mutex<std::collections::VecDeque<String>>,
+        calls: tokio::sync::Mutex<Vec<(String, serde_json::Value)>>,
+    }
+
+    impl SequencedFallbackTools {
+        fn new(responses: Vec<&str>) -> Self {
+            Self {
+                responses: tokio::sync::Mutex::new(
+                    responses.into_iter().map(str::to_owned).collect(),
+                ),
+                calls: tokio::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ToolDispatcher for SequencedFallbackTools {
+        async fn available_tools(&self) -> Vec<ToolDefinition> {
+            vec![]
+        }
+
+        async fn call_tool(&self, name: &str, arguments: serde_json::Value) -> String {
+            self.calls.lock().await.push((name.to_owned(), arguments));
+            self.responses
+                .lock()
+                .await
+                .pop_front()
+                .expect("selector received an unexpected extra call")
+        }
+    }
+
+    fn fallback_needed(model: &str) -> ModelClientError {
+        ModelClientError::NeedsFallback(crate::model::FallbackRequestContext {
+            failed_model: model.to_owned(),
+            already_tried: vec![model.to_owned()],
+            error_status: 400,
+            task_context: json!({"task_kind": "chat"}),
+        })
+    }
+
+    fn fallback_test_event() -> SpineEvent {
+        SpineEvent::ModelRequest {
+            source: "test".into(),
+            id: "fallback-request".into(),
+            chat_id: "fallback-chat".into(),
+            sender: "user".into(),
+            content: "please handle this".into(),
+            system_prompt: None,
+            metadata: json!({"model_tier": "standard", "route_reason": "test"}),
         }
     }
 
@@ -607,6 +896,159 @@ mod tests {
         } else {
             panic!("expected DeliveryRequest");
         }
+    }
+
+    #[tokio::test]
+    async fn retries_with_praxis_selected_fallback_model() {
+        let (emitter, mut rx) = make_emitter();
+        let client = Arc::new(ScriptedModelClient::new(vec![
+            Err(fallback_needed("primary-model")),
+            Ok(ModelCompletion {
+                content: Some("fallback succeeded".into()),
+                tool_calls: vec![],
+                logprobs: None,
+                model: Some("fallback-model".into()),
+            }),
+        ]));
+        let tools = Arc::new(FallbackTools::new(
+            r#"{"model":"fallback-model","reason":"live candidate","exhausted":false}"#,
+        ));
+        let invoker = ModelInvoker::new(
+            Arc::clone(&client) as Arc<dyn ModelClient>,
+            Arc::clone(&tools) as Arc<dyn ToolDispatcher>,
+        );
+
+        invoker.handle(&fallback_test_event(), &emitter).await;
+
+        match rx.recv().await.expect("model response") {
+            SpineEvent::ModelResponse { content, model, .. } => {
+                assert_eq!(content, "fallback succeeded");
+                assert_eq!(model, "fallback-model");
+            }
+            other => panic!("expected ModelResponse, got {other:?}"),
+        }
+        assert_eq!(
+            *client.models.lock().await,
+            vec![None, Some("fallback-model".into())]
+        );
+        let calls = tools.calls.lock().await;
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "select_fallback_model");
+        assert_eq!(calls[0].1["failed_model"], "primary-model");
+        assert_eq!(calls[0].1["already_tried"], json!(["primary-model"]));
+        assert_eq!(
+            calls[0].1["task_context"]["request"]["chat_id"],
+            "fallback-chat"
+        );
+    }
+
+    #[tokio::test]
+    async fn fallback_attempts_are_hard_capped() {
+        let (emitter, mut rx) = make_emitter();
+        let client = Arc::new(ScriptedModelClient::new(vec![
+            Err(fallback_needed("primary-model")),
+            Err(fallback_needed("fallback-1")),
+            Err(fallback_needed("fallback-2")),
+            Err(fallback_needed("fallback-3")),
+        ]));
+        let tools = Arc::new(SequencedFallbackTools::new(vec![
+            r#"{"model":"fallback-1"}"#,
+            r#"{"model":"fallback-2"}"#,
+            r#"{"model":"fallback-3"}"#,
+        ]));
+        let invoker = ModelInvoker::new(
+            Arc::clone(&client) as Arc<dyn ModelClient>,
+            Arc::clone(&tools) as Arc<dyn ToolDispatcher>,
+        );
+
+        invoker.handle(&fallback_test_event(), &emitter).await;
+
+        match rx.recv().await.expect("terminal error") {
+            SpineEvent::DeliveryRequest { content, .. } => {
+                assert!(content.contains("hit max attempts (4)"));
+            }
+            other => panic!("expected DeliveryRequest, got {other:?}"),
+        }
+        assert_eq!(
+            client.models.lock().await.len(),
+            ModelInvoker::MAX_FALLBACK_ATTEMPTS
+        );
+        assert_eq!(
+            tools.calls.lock().await.len(),
+            ModelInvoker::MAX_FALLBACK_ATTEMPTS - 1
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_praxis_selector_that_repeats_a_tried_model() {
+        let (emitter, mut rx) = make_emitter();
+        let client = Arc::new(ScriptedModelClient::new(vec![Err(fallback_needed(
+            "primary-model",
+        ))]));
+        let tools = Arc::new(FallbackTools::new(r#"{"model":"primary-model"}"#));
+        let invoker = ModelInvoker::new(
+            Arc::clone(&client) as Arc<dyn ModelClient>,
+            Arc::clone(&tools) as Arc<dyn ToolDispatcher>,
+        );
+
+        invoker.handle(&fallback_test_event(), &emitter).await;
+
+        match rx.recv().await.expect("terminal error") {
+            SpineEvent::DeliveryRequest { content, .. } => {
+                assert!(content.contains("fallback exhausted"));
+                assert!(content.contains("already-tried"));
+            }
+            other => panic!("expected DeliveryRequest, got {other:?}"),
+        }
+        assert_eq!(client.models.lock().await.len(), 1);
+        assert_eq!(tools.calls.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn fails_closed_when_praxis_selector_returns_invalid_payload() {
+        let (emitter, mut rx) = make_emitter();
+        let client = Arc::new(ScriptedModelClient::new(vec![Err(fallback_needed(
+            "primary-model",
+        ))]));
+        let tools = Arc::new(FallbackTools::new("Tool error: selector unavailable"));
+        let invoker = ModelInvoker::new(
+            Arc::clone(&client) as Arc<dyn ModelClient>,
+            Arc::clone(&tools) as Arc<dyn ToolDispatcher>,
+        );
+
+        invoker.handle(&fallback_test_event(), &emitter).await;
+
+        match rx.recv().await.expect("terminal error") {
+            SpineEvent::DeliveryRequest { content, .. } => {
+                assert!(content.contains("unparseable response"));
+            }
+            other => panic!("expected DeliveryRequest, got {other:?}"),
+        }
+        assert_eq!(client.models.lock().await.len(), 1);
+        assert_eq!(tools.calls.lock().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn does_not_invoke_selector_when_model_request_is_cancelled() {
+        let (emitter, mut rx) = make_emitter();
+        let client = Arc::new(ScriptedModelClient::new(vec![Err(
+            ModelClientError::Cancelled,
+        )]));
+        let tools = Arc::new(FallbackTools::new(r#"{"model":"fallback-model"}"#));
+        let invoker = ModelInvoker::new(
+            Arc::clone(&client) as Arc<dyn ModelClient>,
+            Arc::clone(&tools) as Arc<dyn ToolDispatcher>,
+        );
+
+        invoker.handle(&fallback_test_event(), &emitter).await;
+
+        match rx.recv().await.expect("terminal cancellation") {
+            SpineEvent::DeliveryRequest { content, .. } => {
+                assert!(content.contains("model request cancelled"));
+            }
+            other => panic!("expected DeliveryRequest, got {other:?}"),
+        }
+        assert!(tools.calls.lock().await.is_empty());
     }
 
     #[tokio::test]
@@ -729,9 +1171,15 @@ mod tests {
 
     #[test]
     fn tier_to_model_maps_correctly() {
-        assert_eq!(ModelInvoker::tier_to_model("fast"), Some("qwen2.5:3b".to_string()));
+        assert_eq!(
+            ModelInvoker::tier_to_model("fast"),
+            Some("qwen2.5:3b".to_string())
+        );
         assert_eq!(ModelInvoker::tier_to_model("standard"), None);
-        assert_eq!(ModelInvoker::tier_to_model("premium"), Some("qwen2.5:14b".to_string()));
+        assert_eq!(
+            ModelInvoker::tier_to_model("premium"),
+            Some("qwen2.5:14b".to_string())
+        );
         assert_eq!(ModelInvoker::tier_to_model("unknown"), None);
     }
 
@@ -749,7 +1197,7 @@ mod tests {
                 _messages: &[ChatMessage],
                 _tools: &[ToolDefinition],
                 options: &ChatOptions,
-            ) -> Result<ModelCompletion, String> {
+            ) -> Result<ModelCompletion, ModelClientError> {
                 *self.called_with_model.lock().await = Some(options.model.clone());
                 Ok(ModelCompletion {
                     content: Some("ok".into()),
@@ -821,7 +1269,10 @@ mod tests {
         let injected = messages
             .iter()
             .any(|m| m.role == "system" && m.content.contains("Ship the release binary"));
-        assert!(injected, "expected persisted open task injected into system context");
+        assert!(
+            injected,
+            "expected persisted open task injected into system context"
+        );
         let has_header = messages
             .iter()
             .any(|m| m.content.contains("Your open tasks/commitments"));
@@ -840,10 +1291,11 @@ mod tests {
         let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
             .with_task_manager(manager);
 
-        let messages =
-            invoker.build_messages("hi", Some("sys"), &json!({}), &[], "empty-chat");
+        let messages = invoker.build_messages("hi", Some("sys"), &json!({}), &[], "empty-chat");
         assert!(
-            !messages.iter().any(|m| m.content.contains("open tasks/commitments")),
+            !messages
+                .iter()
+                .any(|m| m.content.contains("open tasks/commitments")),
             "no task block should be injected when there are no open tasks"
         );
     }
@@ -882,9 +1334,8 @@ mod tests {
             "persisted task must survive a fresh store handle (process reload)"
         );
 
-        let invoker =
-            ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
-                .with_task_manager(Arc::clone(&manager2));
+        let invoker = ModelInvoker::new(Arc::new(TextModelClient::new("ok")), Arc::new(MockTools))
+            .with_task_manager(Arc::clone(&manager2));
         let messages = invoker.build_messages(
             "what am I working on?",
             Some("base system prompt"),

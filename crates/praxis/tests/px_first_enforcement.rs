@@ -51,16 +51,16 @@ const STATE_ALLOWLIST: &[&str] = &[
     "crates/radix-core/src/spine/pipeline.rs", // event bus (infrastructure)
     "crates/radix-core/src/spine/procedures/tool_executor.rs", // per-chat loop counter (runtime safety)
     "crates/radix-core/src/delegation/manager.rs", // runtime task handles (JoinHandle is IO)
-    "crates/tui/",                       // TUI state is ephemeral UI, not business logic
-    "crates/tauri-app/",                 // GUI state
-    "crates/mcp-server/",                // connection state (IO boundary)
-    "crates/mcp-client/",                // connection state (IO boundary)
-    "crates/mcp-server/",                // connection state (IO boundary)
-    "crates/praxis/src/px/async_executor.rs", // runtime execution state
-    "crates/praxis/src/px/watcher.rs",   // filesystem watcher (IO boundary)
-    "crates/sync/src/lan.rs",            // network peer discovery (IO boundary)
-    "crates/radix-core/src/plugins/runtime.rs", // plugin lifecycle (IO boundary)
-    "crates/cli/src/main.rs",            // ToolTraceStore is ephemeral debug tracing
+    "crates/tui/",                                 // TUI state is ephemeral UI, not business logic
+    "crates/tauri-app/",                           // GUI state
+    "crates/mcp-server/",                          // connection state (IO boundary)
+    "crates/mcp-client/",                          // connection state (IO boundary)
+    "crates/mcp-server/",                          // connection state (IO boundary)
+    "crates/praxis/src/px/async_executor.rs",      // runtime execution state
+    "crates/praxis/src/px/watcher.rs",             // filesystem watcher (IO boundary)
+    "crates/sync/src/lan.rs",                      // network peer discovery (IO boundary)
+    "crates/radix-core/src/plugins/runtime.rs",    // plugin lifecycle (IO boundary)
+    "crates/cli/src/main.rs",                      // ToolTraceStore is ephemeral debug tracing
     "crates/agenda/src/scheduler.rs", // runtime task working set (persistence via TaskStore, HashMap is hot cache)
     "crates/radix-core/src/secrets.rs", // InMemorySecretStore is test/dev utility only (not used in production)
     "crates/radix-core/src/handlers/on_timer.rs", // dispatch table of Arc<dyn TimerAction> code refs (not serializable data)
