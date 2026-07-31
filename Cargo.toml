@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/px-repo-model",
     "crates/radix-core",
     "crates/mcp-client",
     "crates/privacy",
