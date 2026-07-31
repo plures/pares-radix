@@ -1,3 +1,15 @@
+## [1.55.54] — 2026-07-31
+
+- feat(px-repo-model): add canonical graph identity scaffold (#599) (7a3c376)
+- docs(procedure-graph): M0 spec docs for procedure-graph-repository-substrate epic (#598) (56147d9)
+- test(radix-core): dogfood harness for ADR-0038 git_projection round-trip (#597) (be18358)
+- Copilot/fix praxisbot task obligations (#595) (f9397d3)
+- docs(adr): ADR-0039 spine-assembly-real-transport design (px-first, no implementation) (#596) (b69622e)
+- Initial plan (#594) (0f708be)
+- chore(deps): bump pnpm/action-setup v4 → v6 in all CI workflows (#588) (b2911c8)
+- docs(adr): ADR-0037 praxisbot full radix parity - OQ resolutions + .px-first procedure drafts (design review) (#592) (a30afab)
+- docs(praxis): ADR-0038 - Radix policy+settings engine (design stage) (#593) (bf82d65)
+
 ## [1.55.53] — 2026-07-30
 
 - feat(radix-core): ADR-0038 first slice - deterministic blob/tree git projection (#591) (8acccc1)
