@@ -1,0 +1,17 @@
+[package]
+name = "px-graph-store"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PluresDB-backed procedure graph persistence and queries."
+
+[dependencies]
+px-repo-model = { path = "../px-repo-model" }
+pluresdb = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
