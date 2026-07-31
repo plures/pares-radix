@@ -4,13 +4,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
-use px_repo_model::identity::{ContentHash, ProcedureId, RevisionId};
+use px_repo_model::exact_artifact::ExactArtifactProcedure;
+use px_repo_model::identity::{BlobHash, ContentHash, LogicalChangeId, ProcedureId, ProcedureRevisionHash, RevisionId};
 use px_repo_model::merkle::procedure_root;
-use px_repo_model::schema::{Procedure, RevisionContent};
+use px_repo_model::schema::{Artifact, Blob, LogicalChange, Procedure, ProcedureRevisionContent, Ref, RevisionContent};
 
 use crate::edge::{EdgeKind, EdgeRecord};
 use crate::error::GraphStoreError;
-use crate::node::{GraphNode, NodeKey, StoredNode};
+use crate::node::{BlobRecord, EmptyDirectoryRecord, GraphNode, NodeKey, StoredNode};
 
 const ACTOR_ID: &str = "px-graph-store";
 const NODE_PREFIX: &str = "px_graph_node:v1:";
@@ -72,6 +73,91 @@ impl GraphStore {
         )
     }
 
+    /// Persists a `ProcedureRevision` detail record (graph-schema.md §2.7)
+    /// under its own content-derived `ProcedureRevisionHash`. This is
+    /// distinct from `put_revision`, which persists the M0 `Revision` entity
+    /// (§2.2); a `Procedure`'s `current_revision` field points at records
+    /// stored via this method.
+    pub fn put_procedure_revision(
+        &self,
+        hash: ProcedureRevisionHash,
+        content: ProcedureRevisionContent,
+    ) -> Result<(), GraphStoreError> {
+        self.put_node(
+            NodeKey::procedure_revision(hash),
+            GraphNode::ProcedureRevision(content),
+        )
+    }
+
+    /// Persists an M1 `ExactArtifactProcedure` metadata record
+    /// (graph-schema.md §2.6's `exact_artifact` `ProcedureKind`), keyed by
+    /// its owning procedure id.
+    pub fn put_exact_artifact(
+        &self,
+        artifact: ExactArtifactProcedure,
+    ) -> Result<(), GraphStoreError> {
+        let key = NodeKey::exact_artifact(artifact.procedure_id);
+        self.put_node(key, GraphNode::ExactArtifact(artifact))
+    }
+
+    /// Persists a projection-facing `Artifact` record (graph-schema.md §2.9).
+    pub fn put_artifact(&self, artifact: Artifact) -> Result<(), GraphStoreError> {
+        let key = NodeKey::artifact(artifact.owning_procedure, artifact.blob);
+        self.put_node(key, GraphNode::Artifact(artifact))
+    }
+
+    /// Persists a `LogicalChange` entity (graph-schema.md §2.3).
+    pub fn put_logical_change(&self, change: LogicalChange) -> Result<(), GraphStoreError> {
+        let key = NodeKey::logical_change(change.id);
+        self.put_node(key, GraphNode::LogicalChange(change))
+    }
+
+    /// Persists a mutable `Ref` (graph-schema.md §2.5), scoped to the
+    /// repository that owns it, and records the `Repository HAS_REF Ref`
+    /// edge.
+    pub fn put_ref(&self, repository_name: &str, reference: Ref) -> Result<(), GraphStoreError> {
+        let key = NodeKey::reference(repository_name, &reference.name);
+        self.put_edge(EdgeRecord::new(
+            NodeKey::repository(repository_name),
+            EdgeKind::RepositoryHasRef,
+            key.clone(),
+        ))?;
+        self.put_node(key, GraphNode::Ref(reference))
+    }
+
+    /// Persists a `Blob`'s raw bytes (graph-schema.md §2.10) under its own
+    /// content-derived `BlobHash`, recomputed from the given bytes so a
+    /// caller can never persist content under a mismatched key.
+    pub fn put_blob(&self, blob: Blob) -> Result<BlobHash, GraphStoreError> {
+        let hash = blob.hash();
+        let key = NodeKey::blob(hash);
+        self.put_node(key, GraphNode::Blob(BlobRecord { content: blob.content }))?;
+        Ok(hash)
+    }
+
+    /// Persists an M1-imported empty directory bookkeeping fact, scoped to
+    /// the repository whose tree was imported, and records the
+    /// `RepositoryContainsProcedure`-style containment edge for it.
+    pub fn put_empty_directory(
+        &self,
+        repository_name: &str,
+        path: &str,
+    ) -> Result<(), GraphStoreError> {
+        let key = NodeKey::empty_directory(repository_name, path);
+        self.put_edge(EdgeRecord::new(
+            NodeKey::repository(repository_name),
+            EdgeKind::RepositoryContainsEmptyDirectory,
+            key.clone(),
+        ))?;
+        self.put_node(
+            key,
+            GraphNode::EmptyDirectory(EmptyDirectoryRecord {
+                repository_name: repository_name.to_owned(),
+                path: path.to_owned(),
+            }),
+        )
+    }
+
     /// Explicitly persists a graph edge in PluresDB.
     pub fn put_edge(&self, edge: EdgeRecord) -> Result<(), GraphStoreError> {
         let key = edge.storage_key();
@@ -95,15 +181,92 @@ impl GraphStore {
     pub fn get_procedure(&self, id: ProcedureId) -> Result<Option<Procedure>, GraphStoreError> {
         match self.get_node(&NodeKey::procedure(id))? {
             Some(GraphNode::Procedure(procedure)) => Ok(Some(procedure)),
-            Some(GraphNode::Revision(_)) | None => Ok(None),
+            Some(_) | None => Ok(None),
         }
     }
 
     pub fn get_revision(&self, id: RevisionId) -> Result<Option<RevisionContent>, GraphStoreError> {
         match self.get_node(&NodeKey::revision(id))? {
             Some(GraphNode::Revision(revision)) => Ok(Some(revision)),
-            Some(GraphNode::Procedure(_)) | None => Ok(None),
+            Some(_) | None => Ok(None),
         }
+    }
+
+    pub fn get_procedure_revision(
+        &self,
+        hash: ProcedureRevisionHash,
+    ) -> Result<Option<ProcedureRevisionContent>, GraphStoreError> {
+        match self.get_node(&NodeKey::procedure_revision(hash))? {
+            Some(GraphNode::ProcedureRevision(content)) => Ok(Some(content)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_exact_artifact(
+        &self,
+        procedure_id: ProcedureId,
+    ) -> Result<Option<ExactArtifactProcedure>, GraphStoreError> {
+        match self.get_node(&NodeKey::exact_artifact(procedure_id))? {
+            Some(GraphNode::ExactArtifact(artifact)) => Ok(Some(artifact)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_artifact(
+        &self,
+        owning_procedure: ProcedureId,
+        blob: BlobHash,
+    ) -> Result<Option<Artifact>, GraphStoreError> {
+        match self.get_node(&NodeKey::artifact(owning_procedure, blob))? {
+            Some(GraphNode::Artifact(artifact)) => Ok(Some(artifact)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_logical_change(
+        &self,
+        id: LogicalChangeId,
+    ) -> Result<Option<LogicalChange>, GraphStoreError> {
+        match self.get_node(&NodeKey::logical_change(id))? {
+            Some(GraphNode::LogicalChange(change)) => Ok(Some(change)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_ref(
+        &self,
+        repository_name: &str,
+        ref_name: &str,
+    ) -> Result<Option<Ref>, GraphStoreError> {
+        match self.get_node(&NodeKey::reference(repository_name, ref_name))? {
+            Some(GraphNode::Ref(reference)) => Ok(Some(reference)),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_blob(&self, hash: BlobHash) -> Result<Option<Blob>, GraphStoreError> {
+        match self.get_node(&NodeKey::blob(hash))? {
+            Some(GraphNode::Blob(record)) => Ok(Some(Blob { content: record.content })),
+            Some(_) | None => Ok(None),
+        }
+    }
+
+    pub fn get_empty_directories(
+        &self,
+        repository_name: &str,
+    ) -> Result<Vec<String>, GraphStoreError> {
+        let children = self.get_children(
+            &NodeKey::repository(repository_name),
+            EdgeKind::RepositoryContainsEmptyDirectory,
+        )?;
+        let mut paths = Vec::with_capacity(children.len());
+        for key in children {
+            if let Some(GraphNode::EmptyDirectory(record)) = self.get_node(&key)? {
+                paths.push(record.path);
+            }
+        }
+        paths.sort();
+        Ok(paths)
     }
 
     /// Returns direct children of `from` for an edge kind. The selection rule
