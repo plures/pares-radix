@@ -577,7 +577,7 @@ impl AsyncActionHandler for SshAuthorizePxActions {
                     .ok_or_else(|| error("missing role"))?;
                 Ok(self
                     .store
-                    .get(&format!("policy:global:ssh-authorize-role:{role}"))
+                    .get(format!("policy:global:ssh-authorize-role:{role}"))
                     .map(|record| record.data)
                     .unwrap_or(serde_json::Value::Null))
             }
