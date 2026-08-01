@@ -9,6 +9,7 @@
 //! dependency — this crate only depends on `pares-radix-core` and the
 //! `pluresdb*` crates it already vendors.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -19,9 +20,11 @@ use std::time::Duration;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
+use pares_radix_core::px_adapter::{load_px_procedures, AsyncActionHandler, PxProcedureAdapter};
+use pares_radix_praxis::px::executor::ExecutionError;
 use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
 use pluresdb_procedures::agens::{AgensEvent, AgensRuntime, TimerEntry, TimerTrigger};
 use serde::{Deserialize, Serialize};
@@ -190,11 +193,10 @@ impl ServiceLifecycle {
         let store = match &config.data_dir {
             Some(dir) => {
                 std::fs::create_dir_all(dir)?;
-                let storage: Arc<dyn StorageEngine> = Arc::new(
-                    SledStorage::open(dir).map_err(|e| {
+                let storage: Arc<dyn StorageEngine> =
+                    Arc::new(SledStorage::open(dir).map_err(|e| {
                         anyhow::anyhow!("failed to open SledStorage at {dir:?}: {e}")
-                    })?,
-                );
+                    })?);
                 CrdtStore::default().with_persistence(storage)
             }
             None => {
@@ -339,6 +341,7 @@ fn build_router(shared: Arc<SharedState>) -> Router {
         .route("/events", get(get_events).post(post_event))
         .route("/timers", get(list_timers).post(post_timer))
         .route("/timers/:id", delete(delete_timer))
+        .route("/v1/ssh/authorize", post(post_ssh_authorize))
         .with_state(shared)
 }
 
@@ -473,6 +476,210 @@ async fn delete_timer(
     }
 }
 
+/// Wire contract consumed by `jit-ssh-jitd`'s `PolicyClient`.
+#[derive(Debug, Deserialize)]
+struct SshAuthorizeRequest {
+    pubkey: String,
+    target_host: String,
+    role: String,
+    user: String,
+}
+
+/// A response is always explicit: `allowed` is never inferred from HTTP status.
+#[derive(Debug, Serialize)]
+struct SshAuthorizeResponse {
+    allowed: bool,
+    ttl_seconds: Option<u64>,
+    principals: Vec<String>,
+    extensions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deny_reason: Option<String>,
+}
+
+impl SshAuthorizeResponse {
+    fn deny(reason: impl Into<String>) -> Self {
+        Self {
+            allowed: false,
+            ttl_seconds: None,
+            principals: Vec::new(),
+            extensions: Vec::new(),
+            deny_reason: Some(reason.into()),
+        }
+    }
+
+    fn from_policy(value: serde_json::Value) -> Self {
+        let Some(obj) = value.as_object() else {
+            return Self::deny("policy procedure returned a malformed decision");
+        };
+        if obj.get("allowed") != Some(&serde_json::Value::Bool(true)) {
+            return Self::deny(
+                obj.get("deny_reason")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("policy denied authorization"),
+            );
+        }
+        let ttl_seconds = obj.get("ttl_seconds").and_then(serde_json::Value::as_u64);
+        let principals = json_string_list(obj.get("principals"));
+        let extensions = match obj.get("extensions") {
+            None | Some(serde_json::Value::Null) => Some(Vec::new()),
+            value => json_string_list(value),
+        };
+        match (ttl_seconds, principals, extensions) {
+            (Some(ttl), Some(principals), Some(extensions))
+                if ttl > 0 && !principals.is_empty() =>
+            {
+                Self {
+                    allowed: true,
+                    ttl_seconds: Some(ttl),
+                    principals,
+                    extensions,
+                    deny_reason: None,
+                }
+            }
+            _ => Self::deny("policy produced an incomplete authorization grant"),
+        }
+    }
+}
+
+fn json_string_list(value: Option<&serde_json::Value>) -> Option<Vec<String>> {
+    value?
+        .as_array()?
+        .iter()
+        .map(|item| {
+            let value = item.as_str()?;
+            (!value.is_empty()).then(|| value.to_owned())
+        })
+        .collect()
+}
+
+/// Action bridge for the `authorize_ssh` PX procedure.  It owns all parsing of
+/// persisted policy data, while the PX program owns the authorize/deny flow.
+struct SshAuthorizePxActions {
+    store: &'static CrdtStore,
+}
+
+#[async_trait::async_trait]
+impl AsyncActionHandler for SshAuthorizePxActions {
+    async fn call(
+        &self,
+        name: &str,
+        params: &serde_json::Value,
+    ) -> Result<serde_json::Value, ExecutionError> {
+        let error = |message: &str| ExecutionError::ActionFailed {
+            action: name.to_owned(),
+            message: message.to_owned(),
+        };
+        match name {
+            "db_get" => {
+                let role = params
+                    .get("role")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| error("missing role"))?;
+                Ok(self
+                    .store
+                    .get(&format!("policy:global:ssh-authorize-role:{role}"))
+                    .map(|record| record.data)
+                    .unwrap_or(serde_json::Value::Null))
+            }
+            "check_user_in_allowlist" => {
+                let policy = params.get("policy").and_then(serde_json::Value::as_object);
+                let user = params.get("user").and_then(serde_json::Value::as_str);
+                let Some((policy, user)) = policy.zip(user) else {
+                    return Ok(json!({"allowed": false}));
+                };
+                let value = policy.get("value").and_then(serde_json::Value::as_object);
+                let valid_kind =
+                    policy.get("kind").and_then(serde_json::Value::as_str) == Some("setting");
+                let allowed_users = value
+                    .and_then(|value| value.get("allowed_users"))
+                    .and_then(|v| json_string_list(Some(v)));
+                let principals = value
+                    .and_then(|value| value.get("principals"))
+                    .and_then(|v| json_string_list(Some(v)));
+                let extensions = match value.and_then(|value| value.get("extensions")) {
+                    None | Some(serde_json::Value::Null) => Some(Vec::new()),
+                    extension_value => json_string_list(extension_value),
+                };
+                match (valid_kind, allowed_users, principals, extensions) {
+                    (true, Some(users), Some(principals), Some(extensions))
+                        if users.iter().any(|entry| entry == user) && !principals.is_empty() =>
+                    {
+                        Ok(
+                            json!({"allowed": true, "principals": principals, "extensions": extensions}),
+                        )
+                    }
+                    _ => Ok(json!({"allowed": false})),
+                }
+            }
+            "resolve_grant_ttl" => {
+                let ttl = params
+                    .get("policy")
+                    .and_then(|policy| policy.get("value"))
+                    .and_then(|value| value.get("ttl_seconds"))
+                    .and_then(serde_json::Value::as_u64)
+                    .filter(|ttl| *ttl > 0);
+                match ttl {
+                    Some(ttl_seconds) => Ok(json!({"ttl_seconds": ttl_seconds})),
+                    None => Err(error("policy is missing a positive ttl_seconds")),
+                }
+            }
+            other => Err(ExecutionError::UnknownAction(other.to_owned())),
+        }
+    }
+}
+
+async fn post_ssh_authorize(
+    State(shared): State<Arc<SharedState>>,
+    Json(req): Json<SshAuthorizeRequest>,
+) -> impl IntoResponse {
+    if shared.is_draining() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(SshAuthorizeResponse::deny("service is draining")),
+        )
+            .into_response();
+    }
+
+    let handler: Arc<dyn AsyncActionHandler> = Arc::new(SshAuthorizePxActions {
+        store: shared.store,
+    });
+    let adapter: Option<PxProcedureAdapter> = load_px_procedures(
+        include_str!("../../../praxis/procedures/ssh-authorize.px"),
+        handler,
+    )
+    .ok()
+    .and_then(|procedures| {
+        procedures
+            .into_iter()
+            .find(|procedure| procedure.name() == "authorize_ssh")
+    });
+    let Some(adapter) = adapter else {
+        return Json(SshAuthorizeResponse::deny(
+            "ssh authorization policy is unavailable",
+        ))
+        .into_response();
+    };
+    let vars = HashMap::from([
+        ("pubkey".to_owned(), json!(req.pubkey)),
+        ("target_host".to_owned(), json!(req.target_host)),
+        ("role".to_owned(), json!(req.role)),
+        ("user".to_owned(), json!(req.user)),
+    ]);
+    let response = match adapter.execute_with_vars(vars).await {
+        Ok(result) => result
+            .step_results
+            .last()
+            .and_then(|step| step.output.clone())
+            .map(SshAuthorizeResponse::from_policy)
+            .unwrap_or_else(|| SshAuthorizeResponse::deny("policy returned no decision")),
+        Err(error) => {
+            warn!(error = %error, "ssh authorization policy execution failed");
+            SshAuthorizeResponse::deny("policy execution failed")
+        }
+    };
+    Json(response).into_response()
+}
+
 /// Wait for a Ctrl-C signal (used by `main.rs`); split out so tests can
 /// supply their own shutdown future instead.
 pub async fn ctrl_c_shutdown() {
@@ -550,7 +757,10 @@ mod tests {
     async fn scheduler_flips_ready_after_first_tick() {
         let shared = Arc::new(SharedState::new(CrdtStore::default()));
         assert!(!shared.is_ready());
-        let handle = tokio::spawn(run_scheduler(Arc::clone(&shared), Duration::from_millis(10)));
+        let handle = tokio::spawn(run_scheduler(
+            Arc::clone(&shared),
+            Duration::from_millis(10),
+        ));
         tokio::time::sleep(Duration::from_millis(80)).await;
         assert!(
             shared.is_ready(),
@@ -576,11 +786,7 @@ mod tests {
                 Arc::new(move |event: &AgensEvent| {
                     if let AgensEvent::Timer { name, .. } = event {
                         if name == "fires-once" {
-                            store.put(
-                                "test:timer-fired",
-                                SERVICE_ACTOR,
-                                json!({"fired": true}),
-                            );
+                            store.put("test:timer-fired", SERVICE_ACTOR, json!({"fired": true}));
                         }
                     }
                     Ok(())
@@ -591,7 +797,10 @@ mod tests {
                 .schedule_once("fires-once", Utc::now(), json!({}));
         }
 
-        let handle = tokio::spawn(run_scheduler(Arc::clone(&shared), Duration::from_millis(10)));
+        let handle = tokio::spawn(run_scheduler(
+            Arc::clone(&shared),
+            Duration::from_millis(10),
+        ));
         tokio::time::sleep(Duration::from_millis(80)).await;
         shared.draining.store(true, Ordering::SeqCst);
         let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;

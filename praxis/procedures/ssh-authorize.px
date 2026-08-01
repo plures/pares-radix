@@ -1,0 +1,79 @@
+# ssh-authorize.px - JIT-SSH cert-signing policy decision (ADR-0042, Track C)
+#
+# Real authorization backend for jit-ssh-jitd's PolicyClient
+# (jit-ssh-jitd/src/policy.rs POST /v1/ssh/authorize). jitd contains no
+# allowlist and no decision logic by design - this procedure is the entire
+# decision. Fail-closed: every exit path that isn't an explicit, fully
+# populated grant returns allowed=false.
+#
+# Policy data read (seeded out-of-band, NOT by this file):
+#   key "policy:global:ssh-authorize-role:<role>"
+#     value: { allowed_users: [string], principals: [string],
+#              ttl_seconds: int?, extensions: [string]? }
+#
+# Absence of a role entry is a hard deny per ADR-0038 secure-default
+# baseline (no policy = no grant).
+#
+# Queue topology:
+#
+#   ssh_authorize_request -> [authorize_ssh] -> ssh_authorize_decision
+#
+
+# [parser-skip] fact SshAuthorizeRequest:
+# [parser-skip]   pubkey: string
+# [parser-skip]   target_host: string
+# [parser-skip]   role: string
+# [parser-skip]   user: string
+# [parser-skip]
+# [parser-skip] fact SshAuthorizeDecision:
+# [parser-skip]   allowed: bool
+# [parser-skip]   ttl_seconds: optional[int]
+# [parser-skip]   principals: optional[list[string]]
+# [parser-skip]   extensions: optional[list[string]]
+# [parser-skip]   deny_reason: optional[string]
+# [parser-skip]
+# ─────────────────────────────────────────────────────────────────────
+# Constraints
+# ─────────────────────────────────────────────────────────────────────
+
+# [parser-skip] constraint ssh_authorize_never_allows_without_principals:
+# [parser-skip]   given: "An allowed=true decision must always carry a non-empty principals list and a positive ttl_seconds, matching jit-ssh-jitd's fail-closed client contract"
+# [parser-skip]   check: SshAuthorizeDecision.allowed == false OR (SshAuthorizeDecision.principals != [] AND SshAuthorizeDecision.ttl_seconds > 0)
+# [parser-skip]   severity: error
+
+# ─────────────────────────────────────────────────────────────────────
+# Dataflow Procedures
+# ─────────────────────────────────────────────────────────────────────
+
+# Fail-closed authZ decision for a JIT SSH cert request.
+#
+# Flattened to a single procedure (rather than calling sub-procedures by
+# name) because nested procedure-to-procedure dispatch semantics in the
+# current px executor are not yet verified for this crate's wiring; every
+# step below calls a single, atomic Rust-side action
+# (db_get / check_user_in_allowlist / resolve_grant_ttl / emit), matching
+# the pattern already used by constraint-eval.px and directives.px.
+procedure authorize_ssh(pubkey: string, target_host: string, role: string, user: string) -> decision into "ssh_authorize_decision":
+  given: "Fail-closed authZ decision for a JIT SSH cert request, per ADR-0038 policy scopes (secure-default = deny)"
+  db_get {key: "policy:global:ssh-authorize-role:", role: $role} -> $role_policy
+  when role_policy == null:
+    emit {type: "ssh.authorize.denied", pubkey: $pubkey, target_host: $target_host, role: $role, user: $user, reason: "no_policy_for_role"}
+    return {allowed: false, deny_reason: "no policy registered for this role"}
+  end
+  check_user_in_allowlist {policy: $role_policy, user: $user} -> $membership
+  when membership.allowed == false:
+    emit {type: "ssh.authorize.denied", pubkey: $pubkey, target_host: $target_host, role: $role, user: $user, reason: "user_not_allowed"}
+    return {allowed: false, deny_reason: "user is not permitted for this role"}
+  end
+  when membership.principals == null:
+    emit {type: "ssh.authorize.denied", pubkey: $pubkey, target_host: $target_host, role: $role, user: $user, reason: "no_principals_configured"}
+    return {allowed: false, deny_reason: "policy for this role has no principals configured"}
+  end
+  resolve_grant_ttl {policy: $role_policy} -> $ttl_result
+  emit {type: "ssh.authorize.granted", pubkey: $pubkey, target_host: $target_host, role: $role, user: $user, ttl_seconds: $ttl_result.ttl_seconds}
+  return {
+    allowed: true,
+    ttl_seconds: $ttl_result.ttl_seconds,
+    principals: $membership.principals,
+    extensions: $membership.extensions
+  }

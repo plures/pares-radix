@@ -4577,9 +4577,11 @@ name = "pares-radix-svc"
 version = "1.55.57"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "chrono",
  "pares-radix-core",
+ "pares-radix-praxis",
  "pluresdb 3.10.3",
  "pluresdb-procedures",
  "reqwest 0.12.28",

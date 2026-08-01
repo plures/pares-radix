@@ -103,7 +103,11 @@ async fn spawned_binary_schedules_and_fires_a_once_timer() {
         .send()
         .await
         .expect("POST /timers should succeed");
-    assert!(resp.status().is_success(), "unexpected status: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "unexpected status: {}",
+        resp.status()
+    );
     let body: serde_json::Value = resp.json().await.expect("json body");
     let timer_id = body["id"].as_str().expect("id field").to_string();
     assert!(timer_id.starts_with("timer:"));
@@ -153,7 +157,11 @@ async fn spawned_binary_emits_and_polls_events() {
         .send()
         .await
         .expect("POST /events should succeed");
-    assert!(resp.status().is_success(), "unexpected status: {}", resp.status());
+    assert!(
+        resp.status().is_success(),
+        "unexpected status: {}",
+        resp.status()
+    );
 
     let resp = client
         .get(format!("{base}/events"))
@@ -165,9 +173,7 @@ async fn spawned_binary_emits_and_polls_events() {
     let body: serde_json::Value = resp.json().await.expect("json body");
     let events = body["events"].as_array().expect("events array");
     assert!(
-        events
-            .iter()
-            .any(|e| e["id"] == "smoke-msg-1"),
+        events.iter().any(|e| e["id"] == "smoke-msg-1"),
         "expected emitted event to be returned by poll: {events:?}"
     );
 }
