@@ -1,3 +1,11 @@
+## [1.55.58] — 2026-08-01
+
+- feat(pares-radix-svc): fail-closed POST /v1/ssh/authorize policy endpoint (JIT-SSH Track C) (#614) (36e142c)
+- chore(deps): bump opentelemetry-semantic-conventions (#608) (f95c032)
+- chore(deps): bump actions/checkout from 4 to 7 (#603) (ead0de3)
+- chore(deps): bump opentelemetry_sdk from 0.28.0 to 0.32.1 (#607) (24b6ff3)
+- chore(deps): bump sha1 from 0.10.7 to 0.11.0 (#609) (ecf9880)
+
 ## [1.55.57] — 2026-07-31
 
 - feat(px-graph-store,px-adapter-exact): M3 - persist procedure graph nodes and wire import/materialize through PluresDB (#602) (186b89a)
