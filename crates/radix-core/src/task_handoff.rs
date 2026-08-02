@@ -163,6 +163,13 @@ impl ConditionalTaskStore {
     fn write_record(&self, record: &CustodyRecord) -> Result<(), HandoffError> {
         let value = serde_json::to_value(record)?;
         self.crdt.put(Self::node_id(&record.task.task_id), ACTOR, value);
+        // Warm up the quality-score while we still hold the CAS lock so that
+        // `CrdtStore::ensure_quality_score` writes the *current* state to the
+        // persistence layer.  Without this, a concurrent out-of-lock `read_record`
+        // call on another thread can trigger `ensure_quality_score` after the CAS
+        // completes, overwriting the freshly-written record with a stale pre-claim
+        // snapshot in the sled backing store.
+        let _ = self.crdt.get(Self::node_id(&record.task.task_id));
         Ok(())
     }
 
