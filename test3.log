@@ -1,0 +1,37 @@
+
+running 32 tests
+test chronos::tests::action_display ... ok
+test chronos::tests::from_u8_each_arm_explicitly ... ok
+test chronos::tests::level_u8_roundtrip ... ok
+test chronos::tests::level_display ... ok
+test chronos::tests::from_str_loose_all_variants ... ok
+test chronos::tests::level_ordering ... ok
+test chronos::tests::level_filtering ... ok
+test chronos::tests::in_range_filter ... ok
+test chronos::tests::record_and_latest ... ok
+test chronos::tests::by_actor_filter ... ok
+test chronos::tests::recent_returns_all ... ok
+test chronos::tests::history_empty_key ... ok
+test chronos::tests::entry_without_operation_serializes_without_field ... ok
+test chronos::tests::causal_chain ... ok
+test chronos::tests::build_entry_with_operation_records_recall_query ... ok
+test chronos::tests::get_set_level ... ok
+test chronos::tests::recorded_entry_has_valid_hash ... ok
+test chronos::tests::replay_empty_timeline ... ok
+test chronos::tests::sha256_json_deterministic ... ok
+test chronos::tests::timeline_basic ... ok
+test chronos::tests::timeline_level_filter ... ok
+test chronos::tests::timeline_since_boundary_inclusive ... ok
+test chronos::tests::timeline_since_filter ... ok
+test spine::chronos_watcher::tests::below_threshold_produces_no_proposal ... ok
+test spine::chronos_watcher::tests::distinct_targets_each_get_their_own_proposal ... ok
+test spine::chronos_watcher::tests::non_problem_signals_are_ignored ... ok
+test spine::chronos_watcher::tests::observe_once_never_touches_enforcement ... ok
+test spine::chronos_watcher::tests::proposal_is_persisted_and_deduped_across_passes ... ok
+test spine::chronos_watcher::tests::threshold_reached_records_proposal_and_notification ... ok
+test chronos::tests::replay_all_entries ... ok
+test chronos::tests::replay_start_after_end ... ok
+test chronos::tests::replay_with_range ... ok
+
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 883 filtered out; finished in 0.06s
+
