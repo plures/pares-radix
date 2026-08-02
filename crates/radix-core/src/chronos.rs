@@ -78,6 +78,33 @@ pub struct ChronosEntry {
     pub parent_id: Option<String>,
     pub rationale: Option<String>,
     pub constraint_results: Vec<String>,
+    /// Additive structured operation metadata (ADR-0019 section 4.3).
+    /// Populated for entries that represent a discrete agent operation
+    /// (e.g. a recall query) rather than a plain data mutation. Optional
+    /// and backward-compatible: entries recorded before this field existed
+    /// deserialize with `operation: None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation: Option<ChronosOperation>,
+}
+
+/// Structured metadata describing a discrete agent operation captured on a
+/// [`ChronosEntry`], mirroring `pluresdb-chronos::ChronosOperation`
+/// (ADR-0019 section 4.3, PR#1091) but implemented natively here so
+/// pares-radix-core does not take a dependency on pluresdb-chronos.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChronosOperation {
+    /// Operation kind, e.g. "recall_query".
+    pub kind: String,
+    /// Session this operation belongs to.
+    pub session_id: String,
+    /// Turn within the session this operation belongs to.
+    pub turn_id: String,
+    /// Serialized inputs to the operation (JSON string for portability).
+    pub inputs: String,
+    /// Serialized outputs of the operation (JSON string for portability).
+    pub outputs: String,
+    /// Wall-clock duration of the operation in milliseconds.
+    pub duration_ms: u64,
 }
 
 /// The kind of mutation recorded.
@@ -231,7 +258,35 @@ impl ChronosTimeline {
             parent_id,
             rationale,
             constraint_results,
+            operation: None,
         }
+    }
+
+    /// Build an entry carrying structured [`ChronosOperation`] metadata
+    /// (e.g. a `recall_query`), at an explicit severity level.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_entry_with_operation(
+        &self,
+        key: &str,
+        actor: &str,
+        action: ChronosAction,
+        level: ChronosLevel,
+        data: &Value,
+        constraint_results: Vec<String>,
+        rationale: Option<String>,
+        operation: ChronosOperation,
+    ) -> ChronosEntry {
+        let mut entry = self.build_entry_with_level(
+            key,
+            actor,
+            action,
+            level,
+            data,
+            constraint_results,
+            rationale,
+        );
+        entry.operation = Some(operation);
+        entry
     }
 
     /// Record a mutation in the timeline. Returns false if filtered by level.
@@ -1038,5 +1093,63 @@ mod tests {
 
         // Must match sha256_json applied to the same data
         assert_eq!(entry.data_hash, sha256_json(&data));
+    }
+
+    #[test]
+    fn entry_without_operation_serializes_without_field() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+        let entry = timeline.build_entry(
+            "op:none",
+            "actor",
+            ChronosAction::Create,
+            &json!({"a": 1}),
+            vec![],
+            None,
+        );
+        assert!(entry.operation.is_none());
+        let s = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !s.contains("\"operation\""),
+            "operation field must be omitted when None (backward compat)"
+        );
+
+        // Round-trip through serde still yields None.
+        let round_tripped: ChronosEntry = serde_json::from_str(&s).unwrap();
+        assert!(round_tripped.operation.is_none());
+    }
+
+    #[test]
+    fn build_entry_with_operation_records_recall_query() {
+        let store = test_store();
+        let timeline = ChronosTimeline::new(store);
+
+        let op = ChronosOperation {
+            kind: "recall_query".to_string(),
+            session_id: "sess-123".to_string(),
+            turn_id: "turn-7".to_string(),
+            inputs: json!({"query": "what did we decide about X"}).to_string(),
+            outputs: json!({"hits": 3}).to_string(),
+            duration_ms: 42,
+        };
+
+        let entry = timeline.build_entry_with_operation(
+            "recall:sess-123:turn-7",
+            "pares-agens",
+            ChronosAction::ToolInvoked,
+            ChronosLevel::Info,
+            &json!({"query": "what did we decide about X"}),
+            vec![],
+            Some("recall query emission".into()),
+            op.clone(),
+        );
+
+        assert_eq!(entry.operation, Some(op.clone()));
+        assert!(timeline.record(&entry));
+
+        // Verify it round-trips through storage (real serialization, not asserted from memory).
+        let latest = timeline.latest("recall:sess-123:turn-7").unwrap();
+        assert_eq!(latest.operation, Some(op));
+        assert_eq!(latest.action, ChronosAction::ToolInvoked);
     }
 }

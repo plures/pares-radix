@@ -24,3 +24,5 @@ mutants.out.old/
 
 # Local refactor working notes (recon, milestones) — not shippable
 scratch/
+
+*.log
