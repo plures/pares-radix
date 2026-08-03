@@ -1,3 +1,7 @@
+## [1.55.60] — 2026-08-03
+
+- fix(task-handoff): prevent stale persist_node from overwriting CAS-claimed record (#616) (1482ca4)
+
 ## [1.55.58] — 2026-08-01
 
 - feat(pares-radix-svc): fail-closed POST /v1/ssh/authorize policy endpoint (JIT-SSH Track C) (#614) (36e142c)
