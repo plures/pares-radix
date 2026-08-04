@@ -1,0 +1,21 @@
+* @kbristol
+
+/crates/ @kbristol
+/packages/ @kbristol
+/plugins/ @kbristol
+/src/ @kbristol
+/src-tauri/ @kbristol
+/capabilities/ @kbristol
+/config/ @kbristol
+/docs/ @kbristol
+/e2e/ @kbristol
+/examples/ @kbristol
+/scripts/ @kbristol
+/static/ @kbristol
+/test-scenarios/ @kbristol
+/testing/ @kbristol
+/tests/ @kbristol
+/praxis/ @kbristol
+/.github/ @kbristol
+/.praxis/ @kbristol
+/.plures/ @kbristol
