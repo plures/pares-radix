@@ -900,19 +900,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn retries_with_praxis_selected_fallback_model() {
+    async fn deep_gpt_5_2_fallback_retries_once_on_standard_gpt_4_1() {
+        // This models the live `providers:active` startup state written by
+        // agens-plugin: standard=[gpt-4.1], deep=[gpt-5.2]. After gpt-5.2
+        // has a fallback-eligible 4xx, the .px selector must move to the
+        // next allowed entry (gpt-4.1), and ModelInvoker must make exactly
+        // one retry without re-attempting the failed model.
         let (emitter, mut rx) = make_emitter();
         let client = Arc::new(ScriptedModelClient::new(vec![
-            Err(fallback_needed("primary-model")),
+            Err(fallback_needed("gpt-5.2")),
             Ok(ModelCompletion {
                 content: Some("fallback succeeded".into()),
                 tool_calls: vec![],
                 logprobs: None,
-                model: Some("fallback-model".into()),
+                model: Some("gpt-4.1".into()),
             }),
         ]));
         let tools = Arc::new(FallbackTools::new(
-            r#"{"model":"fallback-model","reason":"live candidate","exhausted":false}"#,
+            r#"{"model":"gpt-4.1","reason":"next live providers:active candidate","exhausted":false}"#,
         ));
         let invoker = ModelInvoker::new(
             Arc::clone(&client) as Arc<dyn ModelClient>,
@@ -924,19 +929,19 @@ mod tests {
         match rx.recv().await.expect("model response") {
             SpineEvent::ModelResponse { content, model, .. } => {
                 assert_eq!(content, "fallback succeeded");
-                assert_eq!(model, "fallback-model");
+                assert_eq!(model, "gpt-4.1");
             }
             other => panic!("expected ModelResponse, got {other:?}"),
         }
         assert_eq!(
             *client.models.lock().await,
-            vec![None, Some("fallback-model".into())]
+            vec![None, Some("gpt-4.1".into())]
         );
         let calls = tools.calls.lock().await;
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "select_fallback_model");
-        assert_eq!(calls[0].1["failed_model"], "primary-model");
-        assert_eq!(calls[0].1["already_tried"], json!(["primary-model"]));
+        assert_eq!(calls[0].1["failed_model"], "gpt-5.2");
+        assert_eq!(calls[0].1["already_tried"], json!(["gpt-5.2"]));
         assert_eq!(
             calls[0].1["task_context"]["request"]["chat_id"],
             "fallback-chat"
