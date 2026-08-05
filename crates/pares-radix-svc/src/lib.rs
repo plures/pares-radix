@@ -340,7 +340,7 @@ fn build_router(shared: Arc<SharedState>) -> Router {
         .route("/readyz", get(readyz))
         .route("/events", get(get_events).post(post_event))
         .route("/timers", get(list_timers).post(post_timer))
-        .route("/timers/:id", delete(delete_timer))
+        .route("/timers/{id}", delete(delete_timer))
         .route("/v1/ssh/authorize", post(post_ssh_authorize))
         .with_state(shared)
 }
@@ -751,6 +751,12 @@ mod tests {
             .store()
             .put("probe", SERVICE_ACTOR, json!({"ok": true}));
         assert!(lifecycle.store().get("probe").is_some());
+    }
+
+    #[test]
+    fn build_router_accepts_current_axum_path_syntax() {
+        let shared = Arc::new(SharedState::new(CrdtStore::default()));
+        let _router = build_router(shared);
     }
 
     #[tokio::test]
