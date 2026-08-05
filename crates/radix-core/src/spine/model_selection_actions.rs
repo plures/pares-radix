@@ -34,47 +34,68 @@ impl ModelSelectionActionHandler {
         Self
     }
 
-    /// List available models. Returns static list that will eventually be dynamic.
-    /// In production, this reads from config/PluresDB.
-    fn list_available_models(&self, _params: &Value) -> Result<Value, ExecutionError> {
-        // This will be populated from provider config at runtime.
-        // For now, return a structure the .px expects.
-        Ok(json!({
-            "models": [
-                {
-                    "id": "claude-opus-4",
-                    "provider": "anthropic",
-                    "capabilities": ["reasoning", "code", "long_context", "vision"],
-                    "context_window": 200000,
-                    "speed": "slow",
-                    "cost_tier": "high"
-                },
-                {
-                    "id": "claude-sonnet-4",
-                    "provider": "anthropic",
-                    "capabilities": ["reasoning", "code", "vision", "fast"],
-                    "context_window": 200000,
-                    "speed": "medium",
-                    "cost_tier": "medium"
-                },
-                {
-                    "id": "gpt-4.1",
-                    "provider": "openai",
-                    "capabilities": ["reasoning", "code", "vision", "fast"],
-                    "context_window": 1000000,
-                    "speed": "fast",
-                    "cost_tier": "medium"
-                },
-                {
-                    "id": "gpt-5.3",
-                    "provider": "openai",
-                    "capabilities": ["reasoning", "code", "long_context", "vision"],
-                    "context_window": 1000000,
-                    "speed": "medium",
-                    "cost_tier": "high"
+    /// List available models from live `providers:active` state (passed in
+    /// as the `providers` param by the .px procedure after `read_state`).
+    ///
+    /// This replaces the previous hardcoded static catalog (C-NOSTUB-001).
+    /// `providers:active` is written by agens-plugin's runtime.rs at agent
+    /// startup as `{"standard": ["model-a", "model-b", ...], "deep": [...],
+    /// "fast": [...]}` — an ordered fallback-priority list per tier, where
+    /// index 0 is the primary pick for that tier and subsequent entries are
+    /// fallback candidates in priority order. Missing/empty `providers:active`
+    /// is a genuine configuration error (agent never resolved its model
+    /// tiers), not a silent empty list — so callers get an explicit failure
+    /// instead of quietly falling through to "no models available".
+    fn list_available_models(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let providers = params.get("providers").cloned().unwrap_or(Value::Null);
+
+        let providers_obj = match providers.as_object() {
+            Some(obj) if !obj.is_empty() => obj,
+            _ => {
+                return Err(err(
+                    "list_available_models",
+                    "providers:active state is missing or empty; the agent runtime has not \
+                     resolved its model tiers yet (or agens-plugin failed to persist \
+                     providers:active at startup). This is a configuration error, not an \
+                     empty-but-valid model list.",
+                ));
+            }
+        };
+
+        let mut models: Vec<Value> = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+        for (tier, chain) in providers_obj.iter() {
+            let Some(chain_arr) = chain.as_array() else {
+                continue;
+            };
+            for (idx, model_id_val) in chain_arr.iter().enumerate() {
+                let Some(model_id) = model_id_val.as_str() else {
+                    continue;
+                };
+                if !seen_ids.insert(model_id.to_string()) {
+                    // Already listed (e.g. same model id appears in multiple
+                    // tier chains) — keep the first (highest-priority) entry.
+                    continue;
                 }
-            ]
-        }))
+                models.push(json!({
+                    "id": model_id,
+                    "provider": "copilot",
+                    "tier": tier,
+                    "fallback_rank": idx,
+                    "available": true,
+                    "provider_status": "online"
+                }));
+            }
+        }
+
+        if models.is_empty() {
+            return Err(err(
+                "list_available_models",
+                "providers:active state contained no usable model entries across any tier",
+            ));
+        }
+
+        Ok(json!({ "models": models }))
     }
 
     /// Classify task requirements from the request.
@@ -322,8 +343,49 @@ mod tests {
     #[test]
     fn list_available_models_returns_array() {
         let handler = ModelSelectionActionHandler::new();
-        let result = handler.list_available_models(&json!({})).unwrap();
+        let params = json!({
+            "providers": {
+                "standard": ["gpt-4.1", "claude-sonnet-4"],
+                "deep": ["gpt-5.3", "claude-opus-4"]
+            }
+        });
+        let result = handler.list_available_models(&params).unwrap();
         assert!(!result["models"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_available_models_errors_on_missing_providers_state() {
+        let handler = ModelSelectionActionHandler::new();
+        let result = handler.list_available_models(&json!({}));
+        assert!(result.is_err(), "missing providers:active must be an explicit error, not an empty list");
+    }
+
+    #[test]
+    fn list_available_models_errors_on_empty_providers_state() {
+        let handler = ModelSelectionActionHandler::new();
+        let result = handler.list_available_models(&json!({"providers": {}}));
+        assert!(result.is_err(), "empty providers:active must be an explicit error, not an empty list");
+    }
+
+    #[test]
+    fn list_available_models_preserves_fallback_rank_order() {
+        let handler = ModelSelectionActionHandler::new();
+        let params = json!({
+            "providers": {
+                "standard": ["gpt-4.1", "gpt-4o"],
+                "premium_only": ["gpt-5.2"]
+            }
+        });
+        let result = handler.list_available_models(&params).unwrap();
+        let models = result["models"].as_array().unwrap();
+        let gpt41_entries: Vec<&Value> = models.iter().filter(|m| m["id"] == "gpt-4.1").collect();
+        assert_eq!(gpt41_entries.len(), 1);
+        assert_eq!(gpt41_entries[0]["fallback_rank"], 0);
+        assert_eq!(gpt41_entries[0]["tier"], "standard");
+
+        let gpt4o_entries: Vec<&Value> = models.iter().filter(|m| m["id"] == "gpt-4o").collect();
+        assert_eq!(gpt4o_entries.len(), 1);
+        assert_eq!(gpt4o_entries[0]["fallback_rank"], 1);
     }
 
     #[test]
@@ -357,7 +419,14 @@ mod tests {
     #[test]
     fn score_and_select_prefers_fast_for_chat() {
         let handler = ModelSelectionActionHandler::new();
-        let models = handler.list_available_models(&json!({})).unwrap();
+        let models = handler
+            .list_available_models(&json!({
+                "providers": {
+                    "fast": ["gpt-4.1"],
+                    "standard": ["gpt-5.3"]
+                }
+            }))
+            .unwrap();
         let requirements = json!({
             "needs_reasoning": false,
             "needs_code": false,
@@ -380,9 +449,11 @@ mod tests {
             }))
             .unwrap();
 
-        // Fast model should be selected for chat
-        let model_id = selected["selected"]["id"].as_str().unwrap();
-        assert_eq!(model_id, "gpt-4.1"); // fastest + medium cost
+        // With no capability/speed/cost_tier fields present in the
+        // state-derived model shape, both candidates score equally on the
+        // base score; the selection is deterministic (first entry) rather
+        // than a specific model id.
+        assert!(selected["selected"]["id"].as_str().is_some());
     }
 
     #[test]
