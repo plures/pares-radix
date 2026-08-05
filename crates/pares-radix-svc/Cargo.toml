@@ -10,6 +10,14 @@ repository.workspace = true
 name = "pares-radix-svc"
 path = "src/main.rs"
 
+[[bin]]
+name = "plugin-fixture-long-lived"
+path = "src/bin/plugin-fixture-long-lived.rs"
+
+[[bin]]
+name = "plugin-fixture-exit-immediately"
+path = "src/bin/plugin-fixture-exit-immediately.rs"
+
 [lib]
 name = "pares_radix_svc"
 path = "src/lib.rs"
@@ -24,6 +32,7 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 uuid.workspace = true
 anyhow = "1"
+thiserror.workspace = true
 pluresdb = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6", features = ["embeddings"] }
 pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6" }
 pares-radix-core = { path = "../radix-core" }

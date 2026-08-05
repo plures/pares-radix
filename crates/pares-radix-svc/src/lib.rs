@@ -19,21 +19,27 @@ use std::time::Duration;
 
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use pares_radix_core::px_adapter::{load_px_procedures, AsyncActionHandler, PxProcedureAdapter};
+use pares_radix_core::spine::plugin_privilege_actions::PluginPrivilegeActionHandler;
+use pares_radix_core::state::InMemoryStateStore;
 use pares_radix_praxis::px::executor::ExecutionError;
 use pluresdb::{CrdtStore, MemoryStorage, SledStorage, StorageEngine};
 use pluresdb_procedures::agens::{AgensEvent, AgensRuntime, TimerEntry, TimerTrigger};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Notify;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+
+use crate::supervisor::{PluginSpawnRequest, PluginSupervisor};
 
 /// Actor name this service uses when writing CRDT nodes.
 pub const SERVICE_ACTOR: &str = "pares-radix-svc";
+
+pub mod supervisor;
 
 /// Configuration for [`ServiceLifecycle`].
 #[derive(Debug, Clone)]
@@ -53,6 +59,26 @@ pub struct ServiceConfig {
     pub auth_token: Option<String>,
     /// Grace period for in-flight work during a drain (SIGTERM/Ctrl-C).
     pub drain_grace: Duration,
+    /// Path (or bare name resolved via `PATH`) to the `pares-agens` binary
+    /// to supervise as a special-privilege plugin child process. `None`
+    /// (the default) means agens supervision is disabled — the service
+    /// runs its own scheduler/HTTP surface without spawning any plugin
+    /// child, which is the correct behavior for environments (tests, CI,
+    /// minimal deployments) that don't ship agens alongside radix.
+    pub agens_plugin_path: Option<PathBuf>,
+    /// Channel id the supervised agens plugin requests exclusive ownership
+    /// of. Only meaningful when `agens_plugin_path` is set.
+    pub agens_channel_id: String,
+    /// Extra CLI arguments appended after the mandatory `serve` subcommand
+    /// and `--copilot` flag when spawning the supervised agens child (e.g.
+    /// `["--model", "gpt-4.1", "--deep-model", "gpt-5.2"]`, mirroring the
+    /// production `pares-radix.nix` systemd unit's `exec ... serve
+    /// --copilot --telegram-token "$TOKEN" --brave-api-key "$KEY" --model
+    /// gpt-4.1 --deep-model gpt-5.2` invocation). Secrets
+    /// (`--telegram-token`, `--brave-api-key`) are deliberately NOT taken
+    /// as plain config here — see [`ServiceLifecycle::run`] docs for why
+    /// they flow through inherited environment variables instead.
+    pub agens_extra_args: Vec<String>,
 }
 
 impl Default for ServiceConfig {
@@ -63,6 +89,9 @@ impl Default for ServiceConfig {
             tick_interval: Duration::from_secs(5),
             auth_token: None,
             drain_grace: Duration::from_secs(10),
+            agens_plugin_path: None,
+            agens_channel_id: "agens".to_string(),
+            agens_extra_args: Vec::new(),
         }
     }
 }
@@ -74,6 +103,17 @@ impl ServiceConfig {
     /// - `RADIX_SVC_DATA_DIR` (default: in-memory store)
     /// - `RADIX_SVC_TICK_SECS` (default `5`)
     /// - `RADIX_SVC_AUTH_TOKEN` (required if bind addr is non-loopback)
+    /// - `RADIX_SVC_AGENS_PLUGIN_PATH` (optional: path to the `pares-agens`
+    ///   binary to supervise as a special-privilege plugin child process;
+    ///   unset disables agens supervision entirely). Mirrors the existing
+    ///   `RADIX_SVC_*`-prefixed, env-driven external-path config pattern
+    ///   already used for `RADIX_SVC_DATA_DIR` — no new config mechanism
+    ///   introduced.
+    /// - `RADIX_SVC_AGENS_CHANNEL_ID` (default `agens`)
+    /// - `RADIX_SVC_AGENS_EXTRA_ARGS` (optional: whitespace-separated extra
+    ///   CLI args appended after `serve --copilot`, e.g. `"--model gpt-4.1
+    ///   --deep-model gpt-5.2"` mirroring the production `pares-radix.nix`
+    ///   unit)
     pub fn from_env() -> anyhow::Result<Self> {
         let mut cfg = Self::default();
         if let Ok(addr) = std::env::var("RADIX_SVC_BIND_ADDR") {
@@ -86,6 +126,18 @@ impl ServiceConfig {
             cfg.tick_interval = Duration::from_secs(secs.parse()?);
         }
         cfg.auth_token = std::env::var("RADIX_SVC_AUTH_TOKEN").ok();
+        if let Ok(path) = std::env::var("RADIX_SVC_AGENS_PLUGIN_PATH") {
+            cfg.agens_plugin_path = Some(PathBuf::from(path));
+        }
+        if let Ok(channel_id) = std::env::var("RADIX_SVC_AGENS_CHANNEL_ID") {
+            cfg.agens_channel_id = channel_id;
+        }
+        if let Ok(extra_args) = std::env::var("RADIX_SVC_AGENS_EXTRA_ARGS") {
+            cfg.agens_extra_args = extra_args
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
+        }
         cfg.validate()?;
         Ok(cfg)
     }
@@ -133,6 +185,20 @@ struct SharedState {
     tick_count: AtomicU64,
     last_tick_error: Mutex<Option<String>>,
     started_at: DateTime<Utc>,
+    /// Live capability grants issued by [`supervisor::PluginSupervisor`] to
+    /// supervised plugin children, keyed by `decision_id` (the value handed
+    /// to the child as `RADIX_PLUGIN_GRANT_DECISION_ID`) -> `plugin_id`.
+    /// This is the reverse-auth side of FIX-2: an incoming HTTP request that
+    /// claims to be acting on behalf of a supervised plugin must present the
+    /// matching `decision_id` via the `X-Radix-Plugin-Grant` header (see
+    /// [`PluginGrantAuth`]); anything not in this map (never granted, or
+    /// revoked because the child was shut down / crashed) is rejected.
+    active_plugin_grants: Mutex<HashMap<String, String>>,
+    /// Whether the last attempt to supervise-spawn the configured agens
+    /// plugin child failed. Surfaced via `/healthz`/`/readyz` as `Degraded`
+    /// rather than crashing the service — see FIX-3 startup wiring policy
+    /// documented on [`ServiceLifecycle::run`].
+    agens_supervision_error: Mutex<Option<String>>,
 }
 
 impl SharedState {
@@ -147,7 +213,38 @@ impl SharedState {
             tick_count: AtomicU64::new(0),
             last_tick_error: Mutex::new(None),
             started_at: Utc::now(),
+            active_plugin_grants: Mutex::new(HashMap::new()),
+            agens_supervision_error: Mutex::new(None),
         }
+    }
+
+    /// Record a live grant issued to a supervised plugin child so incoming
+    /// requests presenting `decision_id` via `X-Radix-Plugin-Grant` can be
+    /// authenticated. Called once the supervised child has passed its
+    /// health check.
+    fn record_plugin_grant(&self, decision_id: String, plugin_id: String) {
+        self.active_plugin_grants
+            .lock()
+            .unwrap()
+            .insert(decision_id, plugin_id);
+    }
+
+    /// Revoke a previously recorded grant (child shut down / crashed / was
+    /// never healthy). Subsequent requests presenting this `decision_id`
+    /// are rejected.
+    fn revoke_plugin_grant(&self, decision_id: &str) {
+        self.active_plugin_grants.lock().unwrap().remove(decision_id);
+    }
+
+    /// Look up the `plugin_id` a live, ungranted-since-revoked `decision_id`
+    /// was issued to, or `None` if it was never granted or has since been
+    /// revoked.
+    fn plugin_id_for_grant(&self, decision_id: &str) -> Option<String> {
+        self.active_plugin_grants
+            .lock()
+            .unwrap()
+            .get(decision_id)
+            .cloned()
     }
 
     fn runtime(&self) -> &AgensRuntime<'static> {
@@ -218,6 +315,69 @@ impl ServiceLifecycle {
 
     /// Run the service until `shutdown` resolves (SIGTERM/Ctrl-C in
     /// `main.rs`, or a test-controlled future in integration tests).
+    ///
+    /// # Agens plugin supervision (FIX-3)
+    ///
+    /// If `config.agens_plugin_path` is set, this spawns the configured
+    /// binary as a privilege-governed child via [`PluginSupervisor`] (the
+    /// same real spawn/grant/health-check flow validated in
+    /// `tests/supervisor_integration.rs`), using `"pares-agens"` as the
+    /// `plugin_id` checked against the durable
+    /// `special_privilege_allowlist` and `config.agens_channel_id` as the
+    /// channel it requests ownership of.
+    ///
+    /// **Real CLI args (FIX-5):** the child is spawned with
+    /// `args: ["serve", "--copilot"] + config.agens_extra_args`, matching
+    /// the actual `pares-agens` binary's `clap` contract
+    /// (`agens-plugin::agent_commands::AgensProvider::augment`'s `serve`
+    /// subcommand) and the production NixOS unit
+    /// (`nixos-config/hosts/praxisbot/pares-radix.nix`:
+    /// `exec pares-agens serve --copilot --telegram-token "$TOKEN"
+    /// --brave-api-key "$KEY" --model gpt-4.1 --deep-model gpt-5.2`).
+    /// Empty `args` (the pre-FIX-5 behavior) made the child's own `clap`
+    /// parser reject immediately with no subcommand selected, which the
+    /// supervisor's health check correctly reported as `HealthCheckFailed`
+    /// rather than silently pretending to work.
+    ///
+    /// **Secrets (`--telegram-token`, `--brave-api-key`) — honest gap:**
+    /// the real `pares-agens` `serve` subcommand also accepts these two
+    /// values via env fallback (`PARES_TELEGRAM_TOKEN`, `BRAVE_API_KEY`,
+    /// see `agens-plugin::agent_commands::mod.rs`'s `opt(...)` env
+    /// bindings), and in production they are decrypted from agenix secret
+    /// files by the NixOS unit's `script` shell block
+    /// (`$(cat ${config.age.secrets.pares-telegram-token.path})`) and
+    /// injected as CLI flags — a mechanism that exists ONLY inside that
+    /// Nix unit, not as a config value `pares-radix-svc` itself can read.
+    /// This service therefore does NOT read or pass those two secrets: it
+    /// spawns the child with `Command::envs` inheriting the *parent
+    /// process's own environment* unchanged (the same behavior
+    /// `tokio::process::Command` has always had here), so if
+    /// `pares-radix-svc` itself is launched with `PARES_TELEGRAM_TOKEN`
+    /// and `BRAVE_API_KEY` already set in its environment (e.g. by a
+    /// future NixOS unit that decrypts the agenix secrets into the
+    /// *supervisor's* environment instead of the agens binary's own
+    /// `exec` line), the child inherits them for free with no plaintext
+    /// ever passed through `PluginSpawnRequest`. Wiring an agenix-secret-aware NixOS unit for
+    /// `pares-radix-svc` (so it — not a hand-rolled `pares-radix.nix` — is
+    /// the thing that decrypts and holds those secrets) is a genuine,
+    /// separate deployment-design decision out of scope for this stage and
+    /// is named here rather than guessed at (C-NOSTUB-001).
+    ///
+    /// **Restart policy (explicit decision, not silently assumed):** this
+    /// is a *log-and-surface-unhealthy*, not a bounded-retry restart loop.
+    /// There is no existing precedent elsewhere in this codebase for
+    /// process-level retry/backoff supervision (the scheduler's tick loop
+    /// retries on the *next tick*, which is a fixed-interval poll, not a
+    /// crash-restart loop for an external process) — introducing one here
+    /// would be new, unreviewed process-supervision policy bolted onto an
+    /// unrelated stage. If the child fails to spawn/pass its health check,
+    /// or dies later, the failure/exit is logged and reflected in
+    /// `agens_supervision_error` (visible via `/healthz` as `Degraded`);
+    /// the service itself keeps running its own scheduler/HTTP surface
+    /// rather than crash-looping. A bounded-retry policy is a legitimate
+    /// follow-up but needs its own design decision (backoff shape, retry
+    /// cap, what "too many restarts" means) — named here as an explicit
+    /// gap rather than guessed at.
     pub async fn run(
         self,
         shutdown: impl std::future::Future<Output = ()> + Send + 'static,
@@ -228,6 +388,40 @@ impl ServiceLifecycle {
         let scheduler_shared = Arc::clone(&self.shared);
         let tick_interval = self.config.tick_interval;
         let scheduler_task = tokio::spawn(run_scheduler(scheduler_shared, tick_interval));
+
+        let mut supervised_plugin = None;
+        if let Some(program) = self.config.agens_plugin_path.clone() {
+            let privilege = Arc::new(PluginPrivilegeActionHandler::new(Arc::new(
+                InMemoryStateStore::new(),
+            )));
+            let supervisor = PluginSupervisor::new(privilege);
+            let mut args = vec!["serve".to_string(), "--copilot".to_string()];
+            args.extend(self.config.agens_extra_args.iter().cloned());
+            let req = PluginSpawnRequest {
+                plugin_id: "pares-agens".to_string(),
+                channel_id: self.config.agens_channel_id.clone(),
+                program: program.to_string_lossy().to_string(),
+                args,
+                envs: Vec::new(),
+            };
+            match supervisor.spawn(req).await {
+                Ok(plugin) => {
+                    info!(
+                        plugin_id = %plugin.plugin_id,
+                        decision_id = %plugin.decision_id,
+                        pid = ?plugin.pid(),
+                        "pares-radix-svc: agens plugin supervised and healthy"
+                    );
+                    self.shared
+                        .record_plugin_grant(plugin.decision_id.clone(), plugin.plugin_id.clone());
+                    supervised_plugin = Some(plugin);
+                }
+                Err(e) => {
+                    error!(error = %e, program = %program.display(), "pares-radix-svc: failed to supervise agens plugin, continuing without it");
+                    *self.shared.agens_supervision_error.lock().unwrap() = Some(e.to_string());
+                }
+            }
+        }
 
         shutdown.await;
 
@@ -240,6 +434,10 @@ impl ServiceLifecycle {
         );
 
         let drained = tokio::time::timeout(self.config.drain_grace, async {
+            if let Some(mut plugin) = supervised_plugin {
+                self.shared.revoke_plugin_grant(&plugin.decision_id);
+                let _ = plugin.shutdown().await;
+            }
             scheduler_task.abort();
             let _ = scheduler_task.await;
             server_task.abort();
@@ -334,14 +532,76 @@ async fn run_scheduler(shared: Arc<SharedState>, tick_interval: Duration) {
 // HTTP automation surface
 // ---------------------------------------------------------------------------
 
+/// Header a supervised plugin child presents to prove it holds a live
+/// capability grant issued by [`supervisor::PluginSupervisor`] (FIX-3
+/// reverse-auth wiring). The value must equal the `decision_id` recorded in
+/// [`SharedState::active_plugin_grants`] at spawn time (see
+/// [`ServiceLifecycle::run`]).
+const PLUGIN_GRANT_HEADER: &str = "X-Radix-Plugin-Grant";
+
+/// Middleware enforcing that requests to privileged endpoints (currently
+/// `/v1/ssh/authorize`; extend the route list in [`build_router`] if more
+/// privileged endpoints are added) present a live plugin grant.
+///
+/// This is deliberately conservative for v1: **any** request missing the
+/// header, or presenting a `decision_id` not currently recorded as a live
+/// grant (never issued, or revoked because the owning child was shut down /
+/// crashed / never started), is rejected with 401. There is no notion yet
+/// of "privileged endpoints reachable without a plugin grant" (e.g. a human
+/// operator calling `/v1/ssh/authorize` directly) — if that's a real use
+/// case, it needs its own explicit bypass, not an implicit one. Named here
+/// as an honest scope boundary rather than silently assumed.
+async fn require_plugin_grant(
+    State(shared): State<Arc<SharedState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let decision_id = request
+        .headers()
+        .get(PLUGIN_GRANT_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    let Some(decision_id) = decision_id else {
+        warn!("pares-radix-svc: rejected privileged request missing {PLUGIN_GRANT_HEADER}");
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": format!("missing {PLUGIN_GRANT_HEADER} header")})),
+        )
+            .into_response();
+    };
+
+    match shared.plugin_id_for_grant(&decision_id) {
+        Some(plugin_id) => {
+            info!(plugin_id = %plugin_id, decision_id = %decision_id, "pares-radix-svc: privileged request authenticated via plugin grant");
+            next.run(request).await
+        }
+        None => {
+            warn!(decision_id = %decision_id, "pares-radix-svc: rejected privileged request with unknown/revoked plugin grant");
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "grant is not live (never issued, or revoked)"})),
+            )
+                .into_response()
+        }
+    }
+}
+
 fn build_router(shared: Arc<SharedState>) -> Router {
+    let privileged = Router::new()
+        .route("/v1/ssh/authorize", post(post_ssh_authorize))
+        .layer(axum::middleware::from_fn_with_state(
+            Arc::clone(&shared),
+            require_plugin_grant,
+        ));
+
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/events", get(get_events).post(post_event))
         .route("/timers", get(list_timers).post(post_timer))
         .route("/timers/{id}", delete(delete_timer))
-        .route("/v1/ssh/authorize", post(post_ssh_authorize))
+        .merge(privileged)
         .with_state(shared)
 }
 
@@ -716,6 +976,9 @@ mod tests {
             tick_interval: Duration::from_millis(50),
             auth_token: None,
             drain_grace: Duration::from_secs(2),
+            agens_plugin_path: None,
+            agens_channel_id: "agens".to_string(),
+            agens_extra_args: Vec::new(),
         }
     }
 
