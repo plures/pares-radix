@@ -1,5 +1,6 @@
 //! GitHub Copilot device flow authentication and model client.
 
+use std::error::Error as _;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,7 +16,7 @@ use tokio::time::sleep;
 
 use crate::model::{
     ChatMessage, ChatOptions, FallbackRequestContext, ModelClient, ModelClientError,
-    ModelCompletion, ToolCall, ToolDefinition,
+    ModelCompletion, ToolCall, ToolDefinition, TransportFailure,
 };
 
 const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
@@ -50,6 +51,88 @@ fn copilot_http_client() -> Result<reqwest::Client, reqwest::Error> {
 
 fn copilot_http_client_or_panic() -> reqwest::Client {
     copilot_http_client().expect("failed to build HTTP client")
+}
+
+/// Return a source diagnostic that is safe for logs and user-visible errors.
+/// Never preserve an entire URL, header, or a diagnostic containing a common
+/// credential marker; dependency error strings are not a security boundary.
+fn sanitize_transport_source(message: String) -> String {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("bearer ")
+        || lower.contains("authorization:")
+        || lower.contains("token=")
+        || lower.contains("access_token")
+        || lower.contains("client_secret")
+    {
+        "[redacted transport source]".to_string()
+    } else {
+        message
+    }
+}
+
+/// Convert a reqwest failure into token-safe diagnostics before it crosses the
+/// model-client boundary. URLs, request headers, and bearer tokens are never
+/// copied into this record.
+fn transport_failure(error: &reqwest::Error) -> TransportFailure {
+    let mut source_chain = Vec::new();
+    let mut raw_sources = Vec::new();
+    let mut source = error.source();
+    while let Some(current) = source {
+        let message = current.to_string();
+        raw_sources.push(message.clone());
+        source_chain.push(sanitize_transport_source(message));
+        source = current.source();
+    }
+    let sources = raw_sources.join(" ").to_ascii_lowercase();
+    TransportFailure {
+        message: "Copilot HTTP request failed".to_string(),
+        is_connect: error.is_connect(),
+        is_timeout: error.is_timeout(),
+        is_tls: sources.contains("certificate") || sources.contains("tls"),
+        is_dns: sources.contains("dns")
+            || sources.contains("failed to lookup")
+            || sources.contains("name or service not known")
+            || sources.contains("no such host"),
+        source_chain,
+    }
+}
+
+async fn send_with_transient_retry(
+    client: &reqwest::Client,
+    url: &str,
+    headers: HeaderMap,
+    body: &Value,
+) -> Result<reqwest::Response, ModelClientError> {
+    match client.post(url).headers(headers.clone()).json(body).send().await {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            let failure = transport_failure(&error);
+            if !failure.is_transient() {
+                return Err(ModelClientError::Transport(failure));
+            }
+
+            tracing::warn!(
+                is_connect = failure.is_connect,
+                is_timeout = failure.is_timeout,
+                source_chain = ?failure.source_chain,
+                "transient Copilot transport failure; retrying once with a fresh client"
+            );
+            // `sleep` and the request future are cancellation-aware: dropping
+            // the caller's completion future cancels both immediately.
+            sleep(Duration::from_millis(250)).await;
+            let fresh_client = copilot_http_client()
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(format!("failed to build fresh HTTP client: {e}"))))?;
+            fresh_client
+                .post(url)
+                .headers(headers)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| ModelClientError::Transport(transport_failure(&e)))
+        }
+    }
 }
 
 /// Errors emitted during Copilot authentication or token refresh.
@@ -403,14 +486,7 @@ impl ModelClient for CopilotModelClient {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers.clone())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+        let response = send_with_transient_retry(&self.client, &url, headers.clone(), &body).await?;
 
         let status = response.status();
         let body_text = response

@@ -229,9 +229,10 @@ pub enum ModelClientError {
     },
     /// The request was cancelled; no fallback should be attempted.
     Cancelled,
-    /// A transport-level failure (connection, timeout, serialization, etc.)
-    /// that is not itself fallback-eligible.
-    Transport(String),
+    /// A transport-level failure (connection, timeout, TLS, serialization,
+    /// etc.) that is not itself fallback-eligible. The diagnostic fields are
+    /// deliberately token-free so they can safely reach operator logs.
+    Transport(TransportFailure),
 }
 
 impl std::fmt::Display for ModelClientError {
@@ -251,8 +252,51 @@ impl std::fmt::Display for ModelClientError {
                 "model '{model}' provider failure (status {status:?}): {message}"
             ),
             ModelClientError::Cancelled => write!(f, "model request cancelled"),
-            ModelClientError::Transport(msg) => write!(f, "transport error: {msg}"),
+            ModelClientError::Transport(failure) => write!(f, "transport error: {failure}"),
         }
+    }
+}
+
+/// Sanitized diagnostics for a failed HTTP transport operation.
+///
+/// `reqwest::Error` itself cannot be retained because it is not cloneable and
+/// may include request metadata. Capture only stable classification flags and
+/// a redacted source chain at the I/O boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransportFailure {
+    pub message: String,
+    pub is_connect: bool,
+    pub is_timeout: bool,
+    pub is_tls: bool,
+    pub source_chain: Vec<String>,
+}
+
+impl TransportFailure {
+    /// Create a non-retryable diagnostic for a local client-side failure.
+    pub fn message(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            is_connect: false,
+            is_timeout: false,
+            is_tls: false,
+            source_chain: Vec::new(),
+        }
+    }
+
+    /// True only for failures where retrying the request with a fresh client
+    /// can make progress. TLS/certificate failures are intentionally excluded.
+    pub fn is_transient(&self) -> bool {
+        !self.is_tls && (self.is_connect || self.is_timeout)
+    }
+}
+
+impl std::fmt::Display for TransportFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} (connect={}, timeout={}, tls={}, sources={:?})",
+            self.message, self.is_connect, self.is_timeout, self.is_tls, self.source_chain
+        )
     }
 }
 
