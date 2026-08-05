@@ -69,6 +69,16 @@ pub struct ServiceConfig {
     /// Channel id the supervised agens plugin requests exclusive ownership
     /// of. Only meaningful when `agens_plugin_path` is set.
     pub agens_channel_id: String,
+    /// Extra CLI arguments appended after the mandatory `serve` subcommand
+    /// and `--copilot` flag when spawning the supervised agens child (e.g.
+    /// `["--model", "gpt-4.1", "--deep-model", "gpt-5.2"]`, mirroring the
+    /// production `pares-radix.nix` systemd unit's `exec ... serve
+    /// --copilot --telegram-token "$TOKEN" --brave-api-key "$KEY" --model
+    /// gpt-4.1 --deep-model gpt-5.2` invocation). Secrets
+    /// (`--telegram-token`, `--brave-api-key`) are deliberately NOT taken
+    /// as plain config here — see [`ServiceLifecycle::run`] docs for why
+    /// they flow through inherited environment variables instead.
+    pub agens_extra_args: Vec<String>,
 }
 
 impl Default for ServiceConfig {
@@ -81,6 +91,7 @@ impl Default for ServiceConfig {
             drain_grace: Duration::from_secs(10),
             agens_plugin_path: None,
             agens_channel_id: "agens".to_string(),
+            agens_extra_args: Vec::new(),
         }
     }
 }
@@ -99,6 +110,10 @@ impl ServiceConfig {
     ///   already used for `RADIX_SVC_DATA_DIR` — no new config mechanism
     ///   introduced.
     /// - `RADIX_SVC_AGENS_CHANNEL_ID` (default `agens`)
+    /// - `RADIX_SVC_AGENS_EXTRA_ARGS` (optional: whitespace-separated extra
+    ///   CLI args appended after `serve --copilot`, e.g. `"--model gpt-4.1
+    ///   --deep-model gpt-5.2"` mirroring the production `pares-radix.nix`
+    ///   unit)
     pub fn from_env() -> anyhow::Result<Self> {
         let mut cfg = Self::default();
         if let Ok(addr) = std::env::var("RADIX_SVC_BIND_ADDR") {
@@ -116,6 +131,12 @@ impl ServiceConfig {
         }
         if let Ok(channel_id) = std::env::var("RADIX_SVC_AGENS_CHANNEL_ID") {
             cfg.agens_channel_id = channel_id;
+        }
+        if let Ok(extra_args) = std::env::var("RADIX_SVC_AGENS_EXTRA_ARGS") {
+            cfg.agens_extra_args = extra_args
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
         }
         cfg.validate()?;
         Ok(cfg)
@@ -305,6 +326,43 @@ impl ServiceLifecycle {
     /// `special_privilege_allowlist` and `config.agens_channel_id` as the
     /// channel it requests ownership of.
     ///
+    /// **Real CLI args (FIX-5):** the child is spawned with
+    /// `args: ["serve", "--copilot"] + config.agens_extra_args`, matching
+    /// the actual `pares-agens` binary's `clap` contract
+    /// (`agens-plugin::agent_commands::AgensProvider::augment`'s `serve`
+    /// subcommand) and the production NixOS unit
+    /// (`nixos-config/hosts/praxisbot/pares-radix.nix`:
+    /// `exec pares-agens serve --copilot --telegram-token "$TOKEN"
+    /// --brave-api-key "$KEY" --model gpt-4.1 --deep-model gpt-5.2`).
+    /// Empty `args` (the pre-FIX-5 behavior) made the child's own `clap`
+    /// parser reject immediately with no subcommand selected, which the
+    /// supervisor's health check correctly reported as `HealthCheckFailed`
+    /// rather than silently pretending to work.
+    ///
+    /// **Secrets (`--telegram-token`, `--brave-api-key`) — honest gap:**
+    /// the real `pares-agens` `serve` subcommand also accepts these two
+    /// values via env fallback (`PARES_TELEGRAM_TOKEN`, `BRAVE_API_KEY`,
+    /// see `agens-plugin::agent_commands::mod.rs`'s `opt(...)` env
+    /// bindings), and in production they are decrypted from agenix secret
+    /// files by the NixOS unit's `script` shell block
+    /// (`$(cat ${config.age.secrets.pares-telegram-token.path})`) and
+    /// injected as CLI flags — a mechanism that exists ONLY inside that
+    /// Nix unit, not as a config value `pares-radix-svc` itself can read.
+    /// This service therefore does NOT read or pass those two secrets: it
+    /// spawns the child with `Command::envs` inheriting the *parent
+    /// process's own environment* unchanged (the same behavior
+    /// `tokio::process::Command` has always had here), so if
+    /// `pares-radix-svc` itself is launched with `PARES_TELEGRAM_TOKEN`
+    /// and `BRAVE_API_KEY` already set in its environment (e.g. by a
+    /// future NixOS unit that decrypts the agenix secrets into the
+    /// *supervisor's* environment instead of the agens binary's own
+    /// `exec` line), the child inherits them for free with no plaintext
+    /// ever passed through `PluginSpawnRequest`. Wiring an agenix-secret-aware NixOS unit for
+    /// `pares-radix-svc` (so it — not a hand-rolled `pares-radix.nix` — is
+    /// the thing that decrypts and holds those secrets) is a genuine,
+    /// separate deployment-design decision out of scope for this stage and
+    /// is named here rather than guessed at (C-NOSTUB-001).
+    ///
     /// **Restart policy (explicit decision, not silently assumed):** this
     /// is a *log-and-surface-unhealthy*, not a bounded-retry restart loop.
     /// There is no existing precedent elsewhere in this codebase for
@@ -337,11 +395,14 @@ impl ServiceLifecycle {
                 InMemoryStateStore::new(),
             )));
             let supervisor = PluginSupervisor::new(privilege);
+            let mut args = vec!["serve".to_string(), "--copilot".to_string()];
+            args.extend(self.config.agens_extra_args.iter().cloned());
             let req = PluginSpawnRequest {
                 plugin_id: "pares-agens".to_string(),
                 channel_id: self.config.agens_channel_id.clone(),
                 program: program.to_string_lossy().to_string(),
-                args: Vec::new(),
+                args,
+                envs: Vec::new(),
             };
             match supervisor.spawn(req).await {
                 Ok(plugin) => {
@@ -917,6 +978,7 @@ mod tests {
             drain_grace: Duration::from_secs(2),
             agens_plugin_path: None,
             agens_channel_id: "agens".to_string(),
+            agens_extra_args: Vec::new(),
         }
     }
 

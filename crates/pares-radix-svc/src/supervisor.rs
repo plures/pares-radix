@@ -61,8 +61,22 @@ pub struct PluginSpawnRequest {
     pub channel_id: String,
     /// Program to execute (path or name resolved via `PATH`).
     pub program: String,
-    /// Arguments passed to the child process.
+    /// Arguments passed to the child process (e.g. `["serve", "--copilot"]`
+    /// for the real `pares-agens` binary — matching the CLI contract its
+    /// own `clap` subcommand surface in `agens-plugin::agent_commands`
+    /// requires; an empty `args` causes the child's CLI parser to exit
+    /// immediately with no subcommand selected).
     pub args: Vec<String>,
+    /// Extra environment variables to set on the child **in addition to**
+    /// the parent's inherited environment (`tokio::process::Command`
+    /// inherits the full parent environment by default — this is the same
+    /// mechanism `pares-agens`'s own `clap` args already use as env
+    /// fallbacks, e.g. `PARES_TELEGRAM_TOKEN`, `BRAVE_API_KEY`,
+    /// `PARES_USE_COPILOT` in `agens-plugin::agent_commands::opt`/`flag` —
+    /// no new secret-passing mechanism is introduced here). Use this field
+    /// only to *override* or *add* variables beyond what the supervisor
+    /// process's own environment already provides.
+    pub envs: Vec<(String, String)>,
 }
 
 /// Why a supervised spawn was refused or failed.
@@ -205,6 +219,7 @@ impl PluginSupervisor {
         info!(plugin_id = %req.plugin_id, program = %req.program, decision_id = %decision_id, "supervisor: spawning privileged plugin child process");
         let mut child = Command::new(&req.program)
             .args(&req.args)
+            .envs(req.envs.iter().map(|(k, v)| (k.as_str(), v.as_str())))
             .env("RADIX_PLUGIN_GRANT_DECISION_ID", &decision_id)
             .kill_on_drop(true)
             .spawn()
