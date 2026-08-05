@@ -167,9 +167,13 @@ impl AsyncActionHandler for CoreActionHandler {
 }
 
 use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
-use crate::spine::epic_registry_actions::{is_epic_registry_action, EpicRegistryActionHandler};
-use crate::spine::repo_health_actions::{self, RepoHealthActionHandler};
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
+use crate::spine::epic_registry_actions::{is_epic_registry_action, EpicRegistryActionHandler};
+use crate::spine::gui_launch_actions::{is_gui_launch_action, GuiLaunchActionHandler};
+use crate::spine::plugin_privilege_actions::{
+    is_plugin_privilege_action, PluginPrivilegeActionHandler,
+};
+use crate::spine::repo_health_actions::{self, RepoHealthActionHandler};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::task_dashboard_actions::{is_task_dashboard_action, TaskDashboardActionHandler};
@@ -202,6 +206,12 @@ pub struct CompositeActionHandler {
     /// live `task:*`/`worktask:*`/`epic:*` namespaces those writers use.
     task_dashboard: TaskDashboardActionHandler,
     repo_health: RepoHealthActionHandler,
+    /// Real IO boundary for `agens-plugin-lifecycle.px` (ADR-0037 OQ-1):
+    /// special-privilege allowlist enforcement + exclusive channel ownership.
+    plugin_privilege: PluginPrivilegeActionHandler,
+    /// Real IO boundary for `gui-launch-policy.px` (ADR-0037 OQ-2):
+    /// on-demand-vs-autostart launch mode resolution.
+    gui_launch: GuiLaunchActionHandler,
     /// Durable task-grounding handler (`read_open_tasks_block`). `None` when the
     /// runtime was assembled without a task store; the action then returns null
     /// and `.px` injects no block (honest absence, never a stub).
@@ -237,6 +247,8 @@ impl CompositeActionHandler {
             worktask: WorktaskActionHandler::new(Arc::clone(&state_store)),
             task_dashboard: TaskDashboardActionHandler::new(Arc::clone(&state_store)),
             repo_health: RepoHealthActionHandler::new(Arc::clone(&state_store)),
+            plugin_privilege: PluginPrivilegeActionHandler::new(Arc::clone(&state_store)),
+            gui_launch: GuiLaunchActionHandler::new(Arc::clone(&state_store)),
             epic_registry: EpicRegistryActionHandler::new(Arc::clone(&state_store)),
             core: CoreActionHandler::new(conversation_store, state_store),
             dev_lifecycle: DevLifecycleActionHandler::new(),
@@ -316,6 +328,10 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.task_dashboard.call(action, params).await
         } else if repo_health_actions::is_repo_health_action(action) {
             self.repo_health.call(action, params).await
+        } else if is_plugin_privilege_action(action) {
+            self.plugin_privilege.call(action, params).await
+        } else if is_gui_launch_action(action) {
+            self.gui_launch.call(action, params).await
         } else if is_task_grounding_action(action) {
             if let Some(ref h) = self.task_grounding {
                 h.call(action, params).await
