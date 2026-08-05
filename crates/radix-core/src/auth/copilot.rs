@@ -1188,6 +1188,110 @@ mod tests {
             .expect("write response");
     }
 
+    #[tokio::test]
+    async fn connect_error_classified_as_transient_and_token_free() {
+        // Resolve to a real, valid address that nothing is listening on so
+        // the connection is actively refused; this reliably produces a real
+        // reqwest connect error without any network access.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind to find a free port");
+        let addr = listener.local_addr().expect("addr");
+        drop(listener);
+
+        let client = copilot_http_client_or_panic();
+        let secret_header = HeaderValue::from_str("Bearer super-secret-token-value").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, secret_header);
+
+        let url = format!("http://{addr}/v1/chat");
+        let err = client
+            .post(&url)
+            .headers(headers)
+            .json(&serde_json::json!({"messages": []}))
+            .send()
+            .await
+            .expect_err("connecting to a closed port must fail");
+
+        assert!(
+            err.is_connect() || err.is_timeout(),
+            "expected a connect- or timeout-class reqwest error (refused-port behavior varies by OS/firewall), got: {err:?}"
+        );
+
+        let failure = transport_failure(&err);
+        assert!(
+            failure.is_connect || failure.is_timeout,
+            "failure must be classified as connect or timeout: {failure:?}"
+        );
+        assert!(
+            failure.is_transient(),
+            "connect failures must be retry-eligible: {failure:?}"
+        );
+        assert!(!failure.is_tls, "a plain connect refusal is not a TLS failure");
+
+        let rendered = failure.to_string();
+        assert!(
+            !rendered.to_ascii_lowercase().contains("super-secret-token-value"),
+            "rendered transport failure must never leak the bearer token: {rendered}"
+        );
+        assert!(
+            !rendered.to_ascii_lowercase().contains("bearer"),
+            "rendered transport failure must never leak auth scheme markers: {rendered}"
+        );
+        for source in &failure.source_chain {
+            assert!(
+                !source.to_ascii_lowercase().contains("super-secret-token-value"),
+                "source chain entry must never contain the token: {source}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_error_classified_as_transient_and_token_free() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+
+        // Accept the connection but never respond, so the client's request
+        // timeout fires — a real, forced timeout classification, not a stub.
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                read_request(&mut stream).await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("build short-timeout client");
+
+        let url = format!("http://{addr}/v1/chat");
+        let err = client
+            .post(&url)
+            .header(AUTHORIZATION, "Bearer another-secret-abc123")
+            .json(&serde_json::json!({"messages": []}))
+            .send()
+            .await
+            .expect_err("request must time out");
+
+        assert!(err.is_timeout(), "expected a timeout-class reqwest error");
+
+        let failure = transport_failure(&err);
+        assert!(failure.is_timeout, "failure must be classified as timeout");
+        assert!(
+            failure.is_transient(),
+            "timeout failures must be retry-eligible: {failure:?}"
+        );
+
+        let rendered = failure.to_string();
+        assert!(
+            !rendered.contains("another-secret-abc123"),
+            "rendered transport failure must never leak the bearer token: {rendered}"
+        );
+    }
+
     async fn spawn_421_then_hang_server() -> (String, Arc<AtomicUsize>) {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await

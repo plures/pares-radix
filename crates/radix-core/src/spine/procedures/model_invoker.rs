@@ -15,6 +15,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::model::{
     ChatMessage, ChatOptions, ModelClient, ModelClientError, StreamDelta, ToolDispatcher,
+    TransportFailure,
 };
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
@@ -603,7 +604,7 @@ mod tests {
             _tools: &[ToolDefinition],
             _options: &ChatOptions,
         ) -> Result<ModelCompletion, ModelClientError> {
-            Err(ModelClientError::Transport("connection timeout".into()))
+            Err(ModelClientError::Transport(TransportFailure::message("connection timeout")))
         }
     }
 
