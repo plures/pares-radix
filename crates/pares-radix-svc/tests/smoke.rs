@@ -205,3 +205,96 @@ async fn spawned_binary_shuts_down_cleanly_on_ctrl_c_equivalent() {
     // code semantics that this smoke harness can't produce cross-platform.
     let _ = status;
 }
+
+/// FIX-3: real service startup wired to spawn the configured plugin child
+/// (`RADIX_SVC_AGENS_PLUGIN_PATH`, using the long-lived fixture binary as a
+/// stand-in for `pares-agens`) via `PluginSupervisor`, AND the reverse-auth
+/// middleware on `/v1/ssh/authorize`: requests without a live plugin grant
+/// are rejected, and there is no way to fabricate a live grant from outside
+/// the process (this test only proves the negative path end-to-end, since
+/// asserting the *positive* path would require the fixture binary to read
+/// `RADIX_PLUGIN_GRANT_DECISION_ID` and call back into the service itself,
+/// which is out of scope for this stage's fixture).
+#[tokio::test]
+async fn spawned_binary_supervises_agens_plugin_and_enforces_reverse_auth() {
+    let port = free_port();
+    let bind_addr = format!("127.0.0.1:{port}");
+    let base = format!("http://{bind_addr}");
+    let data_dir = tempfile::tempdir().expect("tempdir");
+
+    let exe = env!("CARGO_BIN_EXE_pares-radix-svc");
+    let plugin_path = env!("CARGO_BIN_EXE_plugin-fixture-long-lived");
+    let child = std::process::Command::new(exe)
+        .env("RADIX_SVC_BIND_ADDR", &bind_addr)
+        .env("RADIX_SVC_DATA_DIR", data_dir.path())
+        .env("RADIX_SVC_TICK_SECS", "1")
+        .env("RADIX_SVC_AGENS_PLUGIN_PATH", plugin_path)
+        .env("RUST_LOG", "info")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn pares-radix-svc binary with agens supervision enabled");
+    let mut guard = ChildGuard(child);
+
+    let client = reqwest::Client::new();
+    wait_for_ready(&client, &base).await;
+
+    // The service should have supervised the fixture as its "agens" child
+    // and be Running (not Degraded) — i.e. the supervised spawn + health
+    // check succeeded as part of real service startup, not just in the
+    // supervisor's own unit/integration tests.
+    let health: serde_json::Value = client
+        .get(format!("{base}/healthz"))
+        .send()
+        .await
+        .expect("GET /healthz should succeed")
+        .json()
+        .await
+        .expect("json body");
+    assert_eq!(
+        health["state"], "running",
+        "expected service to be Running with agens plugin supervised: {health:?}"
+    );
+
+    // Reverse auth: a request to the privileged endpoint with no grant
+    // header is rejected.
+    let resp = client
+        .post(format!("{base}/v1/ssh/authorize"))
+        .json(&serde_json::json!({
+            "pubkey": "ssh-ed25519 AAAA...",
+            "target_host": "example",
+            "role": "operator",
+            "user": "someone"
+        }))
+        .send()
+        .await
+        .expect("POST /v1/ssh/authorize should succeed at the transport level");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "request with no plugin grant header should be rejected"
+    );
+
+    // A forged/unknown decision id is rejected too (proves lookup against
+    // the live-grant map, not just presence-of-header).
+    let resp = client
+        .post(format!("{base}/v1/ssh/authorize"))
+        .header("X-Radix-Plugin-Grant", "grant:totally-fake:0")
+        .json(&serde_json::json!({
+            "pubkey": "ssh-ed25519 AAAA...",
+            "target_host": "example",
+            "role": "operator",
+            "user": "someone"
+        }))
+        .send()
+        .await
+        .expect("POST /v1/ssh/authorize should succeed at the transport level");
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::FORBIDDEN,
+        "request with an unknown/forged decision id should be rejected"
+    );
+
+    let _ = guard.0.kill();
+    let _ = guard.0.wait();
+}
