@@ -53,48 +53,29 @@ fn copilot_http_client_or_panic() -> reqwest::Client {
     copilot_http_client().expect("failed to build HTTP client")
 }
 
-/// Return a source diagnostic that is safe for logs and user-visible errors.
-/// Never preserve an entire URL, header, or a diagnostic containing a common
-/// credential marker; dependency error strings are not a security boundary.
-fn sanitize_transport_source(message: String) -> String {
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("http://")
-        || lower.contains("https://")
-        || lower.contains("bearer ")
-        || lower.contains("authorization:")
-        || lower.contains("token=")
-        || lower.contains("access_token")
-        || lower.contains("client_secret")
-    {
-        "[redacted transport source]".to_string()
-    } else {
-        message
-    }
-}
-
 /// Convert a reqwest failure into token-safe diagnostics before it crosses the
 /// model-client boundary. URLs, request headers, and bearer tokens are never
 /// copied into this record.
 fn transport_failure(error: &reqwest::Error) -> TransportFailure {
     let mut source_chain = Vec::new();
-    let mut raw_sources = Vec::new();
     let mut source = error.source();
     while let Some(current) = source {
         let message = current.to_string();
-        raw_sources.push(message.clone());
-        source_chain.push(sanitize_transport_source(message));
+        // A source error should not ordinarily contain credentials, but do not
+        // propagate a suspect entry into telemetry if a dependency changes.
+        if !message.to_ascii_lowercase().contains("bearer ")
+            && !message.to_ascii_lowercase().contains("token=")
+        {
+            source_chain.push(message);
+        }
         source = current.source();
     }
-    let sources = raw_sources.join(" ").to_ascii_lowercase();
+    let sources = source_chain.join(" ").to_ascii_lowercase();
     TransportFailure {
         message: "Copilot HTTP request failed".to_string(),
         is_connect: error.is_connect(),
         is_timeout: error.is_timeout(),
         is_tls: sources.contains("certificate") || sources.contains("tls"),
-        is_dns: sources.contains("dns")
-            || sources.contains("failed to lookup")
-            || sources.contains("name or service not known")
-            || sources.contains("no such host"),
         source_chain,
     }
 }
@@ -391,7 +372,7 @@ impl ModelClient for CopilotModelClient {
             let token = auth
                 .ensure_fresh_token()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             (token.to_string(), auth.api_base_url().to_string())
         };
 
@@ -472,7 +453,7 @@ impl ModelClient for CopilotModelClient {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}"))
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?,
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?,
         );
         headers.insert("Editor-Version", HeaderValue::from_static(EDITOR_VERSION));
         headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
@@ -492,7 +473,7 @@ impl ModelClient for CopilotModelClient {
         let body_text = response
             .text()
             .await
-            .map_err(|e| ModelClientError::Transport(format!("response body read error: {e}")))?;
+            .map_err(|e| ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}"))))?;
 
         // Retry logic for transient failures.
         let (status, body_text) = if status == reqwest::StatusCode::MISDIRECTED_REQUEST {
@@ -502,7 +483,7 @@ impl ModelClient for CopilotModelClient {
                 "421 Misdirected Request — retrying with fresh connection"
             );
             let fresh_client = copilot_http_client().map_err(|e| {
-                ModelClientError::Transport(format!("failed to build fresh HTTP client: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("failed to build fresh HTTP client: {e}")))
             })?;
             let resp = fresh_client
                 .post(&url)
@@ -510,10 +491,10 @@ impl ModelClient for CopilotModelClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             let s = resp.status();
             let t = resp.text().await.map_err(|e| {
-                ModelClientError::Transport(format!("response body read error: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
             })?;
             (s, t)
         } else if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -526,14 +507,14 @@ impl ModelClient for CopilotModelClient {
                 let mut auth = self.auth.lock().await;
                 auth.ensure_fresh_token()
                     .await
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?
                     .to_string()
             };
             let mut retry_headers = headers.clone();
             retry_headers.insert(
                 AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {new_token}"))
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?,
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?,
             );
             let resp = self
                 .client
@@ -542,10 +523,10 @@ impl ModelClient for CopilotModelClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             let s = resp.status();
             let t = resp.text().await.map_err(|e| {
-                ModelClientError::Transport(format!("response body read error: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
             })?;
             (s, t)
         } else if status.is_server_error() {
@@ -563,10 +544,10 @@ impl ModelClient for CopilotModelClient {
                     .json(&body)
                     .send()
                     .await
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
                 last_status = resp.status();
                 last_body = resp.text().await.map_err(|e| {
-                    ModelClientError::Transport(format!("response body read error: {e}"))
+                    ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
                 })?;
                 if !last_status.is_server_error() {
                     break;
@@ -586,10 +567,10 @@ impl ModelClient for CopilotModelClient {
         );
 
         let payload: Value = serde_json::from_str(&body_text).map_err(|e| {
-            ModelClientError::Transport(format!(
+            ModelClientError::Transport(TransportFailure::message(format!(
                 "error decoding response body: {e}\nBody: {}",
                 &body_text[..body_text.len().min(500)]
-            ))
+            )))
         })?;
         if !status.is_success() {
             let is_client_error = status.is_client_error();
