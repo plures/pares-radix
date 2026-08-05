@@ -15,8 +15,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::model::{
     ChatMessage, ChatOptions, ModelClient, ModelClientError, StreamDelta, ToolDispatcher,
-    TransportFailure,
 };
+#[cfg(test)]
+use crate::model::TransportFailure;
 use crate::spine::conversation::ConversationStore;
 use crate::spine::event::SpineEvent;
 use crate::spine::pipeline::{PipelineEmitter, SpineProcedure};
