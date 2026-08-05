@@ -47,7 +47,7 @@ walkdir = "2"
 toml = "0.8"
 libc = "0.2"
 sled = "0.34"
-axum = "0.7"
+axum = "0.8"
 tempfile = "3"
 blake3 = "1.5"
 
