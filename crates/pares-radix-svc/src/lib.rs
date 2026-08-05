@@ -35,6 +35,8 @@ use tracing::{info, warn};
 /// Actor name this service uses when writing CRDT nodes.
 pub const SERVICE_ACTOR: &str = "pares-radix-svc";
 
+pub mod supervisor;
+
 /// Configuration for [`ServiceLifecycle`].
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
