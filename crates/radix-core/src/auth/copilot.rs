@@ -59,23 +59,29 @@ fn copilot_http_client_or_panic() -> reqwest::Client {
 fn transport_failure(error: &reqwest::Error) -> TransportFailure {
     let mut source_chain = Vec::new();
     let mut source = error.source();
+    let mut is_tls = false;
+
     while let Some(current) = source {
         let message = current.to_string();
+        let msg_lower = message.to_ascii_lowercase();
+
+        if msg_lower.contains("certificate") || msg_lower.contains("tls") {
+            is_tls = true;
+        }
+
         // A source error should not ordinarily contain credentials, but do not
         // propagate a suspect entry into telemetry if a dependency changes.
-        if !message.to_ascii_lowercase().contains("bearer ")
-            && !message.to_ascii_lowercase().contains("token=")
-        {
+        if !msg_lower.contains("bearer") && !msg_lower.contains("token=") {
             source_chain.push(message);
         }
         source = current.source();
     }
-    let sources = source_chain.join(" ").to_ascii_lowercase();
+
     TransportFailure {
         message: "Copilot HTTP request failed".to_string(),
         is_connect: error.is_connect(),
         is_timeout: error.is_timeout(),
-        is_tls: sources.contains("certificate") || sources.contains("tls"),
+        is_tls,
         source_chain,
     }
 }
