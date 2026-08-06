@@ -374,3 +374,29 @@ export interface PraxisRuleCardProps {
   expanded?: boolean;
   class?: string;
 }
+
+/**
+ * PersistentGateBanner - non-dismissible, page-level banner for a hard-gate
+ * violation that must stay visible until resolved (design-dojo gap analysis
+ * 2026-08-06, candidate #5). Deliberately distinct from Toast/NotificationStack
+ * (transient-by-design) and from Dialog (modal, blocks interaction) - this is
+ * an always-visible, non-transient surface for conditions like a blocked epic,
+ * a failing Praxis rule, or an ADO risk-assessment flag that must stay on
+ * screen until the host confirms the condition has cleared. The component
+ * never self-dismisses; only the host (via onResolve, after the underlying
+ * condition is actually resolved) can remove it.
+ */
+export type GateSeverity = 'blocked' | 'assistance_required' | 'hard_gate';
+
+export interface PersistentGateBannerProps {
+  /** `undefined` renders nothing (no gate condition); use `[]` explicitly to force an empty-but-mounted state if needed. */
+  severity: GateSeverity;
+  label: string;
+  detail?: string;
+  /** e.g. epic IDs, ADO work item IDs, PR numbers blocked by this condition. */
+  blockedItems?: string[];
+  /** Only rendered when provided - the host decides when the underlying condition is actually clearable. */
+  onResolve?: () => void;
+  resolveLabel?: string;
+  class?: string;
+}

@@ -8,13 +8,13 @@
       "upstreamPath": "src/lib/app/SettingsPanel.svelte",
       "status": "drifted",
       "removeAfterNpmVersion": "0.13.0",
-      "notes": "Founding shim comment said remove at npm v0.13+; npm is at 0.17.1. Stale — flagged by drift check."
+      "notes": "Founding shim comment said remove at npm v0.13+; npm is at 0.17.1. Stale - flagged by drift check."
     },
     "Sidebar.svelte": {
       "upstreamPath": "src/lib/layout/Sidebar.svelte",
       "status": "drifted",
       "removeAfterNpmVersion": "0.13.0",
-      "notes": "285 differing lines vs standalone (ADR-0035 audit). Reverted twice historically (20acb73, 0eb0734) due to API incompatibility — needs triage before removal, not blind sync."
+      "notes": "285 differing lines vs standalone (ADR-0035 audit). Reverted twice historically (20acb73, 0eb0734) due to API incompatibility - needs triage before removal, not blind sync."
     },
     "Input.svelte": {
       "upstreamPath": "src/lib/primitives/Input.svelte",
@@ -86,7 +86,7 @@
       "upstreamPath": "src/lib/app/GraphView.svelte",
       "status": "reconciled",
       "removeAfterNpmVersion": "0.18.0",
-      "notes": "ADR-0035 pilot reconciliation: shim now byte-identical to standalone repo HEAD (c0c7667) modulo the local './types-local.js' vs upstream './GraphView.types.js' type-import path, which is an intentional, documented override (see DRIFT.md) required because the shim package does not (yet) ship GraphView.types.ts as a separate module. Everything else — including the upstream doc header — is synced verbatim."
+      "notes": "ADR-0035 pilot reconciliation: shim now byte-identical to standalone repo HEAD (c0c7667) modulo the local './types-local.js' vs upstream './GraphView.types.js' type-import path, which is an intentional, documented override (see DRIFT.md) required because the shim package does not (yet) ship GraphView.types.ts as a separate module. Everything else - including the upstream doc header - is synced verbatim."
     },
     "DataGrid.svelte": {
       "upstreamPath": null,
@@ -104,25 +104,31 @@
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #1) — discrete-stage pipeline status indicator, distinct from ProgressBar's continuous-percent model. Same disposition as DataGrid.svelte: local-only, upstreaming candidate not a sync target."
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #1) - discrete-stage pipeline status indicator, distinct from ProgressBar's continuous-percent model. Same disposition as DataGrid.svelte: local-only, upstreaming candidate not a sync target."
     },
     "EpicStatusBoard.svelte": {
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #2) — epic-registry-shaped status/hierarchy card list, deliberately not a Kanban board. Same disposition as DataGrid.svelte."
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #2) - epic-registry-shaped status/hierarchy card list, deliberately not a Kanban board. Same disposition as DataGrid.svelte."
     },
     "SchemaDiffView.svelte": {
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) — visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 §6) before persisting + migration. Same disposition as DataGrid.svelte."
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) - visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 §6) before persisting + migration. Same disposition as DataGrid.svelte."
     },
     "PraxisRuleCard.svelte": {
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #4) — composite renderer for a single Praxis .px constraint/ADR (id, severity, live pass/fail status, evidence table), built from existing CodeBlock + Badge + Callout. Distinct from the npm-package repo's PraxisDevOverlay/PraxisBox (2026-08-04 batch). Same disposition as DataGrid.svelte."
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #4) - composite renderer for a single Praxis .px constraint/ADR (id, severity, live pass/fail status, evidence table), built from existing CodeBlock + Badge + Callout. Distinct from the npm-package repo's PraxisDevOverlay/PraxisBox (2026-08-04 batch). Same disposition as DataGrid.svelte."
+    },
+    "PersistentGateBanner.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #5) - non-dismissible, page-level banner for hard-gate violations (blocked epics, failing Praxis rules, ADO risk flags) that must stay visible until the host confirms resolution. Deliberately distinct from Toast/NotificationStack (transient) and Dialog (modal). Same disposition as DataGrid.svelte."
     }
   }
 }

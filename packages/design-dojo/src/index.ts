@@ -82,7 +82,9 @@ export { applyDelta, diffField } from './schema-delta.js';
 
 export type CommandItem = { id: string; label: string; icon?: string; action: () => void; };
 
-export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps, SchemaFieldType, SchemaField, EntitySchema, DataRow, SortDirection, DataGridProps, SchemaFormErrors, SchemaFormProps, FieldEditorProps, SchemaDesignerProps, SchemaDelta, PipelineStageStatus, PipelineStage, PipelineStageIndicatorProps, EpicStatus, EpicPriority, EpicTier, EpicEntry, EpicStatusBoardProps, SchemaDiffViewProps, PraxisRuleSeverity, PraxisRuleEvalStatus, PraxisEvidenceRow, PraxisRule, PraxisRuleCardProps } from './types-local.js';
+export { default as PersistentGateBanner } from './PersistentGateBanner.svelte';
+
+export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps, SchemaFieldType, SchemaField, EntitySchema, DataRow, SortDirection, DataGridProps, SchemaFormErrors, SchemaFormProps, FieldEditorProps, SchemaDesignerProps, SchemaDelta, PipelineStageStatus, PipelineStage, PipelineStageIndicatorProps, EpicStatus, EpicPriority, EpicTier, EpicEntry, EpicStatusBoardProps, SchemaDiffViewProps, PraxisRuleSeverity, PraxisRuleEvalStatus, PraxisEvidenceRow, PraxisRule, PraxisRuleCardProps, GateSeverity, PersistentGateBannerProps } from './types-local.js';
 
 export type {
   DetailLevel,
