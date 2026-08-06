@@ -99,6 +99,18 @@
       "status": "local-only",
       "removeAfterNpmVersion": null,
       "notes": "Not present upstream (ADR-0035 §2.1). Same disposition as DataGrid.svelte."
+    },
+    "PipelineStageIndicator.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #1) — discrete-stage pipeline status indicator, distinct from ProgressBar's continuous-percent model. Same disposition as DataGrid.svelte: local-only, upstreaming candidate not a sync target."
+    },
+    "EpicStatusBoard.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #2) — epic-registry-shaped status/hierarchy card list, deliberately not a Kanban board. Same disposition as DataGrid.svelte."
     }
   }
 }

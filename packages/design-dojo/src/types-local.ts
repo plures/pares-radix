@@ -257,3 +257,66 @@ export interface SchemaDesignerProps {
   ondelta?: (delta: SchemaDelta) => void;
   class?: string;
 }
+
+/**
+ * PipelineStageIndicator — discrete named-stage sequence status (design-dojo
+ * gap analysis 2026-08-06, candidate #1). Distinct from `ProgressBar`'s
+ * continuous-percent model: expresses per-stage pass/fail/in-progress/skipped
+ * state for gated multi-stage pipelines (dev-lifecycle gates, CI stages, deploy
+ * gates).
+ */
+export type PipelineStageStatus = 'pending' | 'in-progress' | 'passed' | 'failed' | 'skipped';
+
+export interface PipelineStage {
+  id: string;
+  label: string;
+  status: PipelineStageStatus;
+  /** Optional short supporting text (e.g. failure reason, duration). */
+  detail?: string;
+  /** Offered only when status is 'failed'; renders a Retry action. */
+  onRetry?: () => void;
+}
+
+export interface PipelineStageIndicatorProps {
+  stages: PipelineStage[];
+  orientation?: 'horizontal' | 'vertical';
+  class?: string;
+}
+
+/**
+ * EpicStatusBoard — status-hierarchy card renderer for epic/task registry data
+ * (design-dojo gap analysis 2026-08-06, candidate #2). Modeled on
+ * `epic-registry.json`'s real shape: id, status, priority, tier,
+ * parent_epic_id chain, blocked_on, next_action narrative. Deliberately NOT a
+ * Kanban board — the free-text narrative + hierarchy don't fit a column board.
+ */
+export type EpicStatus =
+  | 'in_progress'
+  | 'awaiting_approval'
+  | 'pending_pr'
+  | 'assistance_required'
+  | 'blocked'
+  | 'complete';
+
+export type EpicPriority = 'p0' | 'p1' | 'p2';
+
+export type EpicTier = 'epic' | 'task' | 'program';
+
+export interface EpicEntry {
+  id: string;
+  status: EpicStatus | string;
+  priority: EpicPriority | string;
+  tier: EpicTier | string;
+  parentEpicId?: string;
+  blockedOn?: string[];
+  nextAction?: string;
+  /** Non-blocking display error surfaced on the card (e.g. sync failure for this entry). */
+  error?: string;
+}
+
+export interface EpicStatusBoardProps {
+  /** `undefined` renders the loading (skeleton) state; `[]` renders the empty state. */
+  entries: EpicEntry[] | undefined;
+  onSelect?: (entry: EpicEntry) => void;
+  class?: string;
+}
