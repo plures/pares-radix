@@ -320,3 +320,19 @@ export interface EpicStatusBoardProps {
   onSelect?: (entry: EpicEntry) => void;
   class?: string;
 }
+
+/**
+ * SchemaDiffView — visual renderer for `schema-delta.ts`'s `SchemaDelta` operation
+ * vocabulary (design-dojo gap analysis 2026-08-06, candidate #3). Renders a list of
+ * typed deltas (add/update/rename/retype/remove/reorder_field) as a human-readable
+ * change list, e.g. for reviewing an agens-driven or user-driven schema customization
+ * (ADR-0031 §6) before it's persisted to PluresDB + attached to a `.px` migration rule.
+ * Pure display — never applies deltas itself; the host calls `applyDelta` separately.
+ */
+export interface SchemaDiffViewProps {
+  /** `undefined` renders the loading (skeleton) state; `[]` renders the empty state. */
+  deltas: SchemaDelta[] | undefined;
+  /** Optional schema snapshot the deltas apply against, used to resolve prior field type/label for update/retype rows. */
+  baseSchema?: EntitySchema;
+  class?: string;
+}

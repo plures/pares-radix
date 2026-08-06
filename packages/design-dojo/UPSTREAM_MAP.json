@@ -111,6 +111,12 @@
       "status": "local-only",
       "removeAfterNpmVersion": null,
       "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #2) — epic-registry-shaped status/hierarchy card list, deliberately not a Kanban board. Same disposition as DataGrid.svelte."
+    },
+    "SchemaDiffView.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) — visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 §6) before persisting + migration. Same disposition as DataGrid.svelte."
     }
   }
 }
