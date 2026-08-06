@@ -85,6 +85,36 @@ tar.extractall(os.environ['out'] + '/lib')
         };
       };
 
+      # Headless service runtime — drives AgensRuntime timer/event loop plus
+      # loopback HTTP automation surface. No Tauri/GTK/ONNX/fastembed deps,
+      # so this is a much lighter/faster build than mkCliPkg. Also supervises
+      # pares-agens as a privilege-governed child process when
+      # RADIX_SVC_AGENS_PLUGIN_PATH is set at runtime (see crates/pares-radix-svc).
+      mkSvcPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
+        pname = "pares-radix-svc";
+        version = cargoVersion;
+        src = pkgs.lib.cleanSource ./.;
+
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+          allowBuiltinFetchGit = true;
+        };
+
+        cargoBuildFlags = [ "-p" "pares-radix-svc" ];
+
+        doCheck = false;
+
+        nativeBuildInputs = with pkgs; [ pkg-config ];
+        buildInputs = with pkgs; [ openssl ];
+
+        meta = {
+          description = "Pares Radix headless service runtime (ADR-0018): AgensRuntime scheduler + loopback HTTP surface, optional pares-agens supervision";
+          homepage = "https://github.com/plures/pares-radix";
+          license = pkgs.lib.licenses.bsl11;
+          mainProgram = "pares-radix-svc";
+        };
+      };
+
       # Tauri desktop app - requires npm build for Svelte frontend first
       mkTauriPkg = pkgs: pkgs.rustPlatform.buildRustPackage {
         pname = "pares-radix-desktop";
@@ -132,6 +162,7 @@ tar.extractall(os.environ['out'] + '/lib')
         packages.default = mkCliPkg pkgs;
         packages.cli = mkCliPkg pkgs;
         packages.desktop = mkTauriPkg pkgs;
+        packages.svc = mkSvcPkg pkgs;
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
@@ -146,6 +177,7 @@ tar.extractall(os.environ['out'] + '/lib')
       overlays.default = final: prev: {
         pares-radix = mkCliPkg final;
         pares-radix-desktop = mkTauriPkg final;
+        pares-radix-svc = mkSvcPkg final;
       };
 
       # NixOS module - headless agent daemon service
