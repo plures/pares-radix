@@ -58,6 +58,7 @@ export { default as SchemaForm } from './SchemaForm.svelte';
 export { default as PipelineStageIndicator } from './PipelineStageIndicator.svelte';
 export { default as EpicStatusBoard } from './EpicStatusBoard.svelte';
 export { default as SchemaDiffView } from './SchemaDiffView.svelte';
+export { default as PraxisRuleCard } from './PraxisRuleCard.svelte';
 
 export { default as GraphView } from './GraphView.svelte';
 
@@ -81,7 +82,7 @@ export { applyDelta, diffField } from './schema-delta.js';
 
 export type CommandItem = { id: string; label: string; icon?: string; action: () => void; };
 
-export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps, SchemaFieldType, SchemaField, EntitySchema, DataRow, SortDirection, DataGridProps, SchemaFormErrors, SchemaFormProps, FieldEditorProps, SchemaDesignerProps, SchemaDelta, PipelineStageStatus, PipelineStage, PipelineStageIndicatorProps, EpicStatus, EpicPriority, EpicTier, EpicEntry, EpicStatusBoardProps, SchemaDiffViewProps } from './types-local.js';
+export type { DashboardWidgetItem, DashboardGridProps, WizardStep, FirstRunWizardProps, SettingInputType, SettingDefinition, SettingsPanelProps, SidebarNavItem, SidebarProps, CommandPaletteProps, StatusItem, StatusBarProps, PluginContentAreaProps, SchemaFieldType, SchemaField, EntitySchema, DataRow, SortDirection, DataGridProps, SchemaFormErrors, SchemaFormProps, FieldEditorProps, SchemaDesignerProps, SchemaDelta, PipelineStageStatus, PipelineStage, PipelineStageIndicatorProps, EpicStatus, EpicPriority, EpicTier, EpicEntry, EpicStatusBoardProps, SchemaDiffViewProps, PraxisRuleSeverity, PraxisRuleEvalStatus, PraxisEvidenceRow, PraxisRule, PraxisRuleCardProps } from './types-local.js';
 
 export type {
   DetailLevel,

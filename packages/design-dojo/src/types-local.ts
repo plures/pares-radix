@@ -336,3 +336,41 @@ export interface SchemaDiffViewProps {
   baseSchema?: EntitySchema;
   class?: string;
 }
+
+/**
+ * PraxisRuleCard — renders one Praxis `.px` constraint/ADR (design-dojo gap
+ * analysis 2026-08-06, candidate #4). Composite of CodeBlock (condition
+ * source) + Badge (severity/status) + Callout (failure reason), with an
+ * expand-for-evidence-table affordance. Distinct from the npm-package repo's
+ * PraxisDevOverlay/PraxisBox (2026-08-04 batch) — this is the lighter-weight
+ * card variant scoped to the pares-radix shim's own dev-lifecycle-gate and
+ * audit-reporting consumers.
+ */
+export type PraxisRuleSeverity = 'error' | 'warning' | 'info';
+
+export type PraxisRuleEvalStatus = 'pass' | 'fail' | 'unknown';
+
+export interface PraxisEvidenceRow {
+  fact: string;
+  value: string;
+}
+
+export interface PraxisRule {
+  id: string;
+  severity: PraxisRuleSeverity | string;
+  status: PraxisRuleEvalStatus | string;
+  description?: string;
+  /** Reason shown when status === 'fail'. */
+  failureReason?: string;
+  /** Raw condition/constraint source rendered via CodeBlock. */
+  condition?: string;
+  conditionLanguage?: string;
+  evidence?: PraxisEvidenceRow[];
+}
+
+export interface PraxisRuleCardProps {
+  /** `undefined` renders the loading (skeleton) state. */
+  rule: PraxisRule | undefined;
+  expanded?: boolean;
+  class?: string;
+}

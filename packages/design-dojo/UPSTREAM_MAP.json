@@ -117,6 +117,12 @@
       "status": "local-only",
       "removeAfterNpmVersion": null,
       "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) — visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 §6) before persisting + migration. Same disposition as DataGrid.svelte."
+    },
+    "PraxisRuleCard.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #4) — composite renderer for a single Praxis .px constraint/ADR (id, severity, live pass/fail status, evidence table), built from existing CodeBlock + Badge + Callout. Distinct from the npm-package repo's PraxisDevOverlay/PraxisBox (2026-08-04 batch). Same disposition as DataGrid.svelte."
     }
   }
 }
