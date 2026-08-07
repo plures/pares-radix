@@ -31,10 +31,10 @@
 	};
 
 	let resolvedEntries = $derived(entries ?? []);
-
-	let availableStatuses = $derived(
-		Array.from(new Set(resolvedEntries.map((e) => e.status))).sort()
+	let statusCounts = $derived(
+		resolvedEntries.reduce((acc, e) => (acc.set(e.status, (acc.get(e.status) ?? 0) + 1), acc), new Map<string, number>())
 	);
+	let availableStatuses = $derived(Array.from(statusCounts.keys()).sort());
 
 	let visibleEntries = $derived(
 		statusFilter === 'all'
