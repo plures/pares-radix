@@ -54,7 +54,7 @@
 	{/if}
 {/snippet}
 
-<div class="json-tree-viewer {className}" role="tree" aria-label="JSON tree: {rootLabel}">
+<div class="json-tree-viewer {className}" aria-label="JSON tree: {rootLabel}">
 	{@render node(rootLabel, data, 0)}
 </div>
 
