@@ -38,6 +38,14 @@ export interface SidebarNavItem { href: string; label: string; icon?: string; ba
 export interface SidebarProps { items: SidebarNavItem[]; currentPath: string; collapsed?: boolean; onToggle?: () => void; }
 export interface CommandItem { id: string; label: string; icon?: string; action: () => void; }
 export interface CommandPaletteProps { open?: boolean; commands?: CommandItem[]; onClose?: () => void; }
+
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+export interface JSONTreeViewerProps {
+  data: JSONValue;
+  rootLabel?: string;
+  defaultExpandDepth?: number;
+  class?: string;
+}
 export interface StatusItem { label: string; value: string; }
 export interface StatusBarProps { items?: StatusItem[]; }
 export interface PluginContentAreaProps { theme?: string; onThemeToggle?: () => void; onSidebarToggle?: () => void; onCommandPaletteOpen?: () => void; statusItems?: StatusItem[]; children: Snippet; }

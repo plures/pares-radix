@@ -92,13 +92,13 @@
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream (ADR-0035 §2.1). Reclassified as an upstream contribution owed, not drift. Tracked as a pares-radix -> design-dojo upstreaming task, not a sync target for this check."
+      "notes": "Not present upstream (ADR-0035 \u00c2\u00a72.1). Reclassified as an upstream contribution owed, not drift. Tracked as a pares-radix -> design-dojo upstreaming task, not a sync target for this check."
     },
     "SchemaForm.svelte": {
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream (ADR-0035 §2.1). Same disposition as DataGrid.svelte."
+      "notes": "Not present upstream (ADR-0035 \u00c2\u00a72.1). Same disposition as DataGrid.svelte."
     },
     "PipelineStageIndicator.svelte": {
       "upstreamPath": null,
@@ -116,7 +116,7 @@
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) - visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 §6) before persisting + migration. Same disposition as DataGrid.svelte."
+      "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #3) - visual renderer for schema-delta.ts's SchemaDelta operation vocabulary (add/update/rename/retype/remove/reorder_field), for reviewing pending schema customizations (ADR-0031 \u00c2\u00a76) before persisting + migration. Same disposition as DataGrid.svelte."
     },
     "PraxisRuleCard.svelte": {
       "upstreamPath": null,
@@ -129,6 +129,12 @@
       "status": "local-only",
       "removeAfterNpmVersion": null,
       "notes": "Not present upstream. New 2026-08-06 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #5) - non-dismissible, page-level banner for hard-gate violations (blocked epics, failing Praxis rules, ADO risk flags) that must stay visible until the host confirms resolution. Deliberately distinct from Toast/NotificationStack (transient) and Dialog (modal). Same disposition as DataGrid.svelte."
+    },
+    "JSONTreeViewer.svelte": {
+      "upstreamPath": null,
+      "status": "local-only",
+      "removeAfterNpmVersion": null,
+      "notes": "Not present upstream. New 2026-08-07 (epic design-dojo:preemptive-controls-and-improvements, gap-analysis candidate #6) - collapsible raw-JSON inspector for ad-hoc inspection of registry/ADR/audit blobs, distinct from SchemaForm (validated-form model requiring an EntitySchema) and CodeBlock (static, non-interactive text). Same disposition as DataGrid.svelte."
     }
   }
 }
