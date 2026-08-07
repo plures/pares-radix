@@ -38,6 +38,14 @@ export interface SidebarNavItem { href: string; label: string; icon?: string; ba
 export interface SidebarProps { items: SidebarNavItem[]; currentPath: string; collapsed?: boolean; onToggle?: () => void; }
 export interface CommandItem { id: string; label: string; icon?: string; action: () => void; }
 export interface CommandPaletteProps { open?: boolean; commands?: CommandItem[]; onClose?: () => void; }
+
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+export interface JSONTreeViewerProps {
+  data: JSONValue;
+  rootLabel?: string;
+  defaultExpandDepth?: number;
+  class?: string;
+}
 export interface StatusItem { label: string; value: string; }
 export interface StatusBarProps { items?: StatusItem[]; }
 export interface PluginContentAreaProps { theme?: string; onThemeToggle?: () => void; onSidebarToggle?: () => void; onCommandPaletteOpen?: () => void; statusItems?: StatusItem[]; children: Snippet; }
@@ -255,5 +263,148 @@ export interface SchemaDesignerProps {
   onschemachange?: (schema: EntitySchema) => void;
   /** Fired with the minimal typed delta the host should persist/migrate. */
   ondelta?: (delta: SchemaDelta) => void;
+  class?: string;
+}
+
+/**
+ * PipelineStageIndicator — discrete named-stage sequence status (design-dojo
+ * gap analysis 2026-08-06, candidate #1). Distinct from `ProgressBar`'s
+ * continuous-percent model: expresses per-stage pass/fail/in-progress/skipped
+ * state for gated multi-stage pipelines (dev-lifecycle gates, CI stages, deploy
+ * gates).
+ */
+export type PipelineStageStatus = 'pending' | 'in-progress' | 'passed' | 'failed' | 'skipped';
+
+export interface PipelineStage {
+  id: string;
+  label: string;
+  status: PipelineStageStatus;
+  /** Optional short supporting text (e.g. failure reason, duration). */
+  detail?: string;
+  /** Offered only when status is 'failed'; renders a Retry action. */
+  onRetry?: () => void;
+}
+
+export interface PipelineStageIndicatorProps {
+  stages: PipelineStage[];
+  orientation?: 'horizontal' | 'vertical';
+  class?: string;
+}
+
+/**
+ * EpicStatusBoard — status-hierarchy card renderer for epic/task registry data
+ * (design-dojo gap analysis 2026-08-06, candidate #2). Modeled on
+ * `epic-registry.json`'s real shape: id, status, priority, tier,
+ * parent_epic_id chain, blocked_on, next_action narrative. Deliberately NOT a
+ * Kanban board — the free-text narrative + hierarchy don't fit a column board.
+ */
+export type EpicStatus =
+  | 'in_progress'
+  | 'awaiting_approval'
+  | 'pending_pr'
+  | 'assistance_required'
+  | 'blocked'
+  | 'complete';
+
+export type EpicPriority = 'p0' | 'p1' | 'p2';
+
+export type EpicTier = 'epic' | 'task' | 'program';
+
+export interface EpicEntry {
+  id: string;
+  status: EpicStatus | string;
+  priority: EpicPriority | string;
+  tier: EpicTier | string;
+  parentEpicId?: string;
+  blockedOn?: string[];
+  nextAction?: string;
+  /** Non-blocking display error surfaced on the card (e.g. sync failure for this entry). */
+  error?: string;
+}
+
+export interface EpicStatusBoardProps {
+  /** `undefined` renders the loading (skeleton) state; `[]` renders the empty state. */
+  entries: EpicEntry[] | undefined;
+  onSelect?: (entry: EpicEntry) => void;
+  class?: string;
+}
+
+/**
+ * SchemaDiffView — visual renderer for `schema-delta.ts`'s `SchemaDelta` operation
+ * vocabulary (design-dojo gap analysis 2026-08-06, candidate #3). Renders a list of
+ * typed deltas (add/update/rename/retype/remove/reorder_field) as a human-readable
+ * change list, e.g. for reviewing an agens-driven or user-driven schema customization
+ * (ADR-0031 §6) before it's persisted to PluresDB + attached to a `.px` migration rule.
+ * Pure display — never applies deltas itself; the host calls `applyDelta` separately.
+ */
+export interface SchemaDiffViewProps {
+  /** `undefined` renders the loading (skeleton) state; `[]` renders the empty state. */
+  deltas: SchemaDelta[] | undefined;
+  /** Optional schema snapshot the deltas apply against, used to resolve prior field type/label for update/retype rows. */
+  baseSchema?: EntitySchema;
+  class?: string;
+}
+
+/**
+ * PraxisRuleCard — renders one Praxis `.px` constraint/ADR (design-dojo gap
+ * analysis 2026-08-06, candidate #4). Composite of CodeBlock (condition
+ * source) + Badge (severity/status) + Callout (failure reason), with an
+ * expand-for-evidence-table affordance. Distinct from the npm-package repo's
+ * PraxisDevOverlay/PraxisBox (2026-08-04 batch) — this is the lighter-weight
+ * card variant scoped to the pares-radix shim's own dev-lifecycle-gate and
+ * audit-reporting consumers.
+ */
+export type PraxisRuleSeverity = 'error' | 'warning' | 'info';
+
+export type PraxisRuleEvalStatus = 'pass' | 'fail' | 'unknown';
+
+export interface PraxisEvidenceRow {
+  fact: string;
+  value: string;
+}
+
+export interface PraxisRule {
+  id: string;
+  severity: PraxisRuleSeverity | string;
+  status: PraxisRuleEvalStatus | string;
+  description?: string;
+  /** Reason shown when status === 'fail'. */
+  failureReason?: string;
+  /** Raw condition/constraint source rendered via CodeBlock. */
+  condition?: string;
+  conditionLanguage?: string;
+  evidence?: PraxisEvidenceRow[];
+}
+
+export interface PraxisRuleCardProps {
+  /** `undefined` renders the loading (skeleton) state. */
+  rule: PraxisRule | undefined;
+  expanded?: boolean;
+  class?: string;
+}
+
+/**
+ * PersistentGateBanner - non-dismissible, page-level banner for a hard-gate
+ * violation that must stay visible until resolved (design-dojo gap analysis
+ * 2026-08-06, candidate #5). Deliberately distinct from Toast/NotificationStack
+ * (transient-by-design) and from Dialog (modal, blocks interaction) - this is
+ * an always-visible, non-transient surface for conditions like a blocked epic,
+ * a failing Praxis rule, or an ADO risk-assessment flag that must stay on
+ * screen until the host confirms the condition has cleared. The component
+ * never self-dismisses; only the host (via onResolve, after the underlying
+ * condition is actually resolved) can remove it.
+ */
+export type GateSeverity = 'blocked' | 'assistance_required' | 'hard_gate';
+
+export interface PersistentGateBannerProps {
+  /** `undefined` renders nothing (no gate condition); use `[]` explicitly to force an empty-but-mounted state if needed. */
+  severity: GateSeverity;
+  label: string;
+  detail?: string;
+  /** e.g. epic IDs, ADO work item IDs, PR numbers blocked by this condition. */
+  blockedItems?: string[];
+  /** Only rendered when provided - the host decides when the underlying condition is actually clearable. */
+  onResolve?: () => void;
+  resolveLabel?: string;
   class?: string;
 }
