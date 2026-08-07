@@ -1,5 +1,6 @@
 //! GitHub Copilot device flow authentication and model client.
 
+use std::error::Error as _;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,7 +16,7 @@ use tokio::time::sleep;
 
 use crate::model::{
     ChatMessage, ChatOptions, FallbackRequestContext, ModelClient, ModelClientError,
-    ModelCompletion, ToolCall, ToolDefinition,
+    ModelCompletion, ToolCall, ToolDefinition, TransportFailure,
 };
 
 const COPILOT_CLIENT_ID: &str = "Iv1.b507a08c87ecfe98";
@@ -50,6 +51,75 @@ fn copilot_http_client() -> Result<reqwest::Client, reqwest::Error> {
 
 fn copilot_http_client_or_panic() -> reqwest::Client {
     copilot_http_client().expect("failed to build HTTP client")
+}
+
+/// Convert a reqwest failure into token-safe diagnostics before it crosses the
+/// model-client boundary. URLs, request headers, and bearer tokens are never
+/// copied into this record.
+fn transport_failure(error: &reqwest::Error) -> TransportFailure {
+    let mut source_chain = Vec::new();
+    let mut source = error.source();
+    let mut is_tls = false;
+
+    while let Some(current) = source {
+        let message = current.to_string();
+        let msg_lower = message.to_ascii_lowercase();
+
+        if msg_lower.contains("certificate") || msg_lower.contains("tls") {
+            is_tls = true;
+        }
+
+        // A source error should not ordinarily contain credentials, but do not
+        // propagate a suspect entry into telemetry if a dependency changes.
+        if !msg_lower.contains("bearer") && !msg_lower.contains("token=") {
+            source_chain.push(message);
+        }
+        source = current.source();
+    }
+
+    TransportFailure {
+        message: "Copilot HTTP request failed".to_string(),
+        is_connect: error.is_connect(),
+        is_timeout: error.is_timeout(),
+        is_tls,
+        source_chain,
+    }
+}
+
+async fn send_with_transient_retry(
+    client: &reqwest::Client,
+    url: &str,
+    headers: HeaderMap,
+    body: &Value,
+) -> Result<reqwest::Response, ModelClientError> {
+    match client.post(url).headers(headers.clone()).json(body).send().await {
+        Ok(response) => Ok(response),
+        Err(error) => {
+            let failure = transport_failure(&error);
+            if !failure.is_transient() {
+                return Err(ModelClientError::Transport(failure));
+            }
+
+            tracing::warn!(
+                is_connect = failure.is_connect,
+                is_timeout = failure.is_timeout,
+                source_chain = ?failure.source_chain,
+                "transient Copilot transport failure; retrying once with a fresh client"
+            );
+            // `sleep` and the request future are cancellation-aware: dropping
+            // the caller's completion future cancels both immediately.
+            sleep(Duration::from_millis(250)).await;
+            let fresh_client = copilot_http_client()
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(format!("failed to build fresh HTTP client: {e}"))))?;
+            fresh_client
+                .post(url)
+                .headers(headers)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| ModelClientError::Transport(transport_failure(&e)))
+        }
+    }
 }
 
 /// Errors emitted during Copilot authentication or token refresh.
@@ -308,7 +378,7 @@ impl ModelClient for CopilotModelClient {
             let token = auth
                 .ensure_fresh_token()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             (token.to_string(), auth.api_base_url().to_string())
         };
 
@@ -389,7 +459,7 @@ impl ModelClient for CopilotModelClient {
         headers.insert(
             AUTHORIZATION,
             HeaderValue::from_str(&format!("Bearer {token}"))
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?,
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?,
         );
         headers.insert("Editor-Version", HeaderValue::from_static(EDITOR_VERSION));
         headers.insert("User-Agent", HeaderValue::from_static(USER_AGENT));
@@ -403,20 +473,13 @@ impl ModelClient for CopilotModelClient {
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        let response = self
-            .client
-            .post(&url)
-            .headers(headers.clone())
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+        let response = send_with_transient_retry(&self.client, &url, headers.clone(), &body).await?;
 
         let status = response.status();
         let body_text = response
             .text()
             .await
-            .map_err(|e| ModelClientError::Transport(format!("response body read error: {e}")))?;
+            .map_err(|e| ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}"))))?;
 
         // Retry logic for transient failures.
         let (status, body_text) = if status == reqwest::StatusCode::MISDIRECTED_REQUEST {
@@ -426,7 +489,7 @@ impl ModelClient for CopilotModelClient {
                 "421 Misdirected Request — retrying with fresh connection"
             );
             let fresh_client = copilot_http_client().map_err(|e| {
-                ModelClientError::Transport(format!("failed to build fresh HTTP client: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("failed to build fresh HTTP client: {e}")))
             })?;
             let resp = fresh_client
                 .post(&url)
@@ -434,10 +497,10 @@ impl ModelClient for CopilotModelClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             let s = resp.status();
             let t = resp.text().await.map_err(|e| {
-                ModelClientError::Transport(format!("response body read error: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
             })?;
             (s, t)
         } else if status == reqwest::StatusCode::UNAUTHORIZED {
@@ -450,14 +513,14 @@ impl ModelClient for CopilotModelClient {
                 let mut auth = self.auth.lock().await;
                 auth.ensure_fresh_token()
                     .await
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?
                     .to_string()
             };
             let mut retry_headers = headers.clone();
             retry_headers.insert(
                 AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {new_token}"))
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?,
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?,
             );
             let resp = self
                 .client
@@ -466,10 +529,10 @@ impl ModelClient for CopilotModelClient {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
             let s = resp.status();
             let t = resp.text().await.map_err(|e| {
-                ModelClientError::Transport(format!("response body read error: {e}"))
+                ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
             })?;
             (s, t)
         } else if status.is_server_error() {
@@ -487,10 +550,10 @@ impl ModelClient for CopilotModelClient {
                     .json(&body)
                     .send()
                     .await
-                    .map_err(|e| ModelClientError::Transport(e.to_string()))?;
+                    .map_err(|e| ModelClientError::Transport(TransportFailure::message(e.to_string())))?;
                 last_status = resp.status();
                 last_body = resp.text().await.map_err(|e| {
-                    ModelClientError::Transport(format!("response body read error: {e}"))
+                    ModelClientError::Transport(TransportFailure::message(format!("response body read error: {e}")))
                 })?;
                 if !last_status.is_server_error() {
                     break;
@@ -510,10 +573,10 @@ impl ModelClient for CopilotModelClient {
         );
 
         let payload: Value = serde_json::from_str(&body_text).map_err(|e| {
-            ModelClientError::Transport(format!(
+            ModelClientError::Transport(TransportFailure::message(format!(
                 "error decoding response body: {e}\nBody: {}",
                 &body_text[..body_text.len().min(500)]
-            ))
+            )))
         })?;
         if !status.is_success() {
             let is_client_error = status.is_client_error();
@@ -1129,6 +1192,110 @@ mod tests {
             .write_all(response.as_bytes())
             .await
             .expect("write response");
+    }
+
+    #[tokio::test]
+    async fn connect_error_classified_as_transient_and_token_free() {
+        // Resolve to a real, valid address that nothing is listening on so
+        // the connection is actively refused; this reliably produces a real
+        // reqwest connect error without any network access.
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind to find a free port");
+        let addr = listener.local_addr().expect("addr");
+        drop(listener);
+
+        let client = copilot_http_client_or_panic();
+        let secret_header = HeaderValue::from_str("Bearer super-secret-token-value").unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, secret_header);
+
+        let url = format!("http://{addr}/v1/chat");
+        let err = client
+            .post(&url)
+            .headers(headers)
+            .json(&serde_json::json!({"messages": []}))
+            .send()
+            .await
+            .expect_err("connecting to a closed port must fail");
+
+        assert!(
+            err.is_connect() || err.is_timeout(),
+            "expected a connect- or timeout-class reqwest error (refused-port behavior varies by OS/firewall), got: {err:?}"
+        );
+
+        let failure = transport_failure(&err);
+        assert!(
+            failure.is_connect || failure.is_timeout,
+            "failure must be classified as connect or timeout: {failure:?}"
+        );
+        assert!(
+            failure.is_transient(),
+            "connect failures must be retry-eligible: {failure:?}"
+        );
+        assert!(!failure.is_tls, "a plain connect refusal is not a TLS failure");
+
+        let rendered = failure.to_string();
+        assert!(
+            !rendered.to_ascii_lowercase().contains("super-secret-token-value"),
+            "rendered transport failure must never leak the bearer token: {rendered}"
+        );
+        assert!(
+            !rendered.to_ascii_lowercase().contains("bearer"),
+            "rendered transport failure must never leak auth scheme markers: {rendered}"
+        );
+        for source in &failure.source_chain {
+            assert!(
+                !source.to_ascii_lowercase().contains("super-secret-token-value"),
+                "source chain entry must never contain the token: {source}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_error_classified_as_transient_and_token_free() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("test server addr");
+
+        // Accept the connection but never respond, so the client's request
+        // timeout fires — a real, forced timeout classification, not a stub.
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                read_request(&mut stream).await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(200))
+            .build()
+            .expect("build short-timeout client");
+
+        let url = format!("http://{addr}/v1/chat");
+        let err = client
+            .post(&url)
+            .header(AUTHORIZATION, "Bearer another-secret-abc123")
+            .json(&serde_json::json!({"messages": []}))
+            .send()
+            .await
+            .expect_err("request must time out");
+
+        assert!(err.is_timeout(), "expected a timeout-class reqwest error");
+
+        let failure = transport_failure(&err);
+        assert!(failure.is_timeout, "failure must be classified as timeout");
+        assert!(
+            failure.is_transient(),
+            "timeout failures must be retry-eligible: {failure:?}"
+        );
+
+        let rendered = failure.to_string();
+        assert!(
+            !rendered.contains("another-secret-abc123"),
+            "rendered transport failure must never leak the bearer token: {rendered}"
+        );
     }
 
     async fn spawn_421_then_hang_server() -> (String, Arc<AtomicUsize>) {
