@@ -18,6 +18,30 @@ members = [
     "crates/pares-radix-svc",
     "src-tauri",
 ]
+# `src-tauri` (pares-radix-app) links against the system GTK/WebKit stack via
+# glib-sys, so it only builds on machines with those -dev packages installed.
+# CI already excludes it from clippy/test (see .github/workflows/ci.yml), and the
+# org release pipeline runs a bare `cargo test` with no apt step — which failed on
+# `glib-2.0 not found`. Excluding it from default-members keeps bare cargo
+# commands buildable everywhere; `cargo tauri build` and `-p pares-radix-app`
+# still select it explicitly.
+default-members = [
+    "crates/px-repo-model",
+    "crates/px-adapter-exact",
+    "crates/px-graph-store",
+    "crates/radix-core",
+    "crates/mcp-client",
+    "crates/privacy",
+    "crates/marketplace",
+    "crates/agenda",
+    "crates/praxis",
+    "crates/sync",
+    "crates/audit",
+    "crates/bitnet-sys",
+    "crates/rector",
+    "crates/omniscient",
+    "crates/pares-radix-svc",
+]
 
 [workspace.package]
 version = "1.55.60"
