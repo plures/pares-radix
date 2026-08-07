@@ -49,7 +49,7 @@
 	{:else}
 		<div class="tree-leaf">
 			<span class="node-label">{label}</span>
-			<span class="node-value" data-type={typeof value}>{JSON.stringify(value)}</span>
+			<span class="node-value" data-type={value === null ? 'null' : typeof value}>{JSON.stringify(value)}</span>
 		</div>
 	{/if}
 {/snippet}
