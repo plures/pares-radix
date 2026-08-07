@@ -92,7 +92,7 @@
       "upstreamPath": null,
       "status": "local-only",
       "removeAfterNpmVersion": null,
-      "notes": "Not present upstream (ADR-0035 \u00c2\u00a72.1). Reclassified as an upstream contribution owed, not drift. Tracked as a pares-radix -> design-dojo upstreaming task, not a sync target for this check."
+      "notes": "Not present upstream (ADR-0035 \u00a72.1). Reclassified as an upstream contribution owed, not drift. Tracked as a pares-radix -> design-dojo upstreaming task, not a sync target for this check."
     },
     "SchemaForm.svelte": {
       "upstreamPath": null,
