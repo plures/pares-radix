@@ -12,42 +12,49 @@
 
 use std::fs;
 use std::path::PathBuf;
+use toml::Value;
 
 const EXCLUDED_FROM_DEFAULT: &[&str] = &["src-tauri"];
 
-fn workspace_manifest() -> String {
+fn workspace_table() -> Value {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap()
         .join("Cargo.toml");
-    fs::read_to_string(&root).unwrap_or_else(|e| panic!("failed to read {}: {e}", root.display()))
+    let raw = fs::read_to_string(&root)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", root.display()));
+    let manifest: Value = raw
+        .parse()
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", root.display()));
+    manifest
+        .get("workspace")
+        .expect("workspace Cargo.toml has no [workspace] table")
+        .clone()
 }
 
-/// Extract the string entries of a top-level `key = [ ... ]` array from the
-/// `[workspace]` table.
-fn array_entries(manifest: &str, key: &str) -> Vec<String> {
-    let needle = format!("\n{key} = [");
-    let start = manifest
-        .find(&needle)
-        .unwrap_or_else(|| panic!("`{key}` not found in workspace Cargo.toml"))
-        + needle.len();
-    let end = start
-        + manifest[start..]
-            .find(']')
-            .unwrap_or_else(|| panic!("unterminated `{key}` array in workspace Cargo.toml"));
-    manifest[start..end]
-        .split(',')
-        .map(|entry| entry.trim().trim_matches('"').to_string())
-        .filter(|entry| !entry.is_empty())
+/// Read a string array out of the `[workspace]` table.
+fn array_entries(workspace: &Value, key: &str) -> Vec<String> {
+    workspace
+        .get(key)
+        .unwrap_or_else(|| panic!("`{key}` not found in [workspace]"))
+        .as_array()
+        .unwrap_or_else(|| panic!("`{key}` is not an array"))
+        .iter()
+        .map(|entry| {
+            entry
+                .as_str()
+                .unwrap_or_else(|| panic!("`{key}` contains a non-string entry"))
+                .to_string()
+        })
         .collect()
 }
 
 #[test]
 fn tauri_app_is_excluded_from_default_members() {
-    let manifest = workspace_manifest();
-    let default_members = array_entries(&manifest, "default-members");
+    let workspace = workspace_table();
+    let default_members = array_entries(&workspace, "default-members");
 
     for excluded in EXCLUDED_FROM_DEFAULT {
         assert!(
@@ -60,9 +67,9 @@ fn tauri_app_is_excluded_from_default_members() {
 
 #[test]
 fn every_other_member_is_a_default_member() {
-    let manifest = workspace_manifest();
-    let members = array_entries(&manifest, "members");
-    let default_members = array_entries(&manifest, "default-members");
+    let workspace = workspace_table();
+    let members = array_entries(&workspace, "members");
+    let default_members = array_entries(&workspace, "default-members");
 
     for member in members {
         if EXCLUDED_FROM_DEFAULT.contains(&member.as_str()) {
