@@ -103,7 +103,7 @@
 			<p>No schema changes pending.</p>
 		</li>
 	{:else}
-		{#each deltas as delta, i (i)}
+		{#each deltas as delta (delta.op + ':' + subjectName(delta) + ':' + summary(delta))}
 			<li class="delta-row op-{delta.op}">
 				<span class="delta-glyph" aria-hidden="true">{opGlyph(delta.op)}</span>
 				<div class="delta-body">
