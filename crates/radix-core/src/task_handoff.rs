@@ -512,6 +512,7 @@ mod tests {
     use super::*;
     use std::sync::{Arc, Barrier};
     use std::thread;
+    use std::time::Duration;
 
     fn path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("radix-handoff-{name}-{}", Uuid::new_v4()))
@@ -593,7 +594,17 @@ mod tests {
             Err(HandoffError::InvalidClaimToken)
         ));
         drop(store);
-        let reopened = ConditionalTaskStore::open(&store_path).unwrap();
+        let max_attempts = 20;
+        let reopened = (0..max_attempts)
+            .find_map(|_| match ConditionalTaskStore::open(&store_path) {
+                Ok(store) => Some(store),
+                Err(HandoffError::Storage(msg)) if msg.contains("could not acquire lock") => {
+                    thread::sleep(Duration::from_millis(25));
+                    None
+                }
+                Err(err) => panic!("failed to reopen store after drop: {err}"),
+            })
+            .expect("store should reopen after lock is released");
         let done = reopened
             .complete_claimed("TASK-ATOMIC", winner.token, "ok".into())
             .unwrap();
