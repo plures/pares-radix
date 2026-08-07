@@ -1,3 +1,14 @@
+## [1.55.64] — 2026-08-07
+
+- feat(design-dojo): 6 new components (pipeline/epic/schema-diff/praxis-rule/gate-banner/json-tree) (#624) (9d14319)
+- fix(svc): pass real serve args + env passthrough to supervised agens child (FIX-5) (#623) (bac0f88)
+- fix: praxisbot transport error classification and model fallback (#622) (020b235)
+- Initial plan (#621) (2ec290d)
+- feat(svc): supervise pares-agens as a privilege-governed child process (#620) (1391cc3)
+- [WIP] Fix CI failures on PR #606 (#619) (6fa021e)
+- chore: add CODEOWNERS + SHA-pin third-party GitHub Actions (#618) (7e982f8)
+- Initial plan (#617) (b083f91)
+
 ## [1.55.60] — 2026-08-03
 
 - fix(task-handoff): prevent stale persist_node from overwriting CAS-claimed record (#616) (1482ca4)
