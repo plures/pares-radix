@@ -33,8 +33,8 @@ axum.workspace = true
 uuid.workspace = true
 anyhow = "1"
 thiserror.workspace = true
-pluresdb = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6", features = ["embeddings"] }
-pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "2af92b1923e11e41c9103ad8f14900b179d839f6" }
+pluresdb = { git = "https://github.com/plures/pluresdb", rev = "328e060016fdc67e704712cffd71fcd9c38bfbf7", features = ["embeddings"] }
+pluresdb-procedures = { git = "https://github.com/plures/pluresdb", rev = "328e060016fdc67e704712cffd71fcd9c38bfbf7" }
 pares-radix-core = { path = "../radix-core" }
 pares-radix-praxis = { path = "../praxis" }
 async-trait = "0.1"
