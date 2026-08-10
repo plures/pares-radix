@@ -1,3 +1,22 @@
+## [1.55.72] — 2026-08-10
+
+- fix: unify pluresdb runtime revision (#641) (b8566fb)
+- pin pluresdb px runtime (#640) (a782f07)
+- fix(ci): bump Node.js from 20 to 22 for jsdom 30.x compatibility (#639) (3be31ee)
+- fix(task_handoff): deflake restart-claim test on transient sled lock contention (#638) (974ce67)
+- chore(deps): bump actions/setup-node from 4.4.0 to 7.0.0 (#627) (9cb9566)
+- chore(deps-dev): bump globals from 17.6.0 to 17.8.0 (#635) (880cd2f)
+- fix(ci): exclude src-tauri from cargo default-members so `release / test` passes (#626) (f9dca5a)
+- fix(ci): run svelte-kit sync before vitest so generated tsconfig exists (#625) (ef2b8c5)
+- feat(design-dojo): 6 new components (pipeline/epic/schema-diff/praxis-rule/gate-banner/json-tree) (#624) (9d14319)
+- fix(svc): pass real serve args + env passthrough to supervised agens child (FIX-5) (#623) (bac0f88)
+- fix: praxisbot transport error classification and model fallback (#622) (020b235)
+- Initial plan (#621) (2ec290d)
+- feat(svc): supervise pares-agens as a privilege-governed child process (#620) (1391cc3)
+- [WIP] Fix CI failures on PR #606 (#619) (6fa021e)
+- chore: add CODEOWNERS + SHA-pin third-party GitHub Actions (#618) (7e982f8)
+- Initial plan (#617) (b083f91)
+
 ## [1.55.60] — 2026-08-03
 
 - fix(task-handoff): prevent stale persist_node from overwriting CAS-claimed record (#616) (1482ca4)
