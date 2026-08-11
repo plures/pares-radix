@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use tracing::{debug, info, warn};
 
-use crate::px_adapter::{load_px_directory, AsyncActionHandler};
+use crate::px_adapter::{load_px_directory, AsyncActionHandler, PxProcedureAdapter};
 use crate::spine::reactive::ReactiveRegistry;
 
 /// Mapping from procedure name to the trigger pattern it should be registered under.
@@ -175,24 +175,45 @@ pub async fn register_reactive_procedures(
     registry: &ReactiveRegistry,
     handler: Arc<dyn AsyncActionHandler>,
 ) -> usize {
-    let trigger_map = default_trigger_map();
-
     // Load all .px procedures from the directory tree
     let adapters = load_px_directory(praxis_dir, handler);
+    register_reactive_adapters(adapters, registry, Some(praxis_dir)).await
+}
+
+/// Register precompiled adapters through the platform's canonical trigger map.
+///
+/// A host may validate source against a stronger schema contract before
+/// compiling it. This function lets that host preserve the platform-owned
+/// trigger mapping instead of reimplementing bootstrap registration logic.
+/// The adapters supplied here are the exact adapters that become reactive.
+pub async fn register_reactive_adapters(
+    adapters: Vec<PxProcedureAdapter>,
+    registry: &ReactiveRegistry,
+    source_dir: Option<&Path>,
+) -> usize {
+    let trigger_map = default_trigger_map();
 
     if adapters.is_empty() {
-        warn!(
-            dir = %praxis_dir.display(),
-            "bootstrap: no .px procedures found"
-        );
+        if let Some(dir) = source_dir {
+            warn!(dir = %dir.display(), "bootstrap: no .px procedures found");
+        } else {
+            warn!("bootstrap: no precompiled .px procedures supplied");
+        }
         return 0;
     }
 
-    info!(
-        count = adapters.len(),
-        dir = %praxis_dir.display(),
-        "bootstrap: compiled .px procedures, registering triggers"
-    );
+    if let Some(dir) = source_dir {
+        info!(
+            count = adapters.len(),
+            dir = %dir.display(),
+            "bootstrap: compiled .px procedures, registering triggers"
+        );
+    } else {
+        info!(
+            count = adapters.len(),
+            "bootstrap: registering precompiled .px procedures"
+        );
+    }
 
     let mut registered = 0;
 
@@ -305,6 +326,25 @@ procedure classify_message:
         // the parser's current state. The test verifies no panic.
         // When the parser supports this syntax fully, assert count >= 1.
         assert!(registry.trigger_count().await == count);
+    }
+
+    #[tokio::test]
+    async fn checked_host_can_register_precompiled_adapters_without_reimplementing_routes() {
+        let source = r#"
+procedure evaluate_dispatch:
+  trigger: on_write
+  given: "Dispatch work after a heartbeat tick"
+  return {should_dispatch: false}
+"#;
+        let handler: Arc<dyn AsyncActionHandler> = Arc::new(NoOpHandler);
+        let adapters = crate::px_adapter::load_px_procedures(source, handler)
+            .expect("test procedure must compile");
+        let registry = ReactiveRegistry::new();
+
+        let registered = register_reactive_adapters(adapters, &registry, None).await;
+
+        assert_eq!(registered, 1);
+        assert_eq!(registry.trigger_count().await, 1);
     }
 
     #[tokio::test]
