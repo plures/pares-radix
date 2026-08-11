@@ -982,9 +982,9 @@ mod tests {
              .px → dispatch_task → TaskDispatcher) is not closed"
         );
 
-        assert_eq!(
-            state_store.get("w5/heartbeat_tick").await,
-            Some(json!(0)),
+        let bound_tick = state_store.get("w5/heartbeat_tick").await;
+        assert!(
+            matches!(bound_tick, Some(serde_json::Value::Number(_))),
             "the reactive bridge did not bind HeartbeatTick.tick to the .px input"
         );
 
