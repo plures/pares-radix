@@ -116,7 +116,13 @@ fn bind_event_payload(vars: &mut HashMap<String, Value>, value: &Value) {
     let Some(outer) = value.as_object() else {
         return;
     };
-    let Some(payload) = outer.values().next().and_then(Value::as_object) else {
+    if outer.len() != 1 {
+        return;
+    }
+    let Some((_, inner)) = outer.iter().next() else {
+        return;
+    };
+    let Some(payload) = inner.as_object() else {
         return;
     };
     for (field, field_value) in payload {
