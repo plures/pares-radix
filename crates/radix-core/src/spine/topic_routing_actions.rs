@@ -1,11 +1,14 @@
 //! Topic Routing action handlers.
 //!
 //! Provides boundary actors for the topic-routing.px procedure:
-//! - `classify_message_topic` — LLM-delegated classification (placeholder → routes to generate)
+//! - `classify_message_topic` — deterministic classification from extracted topic signals
 //! - `evaluate_topic_confidence` — pure confidence threshold check
 //! - `build_steering_context` — assemble context for steering
+//! - `build_steering` — assemble continuation steering guidance
 //! - `format_topic_switch` — format topic transition message
 //! - `extract_topic_signals` — extract topic signals from message content
+//! - `topic_changed` — compare current and newly classified topics
+//! - `force_classify_topic` — resolve overflow reevaluation without tool dispatch
 
 use serde_json::{json, Value};
 
