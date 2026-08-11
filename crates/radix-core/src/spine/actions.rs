@@ -218,11 +218,16 @@ use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 /// 3. `WorktaskActionHandler` handles worktask git/fs/quarantine effects
 /// 4. `RunCommandActionHandler` handles `run_command` (real ShellExecutor, governed)
 /// 5. `BriefingActionHandler` handles `assemble_briefing_report` (pure classify/format)
-/// 6. `SubagentActor` handles spawn_subagent calls
-/// 7. `ToolDispatchActionHandler` handles everything else as tool calls
+/// 6. `ModelSelectionActionHandler` handles deterministic model-selection actions
+/// 7. `TopicRoutingActionHandler` handles deterministic topic-routing actions
+/// 8. RSI metric actions update running averages without tool dispatch
+/// 9. Task/dashboard, repo-health, privilege, GUI, grounding, subagent, dispatch,
+///    handoff, and epic-registry handlers process their owned actions
+/// 10. `ToolDispatchActionHandler` handles everything else as tool calls
 ///
 /// This gives .px procedures access to system state, lifecycle logic, worktask
-/// orchestration, shell commands, subagent spawning, AND external tools.
+/// orchestration, shell commands, deterministic routing/selection, RSI metrics,
+/// subagent spawning, and external tools.
 pub struct CompositeActionHandler {
     core: CoreActionHandler,
     dev_lifecycle: DevLifecycleActionHandler,
@@ -540,8 +545,9 @@ mod tests {
         assert_eq!(result, Value::Null);
     }
 
-    /// Regression proof for the live reactive action path: these PX-owned
-    /// actions must be handled by the composite, never misclassified as tools.
+    /// Regression proof for the live reactive action path: model-selection,
+    /// topic-routing, and RSI metric actions must be handled by the composite
+    /// before generic tool fallthrough.
     #[tokio::test]
     async fn composite_registers_model_topic_and_rsi_actions_before_tool_fallthrough() {
         use crate::model::{ToolDefinition, ToolDispatcher};
