@@ -148,6 +148,30 @@ impl CoreActionHandler {
         debug!(key = %key, "action: write_state");
         Ok(value)
     }
+
+    /// Read every durable state value whose key has `prefix`.
+    ///
+    /// Prefix reads are a PluresDB concern, not a cognition cache concern.
+    /// Sort keys so a procedure gets deterministic input regardless of storage
+    /// backend iteration order.
+    async fn read_state_prefix(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let prefix = params.get("prefix").and_then(Value::as_str).ok_or_else(|| {
+            ExecutionError::ActionFailed {
+                action: "read_state_prefix".into(),
+                message: "missing prefix".into(),
+            }
+        })?;
+        let mut keys = self.state_store.keys_with_prefix(prefix).await;
+        keys.sort();
+        let mut values = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(value) = self.state_store.get(&key).await {
+                values.push(value);
+            }
+        }
+        debug!(prefix, count = values.len(), "action: read_state_prefix");
+        Ok(Value::Array(values))
+    }
 }
 
 #[async_trait]
@@ -156,6 +180,7 @@ impl AsyncActionHandler for CoreActionHandler {
         match action {
             "read_state" => self.read_state(params).await,
             "write_state" => self.write_state(params).await,
+            "read_state_prefix" => self.read_state_prefix(params).await,
             "read_history" => self.read_history(params).await,
             "append_history" => self.append_history(params).await,
             _ => {
@@ -170,16 +195,19 @@ use crate::spine::briefing_actions::{is_briefing_action, BriefingActionHandler};
 use crate::spine::dev_lifecycle_actions::{is_dev_lifecycle_action, DevLifecycleActionHandler};
 use crate::spine::epic_registry_actions::{is_epic_registry_action, EpicRegistryActionHandler};
 use crate::spine::gui_launch_actions::{is_gui_launch_action, GuiLaunchActionHandler};
+use crate::spine::model_selection_actions::{is_model_selection_action, ModelSelectionActionHandler};
 use crate::spine::plugin_privilege_actions::{
     is_plugin_privilege_action, PluginPrivilegeActionHandler,
 };
 use crate::spine::repo_health_actions::{self, RepoHealthActionHandler};
+use crate::spine::rsi_actions::{is_rsi_metric_action, update_running_average};
 use crate::spine::run_command_actions::{is_run_command_action, RunCommandActionHandler};
 use crate::spine::subagent_actor::{is_subagent_action, SubagentActor};
 use crate::spine::task_dashboard_actions::{is_task_dashboard_action, TaskDashboardActionHandler};
 use crate::spine::task_dispatch_actions::{is_task_dispatch_action, TaskDispatchActionHandler};
 use crate::spine::task_grounding_actions::{is_task_grounding_action, TaskGroundingActionHandler};
 use crate::spine::task_handoff_actions::{is_task_handoff_action, TaskHandoffActionHandler};
+use crate::spine::topic_routing_actions::{is_topic_routing_action, TopicRoutingActionHandler};
 use crate::spine::worktask_actions::{is_worktask_action, WorktaskActionHandler};
 
 /// Composite action handler that delegates to multiple handlers in priority order.
@@ -201,6 +229,10 @@ pub struct CompositeActionHandler {
     worktask: WorktaskActionHandler,
     run_command: RunCommandActionHandler,
     briefing: BriefingActionHandler,
+    /// Pure model-selection decisions used by `model-selection.px`.
+    model_selection: ModelSelectionActionHandler,
+    /// Pure topic-routing decisions used by `topic-routing.px`.
+    topic_routing: TopicRoutingActionHandler,
     /// Native task dashboard aggregation + write-cache guard (ADR-0036).
     /// Shares the SAME durable state store as Core/Worktask so it reads the
     /// live `task:*`/`worktask:*`/`epic:*` namespaces those writers use.
@@ -254,6 +286,8 @@ impl CompositeActionHandler {
             dev_lifecycle: DevLifecycleActionHandler::new(),
             run_command: RunCommandActionHandler::new(),
             briefing: BriefingActionHandler::new(),
+            model_selection: ModelSelectionActionHandler::new(),
+            topic_routing: TopicRoutingActionHandler::new(),
             task_grounding: None,
             subagent: None,
             task_dispatch: None,
@@ -307,6 +341,7 @@ impl CompositeActionHandler {
 const CORE_ACTIONS: &[&str] = &[
     "read_state",
     "write_state",
+    "read_state_prefix",
     "read_history",
     "append_history",
 ];
@@ -324,6 +359,12 @@ impl AsyncActionHandler for CompositeActionHandler {
             self.run_command.call(action, params).await
         } else if is_briefing_action(action) {
             self.briefing.call(action, params).await
+        } else if is_model_selection_action(action) {
+            self.model_selection.call(action, params).await
+        } else if is_topic_routing_action(action) {
+            self.topic_routing.call(action, params).await
+        } else if is_rsi_metric_action(action) {
+            update_running_average(params)
         } else if is_task_dashboard_action(action) {
             self.task_dashboard.call(action, params).await
         } else if repo_health_actions::is_repo_health_action(action) {
@@ -472,6 +513,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn read_state_prefix_returns_durable_values_in_key_order() {
+        let store = test_state();
+        store.set("constraint:z", serde_json::json!({"id": "z"})).await;
+        store.set("constraint:a", serde_json::json!({"id": "a"})).await;
+        store.set("unrelated:x", serde_json::json!({"id": "x"})).await;
+        let handler = CoreActionHandler::new(Arc::new(MemoryConversationStore::new()), store);
+
+        let values = handler
+            .call("read_state_prefix", &serde_json::json!({"prefix": "constraint:"}))
+            .await
+            .unwrap();
+        assert_eq!(values, serde_json::json!([{"id": "a"}, {"id": "z"}]));
+    }
+
+    #[tokio::test]
     async fn unknown_action_returns_null() {
         let store = Arc::new(MemoryConversationStore::new());
         let handler = CoreActionHandler::new(store, test_state());
@@ -482,6 +538,72 @@ mod tests {
             .unwrap();
 
         assert_eq!(result, Value::Null);
+    }
+
+    /// Regression proof for the live reactive action path: these PX-owned
+    /// actions must be handled by the composite, never misclassified as tools.
+    #[tokio::test]
+    async fn composite_registers_model_topic_and_rsi_actions_before_tool_fallthrough() {
+        use crate::model::{ToolDefinition, ToolDispatcher};
+        use crate::px_adapter::ToolDispatchActionHandler;
+
+        struct CountingDispatcher(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+        #[async_trait]
+        impl ToolDispatcher for CountingDispatcher {
+            async fn available_tools(&self) -> Vec<ToolDefinition> { vec![] }
+
+            async fn call_tool(&self, _name: &str, _args: Value) -> String {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                "unexpected tool fallthrough".to_string()
+            }
+        }
+
+        let tool_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let dispatcher: Arc<dyn ToolDispatcher> = Arc::new(CountingDispatcher(Arc::clone(&tool_calls)));
+        let handler = CompositeActionHandler::new(
+            Arc::new(MemoryConversationStore::new()),
+            test_state(),
+            Arc::new(ToolDispatchActionHandler::new(dispatcher)),
+        );
+
+        let available = handler.call("list_available_models", &serde_json::json!({})).await.unwrap();
+        let models = available["models"].as_array().unwrap().clone();
+        let requirements = handler.call(
+            "classify_task_requirements",
+            &serde_json::json!({"task": {"task_type": "code", "complexity": "high"}}),
+        ).await.unwrap();
+        let scored = handler.call(
+            "score_models_against_requirements",
+            &serde_json::json!({"models": models, "requirements": requirements}),
+        ).await.unwrap();
+        let selected = handler.call(
+            "select_top_with_fallback",
+            &serde_json::json!({"scored_models": scored["scored_models"]}),
+        ).await.unwrap();
+        assert!(selected["selected"].is_object());
+
+        let classification = handler.call(
+            "classify_message_topic",
+            &serde_json::json!({"message": {"content": "cargo compile error in function"}}),
+        ).await.unwrap();
+        let decision = handler.call(
+            "evaluate_topic_confidence",
+            &serde_json::json!({
+                "found_topic": classification["topic"],
+                "default_topic": "general",
+                "confidence": classification["confidence"],
+                "threshold": 0.7
+            }),
+        ).await.unwrap();
+        assert_eq!(decision["new_topic"], "code");
+
+        let averages = handler.call(
+            "update_running_average",
+            &serde_json::json!({"stats": {}, "new_quality": 0.9, "new_latency": 120}),
+        ).await.unwrap();
+        assert_eq!(averages["count"], 1);
+        assert_eq!(tool_calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     /// END-TO-END LIVE-PATH PROOF (pares-radix#467 — task amnesia):

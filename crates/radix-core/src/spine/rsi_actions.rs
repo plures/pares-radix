@@ -33,6 +33,40 @@ fn err(action: &str, message: impl Into<String>) -> ExecutionError {
     }
 }
 
+/// Returns whether `action` is a stateless RSI metrics calculation that can be
+/// composed into every spine runtime without constructing the hot-reload actor.
+pub fn is_rsi_metric_action(action: &str) -> bool {
+    action == "update_running_average"
+}
+
+/// Update a running quality/latency average with a new generation result.
+///
+/// This is deliberately separate from the hot-reload actor: it has no IO and
+/// is shared by the model-selection PX procedure and the RSI procedures.
+pub fn update_running_average(params: &Value) -> Result<Value, ExecutionError> {
+    let stats = params.get("stats").unwrap_or(&Value::Null);
+    let new_quality = params.get("new_quality").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let new_latency = params.get("new_latency").and_then(|v| v.as_u64()).unwrap_or(0);
+    let prev_avg_quality = stats.get("avg_quality").and_then(|v| v.as_f64()).unwrap_or(new_quality);
+    let prev_avg_latency = stats
+        .get("avg_latency_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(new_latency);
+    let count = stats.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let alpha = 0.2;
+    let avg_quality = prev_avg_quality * (1.0 - alpha) + new_quality * alpha;
+    let avg_latency =
+        (prev_avg_latency as f64 * (1.0 - alpha) + new_latency as f64 * alpha) as u64;
+
+    Ok(json!({
+        "avg_quality": avg_quality,
+        "avg_latency_ms": avg_latency,
+        "count": count + 1,
+        "last_quality": new_quality,
+        "last_latency_ms": new_latency
+    }))
+}
+
 /// Constraint ids that the RSI loop may **never** auto-remove or auto-disable,
 /// even via the rollback (`undo -> remove_constraint`) path.
 ///
@@ -584,38 +618,7 @@ impl RsiActionHandler {
 
     /// Update a running average with a new data point (EMA, alpha=0.2).
     fn update_running_average(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let stats = params.get("stats").unwrap_or(&Value::Null);
-        let new_quality = params
-            .get("new_quality")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let new_latency = params
-            .get("new_latency")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-
-        let prev_avg_quality = stats
-            .get("avg_quality")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(new_quality);
-        let prev_avg_latency = stats
-            .get("avg_latency_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(new_latency);
-        let count = stats.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-
-        let alpha = 0.2;
-        let avg_quality = prev_avg_quality * (1.0 - alpha) + new_quality * alpha;
-        let avg_latency =
-            (prev_avg_latency as f64 * (1.0 - alpha) + new_latency as f64 * alpha) as u64;
-
-        Ok(json!({
-            "avg_quality": avg_quality,
-            "avg_latency_ms": avg_latency,
-            "count": count + 1,
-            "last_quality": new_quality,
-            "last_latency_ms": new_latency
-        }))
+        update_running_average(params)
     }
 }
 
