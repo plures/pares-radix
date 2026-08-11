@@ -171,6 +171,7 @@ impl ActionHandler for BlockingHandlerWrapper {
 ///     registry.register(Box::new(adapter));
 /// }
 /// ```
+#[derive(Clone)]
 pub struct PxProcedureAdapter {
     /// Procedure name (from compiled record).
     name: String,
@@ -844,6 +845,10 @@ mod tests {
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].name(), "health_check");
         assert_eq!(adapters[0].handles(), "manual");
+
+        let copied = adapters[0].clone();
+        assert_eq!(copied.name(), adapters[0].name());
+        assert_eq!(copied.trigger_kind(), adapters[0].trigger_kind());
     }
 
     #[test]
