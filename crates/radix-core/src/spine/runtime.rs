@@ -877,6 +877,7 @@ mod tests {
             praxis.join("tick_dispatch_proof.px"),
             r#"procedure evaluate_dispatch(tick: int from "heartbeat_tick"):
   given: "On a heartbeat tick, dispatch the selected autonomous task (W3 edge proof)"
+  write_state {key: "w5/heartbeat_tick", value: $tick} -> $tick_written
   dispatch_task {task_id: "task-w5-loop", prompt: "execute the seeded task"} -> $res
   return {dispatched: true}
 "#,
@@ -979,6 +980,12 @@ mod tests {
             "heartbeat_tick did NOT drive a dispatch — the W3 producer edge \
              (HeartbeatTick SpineEvent → pipeline on_write → heartbeat_tick:* → \
              .px → dispatch_task → TaskDispatcher) is not closed"
+        );
+
+        assert_eq!(
+            state_store.get("w5/heartbeat_tick").await,
+            Some(json!(0)),
+            "the reactive bridge did not bind HeartbeatTick.tick to the .px input"
         );
 
         // Prove the re-drive actually RE-ENTERED the pipeline: the dispatcher

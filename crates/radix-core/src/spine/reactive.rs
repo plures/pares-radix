@@ -104,6 +104,26 @@ pub struct ReactiveRegistry {
     waiters: Arc<RwLock<HashMap<String, Vec<oneshot::Sender<Value>>>>>,
 }
 
+/// Bind the payload carried by a Spine event to the variables exposed to a
+/// reactive `.px` procedure.
+///
+/// Pipeline events serialize as externally-tagged enum values, for example
+/// `{ "HeartbeatTick": { "id": "…", "tick": 7 } }`.  The reactive bridge
+/// already supplies `$key` and `$value`; flattening the event payload also
+/// supplies its declared inputs (such as `$tick`) without embedding scheduling
+/// policy in Rust.
+fn bind_event_payload(vars: &mut HashMap<String, Value>, value: &Value) {
+    let Some(outer) = value.as_object() else {
+        return;
+    };
+    let Some(payload) = outer.values().next().and_then(Value::as_object) else {
+        return;
+    };
+    for (field, field_value) in payload {
+        vars.entry(field.clone()).or_insert_with(|| field_value.clone());
+    }
+}
+
 impl ReactiveRegistry {
     /// Create a new empty registry without a pipeline emitter.
     ///
@@ -255,6 +275,7 @@ impl ReactiveRegistry {
             "event_kind".to_string(),
             Value::String("on_write".to_string()),
         );
+        bind_event_payload(&mut vars, value);
 
         match adapter.execute_with_vars(vars).await {
             Ok(result) => {
