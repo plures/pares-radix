@@ -1,16 +1,34 @@
 //! Topic Routing action handlers.
 //!
 //! Provides boundary actors for the topic-routing.px procedure:
-//! - `classify_message_topic` — LLM-delegated classification (placeholder → routes to generate)
+//! - `classify_message_topic` — deterministic classification from extracted topic signals
 //! - `evaluate_topic_confidence` — pure confidence threshold check
 //! - `build_steering_context` — assemble context for steering
+//! - `build_steering` — assemble continuation steering guidance
 //! - `format_topic_switch` — format topic transition message
 //! - `extract_topic_signals` — extract topic signals from message content
+//! - `topic_changed` — compare current and newly classified topics
+//! - `force_classify_topic` — resolve overflow reevaluation without tool dispatch
 
 use serde_json::{json, Value};
 
 use crate::px_adapter::AsyncActionHandler;
 use pares_radix_praxis::px::executor::ExecutionError;
+
+/// Returns whether `action` belongs to the topic-routing PX contract.
+pub fn is_topic_routing_action(action: &str) -> bool {
+    matches!(
+        action,
+        "classify_message_topic"
+            | "evaluate_topic_confidence"
+            | "build_steering_context"
+            | "build_steering"
+            | "format_topic_switch"
+            | "extract_topic_signals"
+            | "topic_changed"
+            | "force_classify_topic"
+    )
+}
 
 /// Helper to construct ActionFailed errors concisely.
 #[allow(dead_code)]
@@ -35,6 +53,40 @@ impl TopicRoutingActionHandler {
         Self
     }
 
+    /// Classify a message using the deterministic topic signals already owned
+    /// by this boundary. The result has the shape `topic-routing.px` binds.
+    fn classify_message_topic(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let message = params.get("message").unwrap_or(&Value::Null);
+        let content = message
+            .as_str()
+            .or_else(|| message.get("content").and_then(Value::as_str))
+            .or_else(|| message.get("text").and_then(Value::as_str))
+            .unwrap_or_default();
+        let signals = self.extract_topic_signals(&json!({ "message": content }))?;
+        let strength = signals
+            .get("total_signal_strength")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let previous_topic = params
+            .get("previous_topic")
+            .and_then(Value::as_str)
+            .unwrap_or("general");
+        let topic = if strength == 0 {
+            previous_topic
+        } else {
+            signals
+                .get("dominant_signal")
+                .and_then(Value::as_str)
+                .unwrap_or(previous_topic)
+        };
+
+        Ok(json!({
+            "topic": topic,
+            "confidence": if strength >= 2 { 0.85 } else { 0.45 },
+            "signals": signals.get("signals").cloned().unwrap_or(Value::Array(vec![]))
+        }))
+    }
+
     /// Evaluate topic confidence — pure threshold check.
     /// Input: {confidence: 0.85, threshold: 0.7}
     /// Output: {above_threshold: true, confidence: 0.85}
@@ -53,7 +105,52 @@ impl TopicRoutingActionHandler {
             "above_threshold": confidence >= threshold,
             "confidence": confidence,
             "threshold": threshold,
-            "margin": confidence - threshold
+            "margin": confidence - threshold,
+            "default_topic": params.get("default_topic").cloned().unwrap_or(Value::Null),
+            "new_topic": if confidence >= threshold {
+                params.get("found_topic").cloned().unwrap_or(Value::Null)
+            } else {
+                params.get("default_topic").cloned().unwrap_or(Value::Null)
+            },
+            "changed": confidence >= threshold
+                && params.get("found_topic") != params.get("default_topic"),
+            "reeval_ids": Value::Array(vec![])
+        }))
+    }
+
+    /// Assemble the continuation guidance expected by `topic-routing.px`.
+    fn build_steering(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let topic = params
+            .get("topic")
+            .and_then(Value::as_str)
+            .unwrap_or("general");
+        let pending = params
+            .get("pending_reeval_count")
+            .cloned()
+            .unwrap_or(Value::Null);
+        Ok(json!({
+            "topic": topic,
+            "continuation": params.get("continuation").and_then(Value::as_bool).unwrap_or(true),
+            "pending_reeval_count": pending,
+            "steering_instruction": format!("Continue the conversation in the '{topic}' context.")
+        }))
+    }
+
+    /// Resolve an overflowed reevaluation queue without returning control to
+    /// the generic tool dispatcher.
+    fn force_classify_topic(&self, params: &Value) -> Result<Value, ExecutionError> {
+        let current_topic = params
+            .get("current_topic")
+            .and_then(|value| value.get("current_topic"))
+            .and_then(Value::as_str)
+            .unwrap_or("general");
+        Ok(json!({
+            "new_topic": current_topic,
+            "default_topic": current_topic,
+            "confidence": 1.0,
+            "changed": false,
+            "reeval_ids": Value::Array(vec![]),
+            "forced": true
         }))
     }
 
@@ -221,11 +318,14 @@ impl TopicRoutingActionHandler {
 impl AsyncActionHandler for TopicRoutingActionHandler {
     async fn call(&self, name: &str, params: &Value) -> Result<Value, ExecutionError> {
         match name {
+            "classify_message_topic" => self.classify_message_topic(params),
             "evaluate_topic_confidence" => self.evaluate_topic_confidence(params),
             "build_steering_context" => self.build_steering_context(params),
+            "build_steering" => self.build_steering(params),
             "format_topic_switch" => self.format_topic_switch(params),
             "extract_topic_signals" => self.extract_topic_signals(params),
             "topic_changed" => self.topic_changed(params),
+            "force_classify_topic" => self.force_classify_topic(params),
             _ => Err(ExecutionError::UnknownAction(name.to_string())),
         }
     }

@@ -12,6 +12,21 @@ use serde_json::{json, Value};
 use crate::px_adapter::AsyncActionHandler;
 use pares_radix_praxis::px::executor::ExecutionError;
 
+/// Returns whether `action` belongs to the model-selection PX contract.
+///
+/// Keeping the owned action names beside their implementation lets the spine
+/// composite dispatch them before the generic tool fallthrough.
+pub fn is_model_selection_action(action: &str) -> bool {
+    matches!(
+        action,
+        "list_available_models"
+            | "classify_task_requirements"
+            | "score_models_against_requirements"
+            | "select_top_with_fallback"
+            | "format_model_config"
+    )
+}
+
 /// Helper to construct ActionFailed errors concisely.
 fn err(action: &str, message: impl Into<String>) -> ExecutionError {
     ExecutionError::ActionFailed {
@@ -81,17 +96,22 @@ impl ModelSelectionActionHandler {
     /// Input: {task_type, complexity, context_length, ...}
     /// Output: {needs_reasoning, needs_code, needs_speed, context_demand, ...}
     fn classify_task_requirements(&self, params: &Value) -> Result<Value, ExecutionError> {
-        let task_type = params
+        // `model-selection.px` passes the inbound request as `task`; accepting
+        // the top-level shape as well keeps this boundary useful to direct
+        // callers without making the PX contract ambiguous.
+        let task = params.get("task").unwrap_or(params);
+        let task_type = task
             .get("task_type")
             .and_then(|v| v.as_str())
+            .or_else(|| task.get("kind").and_then(|v| v.as_str()))
             .unwrap_or("general");
 
-        let complexity = params
+        let complexity = task
             .get("complexity")
             .and_then(|v| v.as_str())
             .unwrap_or("medium");
 
-        let context_length = params
+        let context_length = task
             .get("context_length")
             .and_then(|v| v.as_u64())
             .unwrap_or(1000);
