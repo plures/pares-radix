@@ -30,6 +30,7 @@ use pares_radix_praxis::px::executor::ExecutionError;
 const TASK_DISPATCH_ACTIONS: &[&str] = &[
     "dispatch_task",
     "read_evaluable_tasks",
+    "task_list_evaluable_graph",
     "mark_task_in_progress",
 ];
 
@@ -98,6 +99,10 @@ impl TaskDispatchActionHandler {
             "last_evaluated_at": task.last_evaluated_at,
             "attempts": task.attempts,
             "status": Self::status_to_px(&task.status),
+            // The graph edges are durable task data. PX uses them to exclude
+            // fan-in parents and select only runnable child leaves.
+            "subtasks": task.subtasks,
+            "parent_task": task.parent_task,
             "conditions": conditions,
         })
     }
@@ -202,6 +207,10 @@ impl AsyncActionHandler for TaskDispatchActionHandler {
         match action {
             "dispatch_task" => self.dispatch_task(params).await,
             "read_evaluable_tasks" => self.read_evaluable_tasks().await,
+            // The graph-aware name is the contract used by
+            // autonomous-dispatch.px. It is the same durable read with its
+            // parent/child edges included by task_to_evaluable above.
+            "task_list_evaluable_graph" => self.read_evaluable_tasks().await,
             "mark_task_in_progress" => self.mark_task_in_progress(params).await,
             _ => Err(ExecutionError::ActionFailed {
                 action: action.to_string(),
@@ -239,6 +248,34 @@ mod tests {
         let arr = out.as_array().expect("array");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["status"], "pending");
+    }
+
+    #[tokio::test]
+    async fn graph_task_read_preserves_parent_child_edges_for_px_leaf_selection() {
+        let tm = manager();
+        let parent = tm.create_task("coordinate the work", "chat-1", vec![]);
+        let child = tm
+            .create_subtask(&parent.id, "perform the runnable work", vec![])
+            .expect("parent task exists");
+
+        let h = handler_with_manager(tm);
+        let out = h
+            .call("task_list_evaluable_graph", &json!({}))
+            .await
+            .expect("graph task action succeeds");
+        let tasks = out.as_array().expect("graph task action returns an array");
+        let parent = tasks
+            .iter()
+            .find(|task| task["id"] == parent.id)
+            .expect("parent is present");
+        let child = tasks
+            .iter()
+            .find(|task| task["id"] == child.id)
+            .expect("child is present");
+
+        assert_eq!(parent["subtasks"], json!([child["id"].clone()]));
+        assert_eq!(child["parent_task"], parent["id"]);
+        assert_eq!(child["subtasks"], json!([]));
     }
 
     #[tokio::test]
@@ -334,6 +371,7 @@ mod tests {
         for required in [
             "dispatch_task",
             "read_evaluable_tasks",
+            "task_list_evaluable_graph",
             "mark_task_in_progress",
         ] {
             assert!(
